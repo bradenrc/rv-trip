@@ -1,9 +1,8 @@
 "use client";
 
 import { Pin, GripVertical, CalendarDays, Caravan, Plus, CirclePlus } from "lucide-react";
-import { CategoryTile, FloatingTag, StatusMarker, Stars } from "@rv-trip/ui";
+import { FloatingTag, Stars, ReservationLineItem, IdeaLineItem } from "@rv-trip/ui";
 import type { RouteLeg } from "@/lib/trip-logic";
-import { money } from "@/lib/trip-ui";
 
 export function RouteView({
   legs,
@@ -95,15 +94,7 @@ export function RouteView({
                   {row.reservations.length > 0 && (
                     <div className="flex flex-col gap-1.5">
                       {row.reservations.map((r) => (
-                        <div key={r.id} className="flex items-center gap-2.5 py-[7px]">
-                          <CategoryTile type={r.type} />
-                          <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-rv-ink">
-                            {r.name}
-                          </span>
-                          <span className="w-[60px] flex-none text-right font-mono text-[13px] font-semibold text-rv-green-cta">
-                            {r.cost != null ? money(r.cost) : ""}
-                          </span>
-                        </div>
+                        <ReservationLineItem key={r.id} type={r.type} name={r.name} cost={r.cost} />
                       ))}
                     </div>
                   )}
@@ -120,13 +111,7 @@ export function RouteView({
                   {row.ideas.length > 0 && (
                     <div className="flex flex-col gap-1">
                       {row.ideas.map((it) => (
-                        <div key={it.id} className="flex items-center gap-2.5 py-1">
-                          <CategoryTile type={it.type} />
-                          <span className="min-w-0 flex-1 truncate text-[13px] text-rv-ink-muted">
-                            {it.title}
-                          </span>
-                          <StatusMarker status={it.status} />
-                        </div>
+                        <IdeaLineItem key={it.id} type={it.type} title={it.title} status={it.status} />
                       ))}
                     </div>
                   )}

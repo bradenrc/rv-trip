@@ -1,20 +1,10 @@
 "use client";
 
-import {
-  X,
-  CalendarDays,
-  CalendarPlus,
-  Map as MapIcon,
-  Receipt,
-  Plus,
-  CornerRightUp,
-  SquarePen,
-  Check,
-} from "lucide-react";
+import { X, CalendarDays, CalendarPlus, Receipt, Plus, Check } from "lucide-react";
 import type { Stop, ReservationType } from "@rv-trip/core";
 import { isScheduled } from "@rv-trip/core";
-import { categoryMeta, Stars, CategoryTile, StatusPill, FieldLabel } from "@rv-trip/ui";
-import { money, dateRange } from "@/lib/trip-ui";
+import { Stars, FieldLabel, MapPlaceholder, ReservationCard, IdeaCard, money } from "@rv-trip/ui";
+import { dateRange } from "@/lib/trip-ui";
 import { resDates } from "@/lib/trip-logic";
 import type { AddForm } from "./TripPlanner";
 
@@ -130,11 +120,7 @@ export function StopDetailSheet({
         </div>
 
         <div className="flex flex-col gap-6 p-6">
-          {/* Map placeholder */}
-          <div className="flex h-[150px] flex-col items-center justify-center gap-1.5 rounded-rv-card border border-rv-border bg-rv-navy-soft text-rv-ink-faded">
-            <MapIcon className="size-[30px] text-rv-navy" />
-            <span className="font-mono text-[12px]">Map — {stop.place.name}</span>
-          </div>
+          <MapPlaceholder label={stop.place.name} />
 
           {/* Reservations */}
           <div>
@@ -199,61 +185,16 @@ export function StopDetailSheet({
             )}
 
             <div className="flex flex-col gap-2.5">
-              {stop.reservations.map((r) => {
-                const cm = categoryMeta(r.type);
-                const rd = resDates(r);
-                return (
-                  <div
-                    key={r.id}
-                    className="flex gap-3 rounded-rv-card border border-rv-border bg-rv-surface p-4"
-                  >
-                    <CategoryTile type={r.type} size="md" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="text-[14px] font-bold text-rv-ink">{r.name}</span>
-                        <span className="font-mono text-[14px] font-semibold text-rv-green-cta">
-                          {r.cost != null ? money(r.cost) : ""}
-                        </span>
-                      </div>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[12px] text-rv-ink-faded">
-                        <span
-                          className="font-bold uppercase tracking-[0.06em]"
-                          style={{ color: cm.color }}
-                        >
-                          {cm.cat}
-                        </span>
-                        <span className="uppercase tracking-[0.05em]">{r.type}</span>
-                        {rd && (
-                          <>
-                            <span>·</span>
-                            <span>{rd}</span>
-                          </>
-                        )}
-                        {r.confirmationNumber && (
-                          <>
-                            <span>·</span>
-                            <span>#{r.confirmationNumber}</span>
-                          </>
-                        )}
-                        <span className="ml-0.5">
-                          <Stars value={r.rating ?? 0} size={14} onSet={(n) => onResRating(r.id, n)} />
-                        </span>
-                      </div>
-                      <textarea
-                        value={r.notes ?? ""}
-                        onChange={(e) => onResNote(r.id, e.target.value)}
-                        onBlur={() => onCommitResNote(r.id)}
-                        placeholder={
-                          r.type === "campground" || r.type === "lodging"
-                            ? "Favorite site #, gate code, avoid the sharp left at the entrance…"
-                            : "Notes — what to remember, rebook or not…"
-                        }
-                        className="mt-2.5 min-h-[44px] w-full resize-y rounded-rv-md border border-rv-border-soft bg-rv-surface-alt px-2.5 py-2 text-[13px] leading-relaxed text-rv-ink-muted"
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+              {stop.reservations.map((r) => (
+                <ReservationCard
+                  key={r.id}
+                  reservation={r}
+                  dates={resDates(r)}
+                  onRating={(n) => onResRating(r.id, n)}
+                  onNote={(v) => onResNote(r.id, v)}
+                  onCommitNote={() => onCommitResNote(r.id)}
+                />
+              ))}
             </div>
           </div>
 
@@ -262,59 +203,19 @@ export function StopDetailSheet({
             <div>
               <h3 className="m-0 mb-3 text-[17px] font-bold text-rv-navy">Ideas</h3>
               <div className="flex flex-col gap-2">
-                {stop.ideas.map((it) => {
-                  const cm = categoryMeta("activity");
-                  const isDone = it.status === "done";
-                  const noteVisible = ideaNoteOpen.has(it.id) || !!(it.notes && it.notes.trim());
-                  return (
-                    <div
-                      key={it.id}
-                      className="flex flex-col gap-2 rounded-rv-md border border-rv-border bg-rv-surface px-3 py-2.5"
-                    >
-                      <div className="flex flex-wrap items-center gap-2">
-                        <cm.Icon className="size-[18px]" style={{ color: cm.color }} />
-                        <span className="min-w-[120px] flex-1 text-[14px] text-rv-ink">{it.title}</span>
-                        {isDone && (
-                          <Stars value={it.rating ?? 0} size={14} onSet={(n) => onIdeaRating(it.id, n)} />
-                        )}
-                        <StatusPill status={it.status} onClick={() => onIdeaCycle(it.id)} />
-                        {!isDone && (
-                          <button
-                            type="button"
-                            onClick={() => onPromote(it.id)}
-                            title="Promote to reservation"
-                            className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent px-1.5 py-1 text-[13px] font-semibold text-rv-green-cta"
-                          >
-                            <CornerRightUp className="size-4" />
-                            Book
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => onIdeaToggleNote(it.id)}
-                          title="Add a note"
-                          className="inline-flex size-7 cursor-pointer items-center justify-center border-none bg-transparent p-0"
-                          style={{
-                            color: noteVisible
-                              ? "var(--color-rv-green-cta)"
-                              : "var(--color-rv-ink-subtle)",
-                          }}
-                        >
-                          <SquarePen className="size-[17px]" />
-                        </button>
-                      </div>
-                      {noteVisible && (
-                        <textarea
-                          value={it.notes ?? ""}
-                          onChange={(e) => onIdeaNote(it.id, e.target.value)}
-                          onBlur={() => onCommitIdeaNote(it.id)}
-                          placeholder="Add a note — call ahead, what to remember…"
-                          className="min-h-[38px] w-full resize-y rounded-rv-md border border-rv-border-soft bg-rv-surface-alt px-2.5 py-[7px] text-[13px] leading-relaxed text-rv-ink-muted"
-                        />
-                      )}
-                    </div>
-                  );
-                })}
+                {stop.ideas.map((it) => (
+                  <IdeaCard
+                    key={it.id}
+                    idea={it}
+                    noteVisible={ideaNoteOpen.has(it.id) || !!(it.notes && it.notes.trim())}
+                    onCycle={() => onIdeaCycle(it.id)}
+                    onRating={(n) => onIdeaRating(it.id, n)}
+                    onNote={(v) => onIdeaNote(it.id, v)}
+                    onCommitNote={() => onCommitIdeaNote(it.id)}
+                    onToggleNote={() => onIdeaToggleNote(it.id)}
+                    onPromote={() => onPromote(it.id)}
+                  />
+                ))}
               </div>
             </div>
           )}

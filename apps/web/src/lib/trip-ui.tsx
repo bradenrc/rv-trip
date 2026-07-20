@@ -31,9 +31,6 @@ export function fullRange(start: IsoDate, end: IsoDate): string {
   if (a.m === b.m) return `${MONTHS[a.m - 1]} ${a.day} – ${b.day}, ${yr}`;
   return `${monthDay(start)} – ${monthDay(end)}, ${yr}`;
 }
-export function money(n: number): string {
-  return "$" + n.toLocaleString("en-US");
-}
 
 // ── drive-time estimate (haversine at a nominal RV highway speed) ──────────
 export function estimateDrive(
