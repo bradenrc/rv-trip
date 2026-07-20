@@ -1,0 +1,21 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# builds
+.next/
+dist/
+out/
+.turbo/
+
+# env
+.env
+.env*.local
+
+# db
+pgdata/
+
+# misc
+.DS_Store
+*.log
+coverage/
