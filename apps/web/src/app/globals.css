@@ -117,6 +117,57 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+   RV Trip Hub design tokens (ported from the Claude Design handoff's
+   GolfTrip set; renamed to rv-* and scoped so shadcn's own tokens are
+   untouched). Exposes utilities: bg-rv-navy, text-rv-green-cta,
+   border-rv-border, shadow-rv-md, rounded-rv-card, etc.
+   ───────────────────────────────────────────────────────────────────── */
+@theme {
+  /* brand */
+  --color-rv-navy: #0e2a47;
+  --color-rv-navy-deep: #08182b;
+  --color-rv-navy-soft: #e8eef5;
+  --color-rv-green: #2e8b4e;
+  --color-rv-green-cta: #277e47;
+  --color-rv-green-deep: #1f6b3a;
+  --color-rv-green-soft: #e4f2e9;
+  --color-rv-green-ink: #0e3d1f;
+  --color-rv-green-on-dark: #7cd897;
+  /* ink */
+  --color-rv-ink: #0b1b2b;
+  --color-rv-ink-muted: #3a4a5c;
+  --color-rv-ink-faded: #5d6b7d;
+  --color-rv-ink-subtle: #a8b4c2;
+  /* surface & borders */
+  --color-rv-surface: #ffffff;
+  --color-rv-surface-alt: #f4f7fa;
+  --color-rv-border: #dde4ec;
+  --color-rv-border-soft: #e8edf3;
+  --color-rv-border-hi: #c2ccd8;
+  /* status */
+  --color-rv-warning: #97601c;
+  --color-rv-warning-soft: #fef3c7;
+  --color-rv-info: #1e5bff;
+  --color-rv-info-soft: #e1eaff;
+  --color-rv-info-ink: #1a4dd9;
+  /* travel category (slate) */
+  --color-rv-travel: #5c5470;
+  --color-rv-travel-ink: #4a4459;
+
+  /* radius */
+  --radius-rv-sm: 4px;
+  --radius-rv-md: 6px;
+  --radius-rv-card: 10px;
+  --radius-rv-pill: 9999px;
+
+  /* shadow */
+  --shadow-rv-sm: 0 1px 2px rgba(11, 27, 43, 0.04);
+  --shadow-rv-md: 0 1px 3px rgba(11, 27, 43, 0.06), 0 1px 2px -1px rgba(11, 27, 43, 0.04);
+  --shadow-rv-lg: 0 4px 6px -1px rgba(11, 27, 43, 0.06), 0 2px 4px -2px rgba(11, 27, 43, 0.04);
+  --shadow-rv-xl: 0 10px 15px -3px rgba(11, 27, 43, 0.08), 0 4px 6px -4px rgba(11, 27, 43, 0.06);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
