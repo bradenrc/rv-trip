@@ -44,14 +44,17 @@ export function StopDetailSheet({
   onSchedule,
   onSetRating,
   onSetNote,
+  onCommitNote,
   onToggleAdd,
   onFormChange,
   onSubmitAdd,
   onResRating,
   onResNote,
+  onCommitResNote,
   onIdeaCycle,
   onIdeaRating,
   onIdeaNote,
+  onCommitIdeaNote,
   onIdeaToggleNote,
   onPromote,
 }: {
@@ -64,14 +67,17 @@ export function StopDetailSheet({
   onSchedule: () => void;
   onSetRating: (n: number) => void;
   onSetNote: (v: string) => void;
+  onCommitNote: () => void;
   onToggleAdd: () => void;
   onFormChange: (patch: Partial<AddForm>) => void;
   onSubmitAdd: () => void;
   onResRating: (resId: string, n: number) => void;
   onResNote: (resId: string, v: string) => void;
+  onCommitResNote: (resId: string) => void;
   onIdeaCycle: (ideaId: string) => void;
   onIdeaRating: (ideaId: string, n: number) => void;
   onIdeaNote: (ideaId: string, v: string) => void;
+  onCommitIdeaNote: (ideaId: string) => void;
   onIdeaToggleNote: (ideaId: string) => void;
   onPromote: (ideaId: string) => void;
 }) {
@@ -246,6 +252,7 @@ export function StopDetailSheet({
                       <textarea
                         value={r.notes ?? ""}
                         onChange={(e) => onResNote(r.id, e.target.value)}
+                        onBlur={() => onCommitResNote(r.id)}
                         placeholder={
                           r.type === "campground" || r.type === "lodging"
                             ? "Favorite site #, gate code, avoid the sharp left at the entrance…"
@@ -317,6 +324,7 @@ export function StopDetailSheet({
                         <textarea
                           value={it.notes ?? ""}
                           onChange={(e) => onIdeaNote(it.id, e.target.value)}
+                          onBlur={() => onCommitIdeaNote(it.id)}
                           placeholder="Add a note — call ahead, what to remember…"
                           className="min-h-[38px] w-full resize-y rounded-rv-md border border-rv-border-soft bg-rv-surface-alt px-2.5 py-[7px] text-[13px] leading-relaxed text-rv-ink-muted"
                         />
@@ -341,6 +349,7 @@ export function StopDetailSheet({
             <textarea
               value={stop.notes ?? ""}
               onChange={(e) => onSetNote(e.target.value)}
+              onBlur={onCommitNote}
               placeholder="What did you love? What to remember for next time…"
               className="min-h-[96px] w-full resize-y rounded-rv-card border border-rv-border bg-rv-surface px-3.5 py-3 text-[14px] leading-relaxed text-rv-ink"
             />

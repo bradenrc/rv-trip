@@ -1,24 +1,25 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Trip, ReservationType } from "@rv-trip/core";
+import { toast } from "sonner";
+import type { Trip, Reservation, ReservationType } from "@rv-trip/core";
 import { Compass, House, CalendarDays, CircleAlert, Route, ChartNoAxesGantt, Plus } from "lucide-react";
 import {
   timelineModel,
   routeModel,
   stopMap,
+  updateStop,
   setStopRating,
   setStopNote,
   setReservationRating,
   setReservationNote,
-  addReservation,
   cycleIdeaStatus,
   setIdeaRating,
   setIdeaNote,
-  promoteIdea,
   scheduleFloating,
   reorderFloating,
 } from "@/lib/trip-logic";
+import { tripApi } from "@/lib/trip-api";
 import { fullRange } from "@/lib/trip-ui";
 import { Timeline } from "./Timeline";
 import { RouteView } from "./RouteView";
@@ -31,6 +32,26 @@ export interface AddForm {
   cost: string;
 }
 
+/** Map a DB reservation row (cost-as-string, nullable cols) to the core shape. */
+function mapRes(row: Record<string, unknown>): Reservation {
+  return {
+    id: row.id as string,
+    stopId: row.stopId as string,
+    ideaId: (row.ideaId as string | null) ?? null,
+    type: row.type as ReservationType,
+    name: row.name as string,
+    checkIn: (row.checkIn as string | null) ?? null,
+    checkOut: (row.checkOut as string | null) ?? null,
+    confirmationNumber: (row.confirmationNumber as string | null) ?? null,
+    cost: row.cost == null ? null : Number(row.cost),
+    rating: (row.rating as number | null) ?? null,
+    notes: (row.notes as string | null) ?? null,
+  };
+}
+
+const persist = (p: Promise<unknown>) =>
+  p.catch(() => toast.error("That change didn't save — check your connection."));
+
 export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const [trip, setTrip] = useState(initialTrip);
   const [lens, setLens] = useState<"timeline" | "route">("timeline");
@@ -42,7 +63,8 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
   const route = useMemo(() => routeModel(trip), [trip]);
-  const selectedStop = selectedId ? (stopMap(trip).get(selectedId) ?? null) : null;
+  const byId = useMemo(() => stopMap(trip), [trip]);
+  const selectedStop = selectedId ? (byId.get(selectedId) ?? null) : null;
   const selectedLegName = selectedStop
     ? (trip.legs.find((l) => l.id === selectedStop.legId)?.title ?? "")
     : "";
@@ -62,18 +84,51 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
       return next;
     });
 
-  const submitAdd = () => {
-    if (!form.name.trim()) return;
-    setTrip((t) =>
-      addReservation(t, selectedId!, {
+  // ── mutations: optimistic local update + persist ─────────────────────────
+  const doSchedule = (id: string) => {
+    const next = scheduleFloating(trip, id);
+    setTrip(next);
+    const s = stopMap(next).get(id);
+    if (s?.arriveDate && s?.departDate) {
+      persist(tripApi.updateStop(id, { arriveDate: s.arriveDate, departDate: s.departDate }));
+    }
+  };
+
+  const submitAdd = async () => {
+    if (!form.name.trim() || !selectedId) return;
+    try {
+      const row = await tripApi.createReservation({
+        stopId: selectedId,
         type: form.type,
         name: form.name.trim(),
         cost: form.cost ? Number(form.cost) : null,
         checkIn: null,
-      }),
-    );
-    setForm({ type: "campground", name: "", dates: "", cost: "" });
-    setAddOpen(false);
+      });
+      setTrip((t) =>
+        updateStop(t, selectedId, (s) => ({ ...s, reservations: [...s.reservations, mapRes(row)] })),
+      );
+      setForm({ type: "campground", name: "", dates: "", cost: "" });
+      setAddOpen(false);
+    } catch {
+      toast.error("Couldn't save that reservation.");
+    }
+  };
+
+  const doPromote = async (ideaId: string) => {
+    if (!selectedStop) return;
+    const stopId = selectedStop.id;
+    try {
+      const row = await tripApi.promoteIdea(ideaId);
+      setTrip((t) =>
+        updateStop(t, stopId, (s) => ({
+          ...s,
+          ideas: s.ideas.filter((i) => i.id !== ideaId),
+          reservations: [...s.reservations, mapRes(row)],
+        })),
+      );
+    } catch {
+      toast.error("Couldn't book that idea.");
+    }
   };
 
   const dayCount = timeline.rhythm.length;
@@ -137,11 +192,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
         </div>
 
         {lens === "timeline" ? (
-          <Timeline
-            model={timeline}
-            onOpenStop={openStop}
-            onSchedule={(stopId) => setTrip((t) => scheduleFloating(t, stopId))}
-          />
+          <Timeline model={timeline} onOpenStop={openStop} onSchedule={doSchedule} />
         ) : (
           <RouteView
             legs={route}
@@ -151,7 +202,13 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
             onRowDragEnd={() => setRouteDrag(null)}
             onRowDrop={(legId, targetId) => {
               if (routeDrag && routeDrag.legId === legId) {
-                setTrip((t) => reorderFloating(t, legId, routeDrag.stopId, targetId));
+                const next = reorderFloating(trip, legId, routeDrag.stopId, targetId);
+                setTrip(next);
+                const leg = next.legs.find((l) => l.id === legId);
+                if (leg) {
+                  const order = [...leg.stops].sort((a, b) => a.sortOrder - b.sortOrder).map((s) => s.id);
+                  persist(tripApi.reorderLeg(legId, order));
+                }
               }
               setRouteDrag(null);
             }}
@@ -167,19 +224,49 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
           form={form}
           ideaNoteOpen={ideaNoteOpen}
           onClose={closeStop}
-          onSchedule={() => setTrip((t) => scheduleFloating(t, selectedStop.id))}
-          onSetRating={(n) => setTrip((t) => setStopRating(t, selectedStop.id, n))}
+          onSchedule={() => doSchedule(selectedStop.id)}
+          onSetRating={(n) => {
+            const next = setStopRating(trip, selectedStop.id, n);
+            setTrip(next);
+            persist(tripApi.updateStop(selectedStop.id, { rating: stopMap(next).get(selectedStop.id)?.rating ?? null }));
+          }}
           onSetNote={(v) => setTrip((t) => setStopNote(t, selectedStop.id, v))}
+          onCommitNote={() =>
+            persist(tripApi.updateStop(selectedStop.id, { notes: byId.get(selectedStop.id)?.notes ?? "" }))
+          }
           onToggleAdd={() => setAddOpen((v) => !v)}
           onFormChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
           onSubmitAdd={submitAdd}
-          onResRating={(resId, n) => setTrip((t) => setReservationRating(t, selectedStop.id, resId, n))}
+          onResRating={(resId, n) => {
+            const next = setReservationRating(trip, selectedStop.id, resId, n);
+            setTrip(next);
+            const r = stopMap(next).get(selectedStop.id)?.reservations.find((x) => x.id === resId);
+            persist(tripApi.updateReservation(resId, { rating: r?.rating ?? null }));
+          }}
           onResNote={(resId, v) => setTrip((t) => setReservationNote(t, selectedStop.id, resId, v))}
-          onIdeaCycle={(ideaId) => setTrip((t) => cycleIdeaStatus(t, selectedStop.id, ideaId))}
-          onIdeaRating={(ideaId, n) => setTrip((t) => setIdeaRating(t, selectedStop.id, ideaId, n))}
+          onCommitResNote={(resId) => {
+            const r = byId.get(selectedStop.id)?.reservations.find((x) => x.id === resId);
+            persist(tripApi.updateReservation(resId, { notes: r?.notes ?? "" }));
+          }}
+          onIdeaCycle={(ideaId) => {
+            const next = cycleIdeaStatus(trip, selectedStop.id, ideaId);
+            setTrip(next);
+            const it = stopMap(next).get(selectedStop.id)?.ideas.find((x) => x.id === ideaId);
+            if (it) persist(tripApi.updateIdea(ideaId, { status: it.status }));
+          }}
+          onIdeaRating={(ideaId, n) => {
+            const next = setIdeaRating(trip, selectedStop.id, ideaId, n);
+            setTrip(next);
+            const it = stopMap(next).get(selectedStop.id)?.ideas.find((x) => x.id === ideaId);
+            persist(tripApi.updateIdea(ideaId, { rating: it?.rating ?? null }));
+          }}
           onIdeaNote={(ideaId, v) => setTrip((t) => setIdeaNote(t, selectedStop.id, ideaId, v))}
+          onCommitIdeaNote={(ideaId) => {
+            const it = byId.get(selectedStop.id)?.ideas.find((x) => x.id === ideaId);
+            persist(tripApi.updateIdea(ideaId, { notes: it?.notes ?? "" }));
+          }}
           onIdeaToggleNote={toggleIdeaNote}
-          onPromote={(ideaId) => setTrip((t) => promoteIdea(t, selectedStop.id, ideaId))}
+          onPromote={doPromote}
         />
       )}
     </div>

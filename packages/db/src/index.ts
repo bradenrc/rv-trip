@@ -14,3 +14,4 @@ export { schema };
 export type Db = typeof db;
 
 export * from "./queries";
+export * from "./mutations";
