@@ -19,3 +19,11 @@ pgdata/
 .DS_Store
 *.log
 coverage/
+
+# design-sync scratch (staged scripts, build output, machine state)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+packages/ui/dist/

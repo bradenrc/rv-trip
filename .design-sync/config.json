@@ -1,0 +1,15 @@
+{
+  "projectId": "967750d0-e5d2-486e-90b9-101e0b30071f",
+  "shape": "package",
+  "pkg": "@rv-trip/ui",
+  "globalName": "RvTripUi",
+  "buildCmd": "pnpm --filter @rv-trip/ui build",
+  "cssEntry": "dist/styles.css",
+  "extraFonts": ["styles/fonts.css"],
+  "readmeHeader": ".design-sync/conventions.md",
+  "componentSrcMap": {
+    "CategoryMeta": null,
+    "StatusMeta": null,
+    "CategoryLabel": null
+  }
+}

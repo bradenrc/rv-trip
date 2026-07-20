@@ -1,0 +1,18 @@
+/* Ships the Geist brand fonts with the design system (OFL-licensed). The host
+   app loads these via next/font; design-sync copies the woff2 into the bundle's
+   fonts/ and wires these @font-face rules into the styles.css closure so previews
+   and designs render in the real brand font, not a system fallback. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Geist Mono";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2");
+}

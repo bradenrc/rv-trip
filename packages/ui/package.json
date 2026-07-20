@@ -6,8 +6,11 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "publishConfig": {
+    "types": "./dist/index.d.ts"
+  },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && tailwindcss -i styles/entry.css -o dist/styles.css",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,7 +22,10 @@
     "react-dom": "^19"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4",
     "@types/react": "^19",
+    "geist": "^1.7.2",
+    "tailwindcss": "^4",
     "tsup": "^8",
     "typescript": "^5.9.3"
   }
