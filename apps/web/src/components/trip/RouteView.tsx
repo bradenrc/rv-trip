@@ -1,8 +1,9 @@
 "use client";
 
 import { Pin, GripVertical, CalendarDays, Caravan, Plus, CirclePlus } from "lucide-react";
-import type { RouteLeg, RouteRow } from "@/lib/trip-logic";
-import { categoryMeta, statusMeta, Stars, money } from "@/lib/trip-ui";
+import { CategoryTile, FloatingTag, StatusMarker, Stars } from "@rv-trip/ui";
+import type { RouteLeg } from "@/lib/trip-logic";
+import { money } from "@/lib/trip-ui";
 
 export function RouteView({
   legs,
@@ -75,11 +76,7 @@ export function RouteView({
                 >
                   <div className="flex flex-wrap items-center gap-2.5 pl-10">
                     <span className="text-[17px] font-bold text-rv-navy">{row.stop.place.name}</span>
-                    {row.floating && (
-                      <span className="rounded-rv-pill bg-rv-warning-soft px-2.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.06em] text-rv-warning">
-                        Floating
-                      </span>
-                    )}
+                    {row.floating && <FloatingTag />}
                     {row.dates && (
                       <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-rv-ink-faded">
                         <CalendarDays className="size-3.5" />
@@ -97,25 +94,17 @@ export function RouteView({
 
                   {row.reservations.length > 0 && (
                     <div className="flex flex-col gap-1.5">
-                      {row.reservations.map((r) => {
-                        const cm = categoryMeta(r.type);
-                        return (
-                          <div key={r.id} className="flex items-center gap-2.5 py-[7px]">
-                            <span
-                              className="inline-flex size-[30px] flex-none items-center justify-center rounded-rv-sm"
-                              style={{ background: cm.bg, color: cm.color }}
-                            >
-                              <cm.Icon className="size-4" />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-rv-ink">
-                              {r.name}
-                            </span>
-                            <span className="w-[60px] flex-none text-right font-mono text-[13px] font-semibold text-rv-green-cta">
-                              {r.cost != null ? money(r.cost) : ""}
-                            </span>
-                          </div>
-                        );
-                      })}
+                      {row.reservations.map((r) => (
+                        <div key={r.id} className="flex items-center gap-2.5 py-[7px]">
+                          <CategoryTile type={r.type} />
+                          <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-rv-ink">
+                            {r.name}
+                          </span>
+                          <span className="w-[60px] flex-none text-right font-mono text-[13px] font-semibold text-rv-green-cta">
+                            {r.cost != null ? money(r.cost) : ""}
+                          </span>
+                        </div>
+                      ))}
                     </div>
                   )}
 
@@ -130,30 +119,15 @@ export function RouteView({
 
                   {row.ideas.length > 0 && (
                     <div className="flex flex-col gap-1">
-                      {row.ideas.map((it) => {
-                        const cm = categoryMeta(it.type);
-                        const sm = statusMeta(it.status);
-                        return (
-                          <div key={it.id} className="flex items-center gap-2.5 py-1">
-                            <span
-                              className="inline-flex size-[30px] flex-none items-center justify-center rounded-rv-sm"
-                              style={{ background: cm.bg, color: cm.color }}
-                            >
-                              <cm.Icon className="size-3.5" />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-[13px] text-rv-ink-muted">
-                              {it.title}
-                            </span>
-                            <span
-                              className="inline-flex flex-none items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.06em]"
-                              style={{ color: sm.color }}
-                            >
-                              <sm.Icon className="size-3.5" />
-                              {it.status}
-                            </span>
-                          </div>
-                        );
-                      })}
+                      {row.ideas.map((it) => (
+                        <div key={it.id} className="flex items-center gap-2.5 py-1">
+                          <CategoryTile type={it.type} />
+                          <span className="min-w-0 flex-1 truncate text-[13px] text-rv-ink-muted">
+                            {it.title}
+                          </span>
+                          <StatusMarker status={it.status} />
+                        </div>
+                      ))}
                     </div>
                   )}
                 </button>

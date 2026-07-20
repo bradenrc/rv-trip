@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { GripVertical, Lightbulb, Tent, Star, Pointer, CircleCheck } from "lucide-react";
+import { FloatingTag } from "@rv-trip/ui";
 import type { TimelineModel } from "@/lib/trip-logic";
 
 export function Timeline({
@@ -219,9 +220,7 @@ export function Timeline({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[17px] font-bold text-rv-navy">{f.name}</span>
-                      <span className="rounded-rv-pill bg-rv-warning-soft px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.06em] text-rv-warning">
-                        Floating
-                      </span>
+                      <FloatingTag />
                     </div>
                     {f.note && (
                       <p className="m-0 mt-1.5 text-[13px] italic text-rv-ink-muted">“{f.note}”</p>

@@ -13,7 +13,8 @@ import {
 } from "lucide-react";
 import type { Stop, ReservationType } from "@rv-trip/core";
 import { isScheduled } from "@rv-trip/core";
-import { categoryMeta, statusMeta, Stars, money, dateRange } from "@/lib/trip-ui";
+import { categoryMeta, Stars, CategoryTile, StatusPill, FieldLabel } from "@rv-trip/ui";
+import { money, dateRange } from "@/lib/trip-ui";
 import { resDates } from "@/lib/trip-logic";
 import type { AddForm } from "./TripPlanner";
 
@@ -27,12 +28,6 @@ const RES_TYPES: ReservationType[] = [
   "transport",
   "other",
 ];
-
-const STATUS_PILL: Record<string, string> = {
-  idea: "bg-rv-surface-alt text-rv-ink-faded border border-rv-border",
-  planned: "bg-rv-navy-soft text-rv-navy border border-rv-navy-soft",
-  done: "bg-rv-green-soft text-rv-green-ink border border-rv-green",
-};
 
 export function StopDetailSheet({
   stop,
@@ -212,12 +207,7 @@ export function StopDetailSheet({
                     key={r.id}
                     className="flex gap-3 rounded-rv-card border border-rv-border bg-rv-surface p-4"
                   >
-                    <div
-                      className="flex size-[38px] flex-none items-center justify-center rounded-rv-md"
-                      style={{ background: cm.bg, color: cm.color }}
-                    >
-                      <cm.Icon className="size-5" />
-                    </div>
+                    <CategoryTile type={r.type} size="md" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-[14px] font-bold text-rv-ink">{r.name}</span>
@@ -287,14 +277,7 @@ export function StopDetailSheet({
                         {isDone && (
                           <Stars value={it.rating ?? 0} size={14} onSet={(n) => onIdeaRating(it.id, n)} />
                         )}
-                        <button
-                          type="button"
-                          onClick={() => onIdeaCycle(it.id)}
-                          title="Change status"
-                          className={`cursor-pointer rounded-rv-pill px-2.5 py-[3px] font-mono text-[9px] uppercase tracking-[0.08em] ${STATUS_PILL[it.status]}`}
-                        >
-                          {it.status}
-                        </button>
+                        <StatusPill status={it.status} onClick={() => onIdeaCycle(it.id)} />
                         {!isDone && (
                           <button
                             type="button"
@@ -364,13 +347,5 @@ export function StopDetailSheet({
         </div>
       </div>
     </div>
-  );
-}
-
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-rv-ink-faded">
-      {children}
-    </span>
   );
 }

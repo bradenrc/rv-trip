@@ -13,6 +13,7 @@
     "@base-ui/react": "^1.6.0",
     "@rv-trip/core": "workspace:*",
     "@rv-trip/db": "workspace:*",
+    "@rv-trip/ui": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.25.0",
