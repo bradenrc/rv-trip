@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { Trip, Reservation, ReservationType } from "@rv-trip/core";
 import { Compass, House, CalendarDays, CircleAlert, Route, ChartNoAxesGantt, Plus } from "lucide-react";
 import {
   timelineModel,
   routeModel,
+  routeSummary,
   stopMap,
   updateStop,
   setStopRating,
@@ -60,9 +61,18 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const [form, setForm] = useState<AddForm>({ type: "campground", name: "", dates: "", cost: "" });
   const [ideaNoteOpen, setIdeaNoteOpen] = useState<Set<string>>(new Set());
   const [routeDrag, setRouteDrag] = useState<{ legId: string; stopId: string } | null>(null);
+  const [costTracking, setCostTracking] = useState(false);
+  useEffect(() => {
+    setCostTracking(localStorage.getItem("rv-track-costs") === "1");
+  }, []);
+  const changeCostTracking = (on: boolean) => {
+    setCostTracking(on);
+    localStorage.setItem("rv-track-costs", on ? "1" : "0");
+  };
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
   const route = useMemo(() => routeModel(trip), [trip]);
+  const summary = useMemo(() => routeSummary(trip), [trip]);
   const byId = useMemo(() => stopMap(trip), [trip]);
   const selectedStop = selectedId ? (byId.get(selectedId) ?? null) : null;
   const selectedLegName = selectedStop
@@ -181,6 +191,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
                 Timeline
               </ToggleTab>
             </div>
+            <CostSwitch checked={costTracking} onChange={changeCostTracking} />
             <button
               type="button"
               className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-green-cta px-4 py-[9px] text-[14px] font-semibold text-rv-surface"
@@ -196,6 +207,8 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
         ) : (
           <RouteView
             legs={route}
+            summary={summary}
+            costs={costTracking}
             onOpenStop={openStop}
             routeDrag={routeDrag}
             onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
@@ -220,6 +233,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
         <StopDetailSheet
           stop={selectedStop}
           legName={selectedLegName}
+          costs={costTracking}
           addOpen={addOpen}
           form={form}
           ideaNoteOpen={ideaNoteOpen}
@@ -275,6 +289,32 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
 
 function Dot() {
   return <span className="size-[3px] rounded-full bg-rv-ink-subtle" />;
+}
+
+function CostSwitch({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className="inline-flex cursor-pointer items-center gap-2 border-none bg-transparent p-0"
+    >
+      <span className={`text-[13px] font-semibold ${checked ? "text-rv-ink" : "text-rv-ink-faded"}`}>
+        Track costs
+      </span>
+      <span
+        className={`relative h-[22px] w-[38px] flex-none rounded-full transition-colors ${
+          checked ? "bg-rv-green" : "bg-rv-border-hi"
+        }`}
+      >
+        <span
+          className="absolute top-0.5 size-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.2)] transition-[left]"
+          style={{ left: checked ? 18 : 2 }}
+        />
+      </span>
+    </button>
+  );
 }
 
 function ToggleTab({

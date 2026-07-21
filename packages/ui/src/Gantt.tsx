@@ -62,16 +62,19 @@ export function Ruler({ cells }: { cells: { letter: string; label: string; weekS
   );
 }
 
-/** A leg row: its label gutter plus a grid the caller fills with <StopBar>s. */
+/** A leg row: its label gutter plus a grid the caller fills with <StopBar>s.
+ * `rowHeight` drives the timeline's density (Comfortable 112 / Compact 78 / Dense 58). */
 export function SwimLane({
   kicker: k,
   name,
   columns,
+  rowHeight = 112,
   children,
 }: {
   kicker: string;
   name: string;
   columns: number;
+  rowHeight?: number;
   children: React.ReactNode;
 }) {
   return (
@@ -84,7 +87,7 @@ export function SwimLane({
         className="grid flex-1 rounded-rv-sm"
         style={{
           gridTemplateColumns: cols(columns),
-          gridAutoRows: "112px",
+          gridAutoRows: `${rowHeight}px`,
           backgroundImage: "linear-gradient(90deg, var(--color-rv-border-soft) 1px, transparent 1px)",
           backgroundSize: "calc(100% / 4) 100%",
         }}
@@ -105,6 +108,7 @@ export function StopBar({
   ideaCount,
   startCol,
   span,
+  compact = false,
   onClick,
 }: {
   name: string;
@@ -114,6 +118,8 @@ export function StopBar({
   ideaCount: number;
   startCol: number;
   span: number;
+  /** tighter padding/gap for the Compact & Dense timeline densities */
+  compact?: boolean;
   onClick?: () => void;
 }) {
   const showMeta = rating > 0 || resCount > 0 || ideaCount > 0;
@@ -121,7 +127,9 @@ export function StopBar({
     <button
       type="button"
       onClick={onClick}
-      className="relative m-[4px_3px] flex cursor-pointer flex-col gap-[3px] overflow-hidden rounded-rv-md border border-rv-green bg-rv-green-soft p-[8px_9px_8px_13px] text-left shadow-rv-sm transition hover:-translate-y-px hover:shadow-rv-lg"
+      className={`relative m-[4px_3px] flex cursor-pointer flex-col overflow-hidden rounded-rv-md border border-rv-green bg-rv-green-soft text-left shadow-rv-sm transition hover:-translate-y-px hover:shadow-rv-lg ${
+        compact ? "gap-[2px] p-[6px_8px_6px_12px]" : "gap-[3px] p-[8px_9px_8px_13px]"
+      }`}
       style={{ gridColumn: `${startCol} / span ${span}`, gridRow: 1 }}
     >
       <span className="absolute inset-y-0 left-0 w-1 rounded-l-rv-sm bg-rv-navy" />

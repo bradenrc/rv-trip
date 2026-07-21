@@ -277,6 +277,62 @@ export function resDates(r: Reservation): string | null {
   return null;
 }
 
+// ── Route summary rail view-model ──────────────────────────────────────────
+export interface RouteSummary {
+  driveMiles: number;
+  driveTime: string;
+  totalCost: number;
+  stops: number;
+  scheduled: number;
+  floating: number;
+  days: number;
+  openCount: number;
+  gapCount: number;
+  legs: { id: string; name: string; stops: number; cost: number }[];
+}
+
+export function routeSummary(trip: Trip): RouteSummary {
+  const stops = allStops(trip);
+  const stopCost = (s: Stop) => s.reservations.reduce((x, r) => x + (r.cost ?? 0), 0);
+  const { days } = deriveDays(trip, stops);
+  const openCount = days.filter((d) => d.kind === "empty").length;
+  let gapCount = 0;
+  days.forEach((d, i) => {
+    if (d.kind === "empty" && (i === 0 || days[i - 1]!.kind !== "empty")) gapCount++;
+  });
+  const sched = stops
+    .filter(isScheduled)
+    .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
+  let driveMiles = 0;
+  let driveMins = 0;
+  for (let i = 0; i < sched.length - 1; i++) {
+    const d = estimateDrive(sched[i]!.place, sched[i + 1]!.place);
+    if (d) {
+      driveMiles += d.miles;
+      driveMins += d.minutes;
+    }
+  }
+  const dh = Math.floor(driveMins / 60);
+  const dm = driveMins % 60;
+  return {
+    driveMiles,
+    driveTime: driveMiles ? (dh > 0 ? `${dh}h ${String(dm).padStart(2, "0")}m` : `${dm}m`) : "—",
+    totalCost: stops.reduce((a, s) => a + stopCost(s), 0),
+    stops: stops.length,
+    scheduled: sched.length,
+    floating: stops.filter((s) => !isScheduled(s)).length,
+    days: days.length,
+    openCount,
+    gapCount,
+    legs: trip.legs.map((l) => ({
+      id: l.id,
+      name: l.title,
+      stops: l.stops.length,
+      cost: l.stops.reduce((a, s) => a + stopCost(s), 0),
+    })),
+  };
+}
+
 // ── mutations (pure; return a new Trip) ────────────────────────────────────
 function mapLegs(trip: Trip, fn: (l: Leg) => Leg): Trip {
   return { ...trip, legs: trip.legs.map(fn) };

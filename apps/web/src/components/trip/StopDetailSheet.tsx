@@ -22,6 +22,7 @@ const RES_TYPES: ReservationType[] = [
 export function StopDetailSheet({
   stop,
   legName,
+  costs,
   addOpen,
   form,
   ideaNoteOpen,
@@ -45,6 +46,7 @@ export function StopDetailSheet({
 }: {
   stop: Stop;
   legName: string;
+  costs: boolean;
   addOpen: boolean;
   form: AddForm;
   ideaNoteOpen: Set<string>;
@@ -153,16 +155,18 @@ export function StopDetailSheet({
                       ))}
                     </select>
                   </label>
-                  <label className="flex flex-[1_1_90px] flex-col gap-1">
-                    <FieldLabel>Cost $</FieldLabel>
-                    <input
-                      value={form.cost}
-                      onChange={(e) => onFormChange({ cost: e.target.value })}
-                      inputMode="numeric"
-                      placeholder="0"
-                      className="w-full rounded-rv-md border border-rv-border-hi bg-rv-surface px-2.5 py-2 text-[13px] text-rv-ink"
-                    />
-                  </label>
+                  {costs && (
+                    <label className="flex flex-[1_1_90px] flex-col gap-1">
+                      <FieldLabel>Cost $</FieldLabel>
+                      <input
+                        value={form.cost}
+                        onChange={(e) => onFormChange({ cost: e.target.value })}
+                        inputMode="numeric"
+                        placeholder="0"
+                        className="w-full rounded-rv-md border border-rv-border-hi bg-rv-surface px-2.5 py-2 text-[13px] text-rv-ink"
+                      />
+                    </label>
+                  )}
                 </div>
                 <label className="flex flex-col gap-1">
                   <FieldLabel>Name</FieldLabel>
@@ -188,7 +192,7 @@ export function StopDetailSheet({
               {stop.reservations.map((r) => (
                 <ReservationCard
                   key={r.id}
-                  reservation={r}
+                  reservation={costs ? r : { ...r, cost: null }}
                   dates={resDates(r)}
                   onRating={(n) => onResRating(r.id, n)}
                   onNote={(v) => onResNote(r.id, v)}
@@ -239,12 +243,14 @@ export function StopDetailSheet({
             />
           </div>
 
-          {/* Stop total */}
-          <div className="flex items-center justify-end gap-2 border-t border-rv-border-soft pt-4 font-mono text-[13px] text-rv-ink-faded">
-            <Receipt className="size-4" />
-            <span>Stop total</span>
-            <span className="font-semibold text-rv-ink-muted">{money(costTotal)}</span>
-          </div>
+          {/* Stop total — only when tracking costs */}
+          {costs && (
+            <div className="flex items-center justify-end gap-2 border-t border-rv-border-soft pt-4 font-mono text-[13px] text-rv-ink-faded">
+              <Receipt className="size-4" />
+              <span>Stop total</span>
+              <span className="font-semibold text-rv-ink-muted">{money(costTotal)}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
