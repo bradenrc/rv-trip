@@ -14,6 +14,10 @@
 - **Root fix is upstream in the design-sync tooling** — its token classifier (`lib/emit.mjs`) should skip `--tw-*`/`--default-*` (or emit `/* @kind other */` for them). That's skill-owned code the skill says not to fork.
 - Repo-side option (unverified — the server check must honor `@kind` for it to help): a post-`tailwindcss` build step annotating each `--tw-*`/`--default-*` declaration in `dist/styles.css` with `/* @kind other */`, then re-sync. Not applied yet — deferred pending confirmation the check reads the annotation. See Downloads `DESIGN_SYNC_NOTES.md`.
 
+## Re-sync mechanics learned (2026-07-21, planner-refinements sync)
+- When saving the remote anchor to `.design-sync/.cache/remote-sync.json`, write the **complete** `_ds_sync.json` content from `DesignSync(get_file)` **verbatim** — including the full `sourceHashes` block. A partial anchor (e.g. hand-transcribed without `sourceHashes`) makes the driver log `no remote anchor — full scope` and re-verify all 20 (still correct via carried-forward local grades in `.cache/review/`, just not incremental).
+- The Claude Design project also holds **non-sync files** the design agent/user added — `design_handoff_*/`, `explorations/`, `templates/`, `uploads/`, `_ds/broadsheet-*/`, `DESIGN_SYNC_NOTES.md`, `POST_SYNC_VERIFICATION.md`. These are OUTSIDE the sync's scope (`components/`, `_preview/`, `_vendor/`, `fonts/`, `styles.css`, `_ds_bundle.*`, `README.md`, `_ds_sync.json`) — the reconciliation deletes never touch them. Leave them unless the user asks to clean the project.
+
 ## Re-sync risks (watch-list for the next run)
 - **Token drift**: `rv-*` values live in two places (see above). A design that looks off-brand after a re-sync usually means `entry.css` fell behind `globals.css`.
 - **Preview data is inlined** in `.design-sync/previews/*.tsx` (realistic Pacific-NW-Loop trip content). It's static — it won't rot, but if a component's props change, its preview may need updating.
