@@ -100,6 +100,9 @@ export const leg = z.object({
 });
 export type Leg = z.infer<typeof leg>;
 
+export const tripStatus = z.enum(["planning", "upcoming", "complete"]);
+export type TripStatus = z.infer<typeof tripStatus>;
+
 export const trip = z.object({
   id: z.string(),
   ownerId: z.string(),
@@ -107,6 +110,9 @@ export const trip = z.object({
   homeBase: z.string().nullable().default(null),
   startDate: isoDate,
   endDate: isoDate,
+  status: tripStatus.default("planning"),
+  rating: rating,
+  note: z.string().nullable().default(null),
   legs: z.array(leg).default([]),
 });
 export type Trip = z.infer<typeof trip>;

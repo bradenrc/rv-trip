@@ -34,6 +34,9 @@ export const reservationType = pgEnum("reservation_type", [
 
 export const ideaStatus = pgEnum("idea_status", ["idea", "planned", "done"]);
 
+// Lifecycle of a trip on the dashboard: actively planning, scheduled ahead, or done.
+export const tripStatus = pgEnum("trip_status", ["planning", "upcoming", "complete"]);
+
 export const trips = pgTable(
   "trips",
   {
@@ -43,6 +46,10 @@ export const trips = pgTable(
     homeBase: text("home_base"),
     startDate: date("start_date").notNull(),
     endDate: date("end_date").notNull(),
+    status: tripStatus("status").notNull().default("planning"),
+    // Trip-level "revisit" memory shown on the dashboard's Traveled cards.
+    rating: smallint("rating"),
+    note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

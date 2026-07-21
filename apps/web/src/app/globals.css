@@ -171,6 +171,16 @@
   --shadow-rv-xl: 0 10px 15px -3px rgba(11, 27, 43, 0.08), 0 4px 6px -4px rgba(11, 27, 43, 0.06);
 }
 
+/* Dashboard trip-card hover lift (matches the framework handoff). */
+.trip-card {
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  box-shadow: 0 1px 3px rgba(11, 27, 43, 0.06);
+}
+.trip-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -8px rgba(11, 27, 43, 0.18);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

@@ -18,6 +18,7 @@ async function main() {
       homeBase: "Boise, ID",
       startDate: "2026-08-01",
       endDate: "2026-08-28",
+      status: "planning",
     })
     .returning();
 
@@ -151,8 +152,114 @@ async function main() {
     },
   ]);
 
-  console.log(`Seeded trip ${trip!.id} ("${trip!.title}").`);
+  // ── more trips across the dashboard's statuses ───────────────────────────
+  await addTrip(
+    {
+      title: "Desert Southwest Winter",
+      homeBase: "Boise, ID",
+      startDate: "2026-01-06",
+      endDate: "2026-03-30",
+      status: "upcoming",
+    },
+    [
+      {
+        title: "Utah",
+        stops: [
+          { placeName: "Moab, UT", lat: 38.5733, lng: -109.5498, arriveDate: "2026-01-10", departDate: "2026-01-20" },
+          { placeName: "Zion NP", lat: 37.2982, lng: -113.0263, arriveDate: null, departDate: null },
+        ],
+      },
+      {
+        title: "Arizona",
+        stops: [
+          { placeName: "Sedona, AZ", lat: 34.8697, lng: -111.761, arriveDate: "2026-01-25", departDate: "2026-02-05" },
+          { placeName: "Tucson, AZ", lat: 32.2226, lng: -110.9747, arriveDate: "2026-02-10", departDate: "2026-03-01" },
+        ],
+      },
+    ],
+  );
+
+  await addTrip(
+    {
+      title: "Oregon Coast Weekend",
+      homeBase: "Boise, ID",
+      startDate: "2025-05-23",
+      endDate: "2025-05-26",
+      status: "complete",
+      rating: 5,
+      note: "South Beach yurts booked early next time — sunset walks were the whole trip.",
+    },
+    [
+      {
+        title: "Coast",
+        stops: [
+          { placeName: "Newport, OR", lat: 44.6365, lng: -124.053, arriveDate: "2025-05-23", departDate: "2025-05-26" },
+        ],
+      },
+    ],
+  );
+
+  await addTrip(
+    {
+      title: "Yellowstone & Tetons",
+      homeBase: "Boise, ID",
+      startDate: "2024-09-08",
+      endDate: "2024-09-19",
+      status: "complete",
+      rating: 4,
+      note: "Fishing Bridge RV park is the only full-hookup in-park — worth the early reservation.",
+    },
+    [
+      {
+        title: "Yellowstone",
+        stops: [
+          { placeName: "Fishing Bridge, WY", lat: 44.5647, lng: -110.3735, arriveDate: "2024-09-08", departDate: "2024-09-14" },
+        ],
+      },
+      {
+        title: "Tetons",
+        stops: [
+          { placeName: "Jackson, WY", lat: 43.4799, lng: -110.7624, arriveDate: "2024-09-15", departDate: "2024-09-19" },
+        ],
+      },
+    ],
+  );
+
+  console.log(`Seeded ${trip!.title} + 3 more trips.`);
   process.exit(0);
+}
+
+type SeedStop = {
+  placeName: string;
+  lat: number | null;
+  lng: number | null;
+  arriveDate: string | null;
+  departDate: string | null;
+};
+async function addTrip(
+  t: {
+    title: string;
+    homeBase: string;
+    startDate: string;
+    endDate: string;
+    status: "planning" | "upcoming" | "complete";
+    rating?: number;
+    note?: string;
+  },
+  legs: { title: string; stops: SeedStop[] }[],
+) {
+  const [trip] = await db.insert(schema.trips).values({ ownerId: OWNER, ...t }).returning();
+  for (let li = 0; li < legs.length; li++) {
+    const [leg] = await db
+      .insert(schema.legs)
+      .values({ tripId: trip!.id, title: legs[li]!.title, sortOrder: li })
+      .returning();
+    const stops = legs[li]!.stops;
+    if (stops.length) {
+      await db.insert(schema.stops).values(stops.map((s, i) => ({ legId: leg!.id, sortOrder: i, ...s })));
+    }
+  }
+  return trip!;
 }
 
 main().catch((err) => {
