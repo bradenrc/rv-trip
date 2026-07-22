@@ -117,6 +117,34 @@ export const trip = z.object({
 });
 export type Trip = z.infer<typeof trip>;
 
+/**
+ * The Places library: an account-scoped, cross-trip collection of spots.
+ * ONE record with ONE status field — a place graduates want -> been after a
+ * visit rather than being re-entered into a second collection.
+ */
+export const savedPlaceStatus = z.enum(["want", "been"]);
+export type SavedPlaceStatus = z.infer<typeof savedPlaceStatus>;
+
+export const savedPlace = z.object({
+  id: z.string(),
+  ownerId: z.string(),
+  place,
+  /** Human region line ("Olympic NP, WA") — display only, not geocoded. */
+  region: z.string().nullable().default(null),
+  /** Reused so the five-category language (Stay/Eat/Do/Travel/Other) resolves
+   * through the same categoryMeta lookup every other surface uses. */
+  type: reservationType,
+  status: savedPlaceStatus.default("want"),
+  note: z.string().nullable().default(null),
+  /** "want" shelf: who/what the tip came from ("Jane & Rick", "Forum tip"). */
+  source: z.string().nullable().default(null),
+  /** "been" shelf: the rating and the trip it was visited on. */
+  rating,
+  tripId: z.string().nullable().default(null),
+  tripName: z.string().nullable().default(null),
+});
+export type SavedPlace = z.infer<typeof savedPlace>;
+
 /** A stop is "scheduled" iff it has both dates. */
 export function isScheduled(
   s: Pick<Stop, "arriveDate" | "departDate">,

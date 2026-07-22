@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { Trip, Reservation, ReservationType } from "@rv-trip/core";
 import { Compass, House, CalendarDays, CircleAlert, Route, ChartNoAxesGantt, Plus } from "lucide-react";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/trip-logic";
 import { tripApi } from "@/lib/trip-api";
 import { fullRange } from "@/lib/trip-ui";
+import { useBooleanPref } from "@/lib/pref";
 import { Timeline } from "./Timeline";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
@@ -61,14 +62,8 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const [form, setForm] = useState<AddForm>({ type: "campground", name: "", dates: "", cost: "" });
   const [ideaNoteOpen, setIdeaNoteOpen] = useState<Set<string>>(new Set());
   const [routeDrag, setRouteDrag] = useState<{ legId: string; stopId: string } | null>(null);
-  const [costTracking, setCostTracking] = useState(false);
-  useEffect(() => {
-    setCostTracking(localStorage.getItem("rv-track-costs") === "1");
-  }, []);
-  const changeCostTracking = (on: boolean) => {
-    setCostTracking(on);
-    localStorage.setItem("rv-track-costs", on ? "1" : "0");
-  };
+  // Cost tracking is opt-in — planning without money in your face is the default.
+  const [costTracking, changeCostTracking] = useBooleanPref("rv-track-costs");
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
   const route = useMemo(() => routeModel(trip), [trip]);
@@ -90,7 +85,8 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const toggleIdeaNote = (ideaId: string) =>
     setIdeaNoteOpen((prev) => {
       const next = new Set(prev);
-      next.has(ideaId) ? next.delete(ideaId) : next.add(ideaId);
+      if (next.has(ideaId)) next.delete(ideaId);
+      else next.add(ideaId);
       return next;
     });
 

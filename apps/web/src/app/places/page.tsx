@@ -1,13 +1,38 @@
-import { Bookmark } from "lucide-react";
-import { StubPage } from "@/components/nav/StubPage";
+import { Plus } from "lucide-react";
+import { listSavedPlacesForOwner } from "@rv-trip/db";
+import { getOwner } from "@/lib/owner";
+import { PlacesLibrary } from "@/components/places/PlacesLibrary";
 
-export default function PlacesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function PlacesPage() {
+  const places = await listSavedPlacesForOwner(getOwner());
+
   return (
-    <StubPage
-      kicker="Library"
-      title="Places"
-      blurb="Your saved campgrounds, stops, and ideas across every trip — a cross-trip library you can pull from when planning the next one."
-      Icon={Bookmark}
-    />
+    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+      <div className="mb-[26px] flex flex-wrap items-end justify-between gap-5">
+        <div>
+          <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-green-cta">
+            Your places
+          </div>
+          <h1 className="m-0 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-navy">
+            Spots worth keeping
+          </h1>
+          <p className="m-0 mt-3 max-w-[58ch] text-[15px] leading-relaxed text-rv-ink-muted">
+            A queue of places you&rsquo;ve heard about and an archive of the ones you&rsquo;ve been —
+            the raw material for the next trip.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-green-cta px-[18px] py-[11px] text-[14px] font-bold text-white"
+        >
+          <Plus className="size-[15px]" fill="currentColor" strokeWidth={2.5} />
+          Save a place
+        </button>
+      </div>
+
+      <PlacesLibrary places={places} />
+    </main>
   );
 }

@@ -1,8 +1,17 @@
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, desc } from "drizzle-orm";
 import { deriveDays, isScheduled } from "@rv-trip/core";
 import { db } from "./index";
-import { trips } from "./schema";
-import type { Trip, Leg, Stop, Reservation, Idea, Place, TripStatus } from "@rv-trip/core";
+import { trips, savedPlaces } from "./schema";
+import type {
+  Trip,
+  Leg,
+  Stop,
+  Reservation,
+  Idea,
+  Place,
+  TripStatus,
+  SavedPlace,
+} from "@rv-trip/core";
 
 /**
  * Fetch full trip trees (legs → stops → reservations/ideas) and map them to the
@@ -110,6 +119,32 @@ function summarize(trip: Trip): TripSummary {
     miles: Math.round(miles),
     open,
   };
+}
+
+/**
+ * The Places library for an account — both shelves in one list. The page
+ * partitions by `status`; sending both keeps the shelf counts honest without a
+ * second round-trip. `tripName` is denormalized from the visited-on trip.
+ */
+export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPlace[]> {
+  const rows = await db.query.savedPlaces.findMany({
+    where: eq(savedPlaces.ownerId, ownerId),
+    orderBy: [desc(savedPlaces.createdAt)],
+    with: { trip: { columns: { title: true } } },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    ownerId: r.ownerId,
+    place: mapPlace(r.name, r.lat, r.lng, r.googlePlaceId),
+    region: r.region,
+    type: r.type,
+    status: r.status,
+    note: r.note,
+    source: r.source,
+    rating: r.rating,
+    tripId: r.tripId,
+    tripName: r.trip?.title ?? null,
+  }));
 }
 
 function haversineMiles(a: Place, b: Place): number {

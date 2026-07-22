@@ -37,6 +37,9 @@ export const ideaStatus = pgEnum("idea_status", ["idea", "planned", "done"]);
 // Lifecycle of a trip on the dashboard: actively planning, scheduled ahead, or done.
 export const tripStatus = pgEnum("trip_status", ["planning", "upcoming", "complete"]);
 
+// Places library shelves. One record, one status — want graduates to been.
+export const savedPlaceStatus = pgEnum("saved_place_status", ["want", "been"]);
+
 export const trips = pgTable(
   "trips",
   {
@@ -131,8 +134,42 @@ export const reservations = pgTable(
   (t) => [index("reservations_stop_idx").on(t.stopId)],
 );
 
+/**
+ * The Places library. Account-scoped (ownerId), NOT trip-scoped — this is the
+ * cross-trip backlog/archive a user plans from. A "been" place points back at
+ * the trip it was visited on; that link goes null if the trip is deleted, the
+ * place itself survives.
+ */
+export const savedPlaces = pgTable(
+  "saved_places",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull(),
+    name: text("name").notNull(),
+    region: text("region"),
+    lat: doublePrecision("lat"),
+    lng: doublePrecision("lng"),
+    googlePlaceId: text("google_place_id"),
+    type: reservationType("type").notNull().default("other"),
+    status: savedPlaceStatus("status").notNull().default("want"),
+    note: text("note"),
+    // "want" shelf only: free-text attribution for where the tip came from.
+    source: text("source"),
+    // "been" shelf only.
+    rating: smallint("rating"),
+    tripId: uuid("trip_id").references(() => trips.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("saved_places_owner_idx").on(t.ownerId)],
+);
+
 export const tripsRelations = relations(trips, ({ many }) => ({
   legs: many(legs),
+  savedPlaces: many(savedPlaces),
+}));
+
+export const savedPlacesRelations = relations(savedPlaces, ({ one }) => ({
+  trip: one(trips, { fields: [savedPlaces.tripId], references: [trips.id] }),
 }));
 
 export const legsRelations = relations(legs, ({ one, many }) => ({

@@ -18,3 +18,13 @@ export {
 export { FloatingStopCard, AllScheduledCard } from "./FloatingStopCard";
 export { ReservationLineItem, IdeaLineItem } from "./RouteItems";
 export { MapPlaceholder, ReservationCard, IdeaCard } from "./DetailCards";
+export {
+  CategoryChip,
+  PlaceCard,
+  SegmentedControl,
+  ViewSwitch,
+  FilterChip,
+  EmptyShelf,
+  PlacesMapPanel,
+} from "./Places";
+export type { SegmentOption } from "./Places";

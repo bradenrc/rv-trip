@@ -179,7 +179,7 @@ async function main() {
     ],
   );
 
-  await addTrip(
+  const coastTrip = await addTrip(
     {
       title: "Oregon Coast Weekend",
       homeBase: "Boise, ID",
@@ -199,7 +199,7 @@ async function main() {
     ],
   );
 
-  await addTrip(
+  const ystoneTrip = await addTrip(
     {
       title: "Yellowstone & Tetons",
       homeBase: "Boise, ID",
@@ -225,7 +225,105 @@ async function main() {
     ],
   );
 
-  console.log(`Seeded ${trip!.title} + 3 more trips.`);
+  // ── Places library: the cross-trip queue + archive ────────────────────────
+  // "want" carries a source (where the tip came from); "been" carries a rating
+  // and the trip it was visited on.
+  await db.insert(schema.savedPlaces).values([
+    {
+      ownerId: OWNER,
+      name: "Kalaloch Campground",
+      region: "Olympic NP, WA",
+      lat: 47.6118,
+      lng: -124.3762,
+      type: "campground",
+      status: "want",
+      source: "Jane & Rick",
+      note: "Bluff sites right over the beach — they said book site A15 for the sunset.",
+    },
+    {
+      ownerId: OWNER,
+      name: "Sunny's Smokehouse",
+      region: "Bend, OR",
+      lat: 44.0582,
+      lng: -121.3153,
+      type: "dining",
+      status: "want",
+      source: "Forum tip",
+      note: "Brisket sells out by 2pm. Big lot, easy pull-through parking for the rig.",
+    },
+    {
+      ownerId: OWNER,
+      name: "Crater Lake Rim Drive",
+      region: "Crater Lake NP, OR",
+      lat: 42.9446,
+      lng: -122.1090,
+      type: "activity",
+      status: "want",
+      source: "Marcy",
+      note: "Do it clockwise early; east rim closes late season. Watanabe overlook is the one.",
+    },
+    {
+      ownerId: OWNER,
+      name: "Flying J — Ontario",
+      region: "Ontario, OR",
+      lat: 44.0266,
+      lng: -116.9629,
+      type: "transport",
+      status: "want",
+      source: "Range planning",
+      note: "Good midpoint fuel + dump on the I-84 run west. Wide lanes.",
+    },
+    {
+      ownerId: OWNER,
+      name: "South Beach State Park",
+      region: "Newport, OR",
+      lat: 44.6094,
+      lng: -124.0631,
+      type: "campground",
+      status: "been",
+      rating: 5,
+      tripId: coastTrip.id,
+      note: "Yurts are the move — book early next time. Sunset walks were the whole trip.",
+    },
+    {
+      ownerId: OWNER,
+      name: "Local Ocean Seafoods",
+      region: "Newport, OR",
+      lat: 44.6297,
+      lng: -124.0526,
+      type: "dining",
+      status: "been",
+      rating: 5,
+      tripId: coastTrip.id,
+      note: "Bayfront, watch the boats. Go before 6 or wait an hour.",
+    },
+    {
+      ownerId: OWNER,
+      name: "Fishing Bridge RV Park",
+      region: "Yellowstone NP, WY",
+      lat: 44.5647,
+      lng: -110.3735,
+      type: "campground",
+      status: "been",
+      rating: 4,
+      tripId: ystoneTrip.id,
+      note: "Only full-hookup in-park. Worth the early reservation; tight but level.",
+    },
+    {
+      ownerId: OWNER,
+      name: "Old Faithful Loop",
+      region: "Yellowstone NP, WY",
+      lat: 44.4605,
+      lng: -110.8281,
+      type: "activity",
+      status: "been",
+      rating: 4,
+      tripId: ystoneTrip.id,
+      note: "Beat the crowd — first eruption after opening. Biscuit Basin boardwalk was quieter.",
+    },
+  ]);
+
+  console.log(`Seeded ${trip!.title} + 3 more trips + 8 saved places.`);
   process.exit(0);
 }
 
