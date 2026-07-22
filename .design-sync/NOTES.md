@@ -16,6 +16,15 @@
 
 ## Re-sync mechanics learned (2026-07-21, planner-refinements sync)
 - When saving the remote anchor to `.design-sync/.cache/remote-sync.json`, write the **complete** `_ds_sync.json` content from `DesignSync(get_file)` **verbatim** — including the full `sourceHashes` block. A partial anchor (e.g. hand-transcribed without `sourceHashes`) makes the driver log `no remote anchor — full scope` and re-verify all 20 (still correct via carried-forward local grades in `.cache/review/`, just not incremental).
+- **Confirmed 2026-07-22**: with the complete anchor saved, the driver reported `anchor: ok` and partitioned 20 unchanged / 7 added — only the 7 new components captured and graded. Delete any stale `.cache/remote-sync.json` before writing the fresh one (the Write tool refuses to clobber an unread file).
+
+## Preview convention (2026-07-22, Places sync)
+- **This DS has no floor cards** — every component ships an authored `.design-sync/previews/<Name>.tsx`. When a sync adds components, author their previews before uploading rather than letting them ship as floor cards; a mixed picker (rich cards next to "preview not yet authored") reads as a regression.
+- New components go through `lib/preview-rebuild.mjs --components <new>` → `package-capture.mjs --components <new>` → grade → **final driver run** (the driver's diff stage is what regenerates `.sync-diff.json` after a preview rebuild; uploading off a pre-rebuild diff would ship stale render hashes).
+- Type-only exports are dropped automatically by the converter — `SegmentOption` needed no `componentSrcMap: null` entry, unlike `CategoryMeta`/`StatusMeta`/`CategoryLabel` which did. Only add exclusions when a name actually shows up in the discovered list.
+
+## Validating the conventions header
+- `conventions.md` claims `shadow-rv-sm|md|lg|xl`. **Do not probe for `--shadow-rv-*:` custom properties** — Tailwind compiles those utilities to literal `box-shadow` values, so the custom property is absent from the built CSS while the class is present and correct. Grep for the **class name** in `_ds_bundle.css` instead. Colors and radii DO appear as `--color-rv-*:` / `--radius-rv-*:` in `styles.css`, so the custom-property probe is right for those.
 - The Claude Design project also holds **non-sync files** the design agent/user added — `design_handoff_*/`, `explorations/`, `templates/`, `uploads/`, `_ds/broadsheet-*/`, `DESIGN_SYNC_NOTES.md`, `POST_SYNC_VERIFICATION.md`. These are OUTSIDE the sync's scope (`components/`, `_preview/`, `_vendor/`, `fonts/`, `styles.css`, `_ds_bundle.*`, `README.md`, `_ds_sync.json`) — the reconciliation deletes never touch them. Leave them unless the user asks to clean the project.
 
 ## Re-sync risks (watch-list for the next run)
@@ -23,3 +32,5 @@
 - **Preview data is inlined** in `.design-sync/previews/*.tsx` (realistic Pacific-NW-Loop trip content). It's static — it won't rot, but if a component's props change, its preview may need updating.
 - **Grid organisms** (`StopBar`, `OpenSpan`) position via `grid-column` and are previewed inside their parent (`SwimLane`/`OpenLane`); a component-API change to those parents can break the child previews.
 - **`geist` devDep** must stay installed for the font woff2 to resolve at build time.
+- **`categoryMeta` is load-bearing across surfaces.** `CategoryChip`, `FilterChip`, and `PlaceCard` all resolve their icon/color through it, as do `CategoryTile`/`ReservationLineItem`. A change to the five-category mapping silently restyles every one of them — re-check those cards after any edit to `src/category.ts`.
+- **Places previews inline domain objects** (`SavedPlace` shape with `place`/`region`/`source`/`tripName`). If `@rv-trip/core`'s `savedPlace` schema gains a required field, those `.tsx` files fail to compile and the components drop to floor cards — the build log's `! preview build failed:` line is the tell.
