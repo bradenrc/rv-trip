@@ -18,6 +18,28 @@ it carries `.mc/config.yaml`). `mc` is a global command.
 **8790**. Every `mc up`/`down`/`status`/`glass` call below MUST carry
 `--port 8731` — a bare call targets 8730 and talks to btrip's daemon.
 
+## 0 · One-time per machine: register the channel server
+
+The repo's `.mcp.json` documents the channel entry but is NOT reliably
+loaded (project-scope servers need per-session approval, and the
+first-standup postmortem found it never loaded at all — issue 3 stranded
+at every gate). Register it at LOCAL scope once, from the repo root:
+
+```bash
+claude mcp add mc -s local -e MC_CHANNEL_PORT=8790 -- node /Users/braden/temp/mc-dev/channel/mc-channel.mjs
+```
+
+Local scope loads in every session started from this directory, no
+approval prompt. The launch flag (`--dangerously-load-development-channels
+server:mc`) is STILL required — it is what turns the loaded server's
+notifications into injected `<channel>` events. Proof the channel is live
+after launch: `lsof -iTCP:8790 -sTCP:LISTEN` shows a node process.
+
+**Until that proof exists, do not idle on pushes**: after every submit,
+drain (`mc claim <DIR> runner-1 --wait 2` until empty) and re-check the
+queue periodically — the daemon's pushes are fire-and-forget, and the
+durable queue is the truth.
+
 ## 1 · Assert + read the contract
 
 Read `docs/runner-contract.md` in the **mc-dev clone**
