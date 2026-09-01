@@ -9,7 +9,7 @@
    this compiled stylesheet (no Tailwind at runtime), so the design agent can
    only use classes present here — force-generate the brand vocabulary even
    where no shipped component happens to use it. */
-@source inline("{bg,text,border}-rv-{navy,navy-deep,navy-soft,green,green-cta,green-deep,green-soft,green-ink,green-on-dark,ink,ink-muted,ink-faded,ink-subtle,surface,surface-alt,border,border-soft,border-hi,warning,warning-soft,info,info-soft,info-ink,travel,travel-ink}");
+@source inline("{bg,text,border}-rv-{navy,navy-deep,navy-soft,green,green-cta,green-soft,green-ink,green-on-dark,ember,ember-bright,ember-deep,ember-soft,ink,ink-muted,ink-faded,ink-subtle,surface,surface-alt,border,border-soft,border-hi,warning,warning-soft,info,info-soft,info-ink,travel,travel-ink,travel-soft}");
 @source inline("rounded-rv-{sm,md,card,pill}");
 @source inline("shadow-rv-{sm,md,lg,xl}");
 @source inline("font-{sans,mono}");
@@ -20,36 +20,41 @@
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
 
-  /* brand */
-  --color-rv-navy: #0e2a47;
+  /* brand — Nightfall & Ember (issue #3): one hue ≈209°, elevation = lightness */
+  --color-rv-navy: #0a1520;
   --color-rv-navy-deep: #08182b;
-  --color-rv-navy-soft: #e8eef5;
-  --color-rv-green: #2e8b4e;
-  --color-rv-green-cta: #277e47;
-  --color-rv-green-deep: #1f6b3a;
-  --color-rv-green-soft: #e4f2e9;
-  --color-rv-green-ink: #0e3d1f;
+  --color-rv-navy-soft: #21374d;
+  --color-rv-green: #7cd897;
+  --color-rv-green-cta: #7cd897;
+  --color-rv-green-soft: #1c3a2b;
+  --color-rv-green-ink: #a8e8bd;
   --color-rv-green-on-dark: #7cd897;
+  /* ember — CTA · links · money · stars · active */
+  --color-rv-ember: #f28c5e;
+  --color-rv-ember-bright: #ffa477;
+  --color-rv-ember-deep: #c14d20;
+  --color-rv-ember-soft: #3a2b22;
   /* ink */
-  --color-rv-ink: #0b1b2b;
-  --color-rv-ink-muted: #3a4a5c;
-  --color-rv-ink-faded: #5d6b7d;
-  --color-rv-ink-subtle: #a8b4c2;
+  --color-rv-ink: #eef5fa;
+  --color-rv-ink-muted: #b8cbda;
+  --color-rv-ink-faded: #8fa8bd;
+  --color-rv-ink-subtle: #5f7690;
   /* surface & borders */
-  --color-rv-surface: #ffffff;
-  --color-rv-surface-alt: #f4f7fa;
-  --color-rv-border: #dde4ec;
-  --color-rv-border-soft: #e8edf3;
-  --color-rv-border-hi: #c2ccd8;
+  --color-rv-surface: #182b3d;
+  --color-rv-surface-alt: #101f2d;
+  --color-rv-border: #2e4459;
+  --color-rv-border-soft: #26394b;
+  --color-rv-border-hi: #3d566c;
   /* status */
-  --color-rv-warning: #97601c;
-  --color-rv-warning-soft: #fef3c7;
-  --color-rv-info: #1e5bff;
-  --color-rv-info-soft: #e1eaff;
-  --color-rv-info-ink: #1a4dd9;
+  --color-rv-warning: #f0bc55;
+  --color-rv-warning-soft: #3a3220;
+  --color-rv-info: #6fc4d8;
+  --color-rv-info-soft: #183440;
+  --color-rv-info-ink: #6fc4d8;
   /* travel category */
-  --color-rv-travel: #5c5470;
-  --color-rv-travel-ink: #4a4459;
+  --color-rv-travel: #a79ec8;
+  --color-rv-travel-ink: #a79ec8;
+  --color-rv-travel-soft: #2b2839;
 
   /* radius */
   --radius-rv-sm: 4px;
@@ -57,9 +62,10 @@
   --radius-rv-card: 10px;
   --radius-rv-pill: 9999px;
 
-  /* shadow */
-  --shadow-rv-sm: 0 1px 2px rgba(11, 27, 43, 0.04);
-  --shadow-rv-md: 0 1px 3px rgba(11, 27, 43, 0.06), 0 1px 2px -1px rgba(11, 27, 43, 0.04);
-  --shadow-rv-lg: 0 4px 6px -1px rgba(11, 27, 43, 0.06), 0 2px 4px -2px rgba(11, 27, 43, 0.04);
-  --shadow-rv-xl: 0 10px 15px -3px rgba(11, 27, 43, 0.08), 0 4px 6px -4px rgba(11, 27, 43, 0.06);
+  /* shadow — pure black on the night canvas; the surface ladder carries most
+     of the elevation, these restore the hover lift. */
+  --shadow-rv-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow-rv-md: 0 1px 3px rgba(0, 0, 0, 0.36), 0 1px 2px -1px rgba(0, 0, 0, 0.28);
+  --shadow-rv-lg: 0 4px 10px -2px rgba(0, 0, 0, 0.44), 0 2px 4px -2px rgba(0, 0, 0, 0.36);
+  --shadow-rv-xl: 0 12px 28px -6px rgba(0, 0, 0, 0.55), 0 4px 10px -4px rgba(0, 0, 0, 0.44);
 }

@@ -145,11 +145,11 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
         {/* Masthead */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
           <div className="min-w-0">
-            <div className="mb-2.5 flex items-center gap-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-green-cta">
+            <div className="mb-2.5 flex items-center gap-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
               <Compass className="size-3.5" />
               <span>RV Trip Hub · Trip Planner</span>
             </div>
-            <h1 className="m-0 mb-2.5 text-[44px] font-extrabold leading-none tracking-[-0.02em] text-rv-navy">
+            <h1 className="m-0 mb-2.5 text-[44px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
               {trip.title}
             </h1>
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[15px] text-rv-ink-muted">
@@ -190,7 +190,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
             <CostSwitch checked={costTracking} onChange={changeCostTracking} />
             <button
               type="button"
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-green-cta px-4 py-[9px] text-[14px] font-semibold text-rv-surface"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-ember px-4 py-[9px] text-[14px] font-semibold text-rv-navy"
             >
               <Plus className="size-4" />
               Add stop
@@ -327,7 +327,7 @@ function ToggleTab({
       type="button"
       onClick={onClick}
       className={`inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border-none px-[15px] py-[7px] text-[13px] font-semibold ${
-        active ? "bg-rv-navy text-rv-surface" : "bg-transparent text-rv-ink-muted"
+        active ? "bg-rv-navy text-rv-ink" : "bg-transparent text-rv-ink-muted"
       }`}
     >
       {children}

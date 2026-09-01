@@ -83,13 +83,13 @@ export function StopDetailSheet({
         className="flex h-full w-[min(500px,100%)] flex-col overflow-y-auto bg-rv-surface-alt shadow-rv-xl"
       >
         {/* Sticky header */}
-        <div className="sticky top-0 z-[1] bg-rv-navy px-6 py-5 text-rv-surface">
+        <div className="sticky top-0 z-[1] bg-rv-navy px-6 py-5 text-rv-ink">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-rv-green-on-dark">
                 {legName}
               </div>
-              <h2 className="m-0 text-[28px] font-extrabold tracking-[-0.02em] text-rv-surface">
+              <h2 className="m-0 text-[28px] font-extrabold tracking-[-0.02em] text-rv-ink">
                 {stop.place.name}
               </h2>
             </div>
@@ -97,14 +97,14 @@ export function StopDetailSheet({
               type="button"
               onClick={onClose}
               aria-label="Close"
-              className="inline-flex size-[34px] flex-none cursor-pointer items-center justify-center rounded-rv-pill border-none text-rv-surface"
+              className="inline-flex size-[34px] flex-none cursor-pointer items-center justify-center rounded-rv-pill border-none text-rv-ink"
               style={{ background: "color-mix(in srgb, white 14%, transparent)" }}
             >
               <X className="size-[18px]" />
             </button>
           </div>
           <div className="mt-3.5 flex flex-wrap items-center gap-3.5">
-            <span className="inline-flex items-center gap-1.5 font-mono text-[13px] text-rv-navy-soft">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[13px] text-rv-ink-muted">
               <CalendarDays className="size-4" />
               {dates}
             </span>
@@ -127,11 +127,11 @@ export function StopDetailSheet({
           {/* Reservations */}
           <div>
             <div className="mb-3 flex items-center justify-between gap-2.5">
-              <h3 className="m-0 text-[17px] font-bold text-rv-navy">Reservations</h3>
+              <h3 className="m-0 text-[17px] font-bold text-rv-ink">Reservations</h3>
               <button
                 type="button"
                 onClick={onToggleAdd}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-3 py-1.5 text-[13px] font-semibold text-rv-green-cta"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-3 py-1.5 text-[13px] font-semibold text-rv-green"
               >
                 <Plus className="size-3.5" />
                 Add
@@ -180,7 +180,7 @@ export function StopDetailSheet({
                 <button
                   type="button"
                   onClick={onSubmitAdd}
-                  className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-green-cta px-4 py-2 text-[13px] font-semibold text-rv-surface"
+                  className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-ember px-4 py-2 text-[13px] font-semibold text-rv-navy"
                 >
                   <Check className="size-4" />
                   Save reservation
@@ -205,7 +205,7 @@ export function StopDetailSheet({
           {/* Ideas */}
           {stop.ideas.length > 0 && (
             <div>
-              <h3 className="m-0 mb-3 text-[17px] font-bold text-rv-navy">Ideas</h3>
+              <h3 className="m-0 mb-3 text-[17px] font-bold text-rv-ink">Ideas</h3>
               <div className="flex flex-col gap-2">
                 {stop.ideas.map((it) => (
                   <IdeaCard
@@ -226,7 +226,7 @@ export function StopDetailSheet({
 
           {/* Our take — the memory */}
           <div>
-            <h3 className="m-0 mb-1 text-[17px] font-bold text-rv-navy">Our take</h3>
+            <h3 className="m-0 mb-1 text-[17px] font-bold text-rv-ink">Our take</h3>
             <p className="m-0 mb-3 text-[13px] text-rv-ink-faded">
               What we loved — the memory that seeds the next trip.
             </p>

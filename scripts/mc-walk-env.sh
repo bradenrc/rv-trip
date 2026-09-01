@@ -23,6 +23,17 @@ die() {
   exit 1
 }
 
+dotenv_db_url() { # echo DATABASE_URL out of a dotenv file (last wins, quotes stripped)
+  local line val
+  [ -f "$1" ] || return 1
+  line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?DATABASE_URL=' "$1" | tail -1)" || return 1
+  val="${line#*=}"
+  val="${val%\"}" val="${val#\"}"
+  val="${val%\'}" val="${val#\'}"
+  [ -n "$val" ] || return 1
+  printf '%s\n' "$val"
+}
+
 free_port() { # first free port from 3200
   local p=3200
   while lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; do p=$((p + 1)); done
@@ -52,10 +63,26 @@ standup)
   else
     git -C "$wt" checkout "$branch"
   fi
-  # Untracked env files don't follow a worktree — copy the root ones next dev reads.
+  # Untracked env files don't follow a worktree — copy the root ones over. Note
+  # `next dev` runs with cwd apps/web and loads .env from THERE, not from the repo
+  # root the README's `cp .env.example .env` writes, so seed both places.
   for f in .env .env.local; do
     [ -f "$ROOT/$f" ] && cp "$ROOT/$f" "$wt/$f"
+    [ -f "$ROOT/apps/web/$f" ] && cp "$ROOT/apps/web/$f" "$wt/apps/web/$f"
   done
+  # …and belt-and-braces: hand `next dev` a DATABASE_URL through the environment,
+  # so a walk can never boot into packages/db's "DATABASE_URL is not set" throw.
+  # Order: the caller's env, apps/web's env files, the repo-root ones, .env.example
+  # (whose value is the docker-compose Postgres this script starts below anyway).
+  db_url="${DATABASE_URL:-}"
+  if [ -z "$db_url" ]; then
+    for f in "$wt/apps/web/.env.local" "$wt/apps/web/.env" "$wt/.env.local" "$wt/.env" "$ROOT/.env.example"; do
+      db_url="$(dotenv_db_url "$f")" || db_url=""
+      [ -n "$db_url" ] && break
+    done
+  fi
+  [ -n "$db_url" ] || die "standup $issue: no DATABASE_URL — set one in .env or apps/web/.env.local"
+  export DATABASE_URL="$db_url"
   (cd "$wt" && pnpm install --frozen-lockfile >"$WALK_DIR/$issue-install.log" 2>&1) ||
     die "standup $issue: pnpm install failed — see .mc/walk/$issue-install.log"
   (cd "$ROOT" && docker compose up -d >>"$WALK_DIR/$issue-standup.log" 2>&1) || true
