@@ -63,12 +63,16 @@ standup)
   else
     git -C "$wt" checkout "$branch"
   fi
-  # Untracked env files don't follow a worktree — copy the root ones over. Note
-  # `next dev` runs with cwd apps/web and loads .env from THERE, not from the repo
-  # root the README's `cp .env.example .env` writes, so seed both places.
+  # Untracked env files don't follow a worktree — and Next loads env from the APP
+  # directory (apps/web/, its cwd), NOT the monorepo root the README's
+  # `cp .env.example .env` writes. Copy both levels: root .env feeds the drizzle/db
+  # CLIs; apps/web/.env.local is what `next dev` actually reads (issue-3 walk
+  # postmortem: only the root copy shipped, DATABASE_URL was unset, every page 500'd).
+  # `if` guards, not `[ -f ] && cp`: under set -e a false test as the loop body's
+  # last statement kills the whole standup on a machine missing one optional file.
   for f in .env .env.local; do
-    [ -f "$ROOT/$f" ] && cp "$ROOT/$f" "$wt/$f"
-    [ -f "$ROOT/apps/web/$f" ] && cp "$ROOT/apps/web/$f" "$wt/apps/web/$f"
+    if [ -f "$ROOT/$f" ]; then cp "$ROOT/$f" "$wt/$f"; fi
+    if [ -f "$ROOT/apps/web/$f" ]; then cp "$ROOT/apps/web/$f" "$wt/apps/web/$f"; fi
   done
   # …and belt-and-braces: hand `next dev` a DATABASE_URL through the environment,
   # so a walk can never boot into packages/db's "DATABASE_URL is not set" throw.
@@ -91,6 +95,21 @@ standup)
   (cd "$wt/apps/web" && PORT="$port" nohup pnpm dev >"$WALK_DIR/$issue-web.log" 2>&1 &
     echo $! >"$WALK_DIR/$issue-web.pid")
   pid="$(cat "$WALK_DIR/$issue-web.pid")"
+
+  # Health gate: a walk.json for a stack that boots but 500s is worse than a loud
+  # failure (the operator clicks a dead link). curl -f rejects 5xx, so an env-broken
+  # boot fails here with the log pointer instead of registering as walkable.
+  healthy=0
+  for _ in $(seq 1 30); do
+    if curl -fsS -o /dev/null -m 3 "http://localhost:$port/"; then
+      healthy=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$healthy" != "1" ]; then
+    die "standup $issue: web on :$port not serving 200 after ~60s — see .mc/walk/$issue-web.log"
+  fi
 
   cat >"$WALK_DIR/$issue.json" <<EOF
 {
