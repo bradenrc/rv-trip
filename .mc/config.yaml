@@ -1,0 +1,144 @@
+version: 1
+name: rv-trip
+repo: rv-trip
+path: .
+board: 'bradenrc/projects/6' # user project — Status field: Todo / Ready to Dev / In Dev / Done
+# The board's BUILT-IN Status field (btrip uses a custom "Pipeline"). The engine's flips write
+# "In Dev" + "Done" (mc-dev#81 tracks making these configurable), so the board's "In Progress"
+# option was renamed "In Dev" at adoption. "Todo" is never written — safe as-is.
+board_field: Status
+platforms: [web]
+# AUTH NOTE: this daemon must run with the bradenrc identity (keyring), NOT GH_TOKEN=btrip-bot —
+# the bot can't see user project 6. run_gh's keyring fallback (mc-dev, btrip#1953) covers it as
+# long as GH_TOKEN is absent from the daemon's env at `mc up`.
+setup_cmd: 'pnpm install --frozen-lockfile' # ship worktree prep before the merged-tree test run
+test_cmd: 'pnpm turbo run lint typecheck test' # turbo-cached; mirrors what CI would run
+auto_merge: true # walked + trusted before ship → auto-merge when checks pass (btrip recipe)
+# Operator-manual board pickup (mc-dev #38): glass Run/Triage buttons are the pickup;
+# a bare `mc up` would otherwise poll + auto-fire mock on every Ready-to-Dev card.
+poll: false
+# Two projects, one machine: btrip holds channel 8789 + glass 8730. rv-trip claims 8790 + 8731.
+# channel_port must match MC_CHANNEL_PORT in .mcp.json's `mc` server entry; the glass port is
+# given on the CLI (`mc up . --port 8731 --no-poll`).
+channel_port: 8790
+dispatch: orchestrator # worker gates interrupt at dispatch; the runner session resolves them
+
+# Walk gate env — lean v1 (scripts/mc-walk-env.sh): worktree from {branch}, pnpm install,
+# `next dev` on an allocated port against the shared docker Postgres, walk.json for the glass.
+walk:
+  gate: walk
+  web:
+    up: 'bash scripts/mc-walk-env.sh standup {issue} --branch {branch}'
+    url: 'http://localhost:{port}/' # informational — the live URL comes from .mc/walk/{issue}.json
+    down: 'bash scripts/mc-walk-env.sh down --slug {issue}'
+
+# --- Stage agents (engine-native .md briefs, dispatched as mc-dev workers) ---
+# Same seven-agent shape as btrip. Design authority here is ds-bundle/ (tokens + guidelines +
+# components, design-sync-managed) — briefs point at it, never invent outside it.
+agents:
+  mock:
+    md: .mc/agents/mock.md
+    tools: [Read, Write, Edit, Bash, Glob, Grep]
+    model: claude-opus-5
+    native: true
+  wireframe:
+    md: .mc/agents/wireframe.md
+    tools: [Read, Write, Edit, Bash, Glob, Grep]
+    model: claude-opus-5
+    native: true
+    prior_artifact: true
+  vet:
+    md: .mc/agents/vet.md
+    tools: [Read, Bash, Grep, Glob, Write]
+    model: claude-opus-5
+    native: true
+    reviewer: true
+    prior_artifact: true
+  qa:
+    md: .mc/agents/qa.md
+    tools: [Read, Bash, Grep, Glob, Write]
+    model: claude-opus-5
+    native: true
+    reviewer: true
+    prior_artifact: true
+    require_paths: # QA runs only when the dev diff touches a walk-blind surface; tune freely.
+      - 'packages/core/**' # domain logic — no pixels to walk
+      - 'packages/db/**' # schema + queries + migrations
+  dev:
+    md: .mc/agents/dev.md
+    tools: [Read, Write, Edit, Bash, Glob, Grep]
+    model: claude-opus-5
+    native: true
+    code: true
+    prior_artifact: true
+  triage:
+    md: .mc/agents/triage.md # glass multi-select → partition proposal; read-only meta-op
+    tools: [Read, Grep, Glob, Bash]
+    model: claude-opus-5
+  fixup:
+    md: .mc/agents/fixup.md # ship-failure triage: re-land a walked branch on moved main
+    tools: [Read, Write, Edit, Bash, Glob, Grep]
+    model: claude-opus-5
+    native: true
+    code: true
+
+pipeline:
+  entry: mock
+  # CI concurrency cap (mc-dev #36): bound overlapping full-suite runs. rv-trip's suite is
+  # light today; revisit alongside CI_JOBS if suites grow heavy like btrip's.
+  ci_gates: [dev, qa, fixup]
+  max_ci_dispatches: 2
+  gates:
+    - id: mock
+      kind: worker
+      agent: mock
+      on_pass: survey
+      on_fail: mock
+    - id: survey
+      kind: human
+      on_pass: wireframe
+      on_fail: mock
+    - id: wireframe
+      kind: worker
+      agent: wireframe
+      on_pass: signoff
+      on_fail: mock
+    - id: signoff
+      kind: human
+      on_pass: vet
+      on_fail: wireframe
+    - id: vet
+      kind: worker
+      agent: vet
+      on_pass: dev
+      on_fail: dev # findings ride to dev; vet sets route:mock only for a real design decision
+    - id: dev
+      kind: worker
+      agent: dev
+      iterable: true # epics walk plan.json items here — inert for non-epic issues
+      on_pass: qa
+      on_fail: dev
+    - id: qa
+      kind: worker
+      agent: qa
+      on_pass: walk
+      on_fail: dev
+    - id: walk
+      kind: human
+      on_pass: ship
+      on_fail: dev
+    - id: fixup
+      kind: worker
+      agent: fixup
+      on_pass: ship # the walk approved the FEATURE; fixup only reconciles it with moved main
+      on_fail: dev
+    - id: ship
+      kind: worker
+      agent: ship
+      on_pass: null
+      on_fail: fixup # classified ship blocker → the triage ladder, not straight to dev
+
+# Fleet-report era markers (mc-dev #65) — append-only; new optimization → new entry.
+eras:
+  - date: '2026-08-31'
+    label: 'Pipeline adoption' # rv-trip onboards the full mc-dev recipe (this commit)
