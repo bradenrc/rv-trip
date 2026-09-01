@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Issue #3 · Nightfall &amp; Ember — wireframe</title>
+<style>
+  * { box-sizing:border-box; margin:0; }
+  :root {
+    /* Nightfall & Ember — the locked palette (approved palette pass 2) */
+    --night-deep:#0a1520; --night:#101f2d; --raised:#182b3d; --high:#21374d;
+    --line:#2e4459; --line-hi:#3d566c;
+    --ink0:#eef5fa; --ink1:#b8cbda; --ink2:#8fa8bd; --ink3:#5f7690;
+    --ember:#f28c5e; --ember-bright:#ffa477; --ember-deep:#c14d20; --ember-tint:#3a2b22;
+    --stay:#7cd897; --stay-ink:#a9e8bc; --stay-tint:#16382e; --stay-line:#3f7457;
+    --eat:#f0bc55; --eat-tint:#3b2f1d;
+    --do:#6fc4d8; --do-tint:#1c3844;
+    --travel:#a79ec8; --travel-tint:#2e3348;
+    --other:#93a7b8;
+    --r-sm:4px; --r-md:6px; --r-card:10px; --r-pill:9999px;
+    font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  }
+  .mono { font-family:"Geist Mono",ui-monospace,"SF Mono",monospace; }
+  body { background:var(--night); color:var(--ink0); line-height:1.5; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 28px 72px; }
+  section { margin-top:44px; }
+  .kicker { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.11em; color:var(--ember); margin-bottom:6px; }
+  h2 { font-size:19px; letter-spacing:-0.01em; margin-bottom:4px; }
+  .lede { color:var(--ink1); font-size:13.5px; max-width:80ch; }
+
+  .hero { background:var(--night-deep); border-bottom:1px solid var(--line); padding:36px 28px 30px; }
+  .hero-in { max-width:1120px; margin:0 auto; }
+  .hero h1 { font-size:25px; letter-spacing:-0.015em; margin:2px 0 8px; }
+  .hero p { color:var(--ink1); font-size:14px; max-width:86ch; }
+  .chips-strip { display:flex; gap:6px; margin-top:14px; flex-wrap:wrap; }
+  .chips-strip i { width:30px; height:18px; border-radius:4px; border:1px solid rgba(255,255,255,.08); }
+
+  /* ── the rendered app ─────────────────────────────── */
+  .app { border:1px solid var(--line); border-radius:var(--r-card); overflow:hidden; margin-top:16px; }
+  .mast { display:flex; align-items:center; gap:18px; background:var(--night-deep);
+          padding:12px 20px; border-bottom:1px solid var(--line); }
+  .mast .brand { font-weight:800; font-size:14.5px; letter-spacing:-0.01em; }
+  .mast nav { display:flex; gap:4px; margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace;
+              font-size:11px; letter-spacing:.05em; }
+  .mast nav span { padding:4px 12px; border-radius:var(--r-pill); color:var(--ink2); }
+  .mast nav .on { color:var(--ember); box-shadow:inset 0 -2px 0 var(--ember); }
+  .appbody { padding:20px 22px 22px; background:var(--night); }
+
+  .triphead { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:18px; }
+  .triphead h3 { font-size:20px; letter-spacing:-0.01em; }
+  .triphead .meta { font-family:"Geist Mono",ui-monospace,monospace; font-size:11.5px; color:var(--ink2); }
+  .seg { display:flex; margin-left:auto; border:1px solid var(--line-hi); border-radius:var(--r-pill);
+         overflow:hidden; font-family:"Geist Mono",ui-monospace,monospace; font-size:10.5px; }
+  .seg span { padding:5px 14px; color:var(--ink2); }
+  .seg .on { background:var(--high); color:var(--ember); font-weight:700; }
+
+  .lane { display:flex; align-items:center; gap:16px; margin-bottom:10px; }
+  .gut { width:118px; flex:none; }
+  .gut .k { font-family:"Geist Mono",ui-monospace,monospace; font-size:9px; letter-spacing:.1em;
+            text-transform:uppercase; color:var(--ink3); margin-bottom:2px; }
+  .gut .n { font-size:12.5px; font-weight:700; }
+  .gut .n.dim { color:var(--ink2); }
+  .grid28 { flex:1; display:grid; grid-template-columns:repeat(28,1fr); }
+  .rhythm { height:24px; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--line); }
+  .rhythm div { height:100%; }
+  .cD { background:var(--night-deep); box-shadow:inset -1px 0 0 var(--line); }
+  .cS { background:var(--stay); box-shadow:inset -1px 0 0 rgba(10,21,32,.25); }
+  .cO { background:transparent; box-shadow:inset 0 0 0 1px var(--line); }
+  .ruler { align-items:flex-end; margin-bottom:12px; }
+  .ruler .grid28 div { font-family:"Geist Mono",ui-monospace,monospace; font-size:9px;
+                       color:var(--ink3); padding:2px 0 0 3px; }
+  .ruler .grid28 .wk { font-size:11px; font-weight:700; color:var(--ink1); border-left:1px solid var(--line); }
+  .lanegrid { grid-auto-rows:88px; border-radius:var(--r-sm);
+              background-image:linear-gradient(90deg, var(--line) 1px, transparent 1px);
+              background-size:calc(100% / 4) 100%; }
+  .stopbar { position:relative; margin:4px 3px; display:flex; flex-direction:column; gap:3px;
+             overflow:hidden; border-radius:var(--r-md); border:1px solid var(--stay-line);
+             background:var(--stay-tint); text-align:left; padding:8px 9px 8px 13px; grid-row:1; }
+  .stopbar .edge { position:absolute; inset:0 auto 0 0; width:4px; background:var(--night-deep);
+                   border-right:1px solid var(--line-hi); }
+  .stopbar .nm { font-size:13px; font-weight:700; line-height:1.25; color:var(--stay-ink); }
+  .stopbar .rg { font-family:"Geist Mono",ui-monospace,monospace; font-size:9px; color:var(--stay); }
+  .stopbar .meta { margin-top:auto; display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+  .mstar { font-family:"Geist Mono",ui-monospace,monospace; font-size:9px; color:var(--ember); }
+  .mpill { display:inline-flex; align-items:center; gap:4px; font-family:"Geist Mono",ui-monospace,monospace;
+           font-size:9px; border-radius:var(--r-pill); padding:1px 7px; border:1px solid var(--stay-line);
+           background:var(--night); color:var(--stay-ink); }
+  .mpill.idea { border-color:var(--line-hi); color:var(--ink1); }
+  .openspan { margin:4px 3px; display:flex; flex-direction:column; justify-content:center;
+              border-radius:var(--r-md); padding:0 10px; background:var(--high);
+              border:1px dashed var(--line-hi); grid-row:1; }
+  .openspan span { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600; color:var(--ink2); }
+  .openlane .grid28 { grid-auto-rows:44px; }
+  .legend { display:flex; flex-wrap:wrap; gap:18px; border-top:1px solid var(--line);
+            margin-top:16px; padding-top:13px; font-size:11.5px; color:var(--ink2); }
+  .legend i { display:inline-block; width:14px; height:10px; border-radius:2px; margin-right:6px; }
+
+  /* floating rail + stop card */
+  .row2 { display:grid; grid-template-columns:1fr 1.4fr; gap:18px; margin-top:18px; }
+  @media (max-width:860px){ .row2 { grid-template-columns:1fr; } }
+  .float-card { border:1.5px dashed var(--line-hi); border-radius:var(--r-card); padding:16px 18px;
+                background:var(--raised); }
+  .ftag { display:inline-block; font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px;
+          font-weight:700; letter-spacing:.05em; border-radius:var(--r-pill); padding:3px 9px;
+          background:var(--eat-tint); color:var(--eat); }
+  .float-card h4 { font-size:15px; margin:8px 0 3px; }
+  .float-card p { font-size:12.5px; color:var(--ink1); }
+  .ghost { display:inline-block; margin-top:12px; background:transparent; border:1px solid var(--line-hi);
+           color:var(--ink1); font:inherit; font-size:12.5px; font-weight:600;
+           border-radius:var(--r-md); padding:6px 14px; }
+  .defaulted { margin-top:12px; font-size:11.5px; color:var(--eat);
+               font-family:"Geist Mono",ui-monospace,monospace; }
+
+  .stopcard { background:var(--raised); border:1px solid var(--line); border-radius:var(--r-card);
+              padding:17px 19px; }
+  .sc-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .sc-head h4 { font-size:16.5px; letter-spacing:-0.01em; }
+  .sc-date { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--ink2); }
+  .stars { color:var(--ember); letter-spacing:1px; font-size:13px; }
+  .sc-note { font-size:12.5px; color:var(--ink1); font-style:italic; margin:8px 0 12px; }
+  .sc-sect { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; letter-spacing:.09em;
+             text-transform:uppercase; color:var(--ink3); margin:12px 0 4px; }
+  .li { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; }
+  .tile { width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center;
+          justify-content:center; font-size:12px; flex:none; }
+  .li .n { font-weight:600; flex:1; min-width:0; }
+  .li .cost { font-family:"Geist Mono",ui-monospace,monospace; font-size:12px; font-weight:700; color:var(--ember); }
+  .li.idea .n { font-weight:400; color:var(--ink1); font-size:12.5px; }
+  .li .st { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; color:var(--ink2);
+            border:1px solid var(--line-hi); border-radius:var(--r-pill); padding:1px 8px; }
+  .sc-total { display:flex; justify-content:space-between; border-top:1px solid var(--line);
+              margin-top:10px; padding-top:10px; font-size:12.5px; color:var(--ink1); }
+  .sc-total b { font-family:"Geist Mono",ui-monospace,monospace; color:var(--ember); }
+
+  /* token contract */
+  table.tk { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:14px;
+             background:var(--raised); border:1px solid var(--line); border-radius:var(--r-card); overflow:hidden; }
+  .tk th { text-align:left; font-family:"Geist Mono",ui-monospace,monospace; font-size:10px;
+           text-transform:uppercase; letter-spacing:.08em; color:var(--ink2);
+           padding:9px 13px; border-bottom:1px solid var(--line); background:var(--night-deep); }
+  .tk td { padding:7px 13px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  .tk tr:last-child td { border-bottom:none; }
+  .tk code { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--ink0); }
+  .tk .v { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--ink1); white-space:nowrap; }
+  .tk .v i { display:inline-block; width:13px; height:13px; border-radius:3px; vertical-align:-2px;
+             margin-right:6px; border:1px solid rgba(255,255,255,.1); }
+  .tk .new { color:var(--stay); font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700; }
+  .tk td.nt { color:var(--ink2); font-size:11.5px; }
+
+  .devnotes { margin-top:44px; border:1px dashed var(--line-hi); border-radius:var(--r-card); padding:18px 22px; }
+  .devnotes h3 { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; letter-spacing:.09em;
+                 text-transform:uppercase; color:var(--ink2); margin-bottom:8px; }
+  .devnotes ul { padding-left:18px; display:grid; gap:6px; font-size:12.5px; color:var(--ink1); }
+  .devnotes code { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--ink0);
+                   background:var(--high); border-radius:4px; padding:1px 5px; }
+
+  /* sign-off */
+  .signoff { margin-top:30px; }
+  .signoff textarea { width:100%; min-height:88px; background:var(--raised); color:var(--ink0);
+                      border:1px solid var(--line-hi); border-radius:var(--r-card);
+                      padding:12px 14px; font:inherit; font-size:13.5px; resize:vertical; }
+  .signoff textarea::placeholder { color:var(--ink3); }
+  .actions { display:flex; gap:12px; align-items:center; margin-top:16px; flex-wrap:wrap; }
+  .btn { font:inherit; font-weight:700; font-size:14px; border-radius:var(--r-md);
+         padding:11px 20px; cursor:pointer; }
+  .btn.ok { background:var(--ember); color:var(--night-deep); border:none; }
+  .btn.rw { background:transparent; color:var(--ink1); border:1.5px solid var(--line-hi); }
+  .btn:disabled { opacity:.55; cursor:not-allowed; }
+  #status { font-size:13px; font-weight:600; color:var(--stay); }
+</style>
+</head>
+<body>
+
+<div class="hero"><div class="hero-in">
+  <div class="kicker">Issue #3 · Change Colors · wireframe — resolved</div>
+  <h1>Nightfall &amp; Ember, applied</h1>
+  <p>The approved palette rendered onto the shipped screens — month-at-a-glance, the floating rail, and the
+     stop card — with real Pacific NW Loop data. One design, no alternatives. The token contract below is
+     the exact dev change; components stay untouched except two mechanical sweeps.</p>
+  <div class="chips-strip">
+    <i style="background:#0a1520"></i><i style="background:#101f2d"></i><i style="background:#182b3d"></i>
+    <i style="background:#21374d"></i><i style="background:#2e4459"></i><i style="background:#f28c5e"></i>
+    <i style="background:#7cd897"></i><i style="background:#f0bc55"></i><i style="background:#6fc4d8"></i>
+    <i style="background:#a79ec8"></i>
+  </div>
+</div></div>
+
+<div class="wrap">
+
+<section>
+  <div class="kicker">Month-at-a-glance · the signature view</div>
+  <h2>Pacific Northwest Loop on the night canvas</h2>
+  <p class="lede">Composed exactly as <span class="mono">Gantt.tsx</span> ships it: rhythm strip, ruler,
+     swim lanes with arrival edges, open lane, legend. Drive stays the deepest value, stay stays green
+     (lifted), open recedes into the canvas.</p>
+
+  <div class="app">
+    <div class="mast"><span class="brand">RV Trip Hub</span>
+      <nav><span>DASHBOARD</span><span class="on">TRIPS</span><span>PLACES</span></nav></div>
+    <div class="appbody">
+      <div class="triphead">
+        <h3>Pacific Northwest Loop</h3>
+        <span class="meta">BOISE, ID · AUG 1–28 · 28 DAYS</span>
+        <div class="seg"><span>ROUTE</span><span class="on">CALENDAR</span></div>
+      </div>
+
+      <div class="lane">
+        <div class="gut"><div class="k">Rhythm</div></div>
+        <div class="grid28 rhythm">
+          <div class="cO" title="Aug 1 · open"></div><div class="cD" title="Aug 2 · drive → Astoria"></div>
+          <div class="cS"></div><div class="cS"></div>
+          <div class="cD" title="Aug 5 · drive → Newport"></div>
+          <div class="cS"></div><div class="cS"></div><div class="cS"></div><div class="cS"></div>
+          <div class="cO"></div><div class="cO"></div>
+          <div class="cD" title="Aug 12 · drive → Bend"></div>
+          <div class="cS"></div><div class="cS"></div><div class="cS"></div><div class="cS"></div>
+          <div class="cO"></div><div class="cO"></div><div class="cO"></div><div class="cO"></div>
+          <div class="cO"></div><div class="cO"></div><div class="cO"></div><div class="cO"></div>
+          <div class="cO"></div><div class="cO"></div><div class="cO"></div><div class="cO"></div>
+        </div>
+      </div>
+
+      <div class="lane ruler">
+        <div class="gut"></div>
+        <div class="grid28">
+          <div class="wk">AUG 1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div>
+          <div class="wk">8</div><div>9</div><div>10</div><div>11</div><div>12</div><div>13</div><div>14</div>
+          <div class="wk">15</div><div>16</div><div>17</div><div>18</div><div>19</div><div>20</div><div>21</div>
+          <div class="wk">22</div><div>23</div><div>24</div><div>25</div><div>26</div><div>27</div><div>28</div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="gut"><div class="k">Leg 01</div><div class="n">Oregon Coast</div></div>
+        <div class="grid28 lanegrid">
+          <div class="stopbar" style="grid-column:2 / span 3"><span class="edge"></span>
+            <span class="nm">Astoria, OR</span><span class="rg">AUG 2–5</span>
+            <span class="meta"><span class="mstar">★ 5.0</span><span class="mpill">⛺ 2</span></span></div>
+          <div class="stopbar" style="grid-column:5 / span 4"><span class="edge"></span>
+            <span class="nm">Newport, OR</span><span class="rg">AUG 5–9</span>
+            <span class="meta"><span class="mstar">★ 4.0</span><span class="mpill">⛺ 1</span><span class="mpill idea">💡 2</span></span></div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="gut"><div class="k">Leg 02</div><div class="n">Cascades &amp; Home</div></div>
+        <div class="grid28 lanegrid">
+          <div class="stopbar" style="grid-column:12 / span 4"><span class="edge"></span>
+            <span class="nm">Bend, OR</span><span class="rg">AUG 12–16</span>
+            <span class="meta"><span class="mpill idea">💡 1</span></span></div>
+        </div>
+      </div>
+
+      <div class="lane openlane">
+        <div class="gut"><div class="k">Unplanned</div><div class="n dim">Open days</div></div>
+        <div class="grid28">
+          <div class="openspan" style="grid-column:1 / span 1"><span>1</span></div>
+          <div class="openspan" style="grid-column:10 / span 2"><span>2 open</span></div>
+          <div class="openspan" style="grid-column:17 / span 12"><span>12 open</span></div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><i style="background:var(--night-deep);border:1px solid var(--line-hi)"></i>Drive day</span>
+        <span><i style="background:var(--stay)"></i>Stay day</span>
+        <span><i style="background:var(--high);border:1px dashed var(--line-hi)"></i>Open day</span>
+        <span><i style="background:var(--night-deep);border-left:3px solid var(--night-deep);outline:1px solid var(--line-hi)"></i>Arrival edge</span>
+      </div>
+
+      <div class="row2">
+        <div class="float-card">
+          <span class="ftag">◌ FLOATING</span>
+          <h4>Crater Lake NP</h4>
+          <p>“Maybe on the way home if we have time.” · 💡 Rim Drive scenic loop</p>
+          <span class="ghost">Schedule dates</span>
+          <div class="defaulted">⚠ defaulted — floating/attention stays amber (recommended);
+            the ember-tint alternative got no verdict. Confirm at sign-off.</div>
+        </div>
+
+        <div class="stopcard">
+          <div class="sc-head"><h4>Astoria, OR</h4><span class="sc-date">AUG 2–5</span>
+            <span class="stars">★★★★★</span></div>
+          <div class="sc-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+          <div class="sc-sect">Reservations</div>
+          <div class="li"><span class="tile" style="background:var(--stay-tint);color:var(--stay)">⛺</span>
+            <span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+          <div class="li"><span class="tile" style="background:var(--do-tint);color:var(--do)">🔭</span>
+            <span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+          <div class="sc-sect">Ideas</div>
+          <div class="li idea"><span class="tile" style="background:var(--eat-tint);color:var(--eat)">🍴</span>
+            <span class="n">Bowpicker fish &amp; chips</span><span class="st">IDEA</span></div>
+          <div class="sc-total"><span>Stop total</span><b>$242</b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">The token contract</div>
+  <h2>Exactly what changes in <span class="mono" style="font-size:15px">@theme</span></h2>
+  <p class="lede">Strategy: <b style="color:var(--ink0)">revalue the existing semantic tokens onto the night
+     ladder</b> — components keep their class names. Four ember tokens are added; nothing else is new.
+     Both files move in step: <span class="mono">packages/ui/styles/entry.css:17</span> and
+     <span class="mono">apps/web/src/app/globals.css:129</span>.</p>
+  <table class="tk">
+    <tr><th>Token</th><th>Today</th><th>Resolved</th><th>Role on the ladder</th></tr>
+    <tr><td><code>rv-navy</code></td><td class="v"><i style="background:#0e2a47"></i>#0e2a47</td>
+        <td class="v"><i style="background:#0a1520"></i>#0a1520</td><td class="nt">shell chrome + drive-day + arrival edge (heading usages sweep to <code>rv-ink</code>)</td></tr>
+    <tr><td><code>rv-navy-deep</code></td><td class="v"><i style="background:#08182b"></i>#08182b</td>
+        <td class="v"><i style="background:#060d14"></i>#060d14</td><td class="nt">below-shell (gradients)</td></tr>
+    <tr><td><code>rv-navy-soft</code></td><td class="v"><i style="background:#e8eef5"></i>#e8eef5</td>
+        <td class="v"><i style="background:#21374d"></i>#21374d</td><td class="nt">quiet fill / open spans / popover-high</td></tr>
+    <tr><td><code>rv-surface-alt</code></td><td class="v"><i style="background:#f4f7fa"></i>#f4f7fa</td>
+        <td class="v"><i style="background:#101f2d"></i>#101f2d</td><td class="nt"><b style="color:var(--ink0)">the canvas — the anchor</b></td></tr>
+    <tr><td><code>rv-surface</code></td><td class="v"><i style="background:#ffffff"></i>#ffffff</td>
+        <td class="v"><i style="background:#182b3d"></i>#182b3d</td><td class="nt">raised cards / sheets</td></tr>
+    <tr><td><code>rv-border / -soft / -hi</code></td><td class="v">#dde4ec…</td>
+        <td class="v"><i style="background:#2e4459"></i>#2e4459 / #26394b / #3d566c</td><td class="nt">hairlines (handoff dusk recast)</td></tr>
+    <tr><td><code>rv-ink / -muted / -faded / -subtle</code></td><td class="v">#0b1b2b…</td>
+        <td class="v"><i style="background:#eef5fa"></i>#eef5fa / #b8cbda / #8fa8bd / #5f7690</td><td class="nt">15.3 / 10.0 / 6.8 / non-text</td></tr>
+    <tr><td><code>rv-ember</code> <span class="new">NEW</span></td><td class="v">—</td>
+        <td class="v"><i style="background:#f28c5e"></i>#f28c5e</td><td class="nt">CTA (night ink on ember) · links · stars · money · active — 6.9:1 on canvas</td></tr>
+    <tr><td><code>rv-ember-bright / -deep / -soft</code> <span class="new">NEW</span></td><td class="v">—</td>
+        <td class="v">#ffa477 / #c14d20 / #3a2b22</td><td class="nt">hover / pressed / selected tint</td></tr>
+    <tr><td><code>rv-green</code></td><td class="v"><i style="background:#2e8b4e"></i>#2e8b4e</td>
+        <td class="v"><i style="background:#7cd897"></i>#7cd897</td><td class="nt">Stay category (= <code>rv-green-on-dark</code>, now aliases)</td></tr>
+    <tr><td><code>rv-green-cta / -deep</code></td><td class="v">#277e47 / #1f6b3a</td>
+        <td class="v"><i style="background:#3f7457"></i>#3f7457 / #2c5540</td><td class="nt">stay-bar borders/structure — CTA duty moves to ember (sweep)</td></tr>
+    <tr><td><code>rv-green-soft / -ink</code></td><td class="v">#e4f2e9 / #0e3d1f</td>
+        <td class="v"><i style="background:#16382e"></i>#16382e / #a9e8bc</td><td class="nt">stay tint / text on stay tint</td></tr>
+    <tr><td><code>rv-warning / -soft</code></td><td class="v"><i style="background:#97601c"></i>#97601c / #fef3c7</td>
+        <td class="v"><i style="background:#f0bc55"></i>#f0bc55 / #3b2f1d</td><td class="nt">Eat + attention/floating — 9.6:1</td></tr>
+    <tr><td><code>rv-info / -ink / -soft</code></td><td class="v"><i style="background:#1e5bff"></i>#1e5bff / #1a4dd9 / #e1eaff</td>
+        <td class="v"><i style="background:#6fc4d8"></i>#6fc4d8 / #6fc4d8 / #1c3844</td><td class="nt">Do category, teal — info-ink converges with info on dark</td></tr>
+    <tr><td><code>rv-travel / -ink</code></td><td class="v"><i style="background:#5c5470"></i>#5c5470 / #4a4459</td>
+        <td class="v"><i style="background:#a79ec8"></i>#a79ec8 / #b9b0d6</td><td class="nt">Travel, lifted</td></tr>
+    <tr><td>shadcn <code>:root</code> scale</td><td class="v">neutral oklch light</td>
+        <td class="v">night ladder</td><td class="nt"><code>--background</code>#101f2d · <code>--card</code>#182b3d · <code>--popover</code>#21374d · <code>--border</code>#2e4459 · <code>--foreground</code>#eef5fa · <code>--muted-foreground</code>#8fa8bd · <code>--primary</code>#f28c5e / fg #0a1520</td></tr>
+  </table>
+</section>
+
+<div class="devnotes">
+  <h3>Dev notes — verification receipts (not user-facing)</h3>
+  <ul>
+    <li><b>Sweep 1 — headings:</b> 29 <code>text-rv-navy</code> sites read as heading ink and must become
+        <code>text-rv-ink</code> (navy revalues to shell-dark): <code>packages/ui/src</code> — Gantt.tsx:84,153 ·
+        Places.tsx:51,135,229 · FloatingStopCard.tsx:35,41 · DetailCards.tsx:13 · StatusPill.tsx:5;
+        <code>apps/web/src</code> — RouteView.tsx ×6 · StopDetailSheet.tsx ×5 · page.tsx ×3 · TripCard.tsx:106 ·
+        Nav.tsx:24,34 · StubPage.tsx:20 · places/page.tsx:18 · TripPlanner.tsx:152. Ruler week-start color at
+        <code>Gantt.tsx:53</code> and StatusPill "planned" at <code>category.ts:86</code> follow the same rule
+        (→ <code>rv-ink</code>).</li>
+    <li><b>Sweep 2 — accent ownership:</b> <code>rv-green-cta</code> call sites split by role:
+        CTA/money/toggles → <code>rv-ember</code> (Places.tsx:87 — button becomes ember bg + night-deep ink ·
+        RouteItems.tsx:20 · DetailCards.tsx:47,126,137 · FloatingStopCard.tsx:58); stay-internal text → stays
+        green family (Gantt.tsx:137 range → <code>text-rv-green</code>, Gantt.tsx:194 “drop here” →
+        <code>text-rv-green</code>). Stars: <code>Stars.tsx:28–29</code> fill <code>rv-warning</code> →
+        <code>rv-ember</code>; rating chip <code>Gantt.tsx:142</code> likewise.</li>
+    <li><b>Verified safe under revalue (no edit needed):</b> day-kind colors in
+        <code>apps/web/src/lib/trip-logic.ts:72–74</code> (drive=navy → shell-dark ✓, empty=navy-soft → high ✓);
+        sheet scrim <code>StopDetailSheet.tsx:79</code> (navy 42% over dark ✓); TRAVEL/OTHER
+        <code>color-mix</code> recipes in <code>category.ts:48–57</code> re-derive correctly from the new values.</li>
+    <li><b>Safelist:</b> grow <code>entry.css:12</code> with the ember names
+        (<code>{bg,text,border}-rv-ember{,-bright,-deep,-soft}</code>).</li>
+    <li><b>Shadows</b> (<code>--shadow-rv-*</code>) keep their values — depth now comes from the surface ladder;
+        shadows read as near-invisible on dark, which is intended.</li>
+    <li><b>Scope guards:</b> no light mode ships in this issue (dark is the primary theme — approved with the
+        palette); no danger/destructive token invented; <code>ds-bundle/</code> regenerates via design-sync —
+        never hand-edit. The shadcn <code>.dark</code> gray block at <code>globals.css:89</code> becomes dead
+        weight once <code>:root</code> is the night theme — remove it or leave it inert, dev's call.</li>
+    <li><b>Emoji glyphs in this artifact stand in for the Lucide icons</b> the components actually render
+        (Tent, Binoculars, Utensils, Star, Lightbulb) — icon set is unchanged by this issue.</li>
+  </ul>
+</div>
+
+<div class="signoff">
+  <div class="kicker">Sign-off</div>
+  <h2 style="font-size:17px">Ship it to dev, or send it back</h2>
+  <textarea id="rework-comment" placeholder="Comments — required if you Refine, welcome either way…"></textarea>
+  <div class="actions">
+    <button class="btn ok" id="btnSignoff" type="button">Sign off ✓</button>
+    <button class="btn rw" id="btnRwMock" type="button">Rework the direction</button>
+    <button class="btn rw" id="btnRwWire" type="button">Refine this wireframe</button>
+    <span id="status"></span>
+  </div>
+</div>
+
+</div>
+
+<script>
+  /* sign-off POSTs only — no content is script-built */
+  let submitted = false;
+  function send(intent, route) {
+    if (submitted) return;
+    submitted = true;
+    ["btnSignoff","btnRwMock","btnRwWire"].forEach(id => document.getElementById(id).disabled = true);
+    const comment = document.getElementById("rework-comment").value.trim();
+    const body = { issue: 3, stage: "wireframe", intent, comment };
+    if (route) body.route = route;
+    fetch("answers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(() => {
+      document.getElementById("status").textContent =
+        intent === "signoff" ? "✓ Signed off — Nightfall & Ember goes to dev." : "✎ Sent back for " + route + " rework.";
+    }).catch(() => {
+      document.getElementById("status").textContent = "⚠ Send failed — tell design-Claude in chat.";
+    });
+  }
+  document.getElementById("btnSignoff").addEventListener("click", () => send("signoff"));
+  document.getElementById("btnRwMock").addEventListener("click", () => send("refine", "mock"));
+  document.getElementById("btnRwWire").addEventListener("click", () => send("refine", "wireframe"));
+</script>
+</body>
+</html>
