@@ -21,7 +21,7 @@ export function Nav() {
           <span className="inline-flex size-8 items-center justify-center rounded-rv-md bg-rv-navy">
             <Compass className="size-[19px] text-rv-green-on-dark" fill="currentColor" strokeWidth={1.5} />
           </span>
-          <span className="text-[17px] font-extrabold tracking-[-0.01em] text-rv-navy">RV Trip Hub</span>
+          <span className="text-[17px] font-extrabold tracking-[-0.01em] text-rv-ink">RV Trip Hub</span>
         </Link>
         <div className="flex items-center gap-1">
           {LINKS.map(({ href, label, Icon, match }) => {
@@ -31,7 +31,7 @@ export function Nav() {
                 key={href}
                 href={href}
                 className={`inline-flex items-center gap-[7px] rounded-rv-md px-[13px] py-2 text-[14px] font-semibold transition-colors ${
-                  active ? "bg-rv-navy-soft text-rv-navy" : "bg-transparent text-rv-ink-faded"
+                  active ? "bg-rv-navy-soft text-rv-ink" : "bg-transparent text-rv-ink-faded"
                 }`}
               >
                 <Icon className={`size-[17px] ${active ? "text-rv-green" : "text-rv-ink-subtle"}`} />
@@ -47,7 +47,7 @@ export function Nav() {
         title="Account — Braden"
         className="inline-flex cursor-pointer items-center gap-2 rounded-rv-pill border border-rv-border bg-transparent py-1 pl-[5px] pr-2.5"
       >
-        <span className="inline-flex size-[30px] items-center justify-center rounded-full border-2 border-rv-surface bg-rv-green font-mono text-[12px] font-bold text-white">
+        <span className="inline-flex size-[30px] items-center justify-center rounded-full border-2 border-rv-border-hi bg-rv-green font-mono text-[12px] font-bold text-rv-navy">
           B
         </span>
         <span className="text-[13px] font-semibold text-rv-ink-muted">Braden</span>

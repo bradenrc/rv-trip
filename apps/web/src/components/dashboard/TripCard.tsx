@@ -23,7 +23,7 @@ import { fullRange } from "@/lib/trip-ui";
 // ── trip-level status pill (planning / upcoming / traveled) ────────────────
 const STATUS: Record<TripSummary["status"], { label: string; fg: string; bg: string; Icon: LucideIcon }> = {
   planning: { label: "Planning", fg: "var(--color-rv-warning)", bg: "var(--color-rv-warning-soft)", Icon: Pencil },
-  upcoming: { label: "Upcoming", fg: "var(--color-rv-green-cta)", bg: "var(--color-rv-green-soft)", Icon: CalendarCheck },
+  upcoming: { label: "Upcoming", fg: "var(--color-rv-green)", bg: "var(--color-rv-green-soft)", Icon: CalendarCheck },
   complete: { label: "Traveled", fg: "var(--color-rv-ink-faded)", bg: "var(--color-rv-navy-soft)", Icon: CircleCheck },
 };
 
@@ -51,10 +51,10 @@ function Chip({ Icon, children }: { Icon: LucideIcon; children: React.ReactNode 
 
 // Deterministic cover gradient per trip (real cover images are a later follow-up).
 const COVERS = [
-  ["#1f6b3a", "#2e8b4e"],
-  ["#8a5a1c", "#c78a3a"],
-  ["#0e2a47", "#2f5d8a"],
-  ["#3a4a5c", "#5d6b7d"],
+  ["#12332a", "#2f6b4c"],
+  ["#3a2b22", "#8a5230"],
+  ["#0a1520", "#284866"],
+  ["#1d2b38", "#41586e"],
 ];
 function coverFor(id: string): [string, string] {
   let h = 0;
@@ -73,7 +73,7 @@ function TripCover({ id, complete, h }: { id: string; complete: boolean; h: numb
       <div
         className="absolute inset-0"
         style={{
-          opacity: 0.16,
+          opacity: 0.08,
           backgroundImage: "radial-gradient(circle at 1px 1px, #fff 1px, transparent 0)",
           backgroundSize: "14px 14px",
         }}
@@ -103,7 +103,7 @@ export function TripCard({ trip, feature = false }: { trip: TripSummary; feature
         </div>
         <div>
           <h3
-            className={`m-0 mb-[5px] font-extrabold tracking-[-0.01em] text-rv-navy ${feature ? "text-[26px]" : "text-[19px]"}`}
+            className={`m-0 mb-[5px] font-extrabold tracking-[-0.01em] text-rv-ink ${feature ? "text-[26px]" : "text-[19px]"}`}
           >
             {trip.title}
           </h3>
@@ -135,7 +135,7 @@ export function TripCard({ trip, feature = false }: { trip: TripSummary; feature
             </span>
           )}
           {feature && (
-            <span className="ml-auto inline-flex items-center gap-1.5 text-[14px] font-bold text-rv-green-cta">
+            <span className="ml-auto inline-flex items-center gap-1.5 text-[14px] font-bold text-rv-ember">
               Open planner
               <ArrowRight className="size-[15px]" />
             </span>

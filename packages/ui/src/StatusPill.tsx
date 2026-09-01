@@ -2,7 +2,7 @@ import type { IdeaStatus } from "@rv-trip/core";
 
 const PILL: Record<IdeaStatus, string> = {
   idea: "bg-rv-surface-alt text-rv-ink-faded border border-rv-border",
-  planned: "bg-rv-navy-soft text-rv-navy border border-rv-navy-soft",
+  planned: "bg-rv-navy-soft text-rv-ink border border-rv-navy-soft",
   done: "bg-rv-green-soft text-rv-green-ink border border-rv-green",
 };
 

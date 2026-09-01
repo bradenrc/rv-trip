@@ -18,7 +18,7 @@ import type { ReservationType, IdeaStatus } from "@rv-trip/core";
  * one of five categories (Stay / Eat / Do / Travel / Other), each with a fixed
  * icon and color. A single lookup so the visual language never drifts. Colors
  * are CSS custom-property strings (the rv-* theme tokens) for inline use on the
- * tiles that need exact fills / color-mix.
+ * tiles that need exact fills.
  */
 export type CategoryLabel = "Stay" | "Eat" | "Do" | "Travel" | "Other";
 
@@ -31,7 +31,7 @@ export interface CategoryMeta {
 }
 
 const STAY = {
-  color: "var(--color-rv-green-cta)",
+  color: "var(--color-rv-green)",
   bg: "var(--color-rv-green-soft)",
   ink: "var(--color-rv-green-ink)",
 } as const;
@@ -47,7 +47,7 @@ const DO = {
 } as const;
 const TRAVEL = {
   color: "var(--color-rv-travel)",
-  bg: "color-mix(in srgb, var(--color-rv-travel) 13%, var(--color-rv-surface))",
+  bg: "var(--color-rv-travel-soft)",
   ink: "var(--color-rv-travel-ink)",
 } as const;
 const OTHER = {
@@ -83,10 +83,10 @@ export interface StatusMeta {
 export function statusMeta(status: IdeaStatus): StatusMeta {
   switch (status) {
     case "planned":
-      return { Icon: Clock, color: "var(--color-rv-navy)" };
+      return { Icon: Clock, color: "var(--color-rv-ink)" };
     case "done":
-      return { Icon: CircleCheck, color: "var(--color-rv-green-cta)" };
+      return { Icon: CircleCheck, color: "var(--color-rv-green)" };
     default:
-      return { Icon: CircleDashed, color: "var(--color-rv-ink-subtle)" };
+      return { Icon: CircleDashed, color: "var(--color-rv-ink-faded)" };
   }
 }

@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 function SectionHead({ kicker, title, count }: { kicker: string; title: string; count?: number }) {
   return (
     <div className="mb-4 flex items-baseline gap-3">
-      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-rv-ink-subtle">{kicker}</div>
-      <h2 className="m-0 text-[22px] font-extrabold text-rv-navy">{title}</h2>
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-rv-ink-faded">{kicker}</div>
+      <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">{title}</h2>
       {count != null && <span className="font-mono text-[13px] text-rv-ink-faded">{count}</span>}
     </div>
   );
@@ -20,7 +20,7 @@ function NewTripTile({ label = "Start a new trip" }: { label?: string }) {
   return (
     <Link
       href="/trips/new"
-      className="flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-rv-card border border-dashed border-rv-border-hi bg-transparent text-rv-ink-faded transition-colors hover:border-rv-green hover:text-rv-navy"
+      className="flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-rv-card border border-dashed border-rv-border-hi bg-transparent text-rv-ink-faded transition-colors hover:border-rv-green hover:text-rv-ink"
     >
       <PlusCircle className="size-[30px] text-rv-green" />
       <span className="text-[14px] font-semibold">{label}</span>
@@ -40,16 +40,16 @@ export default async function Home() {
       {/* Header */}
       <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
         <div>
-          <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-green-cta">
+          <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
             Your trips
           </div>
-          <h1 className="m-0 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-navy">
+          <h1 className="m-0 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
             Where to next?
           </h1>
         </div>
         <Link
           href="/trips/new"
-          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-green-cta px-[18px] py-[11px] text-[14px] font-bold text-white"
+          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-ember px-[18px] py-[11px] text-[14px] font-bold text-rv-navy"
         >
           <Plus className="size-[15px]" fill="currentColor" strokeWidth={2.5} />
           New trip

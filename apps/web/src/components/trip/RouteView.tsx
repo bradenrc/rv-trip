@@ -47,14 +47,14 @@ export function RouteView({
           <div key={leg.id} id={`route-${leg.id}`} className="mb-8 scroll-mt-6">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <div className="mb-[3px] font-mono text-[9px] uppercase tracking-[0.12em] text-rv-ink-subtle">
+                <div className="mb-[3px] font-mono text-[9px] uppercase tracking-[0.12em] text-rv-ink-faded">
                   {leg.kicker}
                 </div>
-                <h2 className="m-0 text-[22px] font-extrabold text-rv-navy">{leg.name}</h2>
+                <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">{leg.name}</h2>
               </div>
               <button
                 type="button"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-[13px] py-1.5 text-[13px] font-semibold text-rv-green-cta"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-[13px] py-1.5 text-[13px] font-semibold text-rv-green"
               >
                 <Plus className="size-3.5" />
                 Add stop
@@ -88,7 +88,7 @@ export function RouteView({
                     className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1.5 text-left"
                   >
                     <div className="flex flex-wrap items-center gap-2.5 pl-10">
-                      <span className="text-[17px] font-bold text-rv-navy">{row.stop.place.name}</span>
+                      <span className="text-[17px] font-bold text-rv-ink">{row.stop.place.name}</span>
                       {row.floating && <FloatingTag />}
                       {row.dates && (
                         <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-rv-ink-faded">
@@ -120,7 +120,7 @@ export function RouteView({
 
                     {row.showIdeaDivider && (
                       <div className="my-0.5 flex items-center gap-2 pl-10">
-                        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-rv-ink-subtle">
+                        <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-rv-ink-faded">
                           Ideas
                         </span>
                         <span className="h-px flex-1 bg-rv-border-soft" />
@@ -139,7 +139,7 @@ export function RouteView({
 
                 {row.driveLabel && (
                   <div className="my-1 ml-8 flex items-center gap-2 py-[5px] font-mono text-[12px] text-rv-ink-faded">
-                    <Caravan className="size-4 text-rv-navy" />
+                    <Caravan className="size-4 text-rv-ink" />
                     <span>{row.driveLabel}</span>
                   </div>
                 )}
@@ -150,7 +150,7 @@ export function RouteView({
 
         <button
           type="button"
-          className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-dashed border-rv-border-hi bg-transparent px-[18px] py-2.5 text-[14px] font-semibold text-rv-navy"
+          className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-dashed border-rv-border-hi bg-transparent px-[18px] py-2.5 text-[14px] font-semibold text-rv-ink"
         >
           <CirclePlus className="size-4" />
           Add leg
@@ -167,14 +167,14 @@ function Stat({ Icon, label, value, warn }: { Icon: LucideIcon; label: string; v
     <div className="flex items-start gap-2">
       <Icon className={`mt-px size-[15px] ${warn ? "text-rv-warning" : "text-rv-green"}`} />
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-rv-ink-subtle">{label}</div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-rv-ink-faded">{label}</div>
         <div className="text-[13px] font-semibold text-rv-ink-muted">{value}</div>
       </div>
     </div>
   );
 }
 
-const kicker = "font-mono text-[11px] uppercase tracking-[0.1em] text-rv-ink-subtle";
+const kicker = "font-mono text-[11px] uppercase tracking-[0.1em] text-rv-ink-faded";
 
 function RouteRail({ summary, costs }: { summary: RouteSummary; costs: boolean }) {
   return (
@@ -184,7 +184,7 @@ function RouteRail({ summary, costs }: { summary: RouteSummary; costs: boolean }
         <div>
           <div className={`${kicker} mb-2`}>On the road</div>
           <div className="flex items-baseline gap-1.5">
-            <span className="font-mono text-[34px] font-bold leading-none text-rv-navy">
+            <span className="font-mono text-[34px] font-bold leading-none text-rv-ink">
               {summary.driveMiles || "—"}
             </span>
             {summary.driveMiles > 0 && (
@@ -200,7 +200,7 @@ function RouteRail({ summary, costs }: { summary: RouteSummary; costs: boolean }
         {costs && (
           <div className="border-t border-rv-border-soft pt-3.5">
             <div className={`${kicker} mb-2`}>Planned cost</div>
-            <div className="font-mono text-[26px] font-bold leading-none text-rv-green-cta">
+            <div className="font-mono text-[26px] font-bold leading-none text-rv-ember">
               {money(summary.totalCost)}
             </div>
             <div className="mt-1 text-[12px] text-rv-ink-faded">so far</div>
@@ -235,7 +235,7 @@ function RouteRail({ summary, costs }: { summary: RouteSummary; costs: boolean }
                 href={`#route-${l.id}`}
                 className="flex items-baseline justify-between gap-2 rounded-rv-md px-2 py-1.5 no-underline transition-colors hover:bg-rv-green-soft"
               >
-                <span className="text-[13px] font-semibold text-rv-navy">{l.name}</span>
+                <span className="text-[13px] font-semibold text-rv-ink">{l.name}</span>
                 <span className="font-mono text-[11px] text-rv-ink-faded">
                   {l.stops} stop{l.stops === 1 ? "" : "s"}
                   {costs ? ` · ${money(l.cost)}` : ""}

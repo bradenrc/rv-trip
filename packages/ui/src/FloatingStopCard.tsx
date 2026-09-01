@@ -32,13 +32,13 @@ export function FloatingStopCard({
         <GripVertical className="mt-px size-5 text-rv-ink-subtle" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[17px] font-bold text-rv-navy">{name}</span>
+            <span className="text-[17px] font-bold text-rv-ink">{name}</span>
             <FloatingTag />
           </div>
           {note && <p className="m-0 mt-1.5 text-[13px] italic text-rv-ink-muted">“{note}”</p>}
           {firstIdea && (
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              <span className="inline-flex items-center gap-1.5 rounded-rv-pill bg-rv-navy-soft px-2.5 py-[3px] font-mono text-[9px] text-rv-navy">
+              <span className="inline-flex items-center gap-1.5 rounded-rv-pill bg-rv-navy-soft px-2.5 py-[3px] font-mono text-[9px] text-rv-ink">
                 <Lightbulb className="size-2.5" />
                 {firstIdea}
               </span>
@@ -55,7 +55,7 @@ export function AllScheduledCard() {
   return (
     <div className="rounded-rv-card border border-rv-green bg-rv-green-soft p-4">
       <div className="flex items-center gap-2.5">
-        <CircleCheck className="size-[22px] text-rv-green-cta" />
+        <CircleCheck className="size-[22px] text-rv-ember" />
         <div>
           <div className="text-[15px] font-bold text-rv-green-ink">Everything scheduled</div>
           <p className="m-0 mt-0.5 text-[13px] text-rv-green-ink/85">

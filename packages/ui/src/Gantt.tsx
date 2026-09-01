@@ -7,7 +7,7 @@ import { Star, Tent, Lightbulb } from "lucide-react";
  */
 
 const gutter = "w-[120px] flex-none";
-const kicker = "mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-rv-ink-subtle";
+const kicker = "mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-rv-ink-faded";
 
 function cols(n: number) {
   return `repeat(${n}, minmax(0, 1fr))`;
@@ -44,13 +44,13 @@ export function Ruler({ cells }: { cells: { letter: string; label: string; weekS
             className="flex flex-col items-start pl-0.5 pt-[3px]"
             style={{ borderLeft: t.weekStart ? "1px solid var(--color-rv-border)" : "none" }}
           >
-            <span className="font-mono text-[9px] text-rv-ink-subtle">{t.letter}</span>
+            <span className="font-mono text-[9px] text-rv-ink-faded">{t.letter}</span>
             <span
               className="font-mono"
               style={{
                 fontSize: t.weekStart || i === 0 ? "12px" : "9px",
                 fontWeight: t.weekStart || i === 0 ? 700 : 500,
-                color: t.weekStart || i === 0 ? "var(--color-rv-navy)" : "var(--color-rv-ink-faded)",
+                color: t.weekStart || i === 0 ? "var(--color-rv-ink)" : "var(--color-rv-ink-faded)",
               }}
             >
               {t.label}
@@ -81,7 +81,7 @@ export function SwimLane({
     <div className="mb-2.5 flex items-center gap-4">
       <div className={gutter}>
         <div className={kicker}>{k}</div>
-        <div className="text-[13px] font-bold leading-tight text-rv-navy">{name}</div>
+        <div className="text-[13px] font-bold leading-tight text-rv-ink">{name}</div>
       </div>
       <div
         className="grid flex-1 rounded-rv-sm"
@@ -134,11 +134,11 @@ export function StopBar({
     >
       <span className="absolute inset-y-0 left-0 w-1 rounded-l-rv-sm bg-rv-navy" />
       <span className="text-[13px] font-bold leading-tight text-rv-green-ink text-pretty">{name}</span>
-      <span className="font-mono text-[9px] text-rv-green-cta">{range}</span>
+      <span className="font-mono text-[9px] text-rv-green">{range}</span>
       {showMeta && (
         <div className="mt-auto flex flex-wrap items-center gap-[5px]">
           {rating > 0 && (
-            <span className="inline-flex items-center gap-[3px] font-mono text-[9px] text-rv-warning">
+            <span className="inline-flex items-center gap-[3px] font-mono text-[9px] text-rv-ember">
               <Star className="size-2.5 fill-current" />
               {rating.toFixed(1)}
             </span>
@@ -150,7 +150,7 @@ export function StopBar({
             </span>
           )}
           {ideaCount > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-rv-pill border border-rv-border-hi bg-rv-surface px-[7px] py-0.5 font-mono text-[9px] text-rv-navy">
+            <span className="inline-flex items-center gap-1 rounded-rv-pill border border-rv-border-hi bg-rv-surface px-[7px] py-0.5 font-mono text-[9px] text-rv-ink">
               <Lightbulb className="size-2.5" />
               {ideaCount}
             </span>
@@ -191,7 +191,7 @@ export function OpenSpan({
       }}
     >
       <span className="font-mono text-[12px] font-semibold text-rv-ink-faded">{count} open</span>
-      {active && <span className="font-mono text-[9px] text-rv-green-cta">drop here</span>}
+      {active && <span className="font-mono text-[9px] text-rv-green">drop here</span>}
     </div>
   );
 }

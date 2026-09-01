@@ -17,7 +17,7 @@ export function ReservationLineItem({
     <div className="flex items-center gap-2.5 py-[7px]">
       <CategoryTile type={type} />
       <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-rv-ink">{name}</span>
-      <span className="w-[60px] flex-none text-right font-mono text-[13px] font-semibold text-rv-green-cta">
+      <span className="w-[60px] flex-none text-right font-mono text-[13px] font-semibold text-rv-ember">
         {cost != null ? money(cost) : ""}
       </span>
     </div>

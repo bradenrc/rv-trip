@@ -48,7 +48,7 @@ export function PlaceCard({
         <div className="flex min-w-0 items-center gap-2.5">
           <CategoryTile type={p.type} size="md" />
           <div className="min-w-0">
-            <h3 className="m-0 mb-0.5 truncate text-[16px] font-extrabold tracking-[-0.01em] text-rv-navy">
+            <h3 className="m-0 mb-0.5 truncate text-[16px] font-extrabold tracking-[-0.01em] text-rv-ink">
               {p.place.name}
             </h3>
             {p.region && (
@@ -74,7 +74,7 @@ export function PlaceCard({
           <span className="inline-flex min-w-0 items-center gap-2">
             <Stars value={p.rating ?? 0} />
             {p.tripName && (
-              <span className="truncate font-mono text-[11.5px] text-rv-ink-subtle">
+              <span className="truncate font-mono text-[11.5px] text-rv-ink-faded">
                 · {p.tripName}
               </span>
             )}
@@ -84,7 +84,7 @@ export function PlaceCard({
           <button
             type="button"
             onClick={onAddToTrip}
-            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-green-cta px-3 py-1.5 text-[13px] font-bold text-white"
+            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-ember px-3 py-1.5 text-[13px] font-bold text-rv-navy"
           >
             <Plus className="size-3.5" fill="currentColor" strokeWidth={2.5} />
             Add to trip
@@ -132,7 +132,7 @@ export function SegmentedControl<T extends string>({
             onClick={() => onChange(o.value)}
             aria-pressed={on}
             className={`inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border-none px-3.5 py-1.5 text-[13px] font-bold ${
-              on ? "bg-rv-surface text-rv-navy shadow-rv-sm" : "bg-transparent text-rv-ink-faded"
+              on ? "bg-rv-surface text-rv-ink shadow-rv-sm" : "bg-transparent text-rv-ink-faded"
             }`}
           >
             <o.Icon className={`size-3.5 ${on ? "text-rv-green" : "text-rv-ink-subtle"}`} />
@@ -226,7 +226,7 @@ export function EmptyShelf({
   return (
     <div className="flex flex-col items-center gap-3 rounded-rv-card border border-dashed border-rv-border-hi px-6 py-16 text-center">
       <Icon className="size-9 text-rv-green" />
-      <div className="text-[16px] font-bold text-rv-navy">{title}</div>
+      <div className="text-[16px] font-bold text-rv-ink">{title}</div>
       <p className="m-0 max-w-[42ch] text-[14px] text-rv-ink-muted">{blurb}</p>
     </div>
   );
