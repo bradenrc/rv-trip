@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mc": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/Users/braden/temp/mc-dev/channel/mc-channel.mjs"],
+      "env": { "MC_CHANNEL_PORT": "8790" }
+    }
+  }
+}
