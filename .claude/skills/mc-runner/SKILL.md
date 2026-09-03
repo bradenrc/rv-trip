@@ -95,7 +95,11 @@ messages. Per event, mechanically:
   idle.
 - **Anything else** → `mc claim <DIR> runner-1` → dispatch **one**
   general-purpose subagent **in the background** with the spec's `brief` then
-  `task`, working in the spec's `worktree`, producing `output_abs` — then
+  `task`, working in the spec's `worktree`, producing `output_abs` — and
+  **pass the spec's `model` explicitly on the dispatch**. The config's
+  per-agent model is a pipeline decision; an omitted model inherits THIS
+  session's, which silently re-tiers every gate agent the day the runner
+  runs on a cheaper model. Then
   idle (never block on the subagent). When it finishes:
   `mc submit <DIR> <dispatch_id> ok --usage '{"tokens":<subagent_tokens>,"tool_uses":<n>,"duration_ms":<ms>}'`
   (or `fail --error '…'` — include `--usage` on failures too; failed runs
