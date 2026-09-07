@@ -48,8 +48,9 @@ count.
 | Database | **Neon Postgres** (Vercel Marketplace) | Relational grammar (trip→legs→stops→reservations/ideas) wants joins/ranges. Standard Postgres = portable. |
 | Auth | **Clerk** (Vercel Marketplace) | Drop-in React + Expo components; multi-tenant from day one. |
 | ORM | **Drizzle** | Lightweight, SQL-first, strong TS types. |
-| Maps — routing | **Mapbox** (`RoutingProvider`) | Drive time/distance; clean cross-platform SDKs. |
+| Maps — routing | **HERE** (`RoutingProvider`) *(amended 2026-09-07; was Mapbox)* | RV-safe truck routing: vehicle profile (height/width/length/weight/propane) avoids low bridges, weight limits, restricted tunnels. Mapbox/Google directions accept no vehicle dimensions. |
 | Maps — places | **Google Places** (`PlacesProvider`) | Best place search + details/reviews. |
+| Maps — navigation | **Google Maps handoff** | Deep-link turn-by-turn along HERE's safe corridor via constrained via-waypoints; restriction notices shown in-app, never silently trusted. |
 | Photo storage (fast-follow) | Vercel Blob | Public + private; for the journal layer. |
 
 Both map vendors sit **behind interfaces in `packages/core`** so feature code never touches a
@@ -68,7 +69,7 @@ rv-trip/
 │  ├─ core/               # THE SHARED CORE — no framework code
 │  │  ├─ domain/          #   trip grammar: types + Zod schemas + invariants
 │  │  ├─ api-client/      #   typed fetch client (web + Expo both import this)
-│  │  └─ providers/       #   RoutingProvider (Mapbox) + PlacesProvider (Google) interfaces
+│  │  └─ providers/       #   RoutingProvider (HERE) + PlacesProvider (Google) interfaces
 │  ├─ db/                 # Drizzle schema + migrations (Neon Postgres)
 │  └─ ui/                 # shared UI primitives (minimal in v1)
 └─ (apps/mobile/          # Expo — later cycle; imports packages/core verbatim)
@@ -137,7 +138,19 @@ REST route handlers under `apps/web/app/api`, typed against `packages/core` Zod 
 
 ## Maps integration
 
-- `RoutingProvider` → **Mapbox**: drive time/distance between adjacent stops (scheduled or sequenced).
+*(Amended 2026-09-07: routing moved Mapbox → HERE for RV-safe truck routing; Google Maps
+navigation handoff added. Nothing was ever built against Mapbox — only the local stub.)*
+
+- `RoutingProvider` → **HERE Routing** (truck transport mode): drive time/distance between adjacent
+  stops (scheduled or sequenced), routed under the **rig's vehicle profile** — height, width,
+  length, gross weight, propane on board — so low bridges, weight-limited roads, and restricted
+  tunnels are avoided, not discovered. Returns polyline + restriction notices, not just numbers.
+- **Rig profile** — the `/rig` surface stores the vehicle profile (one rig per account in v1);
+  it is the routing input, set once and applied to every drive.
+- **Navigation handoff** → Google Maps deep-link (`google.com/maps/dir/?api=1&…`) with
+  via-waypoints sampled where HERE's safe route *diverges* from the naive route (URL caps ~9
+  waypoints). The app always shows HERE's restriction notices alongside the handoff — Google may
+  reroute a deviating driver, so the corridor is guidance, never a guarantee.
 - `PlacesProvider` → **Google Places**: place search/autocomplete + details/reviews when adding a
   stop or idea.
 - Vendor keys stay **server-side**; clients call our API, never the vendors directly.
