@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { Trip, Reservation, ReservationType } from "@rv-trip/core";
+import { isScheduled } from "@rv-trip/core";
 import { Compass, House, CalendarDays, CircleAlert, Route, ChartNoAxesGantt, Plus } from "lucide-react";
 import {
   timelineModel,
@@ -69,6 +70,18 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const route = useMemo(() => routeModel(trip), [trip]);
   const summary = useMemo(() => routeSummary(trip), [trip]);
   const byId = useMemo(() => stopMap(trip), [trip]);
+  // Trip-wide scheduled sequence — the same ordering routeSummary() and /map use.
+  const scheduledOrdinal = useMemo(
+    () =>
+      new Map(
+        trip.legs
+          .flatMap((l) => l.stops)
+          .filter(isScheduled)
+          .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!))
+          .map((s, i) => [s.id, i + 1] as const),
+      ),
+    [trip],
+  );
   const selectedStop = selectedId ? (byId.get(selectedId) ?? null) : null;
   const selectedLegName = selectedStop
     ? (trip.legs.find((l) => l.id === selectedStop.legId)?.title ?? "")
@@ -229,6 +242,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
         <StopDetailSheet
           stop={selectedStop}
           legName={selectedLegName}
+          stopOrdinal={scheduledOrdinal.get(selectedStop.id) ?? null}
           costs={costTracking}
           addOpen={addOpen}
           form={form}

@@ -3,9 +3,10 @@
 import { X, CalendarDays, CalendarPlus, Receipt, Plus, Check } from "lucide-react";
 import type { Stop, ReservationType } from "@rv-trip/core";
 import { isScheduled } from "@rv-trip/core";
-import { Stars, FieldLabel, MapPlaceholder, ReservationCard, IdeaCard, money } from "@rv-trip/ui";
+import { Stars, FieldLabel, ReservationCard, IdeaCard, money } from "@rv-trip/ui";
 import { dateRange } from "@/lib/trip-ui";
 import { resDates } from "@/lib/trip-logic";
+import { StopMiniMap } from "@/components/map/StopMiniMap";
 import type { AddForm } from "./TripPlanner";
 
 const RES_TYPES: ReservationType[] = [
@@ -22,6 +23,7 @@ const RES_TYPES: ReservationType[] = [
 export function StopDetailSheet({
   stop,
   legName,
+  stopOrdinal,
   costs,
   addOpen,
   form,
@@ -46,6 +48,9 @@ export function StopDetailSheet({
 }: {
   stop: Stop;
   legName: string;
+  /** Position in the trip's scheduled sequence — the number the mini-map's disc
+   * carries, so the sheet and /map count the stops the same way. */
+  stopOrdinal: number | null;
   costs: boolean;
   addOpen: boolean;
   form: AddForm;
@@ -122,7 +127,7 @@ export function StopDetailSheet({
         </div>
 
         <div className="flex flex-col gap-6 p-6">
-          <MapPlaceholder label={stop.place.name} />
+          <StopMiniMap stop={stop} legName={legName} ordinal={stopOrdinal} />
 
           {/* Reservations */}
           <div>

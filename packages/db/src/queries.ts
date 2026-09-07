@@ -93,6 +93,20 @@ export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]>
   return rows.map((r) => summarize(mapTripRow(r)));
 }
 
+/**
+ * Every trip as its full tree — the map needs legs → stops → coordinates, which
+ * `listTripsForOwner` throws away inside `summarize()`. Same query, same
+ * `TRIP_WITH` load; only the mapping differs.
+ */
+export async function listTripsWithStopsForOwner(ownerId: string): Promise<Trip[]> {
+  const rows = await db.query.trips.findMany({
+    where: eq(trips.ownerId, ownerId),
+    orderBy: [asc(trips.startDate)],
+    with: TRIP_WITH,
+  });
+  return rows.map(mapTripRow);
+}
+
 function summarize(trip: Trip): TripSummary {
   const stops = trip.legs.flatMap((l) => l.stops);
   const { days } = deriveDays(trip, stops);

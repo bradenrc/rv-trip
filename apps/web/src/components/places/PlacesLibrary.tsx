@@ -16,9 +16,10 @@ import {
   ViewSwitch,
   FilterChip,
   EmptyShelf,
-  PlacesMapPanel,
   type CategoryLabel,
 } from "@rv-trip/ui";
+import { MapMount } from "@/components/map/MapMount";
+import { buildMapModel } from "@/components/map/pins";
 
 type View = "grid" | "map";
 type CatFilter = "All" | CategoryLabel;
@@ -59,6 +60,11 @@ export function PlacesLibrary({ places }: { places: SavedPlace[] }) {
     () => (cat === "All" ? shelf : shelf.filter((p) => categoryMeta(p.type).cat === cat)),
     [shelf, cat],
   );
+
+  // The map lens draws exactly `list` — the array the grid renders. It never
+  // filters again; the pins ARE the list.
+  const lens = useMemo(() => buildMapModel([], list), [list]);
+  const hidden = shelf.length - list.length;
 
   const wantCount = places.filter((p) => p.status === "want").length;
   const beenCount = places.length - wantCount;
@@ -113,10 +119,19 @@ export function PlacesLibrary({ places }: { places: SavedPlace[] }) {
       </div>
 
       {view === "map" ? (
-        <div className="grid items-start gap-4" style={{ gridTemplateColumns: "1fr 360px" }}>
-          <PlacesMapPanel />
-          <div className="grid gap-3">{cards}</div>
-        </div>
+        <>
+          <div className="grid items-stretch gap-4" style={{ gridTemplateColumns: "1fr 360px" }}>
+            <div className="min-h-[420px]">
+              <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} />
+            </div>
+            <div className="grid content-start gap-3">{cards}</div>
+          </div>
+          {hidden > 0 && (
+            <p className="m-0 mt-[11px] font-mono text-[11px] text-rv-ink-faded">
+              {hidden} {hidden === 1 ? "place" : "places"} hidden by the {cat} filter
+            </p>
+          )}
+        </>
       ) : list.length > 0 ? (
         <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
           {cards}
