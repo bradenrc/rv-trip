@@ -51,10 +51,12 @@ count.
 | Maps — routing | **HERE** (`RoutingProvider`) *(amended 2026-09-07; was Mapbox)* | RV-safe truck routing: vehicle profile (height/width/length/weight/propane) avoids low bridges, weight limits, restricted tunnels. Mapbox/Google directions accept no vehicle dimensions. |
 | Maps — places | **Google Places** (`PlacesProvider`) | Best place search + details/reviews. |
 | Maps — navigation | **Google Maps handoff** | Deep-link turn-by-turn along HERE's safe corridor via constrained via-waypoints; restriction notices shown in-app, never silently trusted. |
+| Maps — display | **Mapbox GL** *(amended 2026-09-07)* | In-app map rendering (`/map`, stop detail). Only vendor with a truly styleable basemap — the map wears the product palette via a custom Studio style. Uses a publishable domain-restricted `pk.*` token (documented exception to server-side-keys; secrets stay server-side). |
 | Photo storage (fast-follow) | Vercel Blob | Public + private; for the journal layer. |
 
-Both map vendors sit **behind interfaces in `packages/core`** so feature code never touches a
-vendor and providers can be swapped/AB-tested.
+The data vendors (routing, places) sit **behind interfaces in `packages/core`** so feature code
+never touches a vendor and providers can be swapped/AB-tested. Display (Mapbox GL) is a UI
+concern, not a core provider — it lives in the web app's map components.
 
 ## Architecture
 
@@ -153,7 +155,12 @@ navigation handoff added. Nothing was ever built against Mapbox — only the loc
   reroute a deviating driver, so the corridor is guidance, never a guarantee.
 - `PlacesProvider` → **Google Places**: place search/autocomplete + details/reviews when adding a
   stop or idea.
-- Vendor keys stay **server-side**; clients call our API, never the vendors directly.
+- **In-app map display** → **Mapbox GL** (`/map` surface, stop-detail map): custom Studio style
+  matching the product palette; route polylines from HERE drawn on it. v1 ships the placeholder;
+  display gets its own issue when the map surface is scheduled.
+- Vendor **secret** keys (HERE, Google) stay **server-side**; clients call our API, never the
+  vendors directly. Exception by design: Mapbox GL's publishable `pk.*` token is client-side,
+  domain-restricted — it renders tiles and can do nothing else.
 
 ## Cross-cutting
 
