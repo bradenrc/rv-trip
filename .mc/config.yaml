@@ -21,6 +21,13 @@ poll: false
 # channel_port must match MC_CHANNEL_PORT in .mcp.json's `mc` server entry; the glass port is
 # given on the CLI (`mc up . --port 8731 --no-poll`).
 channel_port: 8790
+# Engine-worktree env provisioning (mc-dev #83/#104): gitignored env files copied 0600
+# into every dispatch + ship worktree behind the engine's check-ignore guard. next dev
+# reads apps/web/.env.local; root .env feeds the drizzle CLIs (issue-3 walk postmortem).
+worktree_env:
+  - 'apps/web/.env.local'
+  - '.env'
+
 dispatch: orchestrator # worker gates interrupt at dispatch; the runner session resolves them
 
 # Walk gate env — lean v1 (scripts/mc-walk-env.sh): worktree from {branch}, pnpm install,
