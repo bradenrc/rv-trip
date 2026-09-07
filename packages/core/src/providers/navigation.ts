@@ -1,90 +1,56 @@
-import { haversineMeters, type LatLng } from "./index";
+import type { LatLng } from "./index";
 
 /**
  * The Google Maps handoff (docs/design/9 §6).
  *
  * HERE found a corridor that clears our rig; Google is the thing people
- * actually drive with. Pinning waypoints along the safe corridor is how we ask
- * Google to keep to it — but Google will happily reroute a driver who deviates,
- * and it does not know our clearance, so this is guidance, never a guarantee.
- * That is why the in-app notices do NOT dismiss on handoff.
+ * actually drive with. We hand Google the two endpoints and nothing else.
  *
- * Pure and network-free, so the waypoint-selection rules are unit-testable.
+ * We do NOT try to shape the corridor through the URL. Google's `dir/?api=1`
+ * scheme has no pass-through waypoint: every coordinate in `waypoints=` becomes
+ * a destination and is snapped to the nearest address, which testing showed
+ * lands drivers on farm lanes and forest roads. A worse route with the
+ * RV-safe label on it is worse than an honest plain one, so the corridor-
+ * faithful version (server-side Google Routes API with `via` intermediates
+ * validated against the HERE polyline, plus a HERE WeGo option) is a planned
+ * fast-follow, not a URL trick.
+ *
+ * Because this link is NOT the RV-safe corridor, the drive's HERE notices
+ * render right next to the Navigate action and never dismiss on handoff —
+ * the caption next to the button is the whole honesty of the feature.
+ *
+ * Pure and network-free.
  */
-
-/** Google's `waypoints=` limit on a `dir/?api=1` deep link. */
-export const MAX_GOOGLE_WAYPOINTS = 9;
-
-/** Two pins closer together than this add nothing but URL length. ~2 mi. */
-export const MIN_WAYPOINT_SEPARATION_METERS = 3218;
-
-/** Below this the two routes are the same road; there is nothing to pin. */
-const MIN_DIVERGENCE_METERS = 1;
 
 export interface NavigationHandoff {
   url: string;
-  waypoints: LatLng[];
 }
 
-export function buildNavigationHandoff(input: {
-  from: LatLng;
-  to: LatLng;
-  /** The corridor HERE routed for the rig. */
-  safePath?: LatLng[] | null;
-  /** What a car would have driven. No naive path → nothing to compare against. */
-  naivePath?: LatLng[] | null;
-}): NavigationHandoff {
-  const waypoints = selectWaypoints(input.safePath, input.naivePath);
-  return { url: mapsUrl(input.from, input.to, waypoints), waypoints };
+/**
+ * The v2 seam. Nothing today — but the parameter exists so the fast-follow
+ * (corridor intermediates, a HERE WeGo handoff option) extends this object
+ * instead of churning every call site.
+ */
+export interface NavigationHandoffOptions {
+  /** Reserved; no option is accepted yet. */
+  readonly reserved?: never;
 }
 
-function selectWaypoints(
-  safePath: LatLng[] | null | undefined,
-  naivePath: LatLng[] | null | undefined,
-): LatLng[] {
-  if (!safePath || !naivePath || safePath.length < 3 || naivePath.length === 0) return [];
-
-  // Interior points only — the endpoints are already origin and destination.
-  const candidates = safePath
-    .slice(1, -1)
-    .map((point, i) => ({ point, index: i + 1, divergence: nearestDistance(point, naivePath) }))
-    .filter((c) => c.divergence > MIN_DIVERGENCE_METERS)
-    .sort((a, b) => b.divergence - a.divergence);
-
-  const chosen: { point: LatLng; index: number }[] = [];
-  const anchors = [safePath[0]!, safePath[safePath.length - 1]!];
-  for (const candidate of candidates) {
-    if (chosen.length >= MAX_GOOGLE_WAYPOINTS) break;
-    const tooClose = [...anchors, ...chosen.map((c) => c.point)].some(
-      (p) => haversineMeters(p, candidate.point) < MIN_WAYPOINT_SEPARATION_METERS,
-    );
-    if (!tooClose) chosen.push({ point: candidate.point, index: candidate.index });
-  }
-
-  // Google follows the order given, so hand them over in travel order.
-  return chosen.sort((a, b) => a.index - b.index).map((c) => c.point);
-}
-
-function nearestDistance(point: LatLng, path: LatLng[]): number {
-  let best = Infinity;
-  for (const p of path) {
-    const d = haversineMeters(point, p);
-    if (d < best) best = d;
-  }
-  return best;
+export function buildNavigationHandoff(
+  origin: LatLng,
+  destination: LatLng,
+  /** Accepted and ignored — see NavigationHandoffOptions. */
+  _options: NavigationHandoffOptions = {},
+): NavigationHandoff {
+  const url = [
+    "https://www.google.com/maps/dir/?api=1",
+    `origin=${coord(origin)}`,
+    `destination=${coord(destination)}`,
+    "travelmode=driving",
+  ].join("&");
+  return { url };
 }
 
 function coord(p: LatLng): string {
   return `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
-}
-
-function mapsUrl(from: LatLng, to: LatLng, waypoints: LatLng[]): string {
-  const parts = [
-    "https://www.google.com/maps/dir/?api=1",
-    `origin=${coord(from)}`,
-    `destination=${coord(to)}`,
-  ];
-  if (waypoints.length > 0) parts.push(`waypoints=${waypoints.map(coord).join("|")}`);
-  parts.push("travelmode=driving");
-  return parts.join("&");
 }

@@ -10,7 +10,6 @@ import {
   driveMinutes,
   formatDriveTime,
   buildNavigationHandoff,
-  decodeFlexiblePolyline,
   NO_RIG_HASH,
   type Trip,
   type Leg,
@@ -265,7 +264,8 @@ export interface RouteDrive {
   estimate: boolean;
   primaryRoad: string | null;
   notices: RouteNotice[];
-  /** Google Maps deep link, pinned to the corridor HERE found. */
+  /** Google Maps deep link — origin and destination only, never the corridor.
+   * See buildNavigationHandoff: the notices are what carry the RV-safe caveat. */
   navUrl: string;
   miles: number;
   minutes: number;
@@ -273,14 +273,11 @@ export interface RouteDrive {
 
 function toDrive(pair: OrderedPair, routes: RouteMap, rigHash: string): RouteDrive {
   const key = routeCacheKey(pair.from, pair.to, rigHash);
-  const naive = estimateRoute(pair.from, pair.to);
-  const result = routes[key] ?? naive;
-  const handoff = buildNavigationHandoff({
-    from: pair.from,
-    to: pair.to,
-    safePath: result.polyline ? decodeFlexiblePolyline(result.polyline) : null,
-    naivePath: decodeFlexiblePolyline(naive.polyline ?? ""),
-  });
+  const result = routes[key] ?? estimateRoute(pair.from, pair.to);
+  // Endpoints only. Google cannot be handed a pass-through waypoint, so the
+  // link is honestly "get me there", and the notices below it are what says
+  // the RV-safe corridor may not be what Google picks.
+  const handoff = buildNavigationHandoff(pair.from, pair.to);
   return {
     key,
     label: driveLabel(result),
@@ -300,12 +297,14 @@ function toDrive(pair: OrderedPair, routes: RouteMap, rigHash: string): RouteDri
  */
 function resolveDrives(trip: Trip, routes: RouteMap, rigHash: string) {
   const byFromStop = new Map<string, RouteDrive>();
-  const boundaryByLeg = new Map<string, RouteDrive>();
+  // Keyed by the leg the drive leaves, but it carries the leg it ARRIVES in:
+  // an emptied leg in between means the crossing is not always i → i + 1.
+  const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
   const all: RouteDrive[] = [];
   for (const pair of orderedPairs(trip)) {
     const drive = toDrive(pair, routes, rigHash);
     all.push(drive);
-    if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, drive);
+    if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
     else byFromStop.set(pair.fromStopId, drive);
   }
   return { byFromStop, boundaryByLeg, all };
@@ -318,6 +317,7 @@ export function routeModel(
 ): RouteLeg[] {
   const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, rigHash);
   const legs = [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder);
+  const legNumber = new Map(legs.map((l, i) => [l.id, i + 1]));
 
   return legs.map((leg, i) => {
     const ordered = orderedLegStops(leg.stops);
@@ -345,14 +345,16 @@ export function routeModel(
       drive: byFromStop.get(stop.id) ?? null,
     }));
 
-    const outboundDrive = boundaryByLeg.get(leg.id) ?? null;
+    const boundary = boundaryByLeg.get(leg.id) ?? null;
     return {
       id: leg.id,
       kicker: `Leg ${i + 1}`,
       name: leg.title,
       rows,
-      outboundDrive,
-      outboundSeam: outboundDrive ? `Leg ${i + 1} → Leg ${i + 2}` : null,
+      outboundDrive: boundary?.drive ?? null,
+      outboundSeam: boundary
+        ? `Leg ${i + 1} → Leg ${legNumber.get(boundary.toLegId) ?? i + 2}`
+        : null,
     };
   });
 }
@@ -370,8 +372,6 @@ export interface RouteSummary {
   /** How many amber notices the whole route carries. Rendered only when > 0 —
    * a permanent "0 restrictions" would train the eye to skip the slot. */
   restrictionCount: number;
-  /** True while any drive on the trip is still a straight-line estimate. */
-  anyEstimated: boolean;
   totalCost: number;
   stops: number;
   scheduled: number;
@@ -407,7 +407,6 @@ export function routeSummary(
     driveMiles: driveMilesTotal,
     driveTime: driveMilesTotal ? formatDriveTime(driveMins) : "—",
     restrictionCount: all.reduce((a, d) => a + d.notices.length, 0),
-    anyEstimated: all.some((d) => d.estimate),
     totalCost: stops.reduce((a, s) => a + stopCost(s), 0),
     stops: stops.length,
     scheduled: stops.filter(isScheduled).length,

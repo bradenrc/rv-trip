@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
+  HereRoutingProvider,
   buildRoutesUrl,
   hereCredentialsFromEnv,
   parseRouteResponse,
@@ -164,5 +165,171 @@ describe("parseRouteResponse", () => {
   it("throws on a body with no route, so the caller degrades to the estimate", () => {
     expect(() => parseRouteResponse({ routes: [] }, RIG)).toThrow();
     expect(() => parseRouteResponse({}, RIG)).toThrow();
+  });
+});
+
+// ── graceful degradation ───────────────────────────────────────────────────
+// This is the property the whole feature rests on: an unproven vendor must
+// never be able to stop a trip from opening. Every failure the network can
+// hand us has to come back as the honest straight-line estimate, and the
+// token grant has to happen once per process rather than once per drive.
+//
+// Still no live HERE call — `fetch` is stubbed. What is pinned here is our
+// side of the contract (degrade, retry once on 401, reuse the grant); whether
+// HERE accepts the request remains the walk's job.
+
+const CREDENTIALS = {
+  accessKeyId: "id",
+  accessKeySecret: "secret",
+  tokenEndpoint: "https://example.test/token",
+};
+
+type Reply = { status?: number; json?: unknown; throws?: boolean };
+
+/** Installs a scripted `fetch`; returns the URLs it was called with. */
+function stubFetch(script: (url: string) => Reply): { calls: string[]; restore: () => void } {
+  const calls: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: unknown) => {
+    const url = String(input);
+    calls.push(url);
+    const reply = script(url);
+    if (reply.throws) throw new Error("network down");
+    const status = reply.status ?? 200;
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => reply.json ?? {},
+    } as Response;
+  }) as typeof fetch;
+  return { calls, restore: () => (globalThis.fetch = original) };
+}
+
+const GRANT = { access_token: "tok", expires_in: 86_399 };
+const ROUTE_BODY = {
+  routes: [{ sections: [{ summary: { duration: 11_520, length: 218_866 }, polyline: "BG" }] }],
+};
+const isToken = (url: string) => url.startsWith("https://example.test/token");
+
+describe("HereRoutingProvider degradation", () => {
+  let restore = () => {};
+  afterEach(() => restore());
+
+  it("routes normally when the vendor answers", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { json: GRANT } : { json: ROUTE_BODY }));
+    restore = stub.restore;
+    const result = await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG);
+    expect(result.source).toBe("here");
+    expect(result.distanceMeters).toBe(218_866);
+  });
+
+  it("a dead network degrades to the straight-line estimate, not an error", async () => {
+    const stub = stubFetch(() => ({ throws: true }));
+    restore = stub.restore;
+    const result = await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG);
+    expect(result.source).toBe("estimate");
+    expect(result.distanceMeters).toBeGreaterThan(0);
+  });
+
+  it("a rejected token grant degrades", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { status: 500 } : { json: ROUTE_BODY }));
+    restore = stub.restore;
+    expect((await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG)).source).toBe(
+      "estimate",
+    );
+  });
+
+  it("a grant with no access_token degrades", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { json: { expires_in: 60 } } : { json: ROUTE_BODY }));
+    restore = stub.restore;
+    expect((await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG)).source).toBe(
+      "estimate",
+    );
+  });
+
+  it("a 5xx from /routes degrades", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { json: GRANT } : { status: 503 }));
+    restore = stub.restore;
+    expect((await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG)).source).toBe(
+      "estimate",
+    );
+  });
+
+  it("a body we cannot read degrades", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { json: GRANT } : { json: { routes: [] } }));
+    restore = stub.restore;
+    expect((await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG)).source).toBe(
+      "estimate",
+    );
+  });
+
+  it("re-grants once on a 401 and then succeeds", async () => {
+    let routeCalls = 0;
+    const stub = stubFetch((url) => {
+      if (isToken(url)) return { json: GRANT };
+      routeCalls++;
+      return routeCalls === 1 ? { status: 401 } : { json: ROUTE_BODY };
+    });
+    restore = stub.restore;
+    const result = await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG);
+    expect(result.source).toBe("here");
+    expect(routeCalls).toBe(2);
+    // The stale token was dropped, so the retry cost a second grant.
+    expect(stub.calls.filter(isToken)).toHaveLength(2);
+  });
+
+  it("does not retry a 401 forever — it degrades", async () => {
+    let routeCalls = 0;
+    const stub = stubFetch((url) => {
+      if (isToken(url)) return { json: GRANT };
+      routeCalls++;
+      return { status: 401 };
+    });
+    restore = stub.restore;
+    expect((await new HereRoutingProvider(CREDENTIALS).route(NEWPORT, BEND, RIG)).source).toBe(
+      "estimate",
+    );
+    expect(routeCalls).toBe(2);
+  });
+
+  it("grants ONE token per process, not one per drive", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { json: GRANT } : { json: ROUTE_BODY }));
+    restore = stub.restore;
+    const provider = new HereRoutingProvider(CREDENTIALS);
+    await provider.route(NEWPORT, BEND, RIG);
+    await provider.route(BEND, NEWPORT, RIG);
+    expect(stub.calls.filter(isToken)).toHaveLength(1);
+  });
+
+  it("collapses concurrent cache misses onto a single grant", async () => {
+    const stub = stubFetch((url) => (isToken(url) ? { json: GRANT } : { json: ROUTE_BODY }));
+    restore = stub.restore;
+    const provider = new HereRoutingProvider(CREDENTIALS);
+    // routeTrip fires every pair at once through Promise.all; a per-call grant
+    // would bill the vendor once per drive on the trip.
+    await Promise.all([
+      provider.route(NEWPORT, BEND, RIG),
+      provider.route(BEND, NEWPORT, RIG),
+      provider.route(NEWPORT, BEND, null),
+    ]);
+    expect(stub.calls.filter(isToken)).toHaveLength(1);
+  });
+
+  it("a failed grant does not poison the next call", async () => {
+    let firstGrant = true;
+    const stub = stubFetch((url) => {
+      if (isToken(url)) {
+        if (firstGrant) {
+          firstGrant = false;
+          return { status: 500 };
+        }
+        return { json: GRANT };
+      }
+      return { json: ROUTE_BODY };
+    });
+    restore = stub.restore;
+    const provider = new HereRoutingProvider(CREDENTIALS);
+    expect((await provider.route(NEWPORT, BEND, RIG)).source).toBe("estimate");
+    expect((await provider.route(NEWPORT, BEND, RIG)).source).toBe("here");
   });
 });

@@ -40,7 +40,9 @@ export interface RouteResult {
   durationSeconds: number;
   /** driving distance in meters */
   distanceMeters: number;
-  /** HERE flexible polyline, or the stub's two-point straight line. */
+  /** HERE flexible polyline, or the stub's two-point straight line. Carried,
+   * not yet consumed — the map layer and the corridor-faithful handoff are
+   * fast-follows; the Navigate link is endpoints-only. */
   polyline: string | null;
   /** The road the drive mostly runs on ("US-101"), when the vendor names one. */
   primaryRoad: string | null;

@@ -2,10 +2,14 @@ import type { LatLng } from "./index";
 
 /**
  * HERE's "flexible polyline" codec — the encoding `RouteResult.polyline`
- * carries. Both directions are needed: HERE hands us an encoded string to
- * decode for the Navigate handoff, and StubRoutingProvider encodes its
- * two-point straight line so local dev produces the same shape with no network
- * and no keys.
+ * carries. `encode` is live: StubRoutingProvider encodes its two-point straight
+ * line so local dev produces the same shape with no network and no keys.
+ *
+ * `decode` has NO consumer today. It is the seam, kept deliberately: the
+ * Navigate handoff is now endpoints-only (Google has no pass-through waypoint),
+ * and the corridor-faithful fast-follow — server-side Google Routes API
+ * intermediates validated against the HERE geometry, and drawing the corridor
+ * on the Mapbox layer — is what reads the polyline back.
  *
  * Format: a version varint, a header varint carrying the coordinate precision,
  * then zig-zag-encoded signed varint deltas over base-64url-ish characters with
@@ -65,8 +69,8 @@ export function decodeFlexiblePolyline(encoded: string): LatLng[] {
     }
     return points;
   } catch {
-    // An unreadable vendor polyline degrades to "no corridor" — the Navigate
-    // link falls back to origin/destination only. Never a crash.
+    // An unreadable vendor polyline degrades to "no corridor" rather than
+    // throwing. Never a crash on a vendor's encoding.
     return [];
   }
 }

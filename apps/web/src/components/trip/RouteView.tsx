@@ -193,6 +193,9 @@ export function RouteView({
  * There is no fourth state: a drive we cannot route is a missing value, never a
  * spinner and never a blocked save. A pair with no coordinates yields no
  * connector at all — it never reaches here.
+ *
+ * Navigate is the same plain Google link in all three: origin and destination,
+ * never the corridor. In state 2 it carries an amber caption saying so.
  */
 function Drive({ drive }: { drive: RouteDrive }) {
   if (drive.notices.length === 0) {
@@ -224,10 +227,17 @@ function Drive({ drive }: { drive: RouteDrive }) {
           {drive.estimate && <EstimateChip />}
           <NavigateButton href={drive.navUrl} className="ml-auto" />
         </div>
+        {/* The caveat belongs ON the action. The handoff is origin and
+            destination only — Google's URL scheme has no pass-through waypoint,
+            so the link is not the corridor HERE cleared for the rig. Amber
+            because it is a real restriction, but plain text rather than a
+            bordered row: a caption on a button, not a second error. */}
+        <div className="mt-[7px] text-right text-[11.5px] text-rv-warning">
+          Navigation may not follow the RV-safe route — check notices.
+        </div>
         {/* One row per notice, unbounded — no truncation. The notices do NOT
-            dismiss on handoff: Google will reroute a driver who deviates and it
-            does not know your clearance, so the corridor is guidance and this
-            is the thing you can still read at the next fuel stop. */}
+            dismiss on handoff — they are the thing you can still read at the
+            next fuel stop, and the only place your clearance is written down. */}
         <div className="mt-2 flex flex-col gap-2">
           {drive.notices.map((notice, i) => (
             <RouteNotice key={`${notice.code}-${i}`} message={notice.message} />
