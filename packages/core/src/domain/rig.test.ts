@@ -9,6 +9,7 @@ import {
   kilogramsToVendorKg,
   rigProfileInput,
   rigHash,
+  type RigProfileInput,
 } from "./rig";
 
 // The worked math from the wireframe (docs/design/9 §3). Every number here is
@@ -154,12 +155,28 @@ describe("rigHash", () => {
     expect(await rigHash(rig)).toBe(await rigHash({ ...rig }));
   });
 
-  it("changes when a routing-relevant field changes", async () => {
-    const before = await rigHash(rig);
-    expect(await rigHash({ ...rig, heightMeters: 3.5 })).not.toBe(before);
-    expect(await rigHash({ ...rig, propaneOnBoard: false })).not.toBe(before);
-    expect(await rigHash({ ...rig, type: "trailer" })).not.toBe(before);
-  });
+  /**
+   * All SEVEN fields, one case each. A hole here is a SAFETY miss, not a cache
+   * miss: correct your rig's width and a stale, non-RV-safe route would survive
+   * the correction because nothing re-keyed. So the sweep is exhaustive by
+   * construction — `edits` is typed to cover every key of the hashed rig.
+   */
+  const edits: { [K in keyof typeof rig]: RigProfileInput[K] } = {
+    name: "Sunseeker 2500",
+    type: "trailer",
+    heightMeters: 3.5,
+    widthMeters: 2.4384,
+    lengthMeters: 8.2296,
+    grossWeightKg: 6577.1,
+    propaneOnBoard: false,
+  };
+
+  it.each(Object.keys(edits) as (keyof typeof rig)[])(
+    "changes when %s changes",
+    async (field) => {
+      expect(await rigHash({ ...rig, [field]: edits[field] })).not.toBe(await rigHash(rig));
+    },
+  );
 
   it("has a distinct value for 'no rig yet'", async () => {
     expect(await rigHash(null)).toBe("no-rig");

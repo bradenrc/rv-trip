@@ -22,9 +22,11 @@ const RIG = {
 const NEWPORT = { lat: 44.6365, lng: -124.053 };
 const BEND = { lat: 44.0582, lng: -121.3153 };
 
-// NOTE: no live HERE call was made from this worktree. These tests pin the
-// request we build and the mapping we apply to a response shaped like the
-// vendor's; whether HERE accepts them is the walk's job.
+// NOTE: these are offline tests — they pin the request we build and the mapping
+// we apply, with no network. The fixtures are no longer guesses, though: the
+// OAuth grant, the truck query and the notice payload WERE exercised against
+// live HERE from this worktree on 2026-09-07, and the notice detail captured
+// there is reproduced verbatim below. See docs/design/9/dev-notes.md.
 
 describe("hereCredentialsFromEnv", () => {
   it("is null unless all three OAuth values are present (the local case)", () => {
@@ -165,6 +167,83 @@ describe("parseRouteResponse", () => {
   it("throws on a body with no route, so the caller degrades to the estimate", () => {
     expect(() => parseRouteResponse({ routes: [] }, RIG)).toThrow();
     expect(() => parseRouteResponse({}, RIG)).toThrow();
+  });
+
+  /**
+   * VERBATIM from live HERE (2026-09-07, Manhattan → Newark, a 4.42 m / 36 t
+   * rig). The real notice detail is NOT the `causes: [{ type, value }]` shape
+   * assumed above: the dimension is named only inside `cause`, a prose string,
+   * and the limit arrives in a sibling `max*` field. Classified the old way it
+   * fell to "other" and the driver was told nothing but "a restriction there
+   * affects your rig" — the one sentence that cannot be acted on.
+   */
+  const LIVE_WEIGHT_NOTICE = {
+    title: "Violated vehicle restriction.",
+    code: "violatedVehicleRestriction",
+    severity: "critical",
+    details: [
+      {
+        type: "restriction",
+        cause: "Route violates vehicle restriction: current weight limit of 2721 kg",
+        maxGrossWeight: 2721,
+        maxWeight: { value: 2721, type: "current" },
+      },
+    ],
+  };
+
+  const liveBody = (notice: unknown) => ({
+    routes: [
+      {
+        sections: [
+          {
+            summary: { duration: 1_800, length: 20_000 },
+            spans: [{ offset: 0, names: [{ value: "Park Row" }], notices: [0] }],
+            notices: [notice],
+          },
+        ],
+      },
+    ],
+  });
+
+  it("classifies the live vendor shape by its weight limit, not as 'other'", () => {
+    const notice = parseRouteResponse(liveBody(LIVE_WEIGHT_NOTICE), RIG).notices[0]!;
+    expect(notice.kind).toBe("weight");
+    expect(notice.roadName).toBe("Park Row");
+    // A weight limit is not a distance, so limitMeters stays null by design —
+    // the vendor's number reaches the driver through the composed sentence.
+    expect(notice.limitMeters).toBeNull();
+    expect(notice.message).toBe("Avoids Park Row — 5,999 lb weight limit, your rig is 14,500 lb.");
+  });
+
+  it("reads a live dimensional limit out of its sibling max field", () => {
+    const notice = parseRouteResponse(
+      liveBody({
+        code: "violatedVehicleRestriction",
+        details: [
+          {
+            type: "restriction",
+            cause: "Route violates vehicle restriction: height limit of 3.35 m",
+            maxHeight: 3.35,
+          },
+        ],
+      }),
+      RIG,
+    ).notices[0]!;
+    expect(notice.kind).toBe("height");
+    expect(notice.limitMeters).toBe(3.35);
+    expect(notice.message).toBe("Avoids the Park Row tunnel — 11′0″ clearance, your rig is 11′6″.");
+  });
+
+  it("still classifies a restriction whose only clue is the prose cause", () => {
+    const notice = parseRouteResponse(
+      liveBody({
+        code: "violatedVehicleRestriction",
+        details: [{ type: "restriction", cause: "Route violates vehicle restriction: width" }],
+      }),
+      RIG,
+    ).notices[0]!;
+    expect(notice.kind).toBe("width");
+    expect(notice.limitMeters).toBeNull();
   });
 });
 

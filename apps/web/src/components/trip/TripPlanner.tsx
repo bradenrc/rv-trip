@@ -165,7 +165,15 @@ export function TripPlanner({
     if (missing.length === 0) return;
     tripApi
       .routePairs(missing.map((p) => ({ from: p.from, to: p.to })))
-      .then((fresh) => setRoutes((prev) => ({ ...prev, ...fresh })))
+      // Merge ONLY when the reply was keyed with the rig this page rendered
+      // against. Edit the rig in another tab and the server keys with the new
+      // hash — merging those would add keys nothing ever looks up, so every
+      // later reorder would re-request the same pairs forever. A mismatch
+      // means the page is stale: the estimate stands until reload.
+      .then((fresh) => {
+        if (fresh.rigHash !== rigHash) return;
+        setRoutes((prev) => ({ ...prev, ...fresh.routes }));
+      })
       .catch(() => {});
   };
 

@@ -52,7 +52,13 @@ export const tripApi = {
   /** The rig is a singleton at a fixed URL, so saving it is a PUT upsert. */
   saveRig: (input: RigProfileInput) => req(`/api/rig`, "PUT", input),
 
-  /** Route pairs the server never saw — the post-reorder upgrade. */
-  routePairs: (pairs: { from: LatLng; to: LatLng }[]): Promise<RouteMap> =>
-    req(`/api/routes`, "POST", { pairs }) as Promise<RouteMap>,
+  /**
+   * Route pairs the server never saw — the post-reorder upgrade. The reply
+   * echoes the rig hash it keyed with, so the caller can tell "these are keyed
+   * for your rig" from "the rig changed under you".
+   */
+  routePairs: (
+    pairs: { from: LatLng; to: LatLng }[],
+  ): Promise<{ rigHash: string; routes: RouteMap }> =>
+    req(`/api/routes`, "POST", { pairs }) as Promise<{ rigHash: string; routes: RouteMap }>,
 };

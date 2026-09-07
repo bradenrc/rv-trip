@@ -194,7 +194,10 @@ export const rigs = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("rigs_owner_idx").on(t.ownerId)],
+  // No owner index: `.unique()` on owner_id already gives Postgres a btree, and
+  // it is the only way this table is ever read. A second one is write cost for
+  // nothing — the other tables index owner_id because theirs is NOT unique.
+  () => [],
 );
 
 export const tripsRelations = relations(trips, ({ many }) => ({

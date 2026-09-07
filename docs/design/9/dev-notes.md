@@ -254,3 +254,155 @@ once, grant once), never that HERE accepts the request.
 Round 2 re-ran only the gate. `pnpm build`, `db:push`/`db:seed`, the browser walk of the
 Route lens and the two curl'd handlers are **from round 1** and were not repeated — no
 handler, schema or query changed this round.
+
+---
+
+# Round 3 — the walk's "page is stuck refreshing", live HERE, and the qa findings
+
+## 1. "The page is stuck refreshing" — diagnosed, not reproducible from the code
+
+**Cause: stale browser state on the walk's origin, not the app.** Evidence, all of it
+from the walk's own artifacts:
+
+- `.mc/walk/9-web.log` — the walk's dev server on `:3200` answered **every** request
+  `200` for the whole session (`GET /trips/… 200 in 40ms`, …). It never crashed, never
+  hung, never 500'd. Interleaved with those are **8 × `GET /sw.js 404`** — the browser
+  repeatedly re-fetching a **service worker script that this repo does not have**.
+  `grep -rn "serviceWorker\|sw.js\|workbox" apps packages` → no matches;
+  `apps/web/public/` holds five SVGs and nothing else.
+- The same log has zero `/sw.js` lines for the other walks: `.mc/walk/11-web.log`
+  (`:3201`) and `.mc/walk/3-web.log` (`:3199`) never see one. A service-worker
+  registration is scoped to an **origin, port included**, so this is state pinned to
+  `localhost:3200` — exactly the documented project gotcha where a served design
+  prototype registers a SW that then controls the dev app on localhost.
+- `.playwright-mcp/console-2026-09-07T21-18-25-787Z.log` — the walk browser's console
+  from the earlier run shows only `net::ERR_CONNECTION_REFUSED @ localhost:3199/api/rig`
+  ×3. Port **3199**, which the harness had already torn down: the tab was pointing at a
+  dead origin.
+- The three `⚠ Fast Refresh had to perform a full reload due to a runtime error` lines
+  in `9-web.log` bracket a `throw new Error("no degrade")` at `here.ts:67` — a mutation
+  probe someone left in the walk's worktree, not shipped code. A file edit is what
+  Fast Refresh was reloading for.
+
+**Fix is browser-side** (already in the project's memory notes), run in the page console:
+
+```js
+for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister();
+for (const n of await caches.keys()) await caches.delete(n);
+location.reload();
+```
+
+**What I verified instead of guessing.** I stood the app up in this worktree on a clean
+port (`:3111`) with the real `.env` + `apps/web/.env.local`, against the live docker
+Postgres, and drove it with a browser:
+
+- `/`, `/rig`, `/trips/<seed>` all `200`; the trip page renders in **90–900 ms**.
+- Browser console across four navigations and a save: **0 errors, 0 warnings** — only
+  the React DevTools notice and `[HMR] connected`. No reload loop, no `/sw.js` request.
+- Hammered it: 6 × (`PUT /api/rig` with a different height → full trip reload, every
+  route cache key invalidated → live HERE re-route). All `200`, 87–212 ms, server alive
+  at the end. **No crash path found.**
+
+There is no code change in this round attributable to the refresh symptom, because
+there is no code defect behind it. Flagging for the walk: **clear the service worker on
+whatever port the walk serves before judging the page.**
+
+## 2. Live HERE — and the one thing the vendor docs got wrong
+
+With the real credentials present, I exercised HERE end-to-end from this worktree for
+the first time. The grant, the truck query and the notice spans all work as designed.
+**The notice `details[]` shape does not.** Captured verbatim:
+
+```json
+{ "title": "Violated vehicle restriction.", "code": "violatedVehicleRestriction",
+  "severity": "critical",
+  "details": [ { "type": "restriction",
+                 "cause": "Route violates vehicle restriction: current weight limit of 2721 kg",
+                 "maxGrossWeight": 2721, "maxWeight": { "value": 2721, "type": "current" } } ] }
+```
+
+The parser assumed `details[0].causes[0] = { type, value }`. Live HERE sends **no
+`causes` array**: `cause` is *prose*, `type` is the useless constant `"restriction"`,
+and the limit rides in a sibling `max*` field (metres for dimensions, **kilograms** for
+weight). So `noticeKind` saw `"violatedvehiclerestriction restriction"`, matched
+nothing, and fell to `"other"` — the driver got *"Avoids Park Row — a restriction there
+affects your rig."*, the one sentence in the design that cannot be acted on.
+
+- `packages/core/src/providers/here.ts:224` — `HereDetail`, the real shape, documented
+  with the captured payload. The legacy `causes[]` form is kept alongside it; the vendor
+  is not uniform across notice types and a restriction we cannot classify is still one
+  we must show.
+- `packages/core/src/providers/here.ts:285` — new `classify()`. `max*` fields are the
+  authority when present; otherwise the prose `cause`, `detail.type`, `notice.title` and
+  the code are swept into one haystack for `noticeKind`. `limitMeters` is only ever set
+  for a dimensional kind.
+- `packages/core/src/providers/notices.ts:49` — `composeNoticeMessage` gains
+  `limitKilograms`. A weight limit is not a distance, so it never occupies
+  `RouteNotice.limitMeters` (**the §5 contract is unchanged** — no new field on
+  `RouteNotice`); it reaches the driver inside the composed sentence, which is the only
+  form in which the number means anything.
+
+Live result, same road, after the fix:
+
+> **Avoids Park Row — 5,999 lb weight limit, your rig is 79,366 lb.**
+
+**State 2 has now actually been rendered.** I temporarily repointed two seed stops at a
+restricted corridor, loaded the Route lens, and confirmed in the accessibility tree: the
+bordered drive card, the amber caption *"Navigation may not follow the RV-safe route —
+check notices."*, the notice row above, and the rail reading **"2 restrictions on this
+route"**. Both stops were restored to their exact seed coordinates afterwards and the
+test rig row deleted, so the walk starts from the designed no-rig state.
+(`docker exec rv-trip-db psql …` — verified `Astoria, OR|46.1879|-123.8313`,
+`Newport, OR|44.6365|-124.053`.)
+
+Also confirmed live in the same pass, all previously walk-only: the signed
+`client_credentials` grant + its ~24h cache, `transportMode=truck` with `vehicle[*]` in
+cm/kg, `vehicle[shippedHazardousGoods]=flammable`, `spans=notices,names`, `primaryRoad`
+(*"Mt Hood Hwy"*, *"Oregon Coast Hwy"*, *"Corvallis-Lebanon Hwy"*), and the Google
+`dir/?api=1&origin=…&destination=…&travelmode=driving` handoff with **zero** waypoints.
+The header comments at `here.ts:22` and `here.test.ts:25` are updated to say so — they
+claimed "NOT YET EXERCISED", which is no longer true.
+
+## 3. Round-2 qa findings
+
+| finding | what I did |
+| --- | --- |
+| **CN** `rig.test.ts:159` swept only 3 of the 7 hashed fields | `packages/core/src/domain/rig.test.ts:159` — the sweep is now **exhaustive by construction**: `edits` is typed `{ [K in keyof typeof rig]: RigProfileInput[K] }`, so a new hashed field cannot be added without a case. Mutation-proved with qa's own mutation (delete `widthMeters`/`lengthMeters`/`grossWeightKg` from the canonical array): was **silent**, now **3 red**. |
+| **CL** `/api/routes` recomputed the hash, so the merge could silently no-op | `apps/web/src/app/api/routes/route.ts:39` now returns `{ rigHash, routes }` and passes the hash into `routePairs`; `apps/web/src/lib/trip-api.ts:60` types it; `apps/web/src/components/trip/TripPlanner.tsx:174` merges **only** on `fresh.rigHash === rigHash`. A mismatch means the page is stale, so the honestly-labelled estimate stands until reload rather than poisoning the map with keys nothing looks up. Verified live: the returned key **ends with** the echoed hash. |
+| **CL** `rigs_owner_idx` duplicated the unique constraint's btree | `packages/db/src/schema.ts:197` — index dropped, with a comment on why this table differs from the others (theirs is a non-unique `owner_id`). The live DB never had it: `\d rigs` shows only `rigs_pkey` and `rigs_owner_id_unique`. |
+| **CN** `NavigateButton` ~29 px, under the 32 px touch target | `apps/web/src/components/trip/RouteView.tsx:272` — added `min-h-8` **only**. Type, colour and the wireframe's padding are untouched; the floor just stops the box shrinking under the target on the slice's primary action. |
+| **DD** `decodeFlexiblePolyline` / `RouteResult.polyline` unused | Kept, per the human's "leave the seam, don't build any of it here". |
+| **DD** `primaryRoad` is an addition to the §5 contract | Kept, and now **proven live** — HERE names the road on every drive I routed. Still a design call, not a qa one. |
+| **MED (vet)** rail data fidelity | Confirmed on screen this round with real data: **Length 28 days · Open 12 days · 3 gaps · Stops 4 · 4 set / 0 floating**, and the driving hero summing the connectors. These are `deriveDays`' real values, not the wireframe's copy. |
+
+## 4. For qa to check
+
+- `classify()` at `here.ts:285` is the new risk surface. Its three branches are covered
+  by `here.test.ts` and I mutation-proved each: kill the `max*` dimensional branch → 1
+  red; drop `detail.cause` from the haystack → 1 red; drop the weight limit from the
+  sentence → 1 red. Restored → **127/127**.
+- The `rigHash` echo guard in `TripPlanner.tsx:174` is **client code with no test
+  runner** (only `packages/core` has vitest). Its acceptance is the walk: edit the rig
+  in a second tab, then drag a floating stop in the first — the drive must stay on its
+  `estimate` rather than flicker or re-request forever.
+
+## Checks run — round 3
+
+| check | command | result |
+| --- | --- | --- |
+| gate | `pnpm turbo run lint typecheck test` | `Tasks: 7 successful, 7 total`; **`Tests 127 passed (127)`** |
+| live HERE routing | `curl -X POST localhost:3111/api/routes` (real creds) | `{"durationSeconds":12271,"distanceMeters":261383,"primaryRoad":"Mt Hood Hwy","source":"here"}` |
+| live HERE notice | same, Manhattan → Newark, over-weight rig | `kind=weight code=violatedVehicleRestriction road=Park Row` → *"Avoids Park Row — 5,999 lb weight limit, your rig is 79,366 lb."* |
+| `PUT /api/rig` | `curl` | `200` with `"heightMeters":3.5052,"grossWeightKg":6577.09` echoed at full precision |
+| `POST /api/routes` 400 | `curl -d '{"pairs":[]}'` | `{"error":{"fieldErrors":{"pairs":["Array must contain at least 1 element(s)"]}}}` `[400]` |
+| browser — Route lens | Playwright, `:3111` | Live drives + roads + Navigate links; **state 2 card, amber caption and rail "2 restrictions on this route"** all rendered |
+| browser — `/rig` | Playwright: Class C preset → Save | `11 ft 6 in`, `= 3.5052 m stored · sent as 351 cm`, `[pressed]` on Class C; saved `200` |
+| browser console | Playwright, 4 navigations + a save | **0 errors, 0 warnings**; no `/sw.js`, no reload loop |
+| crash hunt | 6 × rig change → full re-route | all `200` in 87–212 ms; server alive after |
+| mutation proofs | 4 targeted mutations, reverted | qa's rig-hash mutation **3 red**; the three `classify`/message mutations **1 red each** |
+
+**SKIPPED:** `pnpm build`, `pnpm db:push` and `pnpm db:seed` were **not** re-run this
+round — `db:push` is not permitted from this agent's sandbox, and no schema *column*
+changed (only a redundant index declaration was removed; `\d rigs` confirms the live
+table already matches). The last full `build` + `db:push`/`db:seed` evidence is round 1's,
+above.

@@ -10,7 +10,7 @@ import {
   type RouteResult,
   type RoutingProvider,
 } from "./index";
-import { composeNoticeMessage, noticeKind } from "./notices";
+import { composeNoticeMessage, noticeKind, type NoticeKind } from "./notices";
 
 /**
  * HERE truck routing — SERVER SIDE ONLY.
@@ -19,12 +19,15 @@ import { composeNoticeMessage, noticeKind } from "./notices";
  * credentials and `fetch`, and must never be pulled into a client bundle.
  * Import it by its subpath (`@rv-trip/core/providers/here`) from server code.
  *
- * NOT YET EXERCISED AGAINST LIVE HERE from this worktree — the token grant, the
- * truck query, the `shippedHazardousGoods` enum value and the notice codes are
- * all shaped from the vendor docs and remain unproven until the walk. That is
- * exactly why every failure path here degrades to `estimateRoute` and renders
- * as the neutral "estimate" state rather than surfacing an error: a trip you
- * cannot open is worse than a drive time you cannot trust.
+ * EXERCISED AGAINST LIVE HERE on 2026-09-07: the signed `client_credentials`
+ * grant, `transportMode=truck` with `vehicle[*]` in cm/kg,
+ * `shippedHazardousGoods=flammable`, `spans=notices,names`, and a real
+ * `violatedVehicleRestriction` notice all round-trip. The notice DETAIL shape
+ * was the one thing the docs got wrong for us — see `HereDetail` below.
+ *
+ * Every failure path still degrades to `estimateRoute` and renders as the
+ * neutral "estimate" state rather than surfacing an error: a trip you cannot
+ * open is worse than a drive time you cannot trust.
  */
 
 const ROUTES_URL = "https://router.hereapi.com/v8/routes";
@@ -205,10 +208,32 @@ interface HereCause {
   /** The road's limit, in metres, when the vendor states one. */
   value?: number;
 }
+/**
+ * A notice detail as HERE actually sends it (captured live 2026-09-07,
+ * Manhattan → Newark, an over-height/over-weight rig):
+ *
+ *   { type: "restriction",
+ *     cause: "Route violates vehicle restriction: current weight limit of 2721 kg",
+ *     maxGrossWeight: 2721, maxWeight: { value: 2721, type: "current" } }
+ *
+ * So `cause` is PROSE, not a code, and the limit rides in a sibling `max*`
+ * field — dimensions in metres, weights in kilograms. The nested `causes[]`
+ * form is kept alongside it because the vendor is not uniform across notice
+ * types, and a restriction we fail to classify is still one we must show.
+ */
+interface HereDetail extends HereCause {
+  cause?: string;
+  causes?: HereCause[];
+  maxHeight?: number;
+  maxWidth?: number;
+  maxLength?: number;
+  maxGrossWeight?: number;
+  maxWeight?: { value?: number };
+}
 interface HereNotice {
   code?: string;
   title?: string;
-  details?: (HereCause & { causes?: HereCause[] })[];
+  details?: HereDetail[];
 }
 interface HereSection {
   summary?: { duration?: number; length?: number };
@@ -248,22 +273,51 @@ export function parseRouteResponse(body: unknown, rig: RigProfileInput | null): 
   };
 }
 
+/**
+ * Which dimension the notice is about, and the vendor's limit for it.
+ *
+ * The `max*` fields are the authority when present — they are typed numbers,
+ * and they say what the prose only implies. Everything else (the legacy
+ * `causes[]` form, the prose `cause`, the notice title, the code itself) is
+ * swept into one haystack for `noticeKind`, so an unrecognised shape still
+ * lands on a dimension when the vendor named one anywhere.
+ */
+function classify(notice: HereNotice, detail: HereDetail | undefined) {
+  const nested = detail?.causes?.[0];
+  const dimensional: [NoticeKind, number | undefined][] = [
+    ["height", detail?.maxHeight],
+    ["width", detail?.maxWidth],
+    ["length", detail?.maxLength],
+  ];
+  for (const [kind, meters] of dimensional) {
+    if (typeof meters === "number") return { kind, limitMeters: meters, limitKilograms: null };
+  }
+  const kg = detail?.maxGrossWeight ?? detail?.maxWeight?.value;
+  if (typeof kg === "number") return { kind: "weight" as const, limitMeters: null, limitKilograms: kg };
+
+  const haystack = [nested?.type, nested?.code, detail?.cause, detail?.type, notice.title]
+    .filter((v): v is string => typeof v === "string")
+    .join(" ");
+  const kind = noticeKind(notice.code ?? "", haystack || null);
+  // The legacy nested form is the only one that carries a bare metre value.
+  const value = typeof nested?.value === "number" ? nested.value : null;
+  const isDimension = kind === "height" || kind === "width" || kind === "length";
+  return { kind, limitMeters: isDimension ? value : null, limitKilograms: null };
+}
+
 function toRouteNotice(
   notice: HereNotice,
   roadName: string | null,
   rig: RigProfileInput | null,
 ): RouteNotice {
   const code = notice.code ?? "unknownRestriction";
-  const detail = notice.details?.[0];
-  const cause = detail?.causes?.[0] ?? detail;
-  const kind = noticeKind(code, cause?.type ?? cause?.code ?? notice.title ?? null);
-  const limitMeters = typeof cause?.value === "number" ? cause.value : null;
+  const { kind, limitMeters, limitKilograms } = classify(notice, notice.details?.[0]);
   return {
     code,
     kind,
     roadName,
     limitMeters,
-    message: composeNoticeMessage({ kind, roadName, limitMeters, rig }),
+    message: composeNoticeMessage({ kind, roadName, limitMeters, limitKilograms, rig }),
   };
 }
 

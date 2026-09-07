@@ -257,13 +257,19 @@ function EstimateChip() {
   );
 }
 
+/**
+ * The slice's primary action, and one you press at a fuel stop with the engine
+ * running — so it carries a 32px floor (`min-h-8`) on top of the design's
+ * padding. Type, colour and padding are the wireframe's; the floor only stops
+ * the box shrinking under the touch target.
+ */
 function NavigateButton({ href, className }: { href: string; className: string }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noreferrer"
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-rv-md bg-rv-ember px-3 py-[5px] text-[13px] font-bold text-rv-navy no-underline shadow-rv-sm ${className}`}
+      className={`inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-rv-md bg-rv-ember px-3 py-[5px] text-[13px] font-bold text-rv-navy no-underline shadow-rv-sm ${className}`}
     >
       <Navigation className="size-3.5" />
       Navigate

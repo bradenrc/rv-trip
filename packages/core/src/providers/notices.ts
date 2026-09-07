@@ -40,9 +40,16 @@ export function composeNoticeMessage(input: {
   kind: NoticeKind;
   roadName: string | null;
   limitMeters: number | null;
+  /**
+   * The road's weight limit, in kilograms. A weight limit is not a distance, so
+   * it never occupies `RouteNotice.limitMeters` — it reaches the driver here,
+   * in the same sentence as their own weight, which is the only form in which
+   * the number means anything.
+   */
+  limitKilograms?: number | null;
   rig: RigProfileInput | null;
 }): string {
-  const { kind, roadName, limitMeters, rig } = input;
+  const { kind, roadName, limitMeters, limitKilograms, rig } = input;
   const road = roadName ?? "this road";
 
   if (kind === "propane") {
@@ -50,10 +57,15 @@ export function composeNoticeMessage(input: {
   }
 
   const yours = rigDimension(kind, rig);
-  // `limitMeters` is a distance, so it can only describe a dimensional limit.
-  // A weight limit arrives without one and takes the shorter sentence below.
+  // `limitMeters` is a distance, so it can only describe a dimensional limit;
+  // a weight limit arrives in kilograms and is set in pounds instead.
   const dimensional = kind === "height" || kind === "width" || kind === "length";
-  const limit = dimensional && limitMeters != null ? formatFeetInches(limitMeters) : null;
+  const limit =
+    dimensional && limitMeters != null
+      ? formatFeetInches(limitMeters)
+      : kind === "weight" && limitKilograms != null
+        ? formatPounds(limitKilograms)
+        : null;
 
   if (kind === "height" && limit && yours) {
     return `Avoids the ${road} tunnel — ${limit} clearance, your rig is ${yours}.`;
