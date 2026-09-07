@@ -3,6 +3,7 @@ export { money } from "./format";
 export { Stars } from "./Stars";
 export { CategoryTile } from "./CategoryTile";
 export { FloatingTag } from "./FloatingTag";
+export { RouteNotice } from "./RouteNotice";
 export { StatusPill } from "./StatusPill";
 export { StatusMarker } from "./StatusMarker";
 export { FieldLabel } from "./FieldLabel";

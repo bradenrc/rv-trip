@@ -1,4 +1,11 @@
-import type { ReservationType, IdeaStatus, IsoDate } from "@rv-trip/core";
+import type {
+  ReservationType,
+  IdeaStatus,
+  IsoDate,
+  LatLng,
+  RigProfileInput,
+} from "@rv-trip/core";
+import type { RouteMap } from "./trip-logic";
 
 async function req(url: string, method: string, body?: unknown) {
   const res = await fetch(url, {
@@ -41,4 +48,11 @@ export const tripApi = {
 
   reorderLeg: (legId: string, order: string[]) =>
     req(`/api/legs/${legId}/reorder`, "POST", { order }),
+
+  /** The rig is a singleton at a fixed URL, so saving it is a PUT upsert. */
+  saveRig: (input: RigProfileInput) => req(`/api/rig`, "PUT", input),
+
+  /** Route pairs the server never saw — the post-reorder upgrade. */
+  routePairs: (pairs: { from: LatLng; to: LatLng }[]): Promise<RouteMap> =>
+    req(`/api/routes`, "POST", { pairs }) as Promise<RouteMap>,
 };

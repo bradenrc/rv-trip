@@ -1,7 +1,14 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "./index";
-import { legs, stops, ideas, reservations, trips } from "./schema";
-import type { ReservationType, IdeaStatus, IsoDate } from "@rv-trip/core";
+import { legs, stops, ideas, reservations, trips, rigs } from "./schema";
+import type {
+  ReservationType,
+  IdeaStatus,
+  IsoDate,
+  RigProfile,
+  RigProfileInput,
+} from "@rv-trip/core";
+import { mapRigRow } from "./queries";
 
 /**
  * Owner-scoped writes. Every mutation is constrained to resources belonging to
@@ -121,4 +128,33 @@ export async function reorderLegStops(
         .where(and(eq(stops.id, order[i]!), eq(stops.legId, legId)));
     }
   });
+}
+
+/**
+ * Save the account's one rig — insert on a first save, update thereafter. The
+ * unique constraint on rigs.owner_id is what makes this a single statement, so
+ * two concurrent saves cannot create two rigs for one account.
+ *
+ * Dimensions arrive metric at millimetre precision and are written verbatim;
+ * rounding UP to whole centimetres happens at the vendor boundary only.
+ */
+export async function upsertRig(owner: string, input: RigProfileInput): Promise<RigProfile> {
+  const values = {
+    name: input.name,
+    type: input.type,
+    heightMeters: String(input.heightMeters),
+    widthMeters: String(input.widthMeters),
+    lengthMeters: String(input.lengthMeters),
+    grossWeightKg: String(input.grossWeightKg),
+    propaneOnBoard: input.propaneOnBoard,
+  };
+  const [row] = await db
+    .insert(rigs)
+    .values({ ownerId: owner, ...values })
+    .onConflictDoUpdate({
+      target: rigs.ownerId,
+      set: { ...values, updatedAt: new Date() },
+    })
+    .returning();
+  return mapRigRow(row!);
 }
