@@ -52,6 +52,11 @@ that matter most:
   `gh issue create` with evidence for triage; do not act on the inference.
 - **Honest reporting.** Relay worker reports verbatim; a claimed check that
   could not have run is itself an observe→file event.
+- **Asked to do something outside the seat → confirm scope, never switch
+  lanes.** "Fix the issue" from the operator is ambiguous (the GitHub bug vs
+  the stuck instance — a btrip runner heard the former, patched ENGINE code
+  and self-merged, skipping the review loop). Ask one clarifying question.
+  Engine (mc-dev) code and merges are NEVER this seat's lane.
 
 ## 2 · Ensure the daemon (this serves the glass too)
 
