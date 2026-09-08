@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Trip, Stop } from "../domain/types";
+import type { Leg, Trip, Stop } from "../domain/types";
 import { routeCacheKey } from "../domain/route-order";
 import type { RouteResult } from "../providers/index";
 import {
@@ -10,6 +10,18 @@ import {
   reorderFloating,
   cycleIdeaStatus,
   setStopRating,
+  allStops,
+  appendLeg,
+  appendStop,
+  canMoveLeg,
+  legOrder,
+  moveLeg,
+  moveStopToLeg,
+  removeLeg,
+  removeStop,
+  renameLeg,
+  renameStop,
+  setStopDates,
   dateRange,
   fullRange,
   addDays,
@@ -312,5 +324,116 @@ describe("dates", () => {
   it("adds days across a month boundary in UTC", () => {
     expect(addDays("2026-08-31", 1)).toBe("2026-09-01");
     expect(addDays("2026-03-08", 1)).toBe("2026-03-09"); // a DST Sunday in the US; plain dates don't care
+  });
+});
+
+/**
+ * The leg + stop structure mutations behind the planner's row menus. Creates
+ * are NOT optimistic — the server mints the id and hands the row back — so the
+ * two "append" helpers take a real row; everything else is optimistic and its
+ * caller holds the pre-change trip as the rollback snapshot.
+ */
+describe("leg and stop structure mutations", () => {
+  const newLeg = (id: string, sortOrder: number): Leg => ({
+    id,
+    tripId: "t",
+    title: id,
+    sortOrder,
+    stops: [],
+  });
+
+  it("appendLeg splices the created leg in at the end", () => {
+    const next = appendLeg(fixture(), newLeg("C", 2));
+    expect(next.legs.map((l) => l.id)).toEqual(["A", "B", "C"]);
+  });
+
+  it("appendStop splices the created stop into its own leg, and nowhere else", () => {
+    const created = stop({ id: "S6", legId: "A", sortOrder: 2 });
+    const next = appendStop(fixture(), created);
+    expect(next.legs[0]!.stops.map((s) => s.id)).toEqual(["S1", "S2", "S6"]);
+    expect(next.legs[1]!.stops).toHaveLength(3);
+  });
+
+  it("renameLeg / renameStop rewrite exactly one title", () => {
+    const next = renameStop(renameLeg(fixture(), "B", "Cascades"), "S3", "Bend, OR");
+    expect(next.legs[1]!.title).toBe("Cascades");
+    expect(next.legs[1]!.stops[0]!.place.name).toBe("Bend, OR");
+    // the coordinates are NOT the rename's business
+    expect(next.legs[1]!.stops[0]!.place.lat).toBe(44.05);
+  });
+
+  it("removeLeg takes its stops with it, the way the DB cascade does", () => {
+    const next = removeLeg(fixture(), "A");
+    expect(next.legs.map((l) => l.id)).toEqual(["B"]);
+    expect(allStops(next).map((s) => s.id)).toEqual(["S3", "S4", "S5"]);
+  });
+
+  it("removeStop takes one stop and leaves the leg", () => {
+    const next = removeStop(fixture(), "S4");
+    expect(next.legs[1]!.stops.map((s) => s.id)).toEqual(["S3", "S5"]);
+  });
+
+  it("legOrder is the whole new order the reorder POST sends", () => {
+    expect(legOrder(fixture())).toEqual(["A", "B"]);
+    expect(legOrder(moveLeg(fixture(), "B", -1))).toEqual(["B", "A"]);
+  });
+
+  it("moveLeg renumbers so two legs can never share a sortOrder", () => {
+    // Array position is left alone and sortOrder is rewritten — the same
+    // convention reorderFloating follows, and what routeModel sorts on.
+    const next = moveLeg(fixture(), "A", 1);
+    expect(next.legs.map((l) => [l.id, l.sortOrder])).toEqual([
+      ["A", 1],
+      ["B", 0],
+    ]);
+  });
+
+  it("moveLeg off either end is a no-op — the menu item is disabled there", () => {
+    const t = fixture();
+    expect(moveLeg(t, "A", -1)).toBe(t);
+    expect(moveLeg(t, "B", 1)).toBe(t);
+    expect(canMoveLeg(t, "A", -1)).toBe(false);
+    expect(canMoveLeg(t, "A", 1)).toBe(true);
+    expect(canMoveLeg(t, "B", 1)).toBe(false);
+  });
+
+  it("moveStopToLeg re-parents the stop and appends it to the destination", () => {
+    const next = moveStopToLeg(fixture(), "S1", "B");
+    expect(next.legs[0]!.stops.map((s) => s.id)).toEqual(["S2"]);
+    expect(next.legs[1]!.stops.map((s) => s.id)).toEqual(["S3", "S4", "S5", "S1"]);
+    const moved = next.legs[1]!.stops.at(-1)!;
+    expect(moved.legId).toBe("B");
+    // appended past the highest sortOrder in the destination (S5 is 2)
+    expect(moved.sortOrder).toBe(3);
+  });
+
+  it("moveStopToLeg into the leg it is already in changes nothing", () => {
+    const t = fixture();
+    expect(moveStopToLeg(t, "S1", "A")).toBe(t);
+  });
+
+  it("setStopDates schedules, and both-null unschedules back to floating", () => {
+    const scheduled = setStopDates(fixture(), "S4", "2026-08-12", "2026-08-14");
+    const s4 = scheduled.legs[1]!.stops.find((s) => s.id === "S4")!;
+    expect([s4.arriveDate, s4.departDate]).toEqual(["2026-08-12", "2026-08-14"]);
+
+    const floating = setStopDates(fixture(), "S1", null, null);
+    const s1 = floating.legs[0]!.stops.find((s) => s.id === "S1")!;
+    expect([s1.arriveDate, s1.departDate]).toEqual([null, null]);
+  });
+
+  it("none of them mutates its input", () => {
+    const t = fixture();
+    const before = JSON.stringify(t);
+    appendLeg(t, newLeg("C", 2));
+    appendStop(t, stop({ id: "S6", legId: "A", sortOrder: 2 }));
+    renameLeg(t, "A", "x");
+    renameStop(t, "S1", "x");
+    removeLeg(t, "A");
+    removeStop(t, "S1");
+    moveLeg(t, "A", 1);
+    moveStopToLeg(t, "S1", "B");
+    setStopDates(t, "S1", null, null);
+    expect(JSON.stringify(t)).toBe(before);
   });
 });

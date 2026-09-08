@@ -3,18 +3,36 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import type { Trip, Reservation, ReservationType, TripSettingsDraft } from "@rv-trip/core";
+import type {
+  CascadeCounts,
+  Reservation,
+  ReservationType,
+  Stop,
+  StopDatesDraft,
+  Trip,
+  TripDateRange,
+  TripSettingsDraft,
+} from "@rv-trip/core";
 import {
   cascadeLossSentence,
   isScheduled,
+  legCascadeCounts,
+  nextLegTitle,
   orderedPairs,
   orphanedStopsMessage,
   routeCacheKey,
+  stopCascadeCounts,
+  stopDatesDraft,
+  stopDatesOutsideTrip,
+  stopDatesHelp,
+  stopDatesPatch,
+  stopOutsideTripMessage,
   stopsOutsideRange,
   tripCascadeCounts,
   tripDayCount,
   tripSettingsDraft,
   tripSettingsPatch,
+  unscheduleStopPatch,
 } from "@rv-trip/core";
 import { FieldLabel, Stars } from "@rv-trip/ui";
 import {
@@ -29,6 +47,17 @@ import {
 } from "lucide-react";
 import {
   allStops,
+  appendLeg,
+  appendStop,
+  canMoveLeg,
+  legOrder,
+  moveLeg,
+  moveStopToLeg,
+  removeLeg,
+  removeStop,
+  renameLeg,
+  renameStop,
+  setStopDates,
   timelineModel,
   routeModel,
   routeSummary,
@@ -79,6 +108,13 @@ import { Timeline } from "./Timeline";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
 
+/**
+ * The name a just-created stop carries until you type over it. "Add stop" opens
+ * that rename focused, so the placeholder is what you see for one keystroke —
+ * not a name anyone has to live with. The place picker (#23) replaces this.
+ */
+const NEW_STOP_NAME = "New stop";
+
 export interface AddForm {
   type: ReservationType;
   name: string;
@@ -123,6 +159,12 @@ export function TripPlanner({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /** The leg or stop whose inline rename is open — set by the row menu's
+   * "Rename" and by a create, so a new row lands ready to be named. */
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [datesStopId, setDatesStopId] = useState<string | null>(null);
+  const [deleteLegId, setDeleteLegId] = useState<string | null>(null);
+  const [deleteStopId, setDeleteStopId] = useState<string | null>(null);
   const [form, setForm] = useState<AddForm>({
     type: "campground",
     name: "",
@@ -190,6 +232,11 @@ export function TripPlanner({
   const selectedLegName = selectedStop
     ? (trip.legs.find((l) => l.id === selectedStop.legId)?.title ?? "")
     : "";
+  // The three row-menu surfaces read their subject off the tree rather than
+  // snapshotting it, so a rollback under an open dialog corrects what it shows.
+  const deleteLeg = deleteLegId ? (trip.legs.find((l) => l.id === deleteLegId) ?? null) : null;
+  const deleteStop = deleteStopId ? (byId.get(deleteStopId) ?? null) : null;
+  const datesStop = datesStopId ? (byId.get(datesStopId) ?? null) : null;
 
   const openStop = (id: string) => {
     setSelectedId(id);
@@ -224,6 +271,161 @@ export function TripPlanner({
         `Couldn't schedule ${s.place.name} — put back to floating.`,
       );
     }
+  };
+
+  // ── legs ─────────────────────────────────────────────────────────────────
+  //
+  // A CREATE is the one write with nothing to be optimistic about — only the
+  // server can mint the id — so it awaits the 201 and splices the row it hands
+  // back. Everything else applies to the tree first and hands persist() the
+  // trip it was applied to, which is what a failure puts back.
+
+  const addLeg = async () => {
+    try {
+      const leg = await tripApi.createLeg({ tripId: trip.id, title: nextLegTitle(trip) });
+      setTrip((t) => appendLeg(t, leg));
+      setLens("route");
+      setRenamingId(leg.id);
+    } catch {
+      toast.error("Couldn't add a leg — nothing was created.");
+    }
+  };
+
+  const doRenameLeg = (legId: string, title: string) => {
+    const undo = trip;
+    const was = trip.legs.find((l) => l.id === legId)?.title ?? "that leg";
+    setTrip(renameLeg(trip, legId, title));
+    persist(
+      tripApi.updateLeg(legId, { title }),
+      undo,
+      `Couldn't rename ${was} — the old name is back.`,
+    );
+  };
+
+  /** "Move leg up/down" — the whole new order travels, never a swap. */
+  const doMoveLeg = (legId: string, delta: -1 | 1) => {
+    const undo = trip;
+    const next = moveLeg(trip, legId, delta);
+    if (next === undo) return;
+    setTrip(next);
+    upgradeRoutes(next);
+    persist(
+      tripApi.reorderLegs(trip.id, legOrder(next)),
+      undo,
+      "Couldn't save that order — put back the way it was.",
+    );
+  };
+
+  const doDeleteLeg = (legId: string) => {
+    setDeleteLegId(null);
+    const leg = trip.legs.find((l) => l.id === legId);
+    if (!leg) return;
+    const undo = trip;
+    // The sheet cannot outlive the stop it is showing.
+    if (leg.stops.some((s) => s.id === selectedId)) closeStop();
+    setTrip(removeLeg(trip, legId));
+    persist(
+      tripApi.deleteLeg(legId),
+      undo,
+      `Couldn't delete ${leg.title} — the leg and its stops are back.`,
+    );
+  };
+
+  // ── stops ────────────────────────────────────────────────────────────────
+
+  /** Born floating and unnamed, with its inline rename already open — the
+   * place picker (#23) is what will eventually fill the name in for you. */
+  const addStop = async (legId: string) => {
+    try {
+      const created = await tripApi.createStop({
+        legId,
+        place: { name: NEW_STOP_NAME, lat: null, lng: null, googlePlaceId: null },
+        arriveDate: null,
+        departDate: null,
+      });
+      setTrip((t) => appendStop(t, created));
+      setLens("route");
+      setRenamingId(created.id);
+    } catch {
+      toast.error("Couldn't add a stop — nothing was created.");
+    }
+  };
+
+  const doRenameStop = (stopId: string, name: string) => {
+    const undo = trip;
+    const was = byId.get(stopId)?.place.name ?? "that stop";
+    setTrip(renameStop(trip, stopId, name));
+    persist(
+      tripApi.updateStop(stopId, { placeName: name }),
+      undo,
+      `Couldn't rename ${was} — the old name is back.`,
+    );
+  };
+
+  /** The stop-dates dialog's Save. Both dates travel together. */
+  const saveStopDates = (stopId: string, draft: StopDatesDraft) => {
+    setDatesStopId(null);
+    const stop = byId.get(stopId);
+    if (!stop) return;
+    const patch = stopDatesPatch(stop, draft);
+    if (patch === null || Object.keys(patch).length === 0) return;
+    const undo = trip;
+    const next = setStopDates(trip, stopId, patch.arriveDate ?? null, patch.departDate ?? null);
+    setTrip(next);
+    upgradeRoutes(next);
+    persist(
+      tripApi.updateStop(stopId, patch),
+      undo,
+      `Couldn't save those dates — ${stop.place.name} is back where it was.`,
+    );
+  };
+
+  /** One PATCH setting BOTH dates to null: the stop drops back to floating. */
+  const doUnschedule = (stopId: string) => {
+    setDatesStopId(null);
+    const stop = byId.get(stopId);
+    if (!stop || !isScheduled(stop)) return;
+    const undo = trip;
+    const next = setStopDates(trip, stopId, null, null);
+    setTrip(next);
+    upgradeRoutes(next);
+    persist(
+      tripApi.updateStop(stopId, unscheduleStopPatch()),
+      undo,
+      `Couldn't unschedule ${stop.place.name} — the dates are back.`,
+    );
+  };
+
+  const doMoveStopToLeg = (stopId: string, legId: string) => {
+    const undo = trip;
+    const next = moveStopToLeg(trip, stopId, legId);
+    if (next === undo) return;
+    const moved = stopMap(next).get(stopId);
+    if (!moved) return;
+    setTrip(next);
+    upgradeRoutes(next);
+    persist(
+      // The destination leg AND the position it was appended at — the server
+      // appends too, but only the client knows the row is going to the end of
+      // a leg it is already holding.
+      tripApi.updateStop(stopId, { legId, sortOrder: moved.sortOrder }),
+      undo,
+      `Couldn't move ${moved.place.name} — it's back in the leg it came from.`,
+    );
+  };
+
+  const doDeleteStop = (stopId: string) => {
+    setDeleteStopId(null);
+    const stop = byId.get(stopId);
+    if (!stop) return;
+    const undo = trip;
+    if (selectedId === stopId) closeStop();
+    setTrip(removeStop(trip, stopId));
+    persist(
+      tripApi.deleteStop(stopId),
+      undo,
+      `Couldn't delete ${stop.place.name} — the stop is back.`,
+    );
   };
 
   /** The masthead's inline title. */
@@ -396,9 +598,17 @@ export function TripPlanner({
               </ToggleTab>
             </div>
             <CostSwitch checked={costTracking} onChange={changeCostTracking} />
+            {/* The masthead has no leg in hand, so it appends to the LAST one —
+                the same "goes on the end" rule every create here follows. A
+                trip always has a leg: createTrip seeds "Leg 1". */}
             <button
               type="button"
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-ember px-4 py-[9px] text-[14px] font-semibold text-rv-navy"
+              onClick={() => {
+                const legId = legOrder(trip).at(-1);
+                if (legId) void addStop(legId);
+              }}
+              disabled={trip.legs.length === 0}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-ember px-4 py-[9px] text-[14px] font-semibold text-rv-navy disabled:cursor-default disabled:opacity-45"
             >
               <Plus className="size-4" />
               Add stop
@@ -416,6 +626,22 @@ export function TripPlanner({
             hasRig={hasRig}
             onOpenStop={openStop}
             routeDrag={routeDrag}
+            actions={{
+              renamingId,
+              onStartRename: setRenamingId,
+              onRenameDone: () => setRenamingId(null),
+              onRenameLeg: doRenameLeg,
+              onAddStop: (legId) => void addStop(legId),
+              onAddLeg: () => void addLeg(),
+              onMoveLeg: doMoveLeg,
+              canMoveLeg: (legId, delta) => canMoveLeg(trip, legId, delta),
+              onDeleteLeg: setDeleteLegId,
+              onRenameStop: doRenameStop,
+              onEditStopDates: setDatesStopId,
+              onUnscheduleStop: doUnschedule,
+              onMoveStopToLeg: doMoveStopToLeg,
+              onDeleteStop: setDeleteStopId,
+            }}
             onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
             onRowDragEnd={() => setRouteDrag(null)}
             onRowDrop={(legId, targetId) => {
@@ -562,15 +788,55 @@ export function TripPlanner({
         }}
       />
 
-      <DeleteTripConfirm
-        trip={trip}
+      <CascadeDeleteConfirm
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+        title={`Delete “${trip.title}”?`}
+        counts={tripCascadeCounts(trip)}
+        action="Delete trip"
         onConfirm={deleteTrip}
+      />
+
+      {/* The two cascading deletes the route lens adds. Both count off the tree
+          the client is already holding, so the sentence is real before the
+          dialog opens. A reservation or an idea is a LEAF and gets no dialog
+          at all — that is the undo toast in i6. */}
+      {deleteLeg && (
+        <CascadeDeleteConfirm
+          open
+          onOpenChange={(open) => !open && setDeleteLegId(null)}
+          title={`Delete “${deleteLeg.title}”?`}
+          counts={legCascadeCounts(deleteLeg)}
+          action="Delete leg"
+          onConfirm={() => doDeleteLeg(deleteLeg.id)}
+        />
+      )}
+
+      {deleteStop && (
+        <CascadeDeleteConfirm
+          open
+          onOpenChange={(open) => !open && setDeleteStopId(null)}
+          title={`Delete “${deleteStop.place.name}”?`}
+          counts={stopCascadeCounts(deleteStop)}
+          action="Delete stop"
+          onConfirm={() => doDeleteStop(deleteStop.id)}
+        />
+      )}
+
+      <StopDatesDialog
+        stop={datesStop}
+        legName={datesStop ? (trip.legs.find((l) => l.id === datesStop.legId)?.title ?? "") : ""}
+        range={{ startDate: trip.startDate, endDate: trip.endDate }}
+        onOpenChange={(open) => !open && setDatesStopId(null)}
+        onSave={saveStopDates}
+        onUnschedule={doUnschedule}
       />
     </div>
   );
 }
+
+/** The stop the row menu's "Edit dates…" is open over. */
+
 
 /** A dialog field's chrome — the app's one input skin, in the dialog's palette. */
 const FIELD =
@@ -761,20 +1027,28 @@ function TripSettingsFields({
 }
 
 /**
- * The cascading delete's confirm. It names the loss with real counts — the
- * client holds the whole tree — and never asks "are you sure?". No destructive
- * variant: the action is the CTA colour (ember) because it is the thing you
- * came to do, and the loss is carried by the attention colour (amber).
+ * A cascading delete's confirm — trip, leg and stop all use THIS one, because
+ * they are the same sentence with a different subject. It names the loss with
+ * real counts (the client holds the whole tree) and never asks "are you
+ * sure?". No destructive variant: the action is the CTA colour (ember) because
+ * it is the thing you came to do, and the loss is carried by the attention
+ * colour (amber). A leaf — a reservation, an idea — never reaches here.
  */
-function DeleteTripConfirm({
-  trip,
+function CascadeDeleteConfirm({
   open,
   onOpenChange,
+  title,
+  counts,
+  action,
   onConfirm,
 }: {
-  trip: Trip;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** “Delete “Oregon Coast”?” — the question, already quoted */
+  title: string;
+  counts: CascadeCounts;
+  /** the confirm button's verb: "Delete trip" · "Delete leg" · "Delete stop" */
+  action: string;
   onConfirm: () => void;
 }) {
   return (
@@ -782,10 +1056,10 @@ function DeleteTripConfirm({
       <AlertDialogContent className="gap-0 rounded-rv-card border border-rv-border-hi bg-rv-surface p-[18px] px-5 text-rv-ink shadow-rv-xl sm:max-w-[470px]">
         <AlertDialogHeader className="gap-1.5 place-items-start text-left sm:place-items-start sm:text-left">
           <AlertDialogTitle className="text-[17px] font-extrabold text-rv-ink">
-            Delete “{trip.title}”?
+            {title}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-[13px] text-rv-warning">
-            {cascadeLossSentence(tripCascadeCounts(trip))}
+            {cascadeLossSentence(counts)}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter className="mx-0 mb-0 mt-[15px] flex-row justify-start gap-[9px] border-t-0 bg-transparent p-0 sm:justify-start">
@@ -796,11 +1070,155 @@ function DeleteTripConfirm({
             onClick={onConfirm}
             className="h-auto cursor-pointer rounded-rv-md border-none bg-rv-ember px-3.5 py-[7px] text-[12.5px] font-bold text-rv-navy"
           >
-            Delete trip
+            {action}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+/**
+ * The stop-dates dialog — the second of the epic's two dialogs, and the medium
+ * weight for a stop. Native `<input type="date">`: the app ships no date
+ * picker. Unschedule sits in the footer as well as in the row menu, because
+ * "these dates are wrong" and "this has no dates" are the same thought here.
+ *
+ * Mounted only while a stop is open so the draft is re-seeded on every open —
+ * that is what makes Cancel really discard (Radix keeps the component mounted
+ * and only portals its content).
+ */
+function StopDatesDialog({
+  stop,
+  legName,
+  range,
+  onOpenChange,
+  onSave,
+  onUnschedule,
+}: {
+  stop: Stop | null;
+  legName: string;
+  range: TripDateRange;
+  onOpenChange: (open: boolean) => void;
+  onSave: (stopId: string, draft: StopDatesDraft) => void;
+  onUnschedule: (stopId: string) => void;
+}) {
+  return (
+    <Dialog open={stop !== null} onOpenChange={onOpenChange}>
+      {stop && (
+        <StopDatesFields
+          stop={stop}
+          legName={legName}
+          range={range}
+          onCancel={() => onOpenChange(false)}
+          onSave={onSave}
+          onUnschedule={onUnschedule}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+function StopDatesFields({
+  stop,
+  legName,
+  range,
+  onCancel,
+  onSave,
+  onUnschedule,
+}: {
+  stop: Stop;
+  legName: string;
+  range: TripDateRange;
+  onCancel: () => void;
+  onSave: (stopId: string, draft: StopDatesDraft) => void;
+  onUnschedule: (stopId: string) => void;
+}) {
+  const [draft, setDraft] = useState<StopDatesDraft>(() => stopDatesDraft(stop));
+  const set = (patch: Partial<StopDatesDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const help = stopDatesHelp(draft);
+  const patch = stopDatesPatch(stop, draft);
+  // Refused, not clamped — the mirror of the trip-side rule, and of the
+  // handler's own 409. deriveDays clamps to the trip window, so a stop dated
+  // outside it would sit in the database and nowhere on the calendar. Said
+  // here, in the server's exact sentence, before the write ever leaves.
+  const outside =
+    patch !== null &&
+    stopDatesOutsideTrip(range, {
+      arriveDate: draft.arriveDate,
+      departDate: draft.departDate,
+    });
+
+  return (
+    <DialogContent className="gap-0 rounded-rv-card border border-rv-border-hi bg-rv-surface p-[18px] px-5 text-rv-ink shadow-rv-xl sm:max-w-[470px]">
+      <DialogHeader className="gap-1.5">
+        <DialogTitle className="text-[17px] font-extrabold text-rv-ink">
+          Dates for {stop.place.name}
+        </DialogTitle>
+        <DialogDescription className="text-[11.5px] text-rv-ink-faded">{legName}</DialogDescription>
+      </DialogHeader>
+
+      <div className="mt-3 flex flex-col gap-2.5">
+        <div className="flex gap-2.5">
+          <div className="flex flex-1 flex-col gap-1">
+            <FieldLabel>Arrive</FieldLabel>
+            <Input
+              type="date"
+              value={draft.arriveDate}
+              onChange={(e) => set({ arriveDate: e.target.value })}
+              className={FIELD_MONO}
+            />
+          </div>
+          <div className="flex flex-1 flex-col gap-1">
+            <FieldLabel>Depart</FieldLabel>
+            <Input
+              type="date"
+              value={draft.departDate}
+              onChange={(e) => set({ departDate: e.target.value })}
+              className={FIELD_MONO}
+            />
+          </div>
+        </div>
+        {help ? (
+          <span className="text-[11.5px] text-rv-ink-faded">{help}</span>
+        ) : (
+          <p className="m-0 rounded-rv-md bg-rv-warning-soft px-[11px] py-[9px] text-[12.5px] text-rv-warning">
+            Pick an arrival and a departure — the departure can’t come first.
+          </p>
+        )}
+        {outside && (
+          <p className="m-0 rounded-rv-md bg-rv-warning-soft px-[11px] py-[9px] text-[12.5px] text-rv-warning">
+            {stopOutsideTripMessage(range, draft.arriveDate, draft.departDate)}
+          </p>
+        )}
+      </div>
+
+      <div className="mt-[15px] flex items-center gap-[9px]">
+        <button
+          type="button"
+          onClick={() => onSave(stop.id, draft)}
+          disabled={patch === null || outside}
+          className="cursor-pointer rounded-rv-md border-none bg-rv-ember px-3.5 py-[7px] text-[12.5px] font-bold text-rv-navy disabled:cursor-default disabled:opacity-45"
+        >
+          Save dates
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="cursor-pointer rounded-rv-md border border-rv-border-hi bg-transparent px-3.5 py-[7px] text-[12.5px] font-semibold text-rv-ink"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={() => onUnschedule(stop.id)}
+          disabled={!isScheduled(stop)}
+          className="ml-auto cursor-pointer rounded-rv-md border border-rv-border-hi bg-transparent px-[11px] py-[5px] text-[11.5px] font-semibold text-rv-ink disabled:cursor-default disabled:opacity-45"
+        >
+          Unschedule
+        </button>
+      </div>
+    </DialogContent>
   );
 }
 

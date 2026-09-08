@@ -576,3 +576,102 @@ export function reorderFloating(
   });
 }
 
+
+// ── leg + stop structure (pure; return a new Trip) ─────────────────────────
+//
+// The row menus in the route lens. A CREATE is the one write with nothing to
+// be optimistic about — only the server can mint the id — so the two `append`
+// helpers take the row the 201 handed back; everything else here is applied
+// optimistically, and its caller keeps the pre-change trip as the snapshot a
+// failed write rolls back to.
+
+/** Splice the leg `POST /api/legs` just created onto the end of the trip. */
+export function appendLeg(trip: Trip, leg: Leg): Trip {
+  return { ...trip, legs: [...trip.legs, leg] };
+}
+
+/** Splice the stop `POST /api/stops` just created into the leg it belongs to. */
+export function appendStop(trip: Trip, stop: Stop): Trip {
+  return mapLegs(trip, (l) =>
+    l.id === stop.legId ? { ...l, stops: [...l.stops, stop] } : l,
+  );
+}
+
+/** The leg header's inline rename. */
+export function renameLeg(trip: Trip, legId: string, title: string): Trip {
+  return mapLegs(trip, (l) => (l.id === legId ? { ...l, title } : l));
+}
+
+/**
+ * The stop row's inline rename. It edits the NAME only — the coordinates and
+ * the Google id are what the place picker owns (#23), not a text field.
+ */
+export function renameStop(trip: Trip, stopId: string, name: string): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, place: { ...s.place, name } }));
+}
+
+/** Delete a leg. Its stops go with it, the way the FK cascade does server-side. */
+export function removeLeg(trip: Trip, legId: string): Trip {
+  return { ...trip, legs: trip.legs.filter((l) => l.id !== legId) };
+}
+
+/** Delete a stop. Its reservations and ideas go with it. */
+export function removeStop(trip: Trip, stopId: string): Trip {
+  return mapLegs(trip, (l) => ({ ...l, stops: l.stops.filter((s) => s.id !== stopId) }));
+}
+
+/** The leg ids in render order — the whole new order `reorder` POSTs. */
+export function legOrder(trip: Trip): string[] {
+  return [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder).map((l) => l.id);
+}
+
+/** Is there a leg on that side to swap with? (The menu item is disabled if not.) */
+export function canMoveLeg(trip: Trip, legId: string, delta: -1 | 1): boolean {
+  const order = legOrder(trip);
+  const from = order.indexOf(legId);
+  return from >= 0 && from + delta >= 0 && from + delta < order.length;
+}
+
+/**
+ * "Move leg up/down". Every leg is renumbered from its new position, so a
+ * half-applied swap can never leave two legs sharing a sortOrder — the same
+ * shape the server's one-transaction renumber uses.
+ */
+export function moveLeg(trip: Trip, legId: string, delta: -1 | 1): Trip {
+  if (!canMoveLeg(trip, legId, delta)) return trip;
+  const order = legOrder(trip);
+  const from = order.indexOf(legId);
+  const [moved] = order.splice(from, 1);
+  order.splice(from + delta, 0, moved!);
+  return { ...trip, legs: trip.legs.map((l) => ({ ...l, sortOrder: order.indexOf(l.id) })) };
+}
+
+/**
+ * "Move to leg". The stop is re-parented and appended to the end of the
+ * destination — the same "the server appends" rule a create follows, so the
+ * optimistic tree and the row the PATCH writes agree.
+ */
+export function moveStopToLeg(trip: Trip, stopId: string, legId: string): Trip {
+  const moving = stopMap(trip).get(stopId);
+  if (!moving || moving.legId === legId) return trip;
+  const highest = trip.legs
+    .find((l) => l.id === legId)
+    ?.stops.reduce((n, s) => Math.max(n, s.sortOrder), -1);
+  if (highest === undefined) return trip;
+  const moved: Stop = { ...moving, legId, sortOrder: highest + 1 };
+  return mapLegs(trip, (l) => {
+    if (l.id === moving.legId) return { ...l, stops: l.stops.filter((s) => s.id !== stopId) };
+    if (l.id === legId) return { ...l, stops: [...l.stops, moved] };
+    return l;
+  });
+}
+
+/** The stop-dates dialog, and "Unschedule" — which is both dates going null. */
+export function setStopDates(
+  trip: Trip,
+  stopId: string,
+  arriveDate: IsoDate | null,
+  departDate: IsoDate | null,
+): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate }));
+}

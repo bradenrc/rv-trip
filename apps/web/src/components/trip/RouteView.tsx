@@ -13,6 +13,13 @@ import {
   Calendar,
   CircleAlert,
   MapPin,
+  Ellipsis,
+  Pencil,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeftRight,
+  Undo2,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -24,6 +31,43 @@ import {
   money,
 } from "@rv-trip/ui";
 import type { RouteDrive, RouteLeg, RouteSummary } from "@/lib/trip-logic";
+import { InlineText } from "@/components/ui/inline-text";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+/**
+ * Every structural verb in the route lens lives on a row menu (⋯) — the leg
+ * header's and the stop row's. Rename is the ONE exception: it is the same
+ * inline edit the row already shows, and the menu item only focuses it, so a
+ * name has one save path rather than two.
+ */
+export interface RouteViewActions {
+  /** the leg or stop whose inline rename should be open (a menu Rename, or a
+   * row that was just created) — `null` when nothing is being renamed */
+  renamingId: string | null;
+  onStartRename: (id: string) => void;
+  onRenameDone: () => void;
+  onRenameLeg: (legId: string, title: string) => void;
+  onAddStop: (legId: string) => void;
+  onAddLeg: () => void;
+  /** delta is -1 (up) / +1 (down); `canMoveLeg` disables the end of the list */
+  onMoveLeg: (legId: string, delta: -1 | 1) => void;
+  canMoveLeg: (legId: string, delta: -1 | 1) => boolean;
+  onDeleteLeg: (legId: string) => void;
+  onRenameStop: (stopId: string, name: string) => void;
+  onEditStopDates: (stopId: string) => void;
+  onUnscheduleStop: (stopId: string) => void;
+  onMoveStopToLeg: (stopId: string, legId: string) => void;
+  onDeleteStop: (stopId: string) => void;
+}
 
 export function RouteView({
   legs,
@@ -35,6 +79,7 @@ export function RouteView({
   onRowDragStart,
   onRowDragEnd,
   onRowDrop,
+  actions,
 }: {
   legs: RouteLeg[];
   summary: RouteSummary;
@@ -47,6 +92,7 @@ export function RouteView({
   onRowDragStart: (legId: string, stopId: string) => void;
   onRowDragEnd: () => void;
   onRowDrop: (legId: string, targetId: string) => void;
+  actions: RouteViewActions;
 }) {
   return (
     <div className="flex flex-wrap items-start gap-8">
@@ -60,19 +106,67 @@ export function RouteView({
         {legs.map((leg) => (
           <div key={leg.id} id={`route-${leg.id}`} className="mb-8 scroll-mt-6">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <div className="mb-[3px] font-mono text-[9px] uppercase tracking-[0.12em] text-rv-ink-faded">
                   {leg.kicker}
                 </div>
-                <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">{leg.name}</h2>
+                <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">
+                  <InlineText
+                    key={actions.renamingId === leg.id ? "editing" : "idle"}
+                    autoEdit={actions.renamingId === leg.id}
+                    onEditEnd={actions.onRenameDone}
+                    value={leg.name}
+                    onSave={(title) => actions.onRenameLeg(leg.id, title)}
+                    label="Rename leg"
+                    className="text-[22px] font-extrabold text-rv-ink"
+                  />
+                </h2>
               </div>
-              <button
-                type="button"
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-[13px] py-1.5 text-[13px] font-semibold text-rv-green"
-              >
-                <Plus className="size-3.5" />
-                Add stop
-              </button>
+              <div className="flex flex-none items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => actions.onAddStop(leg.id)}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-[13px] py-1.5 text-[13px] font-semibold text-rv-green"
+                >
+                  <Plus className="size-3.5" />
+                  Add stop
+                </button>
+                <RowMenu label={`Actions for ${leg.name}`}>
+                  <DropdownMenuItem
+                    className={MENU_ITEM}
+                    onSelect={() => actions.onStartRename(leg.id)}
+                  >
+                    <Pencil />
+                    Rename
+                    <MenuHint>inline</MenuHint>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={MENU_ITEM}
+                    disabled={!actions.canMoveLeg(leg.id, -1)}
+                    onSelect={() => actions.onMoveLeg(leg.id, -1)}
+                  >
+                    <ArrowUp />
+                    Move leg up
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={MENU_ITEM}
+                    disabled={!actions.canMoveLeg(leg.id, 1)}
+                    onSelect={() => actions.onMoveLeg(leg.id, 1)}
+                  >
+                    <ArrowDown />
+                    Move leg down
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border" />
+                  <DropdownMenuItem
+                    className={MENU_ITEM_WARN}
+                    onSelect={() => actions.onDeleteLeg(leg.id)}
+                  >
+                    <Trash2 />
+                    Delete leg…
+                    <MenuHint>confirm</MenuHint>
+                  </DropdownMenuItem>
+                </RowMenu>
+              </div>
             </div>
 
             {leg.rows.map((row) => (
@@ -83,26 +177,51 @@ export function RouteView({
                   onDragEnd={row.floating ? onRowDragEnd : undefined}
                   onDragOver={row.floating ? (e) => e.preventDefault() : undefined}
                   onDrop={row.floating ? () => onRowDrop(leg.id, row.stop.id) : undefined}
-                  className={`flex items-start gap-3 rounded-rv-card border bg-rv-surface p-4 shadow-rv-sm ${
+                  className={`relative flex items-start gap-3 rounded-rv-card border bg-rv-surface p-4 shadow-rv-sm ${
                     routeDrag?.stopId === row.stop.id ? "border-rv-green" : "border-rv-border"
                   }`}
                 >
                   {row.floating ? (
                     <GripVertical
-                      className="mt-[3px] size-[18px] shrink-0 cursor-grab text-rv-ink-subtle"
+                      className="relative mt-[3px] size-[18px] shrink-0 cursor-grab text-rv-ink-subtle"
                       aria-label="Drag to reorder"
                     />
                   ) : (
-                    <Pin className="mt-[3px] size-[18px] shrink-0 text-rv-ink-subtle" aria-label="Ordered by date" />
+                    <Pin
+                      className="relative mt-[3px] size-[18px] shrink-0 text-rv-ink-subtle"
+                      aria-label="Ordered by date"
+                    />
                   )}
 
+                  {/* The row still opens the stop sheet, but the title line
+                      now carries its own controls — so the click target is a
+                      stretched overlay UNDER the content rather than a <button>
+                      wrapped around it (a button inside a button is invalid,
+                      and the inline rename and the ⋯ menu are both buttons).
+                      Content is pointer-transparent; only the controls take
+                      the pointer back. */}
                   <button
                     type="button"
                     onClick={() => onOpenStop(row.stop.id)}
-                    className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1.5 text-left"
-                  >
+                    aria-label={`Open ${row.stop.place.name}`}
+                    className="absolute inset-0 cursor-pointer rounded-rv-card border-0 bg-transparent p-0"
+                  />
+                  <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col gap-1.5 text-left">
                     <div className="flex flex-wrap items-center gap-2.5 pl-10">
-                      <span className="text-[17px] font-bold text-rv-ink">{row.stop.place.name}</span>
+                      {/* inline-block so the open editor has a block box to be
+                          100% of — the masthead's <h1> gives it one for free,
+                          a flex-wrap title line does not. */}
+                      <span className="pointer-events-auto inline-block max-w-full">
+                        <InlineText
+                          key={actions.renamingId === row.stop.id ? "editing" : "idle"}
+                          autoEdit={actions.renamingId === row.stop.id}
+                          onEditEnd={actions.onRenameDone}
+                          value={row.stop.place.name}
+                          onSave={(name) => actions.onRenameStop(row.stop.id, name)}
+                          label="Rename stop"
+                          className="text-[17px] font-bold text-rv-ink"
+                        />
+                      </span>
                       {row.floating && <FloatingTag />}
                       {row.dates && (
                         <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-rv-ink-faded">
@@ -111,6 +230,63 @@ export function RouteView({
                         </span>
                       )}
                       {row.rating > 0 && <Stars value={row.rating} />}
+                      <span className="pointer-events-auto ml-auto">
+                        <RowMenu label={`Actions for ${row.stop.place.name}`}>
+                          <DropdownMenuItem
+                            className={MENU_ITEM}
+                            onSelect={() => actions.onStartRename(row.stop.id)}
+                          >
+                            <Pencil />
+                            Rename
+                            <MenuHint>inline</MenuHint>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className={MENU_ITEM}
+                            onSelect={() => actions.onEditStopDates(row.stop.id)}
+                          >
+                            <CalendarDays />
+                            Edit dates…
+                            <MenuHint>dialog</MenuHint>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className={MENU_ITEM}
+                            disabled={row.floating}
+                            onSelect={() => actions.onUnscheduleStop(row.stop.id)}
+                          >
+                            <Undo2 />
+                            Unschedule
+                            <MenuHint>→ floating</MenuHint>
+                          </DropdownMenuItem>
+                          <DropdownMenuSub>
+                            <DropdownMenuSubTrigger className={MENU_ITEM}>
+                              <ArrowLeftRight />
+                              Move to leg
+                            </DropdownMenuSubTrigger>
+                            <DropdownMenuSubContent className={MENU_SURFACE}>
+                              {legs.map((target) => (
+                                <DropdownMenuItem
+                                  key={target.id}
+                                  className={MENU_ITEM}
+                                  disabled={target.id === leg.id}
+                                  onSelect={() => actions.onMoveStopToLeg(row.stop.id, target.id)}
+                                >
+                                  {target.name}
+                                  <MenuHint>{target.kicker}</MenuHint>
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuSubContent>
+                          </DropdownMenuSub>
+                          <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border" />
+                          <DropdownMenuItem
+                            className={MENU_ITEM_WARN}
+                            onSelect={() => actions.onDeleteStop(row.stop.id)}
+                          >
+                            <Trash2 />
+                            Delete stop…
+                            <MenuHint>confirm</MenuHint>
+                          </DropdownMenuItem>
+                        </RowMenu>
+                      </span>
                     </div>
 
                     {row.note && (
@@ -148,7 +324,7 @@ export function RouteView({
                         ))}
                       </div>
                     )}
-                  </button>
+                  </div>
                 </div>
 
                 {row.drive && <Drive drive={row.drive} />}
@@ -171,6 +347,7 @@ export function RouteView({
 
         <button
           type="button"
+          onClick={actions.onAddLeg}
           className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-dashed border-rv-border-hi bg-transparent px-[18px] py-2.5 text-[14px] font-semibold text-rv-ink"
         >
           <CirclePlus className="size-4" />
@@ -181,6 +358,55 @@ export function RouteView({
       <RouteRail summary={summary} costs={costs} hasRig={hasRig} />
     </div>
   );
+}
+
+/**
+ * The row menu (⋯) — the shelf every structural and destructive verb lives on,
+ * on the leg header and on the stop row. One trigger, one surface, so the two
+ * menus read as the same object rather than two designs.
+ *
+ * The shadcn primitive's stock look already resolves to the design's palette
+ * (`--popover` is rv-navy-soft, `--popover-foreground` is rv-ink in
+ * globals.css), but the geometry does not: the content is sized to the trigger,
+ * and this trigger is a 26px kebab. So the surface is re-stated in rv tokens
+ * verbatim from the wireframe rather than left to inherit.
+ */
+const MENU_SURFACE =
+  "w-[210px] min-w-[210px] rounded-rv-md border border-rv-border-hi bg-rv-navy-soft p-[5px] shadow-rv-lg";
+/** No destructive variant anywhere in this epic — the loss is carried by the
+ * documented attention colour (amber), never by shadcn's off-palette red. */
+const MENU_ITEM =
+  "cursor-pointer gap-2 rounded-rv-sm px-[9px] py-1.5 text-[12.5px] text-rv-ink focus:bg-rv-green-soft";
+const MENU_ITEM_WARN =
+  "cursor-pointer gap-2 rounded-rv-sm px-[9px] py-1.5 text-[12.5px] text-rv-warning focus:bg-rv-warning-soft";
+
+function RowMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={label}
+        className="inline-flex h-6 w-[26px] cursor-pointer items-center justify-center rounded-rv-sm border border-rv-border bg-transparent text-rv-ink-faded"
+      >
+        <Ellipsis className="size-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className={MENU_SURFACE}>
+        {children}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * The right-hand hint on a menu item ("inline", "confirm", "→ floating") — it
+ * says what the verb DOES before you press it, not what it is called.
+ *
+ * The wireframe paints it with the subtle ink, which the shipped role table
+ * reserves for empty stars and grip handles rather than glyphs (the
+ * nightfall-tokens sweep enforces it). rv-ink-faded is the documented colour
+ * for mono meta text, so the hint takes that instead.
+ */
+function MenuHint({ children }: { children: React.ReactNode }) {
+  return <span className="ml-auto font-mono text-[9.5px] text-rv-ink-faded">{children}</span>;
 }
 
 /**

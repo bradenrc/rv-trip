@@ -2,12 +2,15 @@ import {
   isoDate,
   tripCreateInput,
   type IsoDate,
+  type Leg,
+  type Stop,
+  type StopPatchInput,
   type Trip,
   type TripCreateInput,
   type TripPatchInput,
   type TripStatus,
 } from "./types";
-import { daysUntil } from "./trip-status";
+import { daysUntil, formatDateSpan } from "./trip-status";
 
 /**
  * The two trip forms, as pure functions of what the user typed.
@@ -166,4 +169,72 @@ export function cascadeLossSentence(c: CascadeCounts): string {
   const listed =
     parts.length === 1 ? parts[0]! : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
   return `Its ${listed} ${parts.length === 1 ? "is" : "are"} deleted with it. This can't be undone.`;
+}
+
+/** Everything a `DELETE /api/legs/:id` cascades away. The leg is what you are
+ * deleting, not what goes WITH it, so it never counts itself. */
+export function legCascadeCounts(l: Leg): CascadeCounts {
+  return {
+    legs: 0,
+    stops: l.stops.length,
+    reservations: l.stops.reduce((n, s) => n + s.reservations.length, 0),
+    ideas: l.stops.reduce((n, s) => n + s.ideas.length, 0),
+  };
+}
+
+/** Everything a `DELETE /api/stops/:id` cascades away — its two leaf tables. */
+export function stopCascadeCounts(s: Stop): CascadeCounts {
+  return { legs: 0, stops: 0, reservations: s.reservations.length, ideas: s.ideas.length };
+}
+
+/**
+ * The title "Add leg" sends. It counts the legs there are rather than reading
+ * the highest sortOrder, so the name matches the "Leg N" kicker the route lens
+ * renders — and the first one is "Leg 1", exactly what `createTrip` seeds.
+ */
+export function nextLegTitle(t: Trip): string {
+  return `Leg ${t.legs.length + 1}`;
+}
+
+// ── the stop-dates dialog ──────────────────────────────────────────────────
+
+/** What the dialog holds. Both are "" for null, the way a date input holds it. */
+export interface StopDatesDraft {
+  arriveDate: string;
+  departDate: string;
+}
+
+/** The stop, as the dialog's opening state. A floating stop opens blank. */
+export function stopDatesDraft(s: Stop): StopDatesDraft {
+  return { arriveDate: s.arriveDate ?? "", departDate: s.departDate ?? "" };
+}
+
+/**
+ * "5 days · Aug 12 is the drive day in" — the length, and which day you spend
+ * driving. The arrival day is the drive day (derive-days.ts): it is the only
+ * day of the span that is not a stay. `null` while the range is unusable, which
+ * is the same condition that disables Save.
+ */
+export function stopDatesHelp(d: StopDatesDraft): string | null {
+  const days = tripDayCount(d.arriveDate, d.departDate);
+  if (days === null) return null;
+  const arrive = d.arriveDate as IsoDate;
+  return `${days} day${days === 1 ? "" : "s"} · ${formatDateSpan(arrive, arrive)} is the drive day in`;
+}
+
+/**
+ * The `PATCH /api/stops/:id` body for the dialog's Save: both dates, or `{}`
+ * when neither moved. `null` means the range is not submittable — and it is the
+ * same `null` the Save button is disabled on, so there is one rule, not two.
+ */
+export function stopDatesPatch(s: Stop, d: StopDatesDraft): StopPatchInput | null {
+  if (tripDayCount(d.arriveDate, d.departDate) === null) return null;
+  if (d.arriveDate === s.arriveDate && d.departDate === s.departDate) return {};
+  return { arriveDate: d.arriveDate as IsoDate, departDate: d.departDate as IsoDate };
+}
+
+/** "Unschedule" — one PATCH setting BOTH dates to null, so the stop drops back
+ * to the floating rail rather than half-landing on the calendar. */
+export function unscheduleStopPatch(): StopPatchInput {
+  return { arriveDate: null, departDate: null };
 }

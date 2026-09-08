@@ -18,6 +18,12 @@ import { useRef, useState } from "react";
  * path: Enter and Esc blur the input, and `onBlur` is the only place that
  * commits, so a save can never fire twice. Esc sets a flag first — Esc also
  * fires blur, and without the flag the cancel would immediately re-save.
+ *
+ * `autoEdit` opens it already editing, which is how the row menus' "Rename"
+ * and a just-created leg/stop reach it — the menu item focuses THIS edit rather
+ * than opening a second rename surface. The caller flips it by remounting (a
+ * changed `key`), so there is no second source of truth for "am I editing"; it
+ * hears the edit end through `onEditEnd`.
  */
 export function InlineText({
   value,
@@ -25,6 +31,8 @@ export function InlineText({
   label,
   className = "",
   placeholder,
+  autoEdit = false,
+  onEditEnd,
 }: {
   /** the current text — the source of truth, including after a rollback */
   value: string;
@@ -35,8 +43,12 @@ export function InlineText({
   /** typography of the text being replaced; applied to both renders */
   className?: string;
   placeholder?: string;
+  /** mount straight into the edit (the "Rename" menu item, a new row) */
+  autoEdit?: boolean;
+  /** the edit ended — saved or cancelled. Lets the caller drop `autoEdit`. */
+  onEditEnd?: () => void;
 }) {
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(autoEdit);
   // Seeded from `value` when the edit opens, never synced to it after: while the
   // field is open what you are typing is the truth, and the closed render reads
   // `value` directly, so a change from anywhere else (a rollback, a reload)
@@ -46,6 +58,7 @@ export function InlineText({
 
   const commit = () => {
     setEditing(false);
+    onEditEnd?.();
     const next = draft.trim();
     // Blank is a cancel, not a delete: the grammar has no nameless trip or leg.
     if (next === "" || next === value) {
@@ -95,6 +108,7 @@ export function InlineText({
           cancelling.current = false;
           setEditing(false);
           setDraft(value);
+          onEditEnd?.();
           return;
         }
         commit();

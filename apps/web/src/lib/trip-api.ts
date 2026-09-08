@@ -3,7 +3,13 @@ import type {
   IdeaStatus,
   IsoDate,
   LatLng,
+  Leg,
+  LegCreateInput,
+  LegPatchInput,
   RigProfileInput,
+  Stop,
+  StopCreateInput,
+  StopPatchInput,
   Trip,
   TripCreateInput,
   TripPatchInput,
@@ -34,15 +40,38 @@ export const tripApi = {
   /** Legs, stops, reservations and ideas cascade with it. */
   deleteTrip: (id: string) => req(`/api/trips/${id}`, "DELETE"),
 
-  updateStop: (
-    id: string,
-    patch: {
-      rating?: number | null;
-      notes?: string | null;
-      arriveDate?: IsoDate | null;
-      departDate?: IsoDate | null;
-    },
-  ) => req(`/api/stops/${id}`, "PATCH", patch),
+  /**
+   * "Add leg". 201 carries the created leg (with an empty `stops`), because
+   * only the server can mint the id — so this one write is not optimistic.
+   */
+  createLeg: (input: LegCreateInput): Promise<Leg> =>
+    req(`/api/legs`, "POST", input) as Promise<Leg>,
+
+  /** The leg header's inline rename. */
+  updateLeg: (id: string, patch: LegPatchInput) => req(`/api/legs/${id}`, "PATCH", patch),
+
+  /** Stops — and their reservations and ideas — cascade with it. */
+  deleteLeg: (id: string) => req(`/api/legs/${id}`, "DELETE"),
+
+  /** "Move leg up/down" sends the WHOLE new order, so the renumber is one
+   * transaction and two legs can never end up sharing a sortOrder. */
+  reorderLegs: (tripId: string, order: string[]) =>
+    req(`/api/trips/${tripId}/legs/reorder`, "POST", { order }),
+
+  /** "Add stop". 201 carries the created stop, for the same reason a leg does. */
+  createStop: (input: StopCreateInput): Promise<Stop> =>
+    req(`/api/stops`, "POST", input) as Promise<Stop>,
+
+  /**
+   * The widened stop write: rename (`placeName`), move (`legId`), reorder
+   * (`sortOrder`), the dates (both null is "Unschedule") and rating/notes.
+   * A 409 `stop_dates_outside_trip` comes back as a rejected promise like any
+   * other non-2xx, so `persist()` rolls the optimistic change back.
+   */
+  updateStop: (id: string, patch: StopPatchInput) => req(`/api/stops/${id}`, "PATCH", patch),
+
+  /** Reservations and ideas cascade with it. */
+  deleteStop: (id: string) => req(`/api/stops/${id}`, "DELETE"),
 
   createReservation: (input: {
     stopId: string;

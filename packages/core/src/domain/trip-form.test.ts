@@ -6,10 +6,17 @@ import {
   tripSettingsDraft,
   tripSettingsPatch,
   tripCascadeCounts,
+  legCascadeCounts,
+  stopCascadeCounts,
   cascadeLossSentence,
+  nextLegTitle,
+  stopDatesDraft,
+  stopDatesHelp,
+  stopDatesPatch,
+  unscheduleStopPatch,
   type TripSettingsDraft,
 } from "./trip-form";
-import { tripPatchInput, type Trip } from "./types";
+import { tripPatchInput, type Leg, type Stop, type Trip } from "./types";
 
 /** The trip the settings dialog opens over — the seed trip, unpinned. */
 function fixture(over: Partial<Trip> = {}): Trip {
@@ -252,5 +259,146 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
     expect(cascadeLossSentence({ legs: 0, stops: 0, reservations: 0, ideas: 0 })).toBe(
       "This can't be undone.",
     );
+  });
+});
+
+describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () => {
+  const idea = (id: string, stopId: string, i: number) => ({
+    id,
+    stopId,
+    title: "idea",
+    status: "idea" as const,
+    place: null,
+    rating: null,
+    notes: null,
+    sortOrder: i,
+  });
+  const res = (id: string, stopId: string) => ({
+    id,
+    stopId,
+    ideaId: null,
+    type: "campground" as const,
+    name: "res",
+    checkIn: null,
+    checkOut: null,
+    confirmationNumber: null,
+    cost: null,
+    rating: null,
+    notes: null,
+  });
+  const stopOf = (id: string, resCount: number, ideaCount: number): Stop => ({
+    id,
+    legId: "l1",
+    place: { name: id, lat: null, lng: null, googlePlaceId: null },
+    arriveDate: null,
+    departDate: null,
+    sortOrder: 0,
+    rating: null,
+    notes: null,
+    reservations: Array.from({ length: resCount }, (_, i) => res(`${id}-r${i}`, id)),
+    ideas: Array.from({ length: ideaCount }, (_, i) => idea(`${id}-i${i}`, id, i)),
+  });
+  const leg: Leg = {
+    id: "l1",
+    tripId: "t1",
+    title: "Oregon Coast",
+    sortOrder: 0,
+    stops: [stopOf("Astoria, OR", 2, 1), stopOf("Newport, OR", 1, 1)],
+  };
+
+  it("a leg never counts itself — the sentence is about what goes WITH it", () => {
+    expect(legCascadeCounts(leg)).toEqual({ legs: 0, stops: 2, reservations: 3, ideas: 2 });
+    expect(cascadeLossSentence(legCascadeCounts(leg))).toBe(
+      "Its 2 stops, 3 reservations and 2 ideas are deleted with it. This can't be undone.",
+    );
+  });
+
+  it("a stop counts only its own leaves", () => {
+    expect(stopCascadeCounts(stopOf("Bend, OR", 1, 2))).toEqual({
+      legs: 0,
+      stops: 0,
+      reservations: 1,
+      ideas: 2,
+    });
+    expect(cascadeLossSentence(stopCascadeCounts(stopOf("Bend, OR", 1, 2)))).toBe(
+      "Its 1 reservation and 2 ideas are deleted with it. This can't be undone.",
+    );
+  });
+
+  it("a childless stop still confirms, it just has nothing to name", () => {
+    expect(cascadeLossSentence(stopCascadeCounts(stopOf("Bend, OR", 0, 0)))).toBe(
+      "This can't be undone.",
+    );
+  });
+});
+
+describe("nextLegTitle — 'Add leg' names the leg the way createTrip seeds it", () => {
+  const legOf = (id: string, sortOrder: number): Leg => ({
+    id,
+    tripId: "t1",
+    title: id,
+    sortOrder,
+    stops: [],
+  });
+
+  it("counts the legs there are, never the highest sortOrder", () => {
+    expect(nextLegTitle(fixture({ legs: [legOf("a", 0), legOf("b", 4)] }))).toBe("Leg 3");
+  });
+
+  it("a trip with no legs starts at Leg 1 — the same name createTrip seeds", () => {
+    expect(nextLegTitle(fixture())).toBe("Leg 1");
+  });
+});
+
+describe("the stop-dates dialog", () => {
+  const stopOf = (arriveDate: string | null, departDate: string | null): Stop => ({
+    id: "s1",
+    legId: "l1",
+    place: { name: "Bend, OR", lat: null, lng: null, googlePlaceId: null },
+    arriveDate,
+    departDate,
+    sortOrder: 0,
+    rating: null,
+    notes: null,
+    reservations: [],
+    ideas: [],
+  });
+
+  it("opens on the stop's dates, and on blanks for a floating stop", () => {
+    expect(stopDatesDraft(stopOf("2026-08-12", "2026-08-16"))).toEqual({
+      arriveDate: "2026-08-12",
+      departDate: "2026-08-16",
+    });
+    expect(stopDatesDraft(stopOf(null, null))).toEqual({ arriveDate: "", departDate: "" });
+  });
+
+  it("writes the help line the design shows", () => {
+    expect(stopDatesHelp({ arriveDate: "2026-08-12", departDate: "2026-08-16" })).toBe(
+      "5 days · Aug 12 is the drive day in",
+    );
+  });
+
+  it("has no help line to write until both dates are a usable range", () => {
+    expect(stopDatesHelp({ arriveDate: "2026-08-12", departDate: "" })).toBeNull();
+    expect(stopDatesHelp({ arriveDate: "2026-08-16", departDate: "2026-08-12" })).toBeNull();
+  });
+
+  it("sends both dates, and only when they changed", () => {
+    const stop = stopOf("2026-08-12", "2026-08-16");
+    expect(stopDatesPatch(stop, { arriveDate: "2026-08-13", departDate: "2026-08-16" })).toEqual({
+      arriveDate: "2026-08-13",
+      departDate: "2026-08-16",
+    });
+    expect(stopDatesPatch(stop, { arriveDate: "2026-08-12", departDate: "2026-08-16" })).toEqual({});
+  });
+
+  it("refuses a backwards or half-typed range — the Save button reads the same null", () => {
+    const stop = stopOf(null, null);
+    expect(stopDatesPatch(stop, { arriveDate: "2026-08-16", departDate: "2026-08-12" })).toBeNull();
+    expect(stopDatesPatch(stop, { arriveDate: "2026-08-12", departDate: "" })).toBeNull();
+  });
+
+  it("Unschedule is one patch setting BOTH dates to null", () => {
+    expect(unscheduleStopPatch()).toEqual({ arriveDate: null, departDate: null });
   });
 });

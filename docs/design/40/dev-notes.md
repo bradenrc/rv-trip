@@ -575,3 +575,238 @@ from them is in the worktree.
 
 **SKIPPED (no env):** nothing in this item — the two runtime checks above
 replaced what i1/i2 had to argue from code.
+
+---
+
+# dev notes — issue 40, item **i4** of 6
+
+**Leg + stop affordances in the planner.** Scope is i4 only: the two row menus
+and the three dead buttons in `RouteView.tsx`, the handlers + the two new
+dialogs in `TripPlanner.tsx`, the leg/stop methods on `trip-api.ts`, and the
+pure helpers those need. No API/DB change (i3 shipped all of it), no gantt drop
+(i5), no reservation/idea surface (i6).
+
+Design read: `mc/wireframe/issue-40-v0:docs/design/40/index.html` §3 (the three
+weights + both row menus, :465-535), §4 (the stop-dates dialog, :585-615), §5
+(the cascade confirm and its copy, :620-655) + `plan.json` i4.
+
+---
+
+## What changed
+
+### `packages/core` — the decisions, pushed down where `vitest` runs them
+
+`vitest` only runs in `packages/core`, so every rule this item makes is a pure
+function there and the components are the glue that calls it.
+
+**`packages/core/src/planner/index.ts`** — the structural tree mutations, beside
+the ones `TripPlanner` already used (`updateStop`, `reorderFloating`):
+
+- `appendLeg:589` / `appendStop:594` — splice the row a 201 handed back. These
+  two are deliberately NOT optimistic: only the server can mint the id.
+- `renameLeg:601` / `renameStop:609` — `renameStop` rewrites `place.name` only;
+  the coordinates belong to the place picker (#23), not to a text field.
+- `removeLeg:614` (takes its stops, the way the FK cascade does) /
+  `removeStop:619`.
+- `legOrder:624` — the ids in render order, i.e. the whole body the reorder
+  POST sends. `canMoveLeg:629` / `moveLeg:640` — a full renumber, never a swap,
+  so a half-applied move cannot leave two legs sharing a `sortOrder`. Array
+  position is left alone and `sortOrder` is rewritten, which is exactly what
+  `reorderFloating` already does and what `routeModel` sorts on.
+- `moveStopToLeg:654` — re-parents and appends to the end of the destination
+  (the same "the server appends" rule a create follows, so the optimistic tree
+  and the row the PATCH writes agree). A move into the leg it is already in
+  returns the same trip, so the caller can skip the write.
+- `setStopDates:670` — the dialog's save AND "Unschedule" (both dates null).
+
+**`packages/core/src/domain/trip-form.ts`** — the copy and the form rules:
+
+- `legCascadeCounts:176` / `stopCascadeCounts:186` — the counts the two new
+  confirms name. A leg never counts itself: the sentence is about what goes
+  *with* it. Both feed the shipped `cascadeLossSentence`, so trip, leg and stop
+  all speak one sentence rather than three — the leg case renders the design's
+  exact line, *"Its 2 stops, 3 reservations and 2 ideas are deleted with it.
+  This can't be undone."*
+- `nextLegTitle:195` — `"Leg N"` from the leg COUNT, so the name matches the
+  `Leg N` kicker the route lens renders and the first one is `"Leg 1"`, exactly
+  what `createTrip` seeds.
+- `StopDatesDraft:202` + `stopDatesDraft:208` / `stopDatesHelp:218` /
+  `stopDatesPatch:230` / `unscheduleStopPatch:238`. `stopDatesHelp` writes the
+  design's line verbatim — `"5 days · Aug 12 is the drive day in"` — and the
+  arrival day is the drive day because `deriveDays` classifies it that way
+  (derive-days.ts:94ff). `stopDatesPatch` returns `null` for an unusable range
+  (the same `null` that disables Save — one rule, not two) and `{}` when
+  nothing moved.
+
+Tests: `planner.test.ts:336-439` (11 cases incl. a no-mutation sweep) and
+`trip-form.test.ts:265-404` (13 cases). Both were written first and were red
+(`23 failed | 250 passed`) before any of the above existed.
+
+### `apps/web/src/lib/trip-api.ts` — the leg + stop write methods
+
+`createLeg:47`, `updateLeg:51`, `deleteLeg:54`, `reorderLegs:58`,
+`createStop:62`, `deleteStop:74`, and `updateStop:71` widened from a hand-typed
+patch to the core `StopPatchInput` (so `placeName`, `legId` and `sortOrder`
+reach it). A 409 `stop_dates_outside_trip` arrives as a rejected promise like
+any other non-2xx, so `persist()` rolls the optimistic change back.
+
+### `apps/web/src/components/ui/inline-text.tsx` — `autoEdit` + `onEditEnd`
+
+Two optional props (`:34-49`). `autoEdit` mounts it already editing; the caller
+flips it by remounting on a changed `key`, so there is no second source of truth
+for "am I editing", and `onEditEnd` (`:61`, `:111`) lets the caller drop it. That
+is how the menu's **Rename** and a just-created row reach the SAME inline edit —
+one rename path, not two, exactly as §3 argues.
+
+### `apps/web/src/components/trip/RouteView.tsx`
+
+- `RouteViewActions:52` — one `actions` prop carrying the fourteen callbacks,
+  rather than fourteen sibling props.
+- Leg header (`:114-169`): the title is now `InlineText`; the ⋯ menu is
+  Rename / Move leg up / Move leg down / — / Delete leg…, with the two move
+  items disabled at the ends of the list.
+- Per-leg **Add stop** now has `onClick` (`:128`), **Add leg** has one
+  (`:347`), and the masthead's is wired in `TripPlanner` — the three buttons the
+  design called out. Every `<button>` this file renders has a handler.
+- Stop row (`:172-300`): the name is `InlineText` and the ⋯ menu is
+  Rename / Edit dates… / Unschedule / Move to leg ▸ / — / Delete stop….
+  **Unschedule** is disabled on a floating stop; the Move-to-leg submenu is
+  built from the `legs` prop and disables the leg the stop is already in.
+- `RowMenu:383` / `MenuHint:408` / `MENU_SURFACE:374` / `MENU_ITEM:378` /
+  `MENU_ITEM_WARN:380` — one trigger and one surface for both menus.
+
+### `apps/web/src/components/trip/TripPlanner.tsx`
+
+State: `renamingId:164`, `datesStopId`, `deleteLegId`, `deleteStopId`; the three
+subjects are re-derived off the tree (`:250-254`) rather than snapshotted, so a
+rollback under an open dialog corrects what it shows.
+
+Handlers: `addLeg:283`, `doRenameLeg:294`, `doMoveLeg:306`, `doDeleteLeg:319`,
+`addStop:338`, `doRenameStop:354`, `saveStopDates:366`, `doUnschedule:384`,
+`doMoveStopToLeg:399`, `doDeleteStop:417`. Every one that mutates optimistically
+passes its pre-change `trip` to `persist()` as the rollback snapshot, with a
+message naming what was undone. The two deletes close the stop sheet first when
+it is showing a stop that is about to vanish.
+
+Dialogs: `CascadeDeleteConfirm:1037` — i2's `DeleteTripConfirm` generalised to
+take a title, a `CascadeCounts` and a verb, and now used by all three cascading
+deletes rather than copied twice. `StopDatesDialog:1091` / `StopDatesFields:1122`
+— native `<input type="date">` (the app ships no date picker), the help line,
+Save dates / Cancel / Unschedule, mounted only while a stop is open so Cancel
+really discards.
+
+---
+
+## Decisions, deviations and defaults — worth qa's eye
+
+1. **The stop row's click target is now a stretched overlay, not a wrapper
+   button** (`RouteView.tsx:195-208`). The title line grew two real buttons (the
+   inline rename and the ⋯ trigger) and a `<button>` inside a `<button>` is
+   invalid HTML, so the open-the-sheet button is an `absolute inset-0` sibling
+   UNDER the content; the content is `pointer-events-none` and only the two
+   controls take the pointer back. Grip/Pin and the content wrapper are
+   `relative` so they paint above it. **Claim for qa:** clicking a note, a
+   reservation line or empty row space still opens the sheet; clicking the name
+   edits it; clicking ⋯ opens the menu. This is pointer behaviour — see the
+   walk flag below.
+
+2. **"Add stop" names the stop `"New stop"`** (`TripPlanner.tsx:116`) and opens
+   its inline rename focused. The design never gives copy for this; the
+   alternative was a third dialog, which §3 explicitly rules out ("no fourth
+   pattern"). `"Add leg"` needed no invention — `nextLegTitle` reproduces the
+   `"Leg 1"` that `createTrip` already seeds. **Defaulted; flagged.**
+
+3. **The masthead "Add stop" appends to the LAST leg** and switches the lens to
+   Route so the new row (and its open rename) is actually on screen. The
+   masthead has no leg in hand, and "goes on the end" is the rule every other
+   create in this epic follows. It is disabled when the trip has no legs, which
+   `createTrip` makes unreachable. **Defaulted.**
+
+4. **The creates do not call `persist()`.** i4's acceptance says every new
+   mutation call site passes a rollback snapshot; `addLeg`/`addStop` pass none
+   because they are not optimistic — they await the 201 and splice the row it
+   returns, so there is nothing on screen to roll back. A failure is a plain
+   `toast.error` naming that nothing was created. Same shape as i2's
+   `deleteTrip`. **Deliberate; call it out if qa reads the acceptance
+   literally.**
+
+5. **The wireframe paints the menu-item hint with the subtle ink; this uses
+   `rv-ink-faded` instead** (`RouteView.tsx:395-409`). `nightfall-tokens.test.ts`
+   enforces (as a vet HIGH) that the subtle token paints no text glyph — it is
+   for empty stars and grip handles. The faded ink is the documented colour for
+   mono meta text. The shipped role table beat the mock here; it is the only
+   pixel deviation in the item. (The sweep greps raw source lines, so even
+   naming the token in a comment reds it — hence the periphrasis in that
+   comment.)
+
+6. **No destructive variant anywhere**, per §5: the confirm action is
+   `rv-ember`, the loss line and the two Delete… menu items are `rv-warning`.
+   The shadcn dropdown's stock surface already resolves to the design's exact
+   values (`--popover` is `#21374d` = `rv-navy-soft`), but its geometry is sized
+   to the trigger — a 26px kebab — so `MENU_SURFACE` re-states the wireframe's
+   `.menu` box in `rv-*` tokens.
+
+7. **The stop-dates dialog refuses out-of-trip dates before the write leaves**
+   (`StopDatesFields`, the `outside` guard). It composes i3's own
+   `stopDatesOutsideTrip` + `stopOutsideTripMessage`, so the client says the
+   *same sentence* the handler's 409 carries — the mirror of what i2 did with
+   `orphanedStopsMessage` in trip settings. Save is disabled while it holds.
+
+8. **The leg-delete confirm does not name the stops.** The wireframe's copy is
+   *"Its 2 stops (Astoria, OR · Newport, OR), 3 reservations…"*; the epic plan
+   quotes it without the names, and i2 already shipped `cascadeLossSentence`
+   producing the un-named form for the trip. One sentence builder for all three
+   beat a second one for the parenthetical. **Deviation from the wireframe's
+   §5 frame; deliberate.**
+
+---
+
+## Flagged for the walk
+
+Both are pointer/runtime facts static analysis cannot settle, and both were
+called out in the vet:
+
+- **The stretched-overlay stop row (decision 1).** That the overlay does not
+  eat the ⋯ trigger or the inline editor, and that HTML5 drag from the grip
+  still starts the floating reorder with the overlay in the box, is a render
+  fact. `Timeline`'s gap drop (i5's flag) is a different surface and unchanged
+  here.
+- **Radix portals over the hand-rolled stop sheet.** `StopDetailSheet` is a
+  `fixed inset-0 z-40` overlay whose backdrop closes it on click. The menus and
+  both dialogs added here live in `RouteView`/`TripPlanner`, which the sheet
+  covers while it is open, so they should never be dismissed through it — but
+  the dialogs do portal to `document.body`, so the walk should confirm that
+  closing the stop-dates dialog (Esc, Cancel, outside click) does not also close
+  the sheet if one is open behind it.
+- **`InlineText`'s Esc-then-blur ordering** now also runs in two more places
+  (leg title, stop name) and fires `onEditEnd`, which remounts the component.
+  Esc must cancel without saving and without re-opening the editor.
+
+---
+
+## Not done, deliberately
+
+- No gantt-drop change (i5), no reservation/idea surface (i6), no API or DB
+  change (i3 shipped every endpoint this item calls).
+- `Timeline.tsx` is untouched: the row menus are the route lens's.
+- No confirm on a reservation or an idea — those are leaves and get i6's undo
+  toast, per the acceptance.
+
+---
+
+## Checks run
+
+| check | command | result |
+|---|---|---|
+| TDD red first | `pnpm --filter @rv-trip/core test` before implementing | `Tests 23 failed | 250 passed (273)` |
+| full gate | `pnpm turbo run lint typecheck test` | `Tasks: 8 successful, 8 total` |
+| unit tests | (same run, `@rv-trip/core:test`) | `Test Files 18 passed (18)` · `Tests 273 passed (273)` |
+| item acceptance | `pnpm turbo run lint typecheck` | `Tasks: 7 successful, 7 total` |
+
+`pnpm install --frozen-lockfile` was run first — this worktree had no
+`node_modules` (`Done in 6.2s`).
+
+**SKIPPED (no env):** no browser/runtime check. Everything i4 adds is client
+render + pointer behaviour, which is precisely what the walk gate is for; the
+three items above are what it should look at. No database was touched (this item
+adds no query or mutation).
