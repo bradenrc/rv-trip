@@ -1,7 +1,7 @@
 # RV Trip Hub — Native app (iOS-first) design
 
 **Date:** 2026-09-08
-**Status:** Proposed — v1 foundation being built (see audit §5 Phase C)
+**Status:** C0 · C1 · C2 built 2026-09-08 (issue #31); C3–C5 open
 **Parent:** `2026-07-19-rv-trip-hub-mvp-design.md` (the MVP spec, which
 already names this app as a fast-follow: "Expo (React Native), importing
 `packages/core` verbatim")
@@ -25,8 +25,9 @@ ticking an idea — not building the trip.
 | Platform order | iOS first; Android untested but not blocked | The author's phone; the simulator toolchain is on the machine. |
 | Data access | **Only over the REST API**, through `@rv-trip/core/api-client` | The web app talks to the DB directly from server components; the phone cannot. The typed client is the one contract both clients share, and the web app migrates to it for client-side fetches over time. |
 | Shared model logic | `packages/core/planner` (moved from `apps/web/src/lib/trip-logic.ts` + `trip-ui.tsx`) | Pure functions; one Route/Timeline model for both clients. |
-| Styling | **NativeWind** (Tailwind for RN) over the same `rv-*` token values, exported as data from `@rv-trip/core/theme` | The design system's vocabulary (Stay/Eat/Do/Travel, ember/navy/ink) carries over without a second palette. `packages/ui` (DOM components) is *not* reused. |
-| Dev loop | **Expo Go** on the iOS Simulator; `npx expo start` against the local Next API | No native modules in v1 → no CocoaPods, no dev build, sub-minute reloads. Mapbox (`@rnmapbox/maps`) needs a dev-client build and is Phase C3. |
+| Styling | **RN `StyleSheet` over the `rv-*` token values exported as data from `@rv-trip/core/theme`** *(amended during C2: NativeWind was the first pick; a second Tailwind toolchain in the monorepo bought nothing at v1's screen count. Revisit if the screen count grows.)* | The design system's vocabulary (Stay/Eat/Do/Travel, ember/navy/ink) carries over without a second palette — and `tokens.test.ts` fails if `entry.css` and the token file drift. `packages/ui` (DOM components) is *not* reused. |
+| Dev loop | **Expo Go** (SDK 57) on the iOS Simulator; `npx expo start` against the local Next API | No native modules in v1 → no CocoaPods, no dev build, sub-minute reloads. Mapbox (`@rnmapbox/maps`) needs a dev-client build and is Phase C3. |
+| API discovery | `EXPO_PUBLIC_API_URL` → the host Metro serves from (`Constants.expoConfig.hostUri`) on port 3000 → `localhost` | The simulator could not reach `localhost:3000` through Expo's fetch; the Metro host is the Mac's LAN address and works for the simulator and a phone on the same Wi-Fi alike. |
 | Auth | v1 talks to the unauthenticated local API as `dev-user` (same seam as the web). Clerk Expo lands with Phase B1/C4 through the `api-client`'s token hook. | Nothing to authenticate against yet. The seam is an `Authorization` header provider on the client. |
 | Maps in v1 | None in-app. The **Navigate** action opens Google Maps via `Linking` with the same `buildNavigationHandoff` URL the web uses. | Ships the road-value without a native build. Map surface is C3. |
 | Offline | Not v1. Last-fetched trip is cached in memory only. | Spec: no hard offline requirement. Persisted cache (SQLite/MMKV) is a later cycle. |
@@ -39,14 +40,15 @@ rv-trip/
 │  ├─ web/                      # unchanged; lib/trip-logic.ts becomes a re-export
 │  └─ mobile/                   # NEW — Expo + Expo Router
 │     ├─ app/                   #   file-based routes
-│     │  ├─ _layout.tsx         #   providers (query client, theme), stack
+│     │  ├─ _layout.tsx         #   the dark Stack (no providers needed in v1)
 │     │  ├─ index.tsx           #   Trips list
-│     │  ├─ trips/[id].tsx      #   Trip: day strip + route list with drives
+│     │  ├─ trips/[id]/index.tsx #   Trip: day strip + route list with drives
 │     │  ├─ trips/[id]/stops/[stopId].tsx   # Stop detail (rate, note, ideas, reservations)
 │     │  └─ rig.tsx             #   Rig (read-only in v1)
 │     ├─ src/api.ts             #   the configured api-client instance
-│     ├─ src/theme.ts           #   NativeWind config from @rv-trip/core/theme
-│     └─ app.json, metro.config.js, tailwind.config.js
+│     ├─ src/store.ts           #   in-memory bundle store (useSyncExternalStore)
+│     ├─ src/theme.ts · src/ui.tsx #   tokens from @rv-trip/core + the small shared pieces
+│     └─ app.json
 └─ packages/core/src/
    ├─ planner/                  # NEW (moved): timelineModel, routeModel, routeSummary,
    │                            #   schedule/reorder helpers, date formatting — with tests

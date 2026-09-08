@@ -12,10 +12,15 @@ Clerk with a shared core the native (Expo) app will reuse. See the spec.
 
 - **Turborepo** monorepo, TypeScript throughout.
 - `apps/web` — Next.js 16 (App Router) + Tailwind 4. UI + API route handlers.
+- `apps/mobile` — Expo (iOS-first) glance app; talks only to the web app's
+  REST API through `@rv-trip/core/api-client`. See `apps/mobile/README.md`.
 - `packages/core` — the trip grammar: domain types + Zod schemas, the
-  `deriveDays` calendar projection (pure, unit-tested), and map provider
-  interfaces (Mapbox/Google, stubbed locally).
+  `deriveDays` calendar projection, the planner view-models (`planner/`), the
+  typed API client (`api-client/`), colour tokens as data (`theme/`), and the
+  routing/places providers (HERE truck routing; Google Places is still the
+  stub) — all pure, unit-tested.
 - `packages/db` — Drizzle schema + local Postgres client + queries + seed.
+- `packages/ui` — the DOM design-system components (`@rv-trip/ui`).
 
 ## Local dev
 
@@ -31,12 +36,18 @@ pnpm dev                     # http://localhost:3000
 ```
 
 Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
-(Drizzle Studio), `pnpm db:down`.
+(Drizzle Studio), `pnpm db:down`. Phone: `pnpm --filter @rv-trip/mobile ios`
+(Expo Go on the iOS Simulator, against the running web app).
+
+Where things stand: `docs/audit/2026-09-08-project-audit.md` (feature matrix,
+gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).
 
 ## Local-dev accommodations (seams to the cloud target)
 
 - **DB:** local Postgres in Docker instead of Neon — same Drizzle schema.
 - **Auth:** a dev-stub owner (`dev-user`) instead of Clerk — drops into the
   same middleware seam later.
-- **Maps:** provider interfaces stubbed locally; real Mapbox/Google keys when
-  live routing/places are needed.
+- **Maps:** Mapbox GL display · HERE RV-safe routing · Google Maps handoff are
+  live with keys in `.env` (see `.env.example`); without keys every map
+  degrades to a placeholder and every drive to a labelled estimate. Google
+  Places search is still the stub (#23).
