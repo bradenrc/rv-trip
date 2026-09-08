@@ -14,7 +14,7 @@ export function StubPage({
 }) {
   return (
     <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
-      <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
+      <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
         {kicker}
       </div>
       <h1 className="m-0 mb-8 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">

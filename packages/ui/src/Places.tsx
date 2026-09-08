@@ -84,7 +84,7 @@ export function PlaceCard({
           <button
             type="button"
             onClick={onAddToTrip}
-            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-ember px-3 py-1.5 text-[13px] font-bold text-rv-navy"
+            className="inline-flex flex-none cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-3 py-1.5 text-[13px] font-bold text-rv-accent-ink"
           >
             <Plus className="size-3.5" fill="currentColor" strokeWidth={2.5} />
             Add to trip

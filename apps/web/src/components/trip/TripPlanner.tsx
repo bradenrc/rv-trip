@@ -197,7 +197,7 @@ export function TripPlanner({
         {/* Masthead */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
           <div className="min-w-0">
-            <div className="mb-2.5 flex items-center gap-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
+            <div className="mb-2.5 flex items-center gap-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
               <Compass className="size-3.5" />
               <span>RV Trip Hub · Trip Planner</span>
             </div>
@@ -242,7 +242,7 @@ export function TripPlanner({
             <CostSwitch checked={costTracking} onChange={changeCostTracking} />
             <button
               type="button"
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-ember px-4 py-[9px] text-[14px] font-semibold text-rv-navy"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink"
             >
               <Plus className="size-4" />
               Add stop
@@ -382,7 +382,7 @@ function ToggleTab({
       type="button"
       onClick={onClick}
       className={`inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border-none px-[15px] py-[7px] text-[13px] font-semibold ${
-        active ? "bg-rv-navy text-rv-ink" : "bg-transparent text-rv-ink-muted"
+        active ? "dark bg-rv-navy text-rv-ink" : "bg-transparent text-rv-ink-muted"
       }`}
     >
       {children}

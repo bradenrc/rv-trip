@@ -12,12 +12,12 @@ import type { CategoryLabel } from "@rv-trip/ui";
  *
  * ── Provenance ───────────────────────────────────────────────────────────
  * The **night** column is not a new palette: every value is what its `rv-*`
- * token resolves to in `packages/ui/styles/entry.css`, with the token name in
- * a comment beside it — the same discipline `NIGHTFALL_PAINT` uses
+ * token resolves to in the DARK half of `packages/ui/styles/entry.css`, with
+ * the token name in a comment beside it — the same discipline `NIGHTFALL_PAINT` uses
  * (nightfall.ts:5-9), and guarded against drift by
  * `packages/core/src/theme/map-palette.test.ts`. The **day** and **sat**
  * columns are map-only literals: no `rv-*` token is added, so the `toEqual`
- * token contract at `nightfall-tokens.test.ts:114` stays green untouched.
+ * token contract in `nightfall-tokens.test.ts` stays green untouched.
  *
  * Values are literals rather than `var(--…)` because Mapbox paint properties
  * cannot read CSS custom properties, and one vocabulary for the whole overlay
@@ -27,7 +27,8 @@ import type { CategoryLabel } from "@rv-trip/ui";
  * Only what is drawn on the map canvas is mode-keyed. App chrome — the layer
  * chips, the category filter row above the canvas, the 360px rail, every
  * `FilterChip` swatch resolving through `categoryMeta`
- * (packages/ui/src/category.ts:33-57) — stays Nightfall in all three modes.
+ * (packages/ui/src/category.ts:33-57) — follows the app theme in all three
+ * modes.
  * The map is a window onto vendor cartography and has to survive whatever is
  * behind it; the app around it does not. That is why the Day chip row can read
  * `rv-green` beside a `#2e8b4e` pin for the same category, and why
@@ -44,8 +45,9 @@ export const STYLE_MODES = ["night", "day", "sat"] as const;
 
 export type StyleMode = (typeof STYLE_MODES)[number];
 
-/** The default, and the product's identity. */
-export const DEFAULT_STYLE_MODE: StyleMode = "night";
+/** The default. Day is the basemap that reads under either app theme; night
+ * and sat stay one click away in the #12 style toggle. */
+export const DEFAULT_STYLE_MODE: StyleMode = "day";
 
 /** Narrow an untrusted string — a persisted preference, a stale value from a
  * future release — to a mode this build actually renders. */
@@ -94,43 +96,44 @@ export interface OverlayPalette {
 
 const NIGHT: OverlayPalette = {
   category: {
-    Stay: "#7cd897", // --color-rv-green
-    Eat: "#f0bc55", // --color-rv-warning
-    Do: "#6fc4d8", // --color-rv-info-ink
-    Travel: "#a79ec8", // --color-rv-travel
-    Other: "#8fa8bd", // --color-rv-ink-faded
+    Stay: "#34d399", // --color-rv-green
+    Eat: "#fbbf24", // --color-rv-warning
+    Do: "#22d3ee", // --color-rv-info-ink
+    Travel: "#a78bfa", // --color-rv-travel
+    Other: "#94a3b8", // --color-rv-ink-faded
   },
-  dropDot: "#0a1520", // --color-rv-navy
-  discStroke: "#7cd897", // --color-rv-green
-  discFill: "#1c3a2b", // --color-rv-green-soft
-  discInk: "#a8e8bd", // --color-rv-green-ink
-  hollowGround: "#08182b", // --color-rv-navy-deep
-  floatingStroke: "#f0bc55", // --color-rv-warning
-  selFill: "#f28c5e", // --color-rv-ember
-  selStroke: "#ffa477", // --color-rv-ember-bright
-  selInk: "#0a1520", // --color-rv-navy
-  arcLine: "#f28c5e", // --color-rv-ember
+  dropDot: "#020617", // --color-rv-navy
+  discStroke: "#34d399", // --color-rv-green
+  discFill: "#022c22", // --color-rv-green-soft
+  discInk: "#6ee7b7", // --color-rv-green-ink
+  hollowGround: "#0f172a", // --color-rv-navy-deep
+  floatingStroke: "#fbbf24", // --color-rv-warning
+  selFill: "#38bdf8", // --color-rv-accent
+  selStroke: "#7dd3fc", // --color-rv-accent-bright
+  selInk: "#020617", // --color-rv-navy
+  arcLine: "#38bdf8", // --color-rv-accent
   arcWidth: 1.6,
   arcOpacity: 0.75,
   arcCasing: null,
-  labelScrim: "rgba(8, 24, 43, 0.84)", // rv-navy-deep at 84%
-  labelInk: "#b8cbda", // --color-rv-ink-muted
-  labelInkSelected: "#ffa477", // --color-rv-ember-bright
-  arcLabelScrim: "rgba(10, 21, 32, 0.88)", // rv-navy at 88%
-  arcLabelBorder: "#3a2b22", // --color-rv-ember-soft
-  arcLabelInk: "#f28c5e", // --color-rv-ember
-  leader: "#3d566c", // --color-rv-border-hi
+  labelScrim: "rgba(15, 23, 42, 0.84)", // rv-navy-deep at 84%
+  labelInk: "#cbd5e1", // --color-rv-ink-muted
+  labelInkSelected: "#7dd3fc", // --color-rv-accent-bright
+  arcLabelScrim: "rgba(2, 6, 23, 0.88)", // rv-navy at 88%
+  arcLabelBorder: "#082f49", // --color-rv-accent-soft
+  arcLabelInk: "#38bdf8", // --color-rv-accent
+  leader: "#475569", // --color-rv-border-hi
   halo: null,
 };
 
 /**
  * `outdoors-v12`, stock and untouched. Six values come straight from issue
- * #12's table (the five categories plus the day route tone, which is already
- * the real token rv-ember-deep). The rest are derived, not chosen: white is
- * the value the issue already names for the sat halo and does the same job
- * here — a pin's own chip ground, independent of the basemap; rv-navy is the
- * app's existing ink-on-light value; day floating reuses the day amber,
- * because night floating already reuses rv-warning.
+ * #12's table (the five categories plus the day route tone). These are
+ * map-only literals and #19 does not re-trace them: they are tuned to
+ * `outdoors-v12`, not to the app's palette. The rest are derived, not chosen:
+ * white is the value the issue already names for the sat halo and does the
+ * same job here — a pin's own chip ground, independent of the basemap; day
+ * floating reuses the day amber, because night floating already reuses
+ * rv-warning.
  */
 const DAY: OverlayPalette = {
   category: {
@@ -173,7 +176,7 @@ const DAY: OverlayPalette = {
 const SAT: OverlayPalette = {
   ...NIGHT,
   arcOpacity: 1,
-  arcCasing: "rgba(10, 21, 32, 0.8)", // rv-navy at 80%
+  arcCasing: "rgba(2, 6, 23, 0.8)", // rv-navy at 80%
   halo: "#ffffff",
 };
 

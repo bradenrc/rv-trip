@@ -116,7 +116,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
   return (
     <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
       <div className="max-w-[760px]">
-        <div className="mb-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
+        <div className="mb-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
           Profile
         </div>
         <h1 className="m-0 mb-1.5 text-[34px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
@@ -149,7 +149,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
                   aria-pressed={presetId === preset.id}
                   className={`min-w-[132px] cursor-pointer rounded-rv-md border bg-rv-surface-alt px-3 py-[9px] text-left ${
                     presetId === preset.id
-                      ? "border-rv-ember bg-rv-ember-soft"
+                      ? "border-rv-accent bg-rv-accent-soft"
                       : "border-rv-border-hi"
                   }`}
                 >
@@ -226,7 +226,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
               type="button"
               onClick={save}
               disabled={!complete || saving}
-              className="cursor-pointer rounded-rv-md border-none bg-rv-ember px-4 py-2 text-[13px] font-bold text-rv-navy shadow-rv-sm disabled:cursor-default disabled:opacity-45"
+              className="cursor-pointer rounded-rv-md border-none bg-rv-accent-deep px-4 py-2 text-[13px] font-bold text-rv-accent-ink shadow-rv-sm disabled:cursor-default disabled:opacity-45"
             >
               {saving ? "Saving…" : "Save rig"}
             </button>

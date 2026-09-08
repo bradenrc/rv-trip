@@ -9,7 +9,7 @@
    this compiled stylesheet (no Tailwind at runtime), so the design agent can
    only use classes present here — force-generate the brand vocabulary even
    where no shipped component happens to use it. */
-@source inline("{bg,text,border}-rv-{navy,navy-deep,navy-soft,green,green-cta,green-soft,green-ink,green-on-dark,ember,ember-bright,ember-deep,ember-soft,ink,ink-muted,ink-faded,ink-subtle,surface,surface-alt,border,border-soft,border-hi,warning,warning-soft,info,info-soft,info-ink,travel,travel-ink,travel-soft}");
+@source inline("{bg,text,border}-rv-{navy,navy-deep,navy-soft,green,green-cta,green-soft,green-ink,green-on-dark,accent,accent-bright,accent-deep,accent-soft,accent-ink,ink,ink-muted,ink-faded,ink-subtle,surface,surface-alt,border,border-soft,border-hi,warning,warning-soft,info,info-soft,info-ink,travel,travel-ink,travel-soft}");
 @source inline("rounded-rv-{sm,md,card,pill}");
 @source inline("shadow-rv-{sm,md,lg,xl}");
 @source inline("font-{sans,mono}");
@@ -20,52 +20,147 @@
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
 
-  /* brand — Nightfall & Ember (issue #3): one hue ≈209°, elevation = lightness */
-  --color-rv-navy: #0a1520;
-  --color-rv-navy-deep: #08182b;
-  --color-rv-navy-soft: #21374d;
-  --color-rv-green: #7cd897;
-  --color-rv-green-cta: #7cd897;
-  --color-rv-green-soft: #1c3a2b;
-  --color-rv-green-ink: #a8e8bd;
-  --color-rv-green-on-dark: #7cd897;
-  /* ember — CTA · links · money · stars · active */
-  --color-rv-ember: #f28c5e;
-  --color-rv-ember-bright: #ffa477;
-  --color-rv-ember-deep: #c14d20;
-  --color-rv-ember-soft: #3a2b22;
-  /* ink */
-  --color-rv-ink: #eef5fa;
-  --color-rv-ink-muted: #b8cbda;
-  --color-rv-ink-faded: #8fa8bd;
-  --color-rv-ink-subtle: #5f7690;
-  /* surface & borders */
-  --color-rv-surface: #182b3d;
-  --color-rv-surface-alt: #101f2d;
-  --color-rv-border: #2e4459;
-  --color-rv-border-soft: #26394b;
-  --color-rv-border-hi: #3d566c;
-  /* status */
-  --color-rv-warning: #f0bc55;
-  --color-rv-warning-soft: #3a3220;
-  --color-rv-info: #6fc4d8;
-  --color-rv-info-soft: #183440;
-  --color-rv-info-ink: #6fc4d8;
-  /* travel category */
-  --color-rv-travel: #a79ec8;
-  --color-rv-travel-ink: #a79ec8;
-  --color-rv-travel-soft: #2b2839;
-
-  /* radius */
+  /* radius — one scale; it has no light/dark half (issue #19 §1). */
   --radius-rv-sm: 4px;
   --radius-rv-md: 6px;
   --radius-rv-card: 10px;
   --radius-rv-pill: 9999px;
+}
 
-  /* shadow — pure black on the night canvas; the surface ladder carries most
-     of the elevation, these restore the hover lift. */
-  --shadow-rv-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
-  --shadow-rv-md: 0 1px 3px rgba(0, 0, 0, 0.36), 0 1px 2px -1px rgba(0, 0, 0, 0.28);
-  --shadow-rv-lg: 0 4px 10px -2px rgba(0, 0, 0, 0.44), 0 2px 4px -2px rgba(0, 0, 0, 0.36);
-  --shadow-rv-xl: 0 12px 28px -6px rgba(0, 0, 0, 0.55), 0 4px 10px -4px rgba(0, 0, 0, 0.44);
+/* ─────────────────────────────────────────────────────────────────────
+   Slate + Sky — two halves (issue #19).
+
+   Every rv-* utility reads its value through ONE indirection: the theme
+   name maps to a raw `--rv-*` custom property, and that raw property is
+   declared twice — light on `:root`, dark on `.dark`. `inline` is what
+   makes the flip work: the utility compiles to `var(--rv-surface)`, so it
+   re-resolves inside any `.dark` island.
+
+   `inline` does NOT suppress emission of `--color-rv-*` on :root (only
+   `reference` does), so the inline-style call sites that read
+   `var(--color-rv-accent)` keep resolving — but note they resolve the
+   DOCUMENT half, never an island's, because custom properties are
+   substituted at computed-value time on the element that declares them.
+   ───────────────────────────────────────────────────────────────────── */
+@theme inline {
+  --color-rv-navy: var(--rv-navy);
+  --color-rv-navy-deep: var(--rv-navy-deep);
+  --color-rv-navy-soft: var(--rv-navy-soft);
+  --color-rv-green: var(--rv-green);
+  --color-rv-green-cta: var(--rv-green-cta);
+  --color-rv-green-soft: var(--rv-green-soft);
+  --color-rv-green-ink: var(--rv-green-ink);
+  --color-rv-green-on-dark: var(--rv-green-on-dark);
+  --color-rv-accent: var(--rv-accent);
+  --color-rv-accent-bright: var(--rv-accent-bright);
+  --color-rv-accent-deep: var(--rv-accent-deep);
+  --color-rv-accent-soft: var(--rv-accent-soft);
+  --color-rv-accent-ink: var(--rv-accent-ink);
+  --color-rv-ink: var(--rv-ink);
+  --color-rv-ink-muted: var(--rv-ink-muted);
+  --color-rv-ink-faded: var(--rv-ink-faded);
+  --color-rv-ink-subtle: var(--rv-ink-subtle);
+  --color-rv-surface: var(--rv-surface);
+  --color-rv-surface-alt: var(--rv-surface-alt);
+  --color-rv-border: var(--rv-border);
+  --color-rv-border-soft: var(--rv-border-soft);
+  --color-rv-border-hi: var(--rv-border-hi);
+  --color-rv-warning: var(--rv-warning);
+  --color-rv-warning-soft: var(--rv-warning-soft);
+  --color-rv-info: var(--rv-info);
+  --color-rv-info-soft: var(--rv-info-soft);
+  --color-rv-info-ink: var(--rv-info-ink);
+  --color-rv-travel: var(--rv-travel);
+  --color-rv-travel-ink: var(--rv-travel-ink);
+  --color-rv-travel-soft: var(--rv-travel-soft);
+  --shadow-rv-sm: var(--rv-shadow-sm);
+  --shadow-rv-md: var(--rv-shadow-md);
+  --shadow-rv-lg: var(--rv-shadow-lg);
+  --shadow-rv-xl: var(--rv-shadow-xl);
+}
+
+/* ── the LIGHT half ──────────────────────────────────────────────────── */
+:root {
+  /* chrome — identical in BOTH halves; the shell is always dark */
+  --rv-navy: #020617; /* slate-950 */
+  --rv-navy-deep: #0f172a; /* slate-900 */
+  --rv-green-on-dark: #34d399; /* emerald-400 */
+  /* surfaces */
+  --rv-surface-alt: #f8fafc; /* slate-50 */
+  --rv-surface: #ffffff; /* white */
+  --rv-navy-soft: #f1f5f9; /* slate-100 */
+  /* borders */
+  --rv-border: #e2e8f0; /* slate-200 */
+  --rv-border-soft: #f1f5f9; /* slate-100 */
+  --rv-border-hi: #cbd5e1; /* slate-300 */
+  /* ink */
+  --rv-ink: #0f172a; /* slate-900 */
+  --rv-ink-muted: #475569; /* slate-600 */
+  --rv-ink-faded: #64748b; /* slate-500 */
+  --rv-ink-subtle: #94a3b8; /* slate-400 */
+  /* accent — the retired rv-ember-* family, renamed and revalued to Sky */
+  --rv-accent: #0369a1; /* sky-700 */
+  --rv-accent-bright: #0ea5e9; /* sky-500 */
+  --rv-accent-deep: #0284c7; /* sky-600 */
+  --rv-accent-soft: #f0f9ff; /* sky-50 */
+  --rv-accent-ink: #ffffff; /* white */
+  /* green */
+  --rv-green: #059669; /* emerald-600 */
+  --rv-green-cta: #059669; /* emerald-600 */
+  --rv-green-soft: #ecfdf5; /* emerald-50 */
+  --rv-green-ink: #047857; /* emerald-700 */
+  /* status */
+  --rv-warning: #d97706; /* amber-600 */
+  --rv-warning-soft: #fffbeb; /* amber-50 */
+  --rv-info: #0891b2; /* cyan-600 */
+  --rv-info-soft: #ecfeff; /* cyan-50 */
+  --rv-info-ink: #0891b2; /* cyan-600 */
+  /* travel category */
+  --rv-travel: #7c3aed; /* violet-600 */
+  --rv-travel-ink: #7c3aed; /* violet-600 */
+  --rv-travel-soft: #f5f3ff; /* violet-50 */
+  /* elevation — slate-900 alphas; pure black reads leaden on slate-50 */
+  --rv-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --rv-shadow-md: 0 1px 3px rgba(15, 23, 42, 0.1), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+  --rv-shadow-lg: 0 4px 10px -2px rgba(15, 23, 42, 0.12), 0 2px 4px -2px rgba(15, 23, 42, 0.08);
+  --rv-shadow-xl: 0 12px 28px -6px rgba(15, 23, 42, 0.16), 0 4px 10px -4px rgba(15, 23, 42, 0.1);
+}
+
+/* ── the DARK half — the product default, and the chrome island ──────── */
+.dark {
+  --rv-navy: #020617; /* slate-950 — unchanged */
+  --rv-navy-deep: #0f172a; /* slate-900 — unchanged */
+  --rv-green-on-dark: #34d399; /* emerald-400 — unchanged */
+  --rv-surface-alt: #0f172a; /* slate-900 */
+  --rv-surface: #1e293b; /* slate-800 */
+  --rv-navy-soft: #334155; /* slate-700 */
+  --rv-border: #334155; /* slate-700 */
+  --rv-border-soft: #1e293b; /* slate-800 */
+  --rv-border-hi: #475569; /* slate-600 */
+  --rv-ink: #f1f5f9; /* slate-100 */
+  --rv-ink-muted: #cbd5e1; /* slate-300 */
+  --rv-ink-faded: #94a3b8; /* slate-400 */
+  --rv-ink-subtle: #64748b; /* slate-500 */
+  --rv-accent: #38bdf8; /* sky-400 */
+  --rv-accent-bright: #7dd3fc; /* sky-300 */
+  --rv-accent-deep: #0ea5e9; /* sky-500 */
+  --rv-accent-soft: #082f49; /* sky-950 */
+  --rv-accent-ink: #020617; /* slate-950 */
+  --rv-green: #34d399; /* emerald-400 */
+  --rv-green-cta: #34d399; /* emerald-400 */
+  --rv-green-soft: #022c22; /* emerald-950 */
+  --rv-green-ink: #6ee7b7; /* emerald-300 */
+  --rv-warning: #fbbf24; /* amber-400 */
+  --rv-warning-soft: #451a03; /* amber-950 */
+  --rv-info: #22d3ee; /* cyan-400 */
+  --rv-info-soft: #083344; /* cyan-950 */
+  --rv-info-ink: #22d3ee; /* cyan-400 */
+  --rv-travel: #a78bfa; /* violet-400 */
+  --rv-travel-ink: #a78bfa; /* violet-400 */
+  --rv-travel-soft: #2e1065; /* violet-950 */
+  /* elevation — pure black on the night canvas, as shipped */
+  --rv-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --rv-shadow-md: 0 1px 3px rgba(0, 0, 0, 0.36), 0 1px 2px -1px rgba(0, 0, 0, 0.28);
+  --rv-shadow-lg: 0 4px 10px -2px rgba(0, 0, 0, 0.44), 0 2px 4px -2px rgba(0, 0, 0, 0.36);
+  --rv-shadow-xl: 0 12px 28px -6px rgba(0, 0, 0, 0.55), 0 4px 10px -4px rgba(0, 0, 0, 0.44);
 }

@@ -44,7 +44,7 @@ export function ReservationCard({
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <span className="text-[14px] font-bold text-rv-ink">{r.name}</span>
-          <span className="font-mono text-[14px] font-semibold text-rv-ember">
+          <span className="font-mono text-[14px] font-semibold text-rv-accent">
             {r.cost != null ? money(r.cost) : ""}
           </span>
         </div>
@@ -123,7 +123,7 @@ export function IdeaCard({
             type="button"
             onClick={onPromote}
             title="Promote to reservation"
-            className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent px-1.5 py-1 text-[13px] font-semibold text-rv-ember"
+            className="inline-flex cursor-pointer items-center gap-1.5 border-none bg-transparent px-1.5 py-1 text-[13px] font-semibold text-rv-accent"
           >
             <CornerRightUp className="size-4" />
             Book
@@ -134,7 +134,7 @@ export function IdeaCard({
           onClick={onToggleNote}
           title="Add a note"
           className="inline-flex size-7 cursor-pointer items-center justify-center border-none bg-transparent p-0"
-          style={{ color: noteVisible ? "var(--color-rv-ember)" : "var(--color-rv-ink-subtle)" }}
+          style={{ color: noteVisible ? "var(--color-rv-accent)" : "var(--color-rv-ink-subtle)" }}
         >
           <SquarePen className="size-[17px]" />
         </button>

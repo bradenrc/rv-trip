@@ -5,8 +5,8 @@ import type { Map as MapboxMap } from "mapbox-gl";
  *
  * Mapbox can't read CSS custom properties, so the runtime restyle of `dark-v11`
  * passes literals. Every literal here is the value its `rv-*` token resolves to
- * in packages/ui/styles/entry.css (mirrored, and in agreement, at
- * apps/web/src/app/globals.css) — the token name ships beside it so a token
+ * in the DARK half of packages/ui/styles/entry.css (mirrored, and in agreement,
+ * at apps/web/src/app/globals.css) — the token name ships beside it so a token
  * change stays a one-line diff instead of a hunt for a stray hex. No value below
  * is outside the token vocabulary.
  *
@@ -27,36 +27,36 @@ interface PaintRow {
 }
 
 export const NIGHTFALL_PAINT: PaintRow[] = [
-  { role: "Water", layers: ["water", "waterway"], token: "--color-rv-navy", color: "#0a1520" },
+  { role: "Water", layers: ["water", "waterway"], token: "--color-rv-navy", color: "#020617" },
   {
     role: "Land / background",
     layers: ["background", "land"],
     token: "--color-rv-surface-alt",
-    color: "#101f2d",
+    color: "#0f172a",
   },
   {
     role: "Road hairline",
     layers: ["road-minor", "road-street"],
     token: "--color-rv-border",
-    color: "#2e4459",
+    color: "#334155",
   },
   {
     role: "Road major",
     layers: ["road-primary", "road-motorway"],
     token: "--color-rv-border-hi",
-    color: "#3d566c",
+    color: "#475569",
   },
   {
     role: "Place labels",
     layers: ["settlement-label", "poi-label"],
     token: "--color-rv-ink-faded",
-    color: "#8fa8bd",
+    color: "#94a3b8",
   },
   {
     role: "Parks / green areas",
     layers: ["landuse", "national-park", "landuse-overlay"],
     token: "--color-rv-green-soft",
-    color: "#1c3a2b",
+    color: "#022c22",
   },
 ];
 

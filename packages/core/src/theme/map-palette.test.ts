@@ -17,7 +17,9 @@ import { describe, it, expect } from "vitest";
  *   1. Night is *not* a new palette. Every night literal is the value its
  *      `rv-*` token resolves to in `packages/ui/styles/entry.css`, and the
  *      token name ships in a comment beside it. Retune a token and this reds
- *      instead of the map quietly drifting off Nightfall.
+ *      instead of the map quietly drifting off the app palette. Since #19 the
+ *      values live on the raw `--rv-*` pair, so the resolver reads the DARK
+ *      half — the `@theme inline` map only says `var(--rv-…)`.
  *   2. Day is the vetted table, literal for literal — the wireframe's numbers,
  *      not a re-derivation.
  *   3. Sat is night plus a halo and an arc casing, structurally (a spread), so
@@ -31,6 +33,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const read = (p: string) => readFileSync(p, "utf8");
 
 const PALETTE = read(join(REPO, "apps/web/src/components/map/palette.ts"));
+const NIGHTFALL = read(join(REPO, "apps/web/src/components/map/nightfall.ts"));
 const ENTRY_CSS = read(join(REPO, "packages/ui/styles/entry.css"));
 
 /** The `const <NAME>: OverlayPalette = { … };` body, by declaration name. */
@@ -58,9 +61,18 @@ function tokenComments(src: string): Record<string, string> {
   return out;
 }
 
-/** Resolve `--color-rv-x` out of entry.css's @theme block. */
+/** The raw dark half of entry.css — `.dark { --rv-*: <literal>; }`. Reading the
+ * `@theme inline` map instead would compare every night literal against the
+ * string "var(--rv-…)", which nothing can equal. */
+const DARK_HALF = ENTRY_CSS.slice(
+  ENTRY_CSS.indexOf(".dark {"),
+  ENTRY_CSS.indexOf("}", ENTRY_CSS.indexOf(".dark {")),
+);
+
+/** Resolve `--color-rv-x` to the literal its raw twin carries in the dark half. */
 function tokenValue(name: string): string {
-  const m = ENTRY_CSS.match(new RegExp(`${name}\\s*:\\s*([^;]+);`));
+  const raw = name.replace(/^--color-/, "--");
+  const m = DARK_HALF.match(new RegExp(`${raw}\\s*:\\s*([^;]+);`));
   return m ? m[1]!.trim() : `MISSING ${name}`;
 }
 
@@ -79,14 +91,14 @@ const NIGHT_TOKENS: Record<string, string> = {
   discInk: "--color-rv-green-ink",
   hollowGround: "--color-rv-navy-deep",
   floatingStroke: "--color-rv-warning",
-  selFill: "--color-rv-ember",
-  selStroke: "--color-rv-ember-bright",
+  selFill: "--color-rv-accent",
+  selStroke: "--color-rv-accent-bright",
   selInk: "--color-rv-navy",
-  arcLine: "--color-rv-ember",
+  arcLine: "--color-rv-accent",
   labelInk: "--color-rv-ink-muted",
-  labelInkSelected: "--color-rv-ember-bright",
-  arcLabelBorder: "--color-rv-ember-soft",
-  arcLabelInk: "--color-rv-ember",
+  labelInkSelected: "--color-rv-accent-bright",
+  arcLabelBorder: "--color-rv-accent-soft",
+  arcLabelInk: "--color-rv-accent",
   leader: "--color-rv-border-hi",
 };
 
@@ -121,6 +133,10 @@ describe("Map overlay palette — the three-mode contract", () => {
     expect(PALETTE).toContain('export const STYLE_MODES = ["night", "day", "sat"] as const;');
   });
 
+  it("defaults to day (issue #19), with night and sat still one click away", () => {
+    expect(PALETTE).toContain('export const DEFAULT_STYLE_MODE: StyleMode = "day";');
+  });
+
   it("homes the mode vocabulary in a vendor-free module (no mapbox import)", () => {
     // MapView.tsx imports react-map-gl + mapbox-gl.css at module scope and is
     // only ever loaded through `dynamic(…, { ssr: false })`. MapMount needs the
@@ -151,8 +167,8 @@ describe("Map overlay palette — the three-mode contract", () => {
   it("carries night's two scrims and the leader at their documented alphas", () => {
     const night = colors(block("NIGHT"));
     // rv-navy-deep @ 84% (pin labels) and rv-navy @ 88% (arc labels).
-    expect(night.labelScrim).toBe("rgba(8, 24, 43, 0.84)");
-    expect(night.arcLabelScrim).toBe("rgba(10, 21, 32, 0.88)");
+    expect(night.labelScrim).toBe("rgba(15, 23, 42, 0.84)");
+    expect(night.arcLabelScrim).toBe("rgba(2, 6, 23, 0.88)");
   });
 
   it("is the vetted day column, literal for literal", () => {
@@ -167,7 +183,7 @@ describe("Map overlay palette — the three-mode contract", () => {
     expect(sat).toContain("...NIGHT");
     expect(colors(sat)).toEqual({
       halo: "#ffffff",
-      arcCasing: "rgba(10, 21, 32, 0.8)",
+      arcCasing: "rgba(2, 6, 23, 0.8)",
     });
   });
 
@@ -194,6 +210,22 @@ describe("Map overlay palette — the three-mode contract", () => {
     // lands on a DOM marker's inline style, never in a Mapbox paint property.
     // No *colour* may take that shape.
     expect(PALETTE).not.toContain("var(--color-");
+  });
+
+  it("restyles the night BASEMAP from the same dark half (nightfall.ts)", () => {
+    // nightfall.ts states the same invariant as the night column above — every
+    // literal is its rv-* token's dark-half value, with the token name beside
+    // it — but nothing guarded it (qa's DD). Retune a token and this reds
+    // instead of the basemap quietly staying on the old palette.
+    const rows = [...NIGHTFALL.matchAll(/token: "(--color-rv-[a-z-]+)",\s*color: "([^"]+)"/g)];
+    expect(rows.length, "NIGHTFALL_PAINT rows").toBe(6);
+    const actual: Record<string, string> = {};
+    const resolved: Record<string, string> = {};
+    for (const m of rows) {
+      actual[m[1]!] = m[2]!;
+      resolved[m[1]!] = tokenValue(m[1]!);
+    }
+    expect(actual).toEqual(resolved);
   });
 
   it("adds no rv-* token, so the Nightfall toEqual guard stays untouched", () => {
