@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Known palettes — three proven dark systems</title>
+<style>
+  * { box-sizing:border-box; margin:0; }
+  :root { font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+          --r-md:6px; --r-card:12px; --r-pill:9999px; }
+  .mono { font-family:"Geist Mono",ui-monospace,"SF Mono",monospace; }
+  body { background:#0f172a; color:#f1f5f9; line-height:1.5; padding-bottom:70px; }
+  .hero { background:#020617; border-bottom:1px solid #334155; padding:36px 28px 30px; margin-bottom:40px; }
+  .hero-in { max-width:1120px; margin:0 auto; }
+  .kicker { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.11em; color:#38bdf8; margin-bottom:6px; }
+  .hero h1 { font-size:25px; letter-spacing:-0.015em; margin:2px 0 8px; }
+  .hero p { color:#94a3b8; font-size:14.5px; max-width:86ch; }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
+  @media (max-width:1000px){ .grid { grid-template-columns:1fr; } }
+
+  /* each panel IS its system's canvas */
+  .panel { border-radius:16px; padding:20px 18px 16px; background:var(--p-canvas);
+           border:1.5px solid var(--p-line); cursor:pointer; }
+  .panel:hover { border-color:var(--p-accent); }
+  .panel.sel { border-color:var(--p-accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--p-accent) 20%, transparent); }
+  .pt { display:flex; align-items:baseline; gap:8px; }
+  .pt b { font-size:15.5px; color:var(--p-text); }
+  .pt .rec { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; font-weight:700;
+             color:var(--p-accent); border:1px solid var(--p-accent); border-radius:var(--r-pill); padding:1px 8px; }
+  .pd { font-size:12px; color:var(--p-muted); margin:3px 0 12px; }
+  .mast { display:flex; align-items:center; gap:10px; background:var(--p-shell); color:var(--p-text);
+          border-radius:8px; padding:8px 12px; font-size:12px; margin-bottom:10px; }
+  .mast .brand { font-weight:800; }
+  .mast .tab { margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace; font-size:10px;
+               color:var(--p-accent); box-shadow:inset 0 -2px 0 var(--p-accent); padding:2px 6px; }
+  .card { border-radius:var(--r-card); padding:15px 17px; background:var(--p-card);
+          border:1px solid var(--p-line); color:var(--p-text); }
+  .c-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .c-head b { font-size:15.5px; }
+  .c-date { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--p-muted); }
+  .stars { color:var(--p-star); letter-spacing:1px; font-size:12.5px; }
+  .c-note { font-size:12.5px; font-style:italic; color:var(--p-muted2); margin:7px 0 9px; }
+  .li { display:flex; align-items:center; gap:10px; padding:5px 0; font-size:13px; }
+  .tile { width:23px; height:23px; border-radius:6px; display:inline-flex; align-items:center;
+          justify-content:center; font-size:11.5px; flex:none; }
+  .li .n { font-weight:600; flex:1; }
+  .li .cost { font-family:"Geist Mono",ui-monospace,monospace; font-size:12px; font-weight:700; color:var(--p-accent); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 11px; }
+  .chip { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+          text-transform:uppercase; letter-spacing:.05em; border-radius:var(--r-pill); padding:3px 9px; }
+  .cta { border:none; cursor:pointer; font:inherit; font-size:12.5px; font-weight:700;
+         border-radius:var(--r-md); padding:7px 14px; background:var(--p-cta); color:var(--p-cta-ink); }
+  .meta-row { display:flex; align-items:center; gap:10px; }
+  .float { margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+           border-radius:var(--r-pill); padding:3px 9px; background:var(--p-eat-bg); color:var(--p-eat); }
+  .swl { display:flex; gap:5px; margin-top:12px; flex-wrap:wrap; }
+  .swl i { width:26px; height:16px; border-radius:4px; border:1px solid rgba(255,255,255,.09); }
+  .pc { margin-top:11px; font-size:11.5px; color:var(--p-muted); }
+  .pc b { color:var(--p-text); }
+
+  /* A · Tailwind Slate + Sky — canvas is (almost exactly) YOUR background */
+  .px-tw { --p-canvas:#0f172a; --p-shell:#020617; --p-card:#1e293b; --p-line:#334155;
+    --p-text:#f1f5f9; --p-muted:#94a3b8; --p-muted2:#cbd5e1;
+    --p-accent:#38bdf8; --p-star:#38bdf8; --p-cta:#0ea5e9; --p-cta-ink:#020617;
+    --p-stay:#34d399; --p-stay-bg:rgba(52,211,153,.14);
+    --p-eat:#fbbf24; --p-eat-bg:rgba(251,191,36,.13);
+    --p-do:#22d3ee; --p-do-bg:rgba(34,211,238,.13); }
+  /* B · Nord */
+  .px-nord { --p-canvas:#2e3440; --p-shell:#242933; --p-card:#3b4252; --p-line:#4c566a;
+    --p-text:#eceff4; --p-muted:#9aa5b8; --p-muted2:#d8dee9;
+    --p-accent:#88c0d0; --p-star:#ebcb8b; --p-cta:#5e81ac; --p-cta-ink:#eceff4;
+    --p-stay:#a3be8c; --p-stay-bg:rgba(163,190,140,.16);
+    --p-eat:#ebcb8b; --p-eat-bg:rgba(235,203,139,.15);
+    --p-do:#81a1c1; --p-do-bg:rgba(129,161,193,.16); }
+  /* C · Catppuccin Mocha */
+  .px-cat { --p-canvas:#1e1e2e; --p-shell:#11111b; --p-card:#313244; --p-line:#45475a;
+    --p-text:#cdd6f4; --p-muted:#a6adc8; --p-muted2:#bac2de;
+    --p-accent:#89b4fa; --p-star:#f9e2af; --p-cta:#89b4fa; --p-cta-ink:#11111b;
+    --p-stay:#a6e3a1; --p-stay-bg:rgba(166,227,161,.14);
+    --p-eat:#f9e2af; --p-eat-bg:rgba(249,226,175,.13);
+    --p-do:#94e2d5; --p-do-bg:rgba(148,226,213,.14); }
+
+  .foot { max-width:1180px; margin:34px auto 0; padding:0 24px; font-size:13px; color:#94a3b8; }
+  .foot b { color:#38bdf8; }
+</style>
+</head>
+<body>
+
+<div class="hero"><div class="hero-in">
+  <div class="kicker">Palette revision · mock 3 — known systems only</div>
+  <h1>No invented colors. Three proven dark systems, side by side.</h1>
+  <p>Every value below is a published token from its system — nothing hand-mixed. Each panel sits on its
+     own canvas. Note on A: Tailwind's slate-900 is one hex-step from the background you already love,
+     so it keeps your canvas essentially unchanged — and it's the system our stack is already built on.</p>
+</div></div>
+
+<div class="wrap"><div class="grid">
+
+  <div class="panel px-tw sel" data-v="tailwind">
+    <div class="pt"><b>A · Tailwind Slate + Sky</b><span class="rec">★ REC</span></div>
+    <div class="pd">slate-950/900/800/700 ladder · sky accent · emerald/amber/cyan categories. Native to our Tailwind v4 + shadcn stack.</div>
+    <div class="mast"><span class="brand">RV Trip Hub</span><span class="tab">CALENDAR</span></div>
+    <div class="card">
+      <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+      <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+      <div class="li"><span class="tile" style="background:var(--p-stay-bg);color:var(--p-stay)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+      <div class="li"><span class="tile" style="background:var(--p-do-bg);color:var(--p-do)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+      <div class="chips">
+        <span class="chip" style="background:var(--p-stay-bg);color:var(--p-stay)">⛺ Stay</span>
+        <span class="chip" style="background:var(--p-eat-bg);color:var(--p-eat)">🍴 Eat</span>
+        <span class="chip" style="background:var(--p-do-bg);color:var(--p-do)">🔭 Do</span></div>
+      <div class="meta-row"><button class="cta" type="button">＋ Add stop</button><span class="float">◌ FLOATING</span></div>
+    </div>
+    <div class="swl"><i style="background:#0f172a"></i><i style="background:#1e293b"></i><i style="background:#334155"></i><i style="background:#38bdf8"></i><i style="background:#34d399"></i><i style="background:#fbbf24"></i><i style="background:#22d3ee"></i></div>
+    <div class="pc"><b>Why ★:</b> keeps your background; cool sky accent (no warm clash); every color has a
+      Tailwind name so dev writes <span class="mono">sky-400</span>, not hex; shadcn's slate preset does half the work.</div>
+  </div>
+
+  <div class="panel px-nord" data-v="nord">
+    <div class="pt"><b>B · Nord</b></div>
+    <div class="pd">Polar-night ladder · frost accents · aurora categories. Famously calm and easy on the eyes.</div>
+    <div class="mast"><span class="brand">RV Trip Hub</span><span class="tab">CALENDAR</span></div>
+    <div class="card">
+      <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+      <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+      <div class="li"><span class="tile" style="background:var(--p-stay-bg);color:var(--p-stay)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+      <div class="li"><span class="tile" style="background:var(--p-do-bg);color:var(--p-do)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+      <div class="chips">
+        <span class="chip" style="background:var(--p-stay-bg);color:var(--p-stay)">⛺ Stay</span>
+        <span class="chip" style="background:var(--p-eat-bg);color:var(--p-eat)">🍴 Eat</span>
+        <span class="chip" style="background:var(--p-do-bg);color:var(--p-do)">🔭 Do</span></div>
+      <div class="meta-row"><button class="cta" type="button">＋ Add stop</button><span class="float">◌ FLOATING</span></div>
+    </div>
+    <div class="swl"><i style="background:#2e3440"></i><i style="background:#3b4252"></i><i style="background:#4c566a"></i><i style="background:#88c0d0"></i><i style="background:#a3be8c"></i><i style="background:#ebcb8b"></i><i style="background:#81a1c1"></i></div>
+    <div class="pc"><b>Trade-off:</b> gentlest contrast of the three (that's its character) — and its canvas
+      is notably lighter/grayer than the background you like.</div>
+  </div>
+
+  <div class="panel px-cat" data-v="catppuccin">
+    <div class="pt"><b>C · Catppuccin Mocha</b></div>
+    <div class="pd">Base/surface ladder · pastel accents. Cozy, modern, very popular.</div>
+    <div class="mast"><span class="brand">RV Trip Hub</span><span class="tab">CALENDAR</span></div>
+    <div class="card">
+      <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+      <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+      <div class="li"><span class="tile" style="background:var(--p-stay-bg);color:var(--p-stay)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+      <div class="li"><span class="tile" style="background:var(--p-do-bg);color:var(--p-do)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+      <div class="chips">
+        <span class="chip" style="background:var(--p-stay-bg);color:var(--p-stay)">⛺ Stay</span>
+        <span class="chip" style="background:var(--p-eat-bg);color:var(--p-eat)">🍴 Eat</span>
+        <span class="chip" style="background:var(--p-do-bg);color:var(--p-do)">🔭 Do</span></div>
+      <div class="meta-row"><button class="cta" type="button">＋ Add stop</button><span class="float">◌ FLOATING</span></div>
+    </div>
+    <div class="swl"><i style="background:#1e1e2e"></i><i style="background:#313244"></i><i style="background:#45475a"></i><i style="background:#89b4fa"></i><i style="background:#a6e3a1"></i><i style="background:#f9e2af"></i><i style="background:#94e2d5"></i></div>
+    <div class="pc"><b>Trade-off:</b> purple-tinted canvas (not your blue), and its pastel voice is more
+      "cozy app" than "night highway."</div>
+  </div>
+
+</div></div>
+
+<div class="foot">Click a panel to mark your pick, then tell me in chat. My lean is <b>A</b>: it keeps the
+  one color you named as loved, swaps all warm accent work for a cool sky, and turns the whole palette into
+  names our stack already speaks. If none of the three lands, next round I'd bring Radix Colors dark scales
+  — the system built specifically for accessible component states.</div>
+
+<script>
+  document.querySelectorAll('.panel').forEach(p => p.addEventListener('click', () => {
+    document.querySelectorAll('.panel').forEach(o => o.classList.remove('sel'));
+    p.classList.add('sel');
+  }));
+</script>
+</body>
+</html>

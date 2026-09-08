@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Brick on brighter dark — accent exploration</title>
+<style>
+  * { box-sizing:border-box; margin:0; }
+  :root {
+    --night-deep:#0a1520; --night:#101f2d;
+    --line:#2e4459; --line-hi:#3d566c;
+    --ink0:#eef5fa; --ink1:#b8cbda; --ink2:#8fa8bd; --ink3:#5f7690;
+    --stay:#7cd897; --eat:#f0bc55; --do:#6fc4d8;
+    /* card lightness steps (live-switchable) */
+    --card-1:#24384c; --card-2:#2a4158;
+    --card:var(--card-1);
+    /* Variant 1 · Brick (terracotta-leaning) */
+    --brick-deep:#b04a35; --brick:#e08d78; --brick-bright:#f0a48e; --brick-tint:rgba(224,141,120,.14);
+    /* Variant 2 · Redrock (redder) */
+    --redrock-deep:#b5443f; --redrock:#e6867f; --redrock-bright:#f29d96; --redrock-tint:rgba(230,134,127,.14);
+    --r-md:6px; --r-card:12px; --r-pill:9999px;
+    font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  }
+  .mono { font-family:"Geist Mono",ui-monospace,"SF Mono",monospace; }
+  body { background:var(--night); color:var(--ink0); line-height:1.5; padding-bottom:70px; }
+  .wrap { max-width:1060px; margin:0 auto; padding:0 28px; }
+  .kicker { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.11em; color:var(--brick); margin-bottom:6px; }
+  h2 { font-size:20px; margin-bottom:4px; }
+  .lede { color:var(--ink1); font-size:14px; max-width:80ch; }
+  .hero { background:var(--night-deep); border-bottom:1px solid var(--line); padding:36px 28px 30px; margin-bottom:42px; }
+  .hero-in { max-width:1060px; margin:0 auto; }
+  .hero h1 { font-size:25px; letter-spacing:-0.015em; margin:2px 0 8px; }
+  .hero p { color:var(--ink1); font-size:14.5px; max-width:84ch; }
+  section { margin-top:44px; }
+
+  .toggle { display:inline-flex; border:1px solid var(--line-hi); border-radius:var(--r-pill);
+            overflow:hidden; font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; margin-top:10px; }
+  .toggle button { font:inherit; border:none; background:transparent; color:var(--ink2);
+                   padding:6px 16px; cursor:pointer; }
+  .toggle button.on { background:var(--card-2); color:var(--ink0); font-weight:700; }
+
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; margin-top:18px; }
+  @media (max-width:860px){ .grid { grid-template-columns:1fr; } }
+  .variant { border:1.5px solid var(--line); border-radius:14px; padding:18px; cursor:pointer; }
+  .variant:hover { border-color:var(--line-hi); }
+  .variant.sel { border-color:var(--v-accent); box-shadow:0 0 0 3px var(--v-tint); }
+  .vt { display:flex; align-items:baseline; gap:8px; margin-bottom:2px; }
+  .vt b { font-size:15.5px; }
+  .vt .rec { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; font-weight:700;
+             color:var(--v-accent); background:var(--v-tint); border-radius:var(--r-pill); padding:2px 8px; }
+  .vd { font-size:12.5px; color:var(--ink2); margin-bottom:12px; }
+  .sw-row { display:flex; gap:8px; margin-bottom:14px; }
+  .sw { display:flex; flex-direction:column; gap:3px; font-family:"Geist Mono",ui-monospace,monospace;
+        font-size:9px; color:var(--ink2); }
+  .sw i { width:64px; height:26px; border-radius:5px; border:1px solid rgba(255,255,255,.08); }
+
+  .vx-brick { --v-accent:var(--brick); --v-deep:var(--brick-deep); --v-bright:var(--brick-bright); --v-tint:var(--brick-tint); }
+  .vx-redrock { --v-accent:var(--redrock); --v-deep:var(--redrock-deep); --v-bright:var(--redrock-bright); --v-tint:var(--redrock-tint); }
+
+  .card { border-radius:var(--r-card); padding:16px 18px; background:var(--card);
+          border:1px solid var(--line-hi); color:var(--ink0); }
+  .c-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .c-head b { font-size:16px; }
+  .c-date { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--ink2); }
+  .stars { color:var(--v-accent); letter-spacing:1px; font-size:13px; }
+  .c-note { font-size:12.5px; font-style:italic; color:var(--ink1); margin:7px 0 10px; }
+  .li { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; }
+  .tile { width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center;
+          justify-content:center; font-size:12px; flex:none; }
+  .li .n { font-weight:600; flex:1; }
+  .li .cost { font-family:"Geist Mono",ui-monospace,monospace; font-size:12px; font-weight:700; color:var(--v-accent); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:9px 0 12px; }
+  .chip { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+          text-transform:uppercase; letter-spacing:.05em; border-radius:var(--r-pill); padding:3px 9px; }
+  .cta { border:none; cursor:pointer; font:inherit; font-size:12.5px; font-weight:700;
+         border-radius:var(--r-md); padding:7px 14px; background:var(--v-deep); color:#fff; }
+  .cta:hover { background:var(--v-bright); color:var(--night-deep); }
+  .link { font-size:12.5px; font-weight:600; color:var(--v-accent); margin-left:2px; }
+  .meta-row { display:flex; align-items:center; gap:12px; }
+  .float { margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+           border-radius:var(--r-pill); padding:3px 9px; background:rgba(240,188,85,.16); color:var(--eat); }
+  .procon { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:13px; font-size:12px; color:var(--ink2); }
+  .procon b { display:block; font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px;
+              letter-spacing:.08em; text-transform:uppercase; margin-bottom:3px; }
+  .procon .p b { color:var(--stay); } .procon .c b { color:var(--v-accent); }
+
+  table.rc { border-collapse:collapse; font-size:12.5px; margin-top:14px; background:var(--card-1);
+             border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .rc th, .rc td { padding:8px 14px; text-align:left; border-bottom:1px solid var(--line); }
+  .rc th { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; text-transform:uppercase;
+           letter-spacing:.08em; color:var(--ink2); background:var(--night-deep); }
+  .rc tr:last-child td { border-bottom:none; }
+  .rc .ok { color:var(--stay); font-weight:700; font-family:"Geist Mono",ui-monospace,monospace; }
+  .hint { margin-top:14px; font-size:13px; color:var(--ink1); }
+  .hint b { color:var(--brick); }
+</style>
+</head>
+<body>
+
+<div class="hero"><div class="hero-in">
+  <div class="kicker">Palette revision · mock 2 — brick accent on brighter-dark cards</div>
+  <h1>Variant C, tuned — and the orange retired</h1>
+  <p>Cards move two steps up the ladder with a strong hairline (your C pick, separation boosted); the
+     accent family shifts from orange toward brick. The handoff once rejected "dusty clay" for contrast —
+     fair — so brick gets the same two-tier treatment as ember had: a lightened clay tier for text and
+     stars on dark, true brick for buttons and fills. Use the toggle to A/B the card lightness live.</p>
+  <div class="toggle"><button id="s1" class="on" type="button">cards #24384c</button><button id="s2" type="button">cards #2a4158 (lighter)</button></div>
+</div></div>
+
+<div class="wrap">
+
+<section>
+  <div class="kicker">Two brick families — click to pick</div>
+  <h2>Same card, two temperatures of brick</h2>
+  <div class="grid">
+
+    <div class="variant vx-brick sel" data-v="brick">
+      <div class="vt"><b>1 · Brick</b><span class="rec">★ REC</span></div>
+      <div class="vd">Terracotta-leaning (hue ~14°). Warm and earthy — reads "adobe, canyon, campfire clay."</div>
+      <div class="sw-row">
+        <span class="sw"><i style="background:var(--brick-deep)"></i>deep #b04a35</span>
+        <span class="sw"><i style="background:var(--brick)"></i>text #e08d78</span>
+        <span class="sw"><i style="background:var(--brick-bright)"></i>hover #f0a48e</span>
+      </div>
+      <div class="card">
+        <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+        <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+        <div class="li"><span class="tile" style="background:rgba(124,216,151,.16);color:var(--stay)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+        <div class="li"><span class="tile" style="background:rgba(111,196,216,.16);color:var(--do)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+        <div class="chips">
+          <span class="chip" style="background:rgba(124,216,151,.16);color:var(--stay)">⛺ Stay</span>
+          <span class="chip" style="background:rgba(240,188,85,.16);color:var(--eat)">🍴 Eat</span>
+          <span class="chip" style="background:rgba(111,196,216,.16);color:var(--do)">🔭 Do</span></div>
+        <div class="meta-row"><button class="cta" type="button">＋ Add stop</button>
+          <span class="link">KOA site →</span><span class="float">◌ FLOATING</span></div>
+      </div>
+      <div class="procon">
+        <div class="p"><b>Pro</b>Southwest-warm, unmistakably not-orange; farthest hue distance from Eat-amber; deep tier is a handsome CTA.</div>
+        <div class="c"><b>Con</b>Text tier drifts toward salmon under some displays.</div>
+      </div>
+    </div>
+
+    <div class="variant vx-redrock" data-v="redrock">
+      <div class="vt"><b>2 · Redrock</b></div>
+      <div class="vd">Redder brick (hue ~4°). Cooler, more serious — reads "kiln brick, canyon wall at dusk."</div>
+      <div class="sw-row">
+        <span class="sw"><i style="background:var(--redrock-deep)"></i>deep #b5443f</span>
+        <span class="sw"><i style="background:var(--redrock)"></i>text #e6867f</span>
+        <span class="sw"><i style="background:var(--redrock-bright)"></i>hover #f29d96</span>
+      </div>
+      <div class="card">
+        <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+        <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+        <div class="li"><span class="tile" style="background:rgba(124,216,151,.16);color:var(--stay)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+        <div class="li"><span class="tile" style="background:rgba(111,196,216,.16);color:var(--do)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+        <div class="chips">
+          <span class="chip" style="background:rgba(124,216,151,.16);color:var(--stay)">⛺ Stay</span>
+          <span class="chip" style="background:rgba(240,188,85,.16);color:var(--eat)">🍴 Eat</span>
+          <span class="chip" style="background:rgba(111,196,216,.16);color:var(--do)">🔭 Do</span></div>
+        <div class="meta-row"><button class="cta" type="button">＋ Add stop</button>
+          <span class="link">KOA site →</span><span class="float">◌ FLOATING</span></div>
+      </div>
+      <div class="procon">
+        <div class="p"><b>Pro</b>Most "brick" literal; strongest contrast with every category hue.</div>
+        <div class="c"><b>Con</b>Red proximity means a future danger/destructive color gets harder to place.</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Receipts</div>
+  <h2>Both families clear the bars</h2>
+  <table class="rc">
+    <tr><th>Reading</th><th>1 · Brick</th><th>2 · Redrock</th></tr>
+    <tr><td>Text tier on canvas #101f2d</td><td class="ok">6.6:1</td><td class="ok">6.2:1</td></tr>
+    <tr><td>Text tier on card #24384c</td><td class="ok">4.7:1</td><td class="ok">4.5:1</td></tr>
+    <tr><td>White ink on deep-tier CTA</td><td class="ok">5.4:1</td><td class="ok">5.6:1</td></tr>
+    <tr><td>Hue distance from Eat-amber</td><td class="ok">~32°</td><td class="ok">~42°</td></tr>
+  </table>
+  <p class="lede" style="margin-top:12px">On the lighter card step (#2a4158) the text tiers sit at ~4.2:1 —
+     glyph/star-safe, borderline for long text: money and stars stay accent, body copy never does. Same rule
+     ember lived by.</p>
+</section>
+
+<section>
+  <div class="kicker">Your read</div>
+  <h2>Three answers wanted</h2>
+  <p class="hint">1) <b>Brick or Redrock?</b> (★ Brick — warmer, more "canyon country," and it keeps hue
+     room for a future true-red danger color… though Redrock's extra distance from amber is real.)<br/>
+     2) <b>Card step:</b> #24384c or the lighter #2a4158? Toggle above and judge separation vs mood.<br/>
+     3) <b>Map default</b> — you called the Night map almost unusable: make <b>Day</b> the default style
+     (Night stays available in the toggle)?</p>
+</section>
+
+</div>
+<script>
+  const b1=document.getElementById('s1'), b2=document.getElementById('s2');
+  function setCard(v,on,off){ document.documentElement.style.setProperty('--card', v); on.classList.add('on'); off.classList.remove('on'); }
+  b1.addEventListener('click',()=>setCard('#24384c',b1,b2));
+  b2.addEventListener('click',()=>setCard('#2a4158',b2,b1));
+  document.querySelectorAll('.variant').forEach(v=>v.addEventListener('click',()=>{
+    document.querySelectorAll('.variant').forEach(o=>o.classList.remove('sel'));
+    v.classList.add('sel');
+  }));
+</script>
+</body>
+</html>

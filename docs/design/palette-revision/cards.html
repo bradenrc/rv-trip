@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Card surfaces on the night canvas — exploration</title>
+<style>
+  * { box-sizing:border-box; margin:0; }
+  :root {
+    --night-deep:#0a1520; --night:#101f2d; --raised:#182b3d; --high:#21374d;
+    --line:#2e4459; --line-hi:#3d566c;
+    --ink0:#eef5fa; --ink1:#b8cbda; --ink2:#8fa8bd; --ink3:#5f7690;
+    --ember:#f28c5e; --ember-deep:#c14d20;
+    --stay-dark:#7cd897;
+    /* light-interior sets (the ORIGINAL light palette, returning inside cards) */
+    --l-ink:#0b1b2b; --l-muted:#3a4a5c; --l-faded:#5d6b7d; --l-border:#dde4ec;
+    --l-stay-bg:#e4f2e9; --l-stay-ink:#0e3d1f; --l-eat-bg:#fef3c7; --l-eat-ink:#97601c;
+    --l-do-bg:#e3f0f4; --l-do-ink:#23697d;
+    --r-md:6px; --r-card:12px; --r-pill:9999px;
+    font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  }
+  .mono { font-family:"Geist Mono",ui-monospace,"SF Mono",monospace; }
+  body { background:var(--night); color:var(--ink0); line-height:1.5; padding-bottom:70px; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 28px; }
+  .kicker { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.11em; color:var(--ember); margin-bottom:6px; }
+  h2 { font-size:20px; margin-bottom:4px; }
+  .lede { color:var(--ink1); font-size:14px; max-width:80ch; }
+  .hero { background:var(--night-deep); border-bottom:1px solid var(--line); padding:38px 28px 32px; margin-bottom:44px; }
+  .hero-in { max-width:1120px; margin:0 auto; }
+  .hero h1 { font-size:26px; letter-spacing:-0.015em; margin:2px 0 8px; }
+  .hero p { color:var(--ink1); font-size:14.5px; max-width:84ch; }
+
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:22px; margin-top:20px; }
+  @media (max-width:980px){ .grid { grid-template-columns:1fr; } }
+  .variant { border:1.5px solid var(--line); border-radius:14px; padding:18px; cursor:pointer; }
+  .variant:hover { border-color:var(--line-hi); }
+  .variant.sel { border-color:var(--ember); box-shadow:0 0 0 3px rgba(242,140,94,.15); }
+  .vt { display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
+  .vt b { font-size:15.5px; }
+  .vt .rec { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; font-weight:700;
+             color:var(--ember); background:rgba(242,140,94,.12); border-radius:var(--r-pill); padding:2px 8px; }
+  .vd { font-size:12.5px; color:var(--ink2); margin-bottom:14px; }
+
+  /* the shared card slice, per-variant vars */
+  .card { border-radius:var(--r-card); padding:16px 18px; background:var(--c-bg);
+          color:var(--c-ink); border:var(--c-bd); box-shadow:var(--c-sh); }
+  .c-head { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .c-head b { font-size:16px; letter-spacing:-0.01em; }
+  .c-date { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--c-faded); }
+  .stars { color:var(--c-star); letter-spacing:1px; font-size:13px; }
+  .c-note { font-size:12.5px; font-style:italic; color:var(--c-muted); margin:7px 0 10px; }
+  .li { display:flex; align-items:center; gap:10px; padding:6px 0; font-size:13px; }
+  .tile { width:24px; height:24px; border-radius:6px; display:inline-flex; align-items:center;
+          justify-content:center; font-size:12px; flex:none; }
+  .li .n { font-weight:600; flex:1; }
+  .li .cost { font-family:"Geist Mono",ui-monospace,monospace; font-size:12px; font-weight:700; color:var(--c-money); }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin:9px 0 12px; }
+  .chip { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+          text-transform:uppercase; letter-spacing:.05em; border-radius:var(--r-pill); padding:3px 9px; }
+  .cta { border:none; cursor:pointer; font:inherit; font-size:12.5px; font-weight:700;
+         border-radius:var(--r-md); padding:7px 14px; background:var(--c-cta); color:var(--c-cta-ink); }
+  .meta-row { display:flex; align-items:center; gap:10px; }
+  .float { margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+           border-radius:var(--r-pill); padding:3px 9px; background:var(--c-eat-bg); color:var(--c-eat-ink); }
+
+  .vx-paper { --c-bg:#ffffff; --c-ink:var(--l-ink); --c-muted:var(--l-muted); --c-faded:var(--l-faded);
+    --c-bd:none; --c-sh:0 10px 28px -10px rgba(0,0,0,.55);
+    --c-money:var(--ember-deep); --c-star:var(--ember); --c-cta:var(--ember-deep); --c-cta-ink:#fff;
+    --c-stay-bg:var(--l-stay-bg); --c-stay-ink:var(--l-stay-ink);
+    --c-eat-bg:var(--l-eat-bg); --c-eat-ink:var(--l-eat-ink);
+    --c-do-bg:var(--l-do-bg); --c-do-ink:var(--l-do-ink); }
+  .vx-fog { --c-bg:#e9f1f7; --c-ink:var(--l-ink); --c-muted:var(--l-muted); --c-faded:var(--l-faded);
+    --c-bd:none; --c-sh:0 10px 28px -10px rgba(0,0,0,.5);
+    --c-money:var(--ember-deep); --c-star:var(--ember); --c-cta:var(--ember-deep); --c-cta-ink:#fff;
+    --c-stay-bg:#d9ecdf; --c-stay-ink:var(--l-stay-ink);
+    --c-eat-bg:#f6ecc4; --c-eat-ink:var(--l-eat-ink);
+    --c-do-bg:#d6e8ee; --c-do-ink:var(--l-do-ink); }
+  .vx-dark { --c-bg:#24384c; --c-ink:var(--ink0); --c-muted:var(--ink1); --c-faded:var(--ink2);
+    --c-bd:1px solid var(--line-hi); --c-sh:none;
+    --c-money:var(--ember); --c-star:var(--ember); --c-cta:var(--ember); --c-cta-ink:var(--night-deep);
+    --c-stay-bg:rgba(124,216,151,.16); --c-stay-ink:var(--stay-dark);
+    --c-eat-bg:rgba(240,188,85,.16); --c-eat-ink:#f0bc55;
+    --c-do-bg:rgba(111,196,216,.16); --c-do-ink:#6fc4d8; }
+
+  .procon { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:14px; font-size:12px; color:var(--ink2); }
+  .procon b { display:block; font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px;
+              letter-spacing:.08em; text-transform:uppercase; margin-bottom:3px; }
+  .procon .p b { color:var(--stay-dark); } .procon .c b { color:var(--ember); }
+
+  table.rc { border-collapse:collapse; font-size:12.5px; margin-top:16px; background:var(--raised);
+             border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .rc th, .rc td { padding:8px 14px; text-align:left; border-bottom:1px solid var(--line); }
+  .rc th { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; text-transform:uppercase;
+           letter-spacing:.08em; color:var(--ink2); background:var(--night-deep); }
+  .rc tr:last-child td { border-bottom:none; }
+  .rc .ok { color:var(--stay-dark); font-weight:700; font-family:"Geist Mono",ui-monospace,monospace; }
+  .rc .meh { color:#f0bc55; font-weight:700; font-family:"Geist Mono",ui-monospace,monospace; }
+
+  section { margin-top:46px; }
+  .notes textarea { width:100%; min-height:80px; background:var(--raised); color:var(--ink0);
+                    border:1px solid var(--line-hi); border-radius:10px; padding:12px 14px;
+                    font:inherit; font-size:13.5px; resize:vertical; }
+  .notes textarea::placeholder { color:var(--ink3); }
+  .hint { margin-top:12px; font-size:13px; color:var(--ink1); }
+  .hint b { color:var(--ember); }
+</style>
+</head>
+<body>
+
+<div class="hero"><div class="hero-in">
+  <div class="kicker">Palette revision · mock — card surfaces</div>
+  <h1>Keep the night. Lighten what you read.</h1>
+  <p>Your usability read matches the original handoff's one rule we overruled: content surfaces should be
+     light even when the chrome is dark. The night canvas and masthead stay exactly as they are — below,
+     the same Astoria card in three surface treatments, live on the real canvas. Click a variant to mark
+     your pick; tell me in chat.</p>
+</div></div>
+
+<div class="wrap">
+
+<section>
+  <div class="kicker">The candidates — same content, three surfaces</div>
+  <h2>Astoria on the night canvas, three ways</h2>
+  <div class="grid">
+
+    <div class="variant" data-v="paper">
+      <div class="vt"><b>A · Paper</b></div>
+      <div class="vd">Pure white cards — the handoff's original rule, verbatim. Ink returns to the full
+        light set; ember goes text-safe deep for money/CTA; category tints are the original light values.</div>
+      <div class="card vx-paper">
+        <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+        <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+        <div class="li"><span class="tile" style="background:var(--c-stay-bg);color:var(--c-stay-ink)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+        <div class="li"><span class="tile" style="background:var(--c-do-bg);color:var(--c-do-ink)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+        <div class="chips">
+          <span class="chip" style="background:var(--c-stay-bg);color:var(--c-stay-ink)">⛺ Stay</span>
+          <span class="chip" style="background:var(--c-eat-bg);color:var(--c-eat-ink)">🍴 Eat</span>
+          <span class="chip" style="background:var(--c-do-bg);color:var(--c-do-ink)">🔭 Do</span></div>
+        <div class="meta-row"><button class="cta" type="button">＋ Add stop</button>
+          <span class="float">◌ FLOATING</span></div>
+      </div>
+      <div class="procon">
+        <div class="p"><b>Pro</b>Maximum readability (15.9:1 body ink); crispest figure-ground; simplest token story — the old light set returns intact inside cards.</div>
+        <div class="c"><b>Con</b>Brightest possible surface — some glare against the night ground in dim rooms.</div>
+      </div>
+    </div>
+
+    <div class="variant" data-v="fog" >
+      <div class="vt"><b>B · Fog</b><span class="rec">★ REC</span></div>
+      <div class="vd">Cool light-gray cards (#e9f1f7) on the dusk wheel — a soft step down from white.
+        Same dark-ink interior; tints nudged one step deeper so they don't vanish on gray.</div>
+      <div class="card vx-fog">
+        <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+        <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+        <div class="li"><span class="tile" style="background:var(--c-stay-bg);color:var(--c-stay-ink)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+        <div class="li"><span class="tile" style="background:var(--c-do-bg);color:var(--c-do-ink)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+        <div class="chips">
+          <span class="chip" style="background:var(--c-stay-bg);color:var(--c-stay-ink)">⛺ Stay</span>
+          <span class="chip" style="background:var(--c-eat-bg);color:var(--c-eat-ink)">🍴 Eat</span>
+          <span class="chip" style="background:var(--c-do-bg);color:var(--c-do-ink)">🔭 Do</span></div>
+        <div class="meta-row"><button class="cta" type="button">＋ Add stop</button>
+          <span class="float">◌ FLOATING</span></div>
+      </div>
+      <div class="procon">
+        <div class="p"><b>Pro</b>Near-white readability (14.5:1) without the glare; the cool gray sits on the dusk hue wheel, so cards feel *of* the night rather than punched through it.</div>
+        <div class="c"><b>Con</b>Tints need their own nudged values (one more small palette set to maintain).</div>
+      </div>
+    </div>
+
+    <div class="variant" data-v="dark">
+      <div class="vt"><b>C · Brighter dark</b></div>
+      <div class="vd">The minimal change: cards two ladder-steps lighter (#24384c), brighter ink. Included
+        honestly as the comparator — judge whether "more contrast, still dark" clears your bar.</div>
+      <div class="card vx-dark">
+        <div class="c-head"><b>Astoria, OR</b><span class="c-date">AUG 2–5</span><span class="stars">★★★★★</span></div>
+        <div class="c-note">“Loved the riverwalk. Book the same RV park next time.”</div>
+        <div class="li"><span class="tile" style="background:var(--c-stay-bg);color:var(--c-stay-ink)">⛺</span><span class="n">Astoria/Warrenton KOA</span><span class="cost">$204</span></div>
+        <div class="li"><span class="tile" style="background:var(--c-do-bg);color:var(--c-do-ink)">🔭</span><span class="n">Columbia River Maritime Museum</span><span class="cost">$38</span></div>
+        <div class="chips">
+          <span class="chip" style="background:var(--c-stay-bg);color:var(--c-stay-ink)">⛺ Stay</span>
+          <span class="chip" style="background:var(--c-eat-bg);color:var(--c-eat-ink)">🍴 Eat</span>
+          <span class="chip" style="background:var(--c-do-bg);color:var(--c-do-ink)">🔭 Do</span></div>
+        <div class="meta-row"><button class="cta" type="button">＋ Add stop</button>
+          <span class="float">◌ FLOATING</span></div>
+      </div>
+      <div class="procon">
+        <div class="p"><b>Pro</b>Smallest diff; the all-dark identity survives whole.</div>
+        <div class="c"><b>Con</b>Ink contrast improves but *surface separation* stays weak — the thing you flagged. Likely still below your usability bar.</div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Receipts</div>
+  <h2>Contrast, measured</h2>
+  <table class="rc">
+    <tr><th>Reading</th><th>A · Paper</th><th>B · Fog</th><th>C · Brighter dark</th></tr>
+    <tr><td>Body ink on card</td><td class="ok">15.9:1</td><td class="ok">14.5:1</td><td class="ok">11.8:1</td></tr>
+    <tr><td>Card vs canvas (surface separation)</td><td class="ok">13.7:1</td><td class="ok">11.9:1</td><td class="meh">1.7:1</td></tr>
+    <tr><td>Money / accent text</td><td class="ok">4.8:1 (ember-deep)</td><td class="ok">4.4:1</td><td class="ok">6.4:1 (ember)</td></tr>
+    <tr><td>Category chip text on tint</td><td class="ok">all ≥ 5:1</td><td class="ok">all ≥ 5:1</td><td class="meh">3.5–4.2:1</td></tr>
+  </table>
+  <p class="lede" style="margin-top:12px">Row 2 is your complaint quantified: C's cards separate from the
+     canvas at only ~1.7:1 — readable ink on an invisible surface. A and B fix the <i>surface</i>, not just
+     the text.</p>
+</section>
+
+<section class="notes">
+  <div class="kicker">Your read</div>
+  <h2>Pick and note</h2>
+  <textarea placeholder="Which one, and what would you tune? (glare, tint strength, chrome contrast…)"></textarea>
+  <div class="hint">My lean: <b>B · Fog</b> — white's readability without white's glare, and the cool gray
+     keeps the cards on the dusk wheel. Click a variant above to mark it, then tell me in chat; I'll spec
+     the winner (this also decides the map default question — with light cards, the Day map as default
+     reads coherent).</div>
+</section>
+
+</div>
+<script>
+  document.querySelectorAll('.variant').forEach(v => v.addEventListener('click', () => {
+    document.querySelectorAll('.variant').forEach(o => o.classList.remove('sel'));
+    v.classList.add('sel');
+  }));
+</script>
+</body>
+</html>
