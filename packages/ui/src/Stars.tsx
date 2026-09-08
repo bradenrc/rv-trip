@@ -25,8 +25,8 @@ export function Stars({
             style={{
               width: size,
               height: size,
-              color: filled ? "var(--color-rv-ember)" : "var(--color-rv-ink-subtle)",
-              fill: filled ? "var(--color-rv-ember)" : "transparent",
+              color: filled ? "var(--color-rv-accent)" : "var(--color-rv-ink-subtle)",
+              fill: filled ? "var(--color-rv-accent)" : "transparent",
             }}
           />
         );

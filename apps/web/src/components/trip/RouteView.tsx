@@ -269,7 +269,7 @@ function NavigateButton({ href, className }: { href: string; className: string }
       href={href}
       target="_blank"
       rel="noreferrer"
-      className={`inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-rv-md bg-rv-ember px-3 py-[5px] text-[13px] font-bold text-rv-navy no-underline shadow-rv-sm ${className}`}
+      className={`inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-rv-md bg-rv-accent-deep px-3 py-[5px] text-[13px] font-bold text-rv-accent-ink no-underline shadow-rv-sm ${className}`}
     >
       <Navigation className="size-3.5" />
       Navigate
@@ -341,7 +341,7 @@ function RouteRail({
               </div>
               <Link
                 href="/rig"
-                className="mt-1.5 inline-block text-[12.5px] font-bold text-rv-ember no-underline"
+                className="mt-1.5 inline-block text-[12.5px] font-bold text-rv-accent no-underline"
               >
                 Set up your rig →
               </Link>
@@ -353,7 +353,7 @@ function RouteRail({
         {costs && (
           <div className="border-t border-rv-border-soft pt-3.5">
             <div className={`${kicker} mb-2`}>Planned cost</div>
-            <div className="font-mono text-[26px] font-bold leading-none text-rv-ember">
+            <div className="font-mono text-[26px] font-bold leading-none text-rv-accent">
               {money(summary.totalCost)}
             </div>
             <div className="mt-1 text-[12px] text-rv-ink-faded">so far</div>

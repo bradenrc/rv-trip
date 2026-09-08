@@ -176,7 +176,7 @@ export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPla
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-[18px] gap-y-2 border-t border-rv-border bg-rv-navy-deep px-3.5 py-[11px] text-[11.5px] text-rv-ink-faded">
+        <div className="dark flex flex-wrap items-center gap-x-[18px] gap-y-2 border-t border-rv-border bg-rv-navy-deep px-3.5 py-[11px] text-[11.5px] text-rv-ink-faded">
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full border-2 border-rv-green bg-rv-green-soft" />}>
             Trip stop, in order
           </LegendKey>
@@ -186,10 +186,10 @@ export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPla
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full border-2 border-dashed border-rv-warning bg-rv-navy-deep" />}>
             Floating stop
           </LegendKey>
-          <LegendKey swatch={<i className="size-[13px] flex-none rounded-full bg-rv-ember" />}>Selected</LegendKey>
+          <LegendKey swatch={<i className="size-[13px] flex-none rounded-full bg-rv-accent" />}>Selected</LegendKey>
           <LegendKey swatch={<TeardropKey />}>Saved · want to go</LegendKey>
           <LegendKey swatch={<TeardropKey hollow />}>Saved · been there</LegendKey>
-          <LegendKey swatch={<i className="inline-block w-6 flex-none border-t-2 border-dashed border-rv-ember" />}>
+          <LegendKey swatch={<i className="inline-block w-6 flex-none border-t-2 border-dashed border-rv-accent" />}>
             Estimated drive — straight-line, not a road route
           </LegendKey>
         </div>
@@ -234,7 +234,7 @@ function TeardropKey({ hollow = false }: { hollow?: boolean }) {
  * are token-styled layout glue rather than DS reuse. */
 function SelectedCard({ pin }: { pin: MapPin }) {
   return (
-    <div className="rounded-rv-card border border-rv-ember-deep bg-rv-surface px-3.5 py-[13px] shadow-rv-lg">
+    <div className="rounded-rv-card border border-rv-accent-deep bg-rv-surface px-3.5 py-[13px] shadow-rv-lg">
       {pin.kind === "stop" ? <SelectedStop pin={pin} /> : <SelectedPlace pin={pin} />}
     </div>
   );
@@ -268,7 +268,7 @@ function SelectedStop({ pin }: { pin: StopPin }) {
             </span>
           </span>
           {r.cost != null && (
-            <span className="ml-auto font-mono text-[12.5px] font-semibold text-rv-ember">
+            <span className="ml-auto font-mono text-[12.5px] font-semibold text-rv-accent">
               {money(r.cost)}
             </span>
           )}

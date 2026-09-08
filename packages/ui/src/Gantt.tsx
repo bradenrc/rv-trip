@@ -138,7 +138,7 @@ export function StopBar({
       {showMeta && (
         <div className="mt-auto flex flex-wrap items-center gap-[5px]">
           {rating > 0 && (
-            <span className="inline-flex items-center gap-[3px] font-mono text-[9px] text-rv-ember">
+            <span className="inline-flex items-center gap-[3px] font-mono text-[9px] text-rv-accent">
               <Star className="size-2.5 fill-current" />
               {rating.toFixed(1)}
             </span>

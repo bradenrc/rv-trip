@@ -88,7 +88,7 @@ export function StopDetailSheet({
         className="flex h-full w-[min(500px,100%)] flex-col overflow-y-auto bg-rv-surface-alt shadow-rv-xl"
       >
         {/* Sticky header */}
-        <div className="sticky top-0 z-[1] bg-rv-navy px-6 py-5 text-rv-ink">
+        <div className="dark sticky top-0 z-[1] bg-rv-navy px-6 py-5 text-rv-ink">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="mb-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-rv-green-on-dark">
@@ -185,7 +185,7 @@ export function StopDetailSheet({
                 <button
                   type="button"
                   onClick={onSubmitAdd}
-                  className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-ember px-4 py-2 text-[13px] font-semibold text-rv-navy"
+                  className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-accent-deep px-4 py-2 text-[13px] font-semibold text-rv-accent-ink"
                 >
                   <Check className="size-4" />
                   Save reservation

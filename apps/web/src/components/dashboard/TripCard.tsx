@@ -135,7 +135,7 @@ export function TripCard({ trip, feature = false }: { trip: TripSummary; feature
             </span>
           )}
           {feature && (
-            <span className="ml-auto inline-flex items-center gap-1.5 text-[14px] font-bold text-rv-ember">
+            <span className="ml-auto inline-flex items-center gap-1.5 text-[14px] font-bold text-rv-accent">
               Open planner
               <ArrowRight className="size-[15px]" />
             </span>
