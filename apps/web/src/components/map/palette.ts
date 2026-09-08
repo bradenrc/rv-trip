@@ -1,0 +1,209 @@
+import type { CategoryLabel } from "@rv-trip/ui";
+
+/**
+ * The map's three-mode overlay palette (issue #12).
+ *
+ * ── Why this file exists ──────────────────────────────────────────────────
+ * Swapping the basemap is one line. Everything drawn *on top of* it is not:
+ * every pin, label, leader and arc in `MapView` is a Night literal — either a
+ * Tailwind `rv-*` class or an inline hex — and every one of them is unreadable
+ * over `outdoors-v12`. So the overlay is a table of roles, keyed by mode, and
+ * this is that table.
+ *
+ * ── Provenance ───────────────────────────────────────────────────────────
+ * The **night** column is not a new palette: every value is what its `rv-*`
+ * token resolves to in `packages/ui/styles/entry.css`, with the token name in
+ * a comment beside it — the same discipline `NIGHTFALL_PAINT` uses
+ * (nightfall.ts:5-9), and guarded against drift by
+ * `packages/core/src/theme/map-palette.test.ts`. The **day** and **sat**
+ * columns are map-only literals: no `rv-*` token is added, so the `toEqual`
+ * token contract at `nightfall-tokens.test.ts:114` stays green untouched.
+ *
+ * Values are literals rather than `var(--…)` because Mapbox paint properties
+ * cannot read CSS custom properties, and one vocabulary for the whole overlay
+ * beats two.
+ *
+ * ── Scope: the canvas flips, the chrome does not ─────────────────────────
+ * Only what is drawn on the map canvas is mode-keyed. App chrome — the layer
+ * chips, the category filter row above the canvas, the 360px rail, every
+ * `FilterChip` swatch resolving through `categoryMeta`
+ * (packages/ui/src/category.ts:33-57) — stays Nightfall in all three modes.
+ * The map is a window onto vendor cartography and has to survive whatever is
+ * behind it; the app around it does not. That is why the Day chip row can read
+ * `rv-green` beside a `#2e8b4e` pin for the same category, and why
+ * `categoryMeta` is not touched by this issue: the category *meanings* never
+ * move, and the legend is chrome.
+ *
+ * This module is deliberately vendor-free — no `react-map-gl`, no `mapbox-gl`.
+ * `MapMount` runs during SSR and needs `isStyleMode` as a runtime value, and a
+ * value import of anything in `MapView.tsx` would drag `mapbox-gl` (which
+ * touches `window` at import time) into the server bundle.
+ */
+
+export const STYLE_MODES = ["night", "day", "sat"] as const;
+
+export type StyleMode = (typeof STYLE_MODES)[number];
+
+/** The default, and the product's identity. */
+export const DEFAULT_STYLE_MODE: StyleMode = "night";
+
+/** Narrow an untrusted string — a persisted preference, a stale value from a
+ * future release — to a mode this build actually renders. */
+export function isStyleMode(value: string): value is StyleMode {
+  return (STYLE_MODES as readonly string[]).includes(value);
+}
+
+export interface OverlayPalette {
+  /** Saved-place teardrop grounds, per category. Meanings are fixed; only the
+   * values flip. */
+  category: Record<CategoryLabel, string>;
+  /** The teardrop's inner dot on a "want" place. */
+  dropDot: string;
+  /** Stop-disc stroke — planning and been alike. */
+  discStroke: string;
+  /** Stop-disc fill, planning only. */
+  discFill: string;
+  /** Stop-disc numeral, planning only. */
+  discInk: string;
+  /** The hollow ground behind a been disc, a floating disc, and a been
+   * teardrop's body (MapView.tsx StopDisc + PlaceDrop both). */
+  hollowGround: string;
+  /** A floating stop's dashed stroke — and its ◇, which takes the same value. */
+  floatingStroke: string;
+  selFill: string;
+  selStroke: string;
+  selInk: string;
+  arcLine: string;
+  arcWidth: number;
+  arcOpacity: number;
+  /** A wide dark line *under* the arc, so a dashed estimate survives satellite
+   * imagery. Null where the basemap is flat enough not to need one. */
+  arcCasing: string | null;
+  labelScrim: string;
+  labelInk: string;
+  labelInkSelected: string;
+  arcLabelScrim: string;
+  arcLabelBorder: string;
+  arcLabelInk: string;
+  /** The dashed spiderfy leader back to a nudged pin's true coordinate. */
+  leader: string;
+  /** A 1.5px ring outside every marker's own shadow, so a pin reads against
+   * imagery of any tone. Null where the basemap is uniform enough. */
+  halo: string | null;
+}
+
+const NIGHT: OverlayPalette = {
+  category: {
+    Stay: "#7cd897", // --color-rv-green
+    Eat: "#f0bc55", // --color-rv-warning
+    Do: "#6fc4d8", // --color-rv-info-ink
+    Travel: "#a79ec8", // --color-rv-travel
+    Other: "#8fa8bd", // --color-rv-ink-faded
+  },
+  dropDot: "#0a1520", // --color-rv-navy
+  discStroke: "#7cd897", // --color-rv-green
+  discFill: "#1c3a2b", // --color-rv-green-soft
+  discInk: "#a8e8bd", // --color-rv-green-ink
+  hollowGround: "#08182b", // --color-rv-navy-deep
+  floatingStroke: "#f0bc55", // --color-rv-warning
+  selFill: "#f28c5e", // --color-rv-ember
+  selStroke: "#ffa477", // --color-rv-ember-bright
+  selInk: "#0a1520", // --color-rv-navy
+  arcLine: "#f28c5e", // --color-rv-ember
+  arcWidth: 1.6,
+  arcOpacity: 0.75,
+  arcCasing: null,
+  labelScrim: "rgba(8, 24, 43, 0.84)", // rv-navy-deep at 84%
+  labelInk: "#b8cbda", // --color-rv-ink-muted
+  labelInkSelected: "#ffa477", // --color-rv-ember-bright
+  arcLabelScrim: "rgba(10, 21, 32, 0.88)", // rv-navy at 88%
+  arcLabelBorder: "#3a2b22", // --color-rv-ember-soft
+  arcLabelInk: "#f28c5e", // --color-rv-ember
+  leader: "#3d566c", // --color-rv-border-hi
+  halo: null,
+};
+
+/**
+ * `outdoors-v12`, stock and untouched. Six values come straight from issue
+ * #12's table (the five categories plus the day route tone, which is already
+ * the real token rv-ember-deep). The rest are derived, not chosen: white is
+ * the value the issue already names for the sat halo and does the same job
+ * here — a pin's own chip ground, independent of the basemap; rv-navy is the
+ * app's existing ink-on-light value; day floating reuses the day amber,
+ * because night floating already reuses rv-warning.
+ */
+const DAY: OverlayPalette = {
+  category: {
+    Stay: "#2e8b4e",
+    Eat: "#97601c",
+    Do: "#23697d",
+    Travel: "#5c5470",
+    Other: "#5d6b7d",
+  },
+  dropDot: "#ffffff",
+  discStroke: "#2e8b4e",
+  discFill: "#2e8b4e",
+  discInk: "#ffffff",
+  hollowGround: "#ffffff",
+  floatingStroke: "#97601c",
+  selFill: "#c14d20",
+  selStroke: "#c14d20",
+  selInk: "#ffffff",
+  arcLine: "#c14d20",
+  arcWidth: 1.8,
+  arcOpacity: 0.92,
+  arcCasing: null,
+  labelScrim: "rgba(255, 255, 255, 0.9)",
+  labelInk: "#0a1520",
+  labelInkSelected: "#c14d20",
+  arcLabelScrim: "rgba(255, 255, 255, 0.9)",
+  arcLabelBorder: "#c14d20",
+  arcLabelInk: "#c14d20",
+  leader: "rgba(10, 21, 32, 0.45)",
+  halo: null,
+};
+
+/**
+ * `satellite-streets-v12`. The overlay is night's — a scrim at .84–.88 alpha
+ * is the one treatment that is independent of whatever imagery happens to be
+ * underneath, so there is nothing to tune per tile. What imagery *does* need
+ * is separation: a white halo outside every marker, and a dark casing under
+ * every arc. Built as a spread of night so the two can never fork by hand.
+ */
+const SAT: OverlayPalette = {
+  ...NIGHT,
+  arcOpacity: 1,
+  arcCasing: "rgba(10, 21, 32, 0.8)", // rv-navy at 80%
+  halo: "#ffffff",
+};
+
+export const MAP_PALETTE: Record<StyleMode, OverlayPalette> = {
+  night: NIGHT,
+  day: DAY,
+  sat: SAT,
+};
+
+/** The width of the casing line under a sat arc. */
+export const ARC_CASING_WIDTH = 4;
+
+/**
+ * A DOM marker's full `box-shadow`: its own depth shadow, then — on sat — the
+ * halo ring, then the selection ring outside both. The order is the whole
+ * point: a ring cannot be appended to a Tailwind `shadow-rv-*` class, which is
+ * why these markers carry their shadow inline.
+ */
+export function markerShadow(
+  depth: "sm" | "md" | "lg" | "xl",
+  palette: OverlayPalette,
+  selected: boolean,
+): string {
+  const parts = [`var(--shadow-rv-${depth})`];
+  if (palette.halo) parts.push(`0 0 0 1.5px ${palette.halo}`);
+  if (selected) {
+    // The selection ring always sits outside the halo, so it grows by its width.
+    parts.push(
+      `0 0 0 ${palette.halo ? 6.5 : 5}px color-mix(in srgb, ${palette.selFill} 22%, transparent)`,
+    );
+  }
+  return parts.join(", ");
+}
