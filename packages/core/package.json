@@ -7,7 +7,9 @@
     ".": "./src/index.ts",
     "./domain": "./src/domain/index.ts",
     "./providers": "./src/providers/index.ts",
-    "./providers/here": "./src/providers/here.ts"
+    "./providers/here": "./src/providers/here.ts",
+    "./planner": "./src/planner/index.ts",
+    "./api-client": "./src/api-client/index.ts"
   },
   "scripts": {
     "test": "vitest run",
