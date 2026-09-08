@@ -230,41 +230,41 @@ pure architecture fixes that every later phase benefits from.
 
 | # | Issue | Depends on |
 |---|---|---|
-| A1 | Trip CRUD: real `/trips/new`, trip settings (title/dates/home/status/rating/note), delete | — |
-| A2 | Leg + stop CRUD: add/rename/reorder/delete legs; add/delete/move stops; explicit date editor + unschedule; gantt drop targets the gap you dropped on | A1 |
-| A3 | Google Places wiring: `PlacesProvider` server impl + `/api/places/search`; place picker in add-stop / add-idea / save-a-place; geocode backfill | — |
-| A4 | Reservations + ideas complete: create idea; delete either; full reservation edit (type/name/dates/confirmation/cost); promote keeps a chosen type | A2 |
-| A5 | Places library write path: save / edit / delete / graduate want→been; suggest "been" from rated stops on completed trips | A3 |
+| A1 · [#21](https://github.com/bradenrc/rv-trip/issues/21) | Trip CRUD: real `/trips/new`, trip settings (title/dates/home/status/rating/note), delete | — |
+| A2 · [#22](https://github.com/bradenrc/rv-trip/issues/22) | Leg + stop CRUD: add/rename/reorder/delete legs; add/delete/move stops; explicit date editor + unschedule; gantt drop targets the gap you dropped on | A1 |
+| A3 · [#23](https://github.com/bradenrc/rv-trip/issues/23) | Google Places wiring: `PlacesProvider` server impl + `/api/places/search`; place picker in add-stop / add-idea / save-a-place; geocode backfill | — |
+| A4 · [#24](https://github.com/bradenrc/rv-trip/issues/24) | Reservations + ideas complete: create idea; delete either; full reservation edit (type/name/dates/confirmation/cost); promote keeps a chosen type | A2 |
+| A5 · [#25](https://github.com/bradenrc/rv-trip/issues/25) | Places library write path: save / edit / delete / graduate want→been; suggest "been" from rated stops on completed trips | A3 |
 
 ### Phase B — sellable substrate (closes G4, G5, G6, G8)
 
 | # | Issue | Depends on |
 |---|---|---|
-| B1 | Auth: Clerk on web (middleware + `getOwner()` from session) and the API; dev-owner mapping for local | — |
-| B2 | Migrations + Neon: checked-in `drizzle/` migrations, `db:migrate` in deploy, Neon branches for preview/prod | — |
-| B3 | CI + Vercel: GitHub Actions running the pipeline's `test_cmd`; Vercel project + env; preview deploys | B2 |
-| B4 | Persistent route cache: `routes` table keyed `(from, to, rigHash)` with TTL | — |
-| B5 | API integration tests against the docker Postgres (and later a Neon branch) | — |
+| B1 · [#26](https://github.com/bradenrc/rv-trip/issues/26) | Auth: Clerk on web (middleware + `getOwner()` from session) and the API; dev-owner mapping for local | — |
+| B2 · [#27](https://github.com/bradenrc/rv-trip/issues/27) | Migrations + Neon: checked-in `drizzle/` migrations, `db:migrate` in deploy, Neon branches for preview/prod | — |
+| B3 · [#28](https://github.com/bradenrc/rv-trip/issues/28) | CI + Vercel: GitHub Actions running the pipeline's `test_cmd`; Vercel project + env; preview deploys | B2 |
+| B4 · [#29](https://github.com/bradenrc/rv-trip/issues/29) | Persistent route cache: `routes` table keyed `(from, to, rigHash)` with TTL | — |
+| B5 · [#30](https://github.com/bradenrc/rv-trip/issues/30) | API integration tests against the docker Postgres (and later a Neon branch) | — |
 
 ### Phase C — native app and phone (closes G2, G3, G9)
 
 | # | Issue | Depends on |
 |---|---|---|
-| C0 | Shared planner core: move `trip-logic` + `trip-ui` into `packages/core/planner`, with tests; web re-exports | — |
-| C1 | Read API + typed client: `GET /api/trips`, `/api/trips/:id`, `/api/places`; `packages/core/api-client` (Zod-validated) | — |
-| C2 | Expo app `apps/mobile` v1 (iOS-first): trips → trip (route list with drives + day strip) → stop detail (read, rate, note) → navigate handoff; rig read-only; runs in the iOS Simulator | C0, C1 |
-| C3 | Mobile map: `@rnmapbox/maps` dev build, corridors from polylines, stop mini-map | C2, D1 |
-| C4 | Mobile auth: Clerk Expo, token into `api-client` | B1, C2 |
-| C5 | Responsive web + PWA manifest (the "glance on phone" web path) | — |
+| C0 · [#31](https://github.com/bradenrc/rv-trip/issues/31) | Shared planner core: move `trip-logic` + `trip-ui` into `packages/core/planner`, with tests; web re-exports | — |
+| C1 · [#31](https://github.com/bradenrc/rv-trip/issues/31) | Read API + typed client: `GET /api/trips`, `/api/trips/:id`, `/api/places`; `packages/core/api-client` (Zod-validated) | — |
+| C2 · [#31](https://github.com/bradenrc/rv-trip/issues/31) | Expo app `apps/mobile` v1 (iOS-first): trips → trip (route list with drives + day strip) → stop detail (read, rate, note) → navigate handoff; rig read-only; runs in the iOS Simulator | C0, C1 |
+| C3 · [#32](https://github.com/bradenrc/rv-trip/issues/32) | Mobile map: `@rnmapbox/maps` dev build, corridors from polylines, stop mini-map | C2, D1 |
+| C4 · [#33](https://github.com/bradenrc/rv-trip/issues/33) | Mobile auth: Clerk Expo, token into `api-client` | B1, C2 |
+| C5 · [#34](https://github.com/bradenrc/rv-trip/issues/34) | Responsive web + PWA manifest (the "glance on phone" web path) | — |
 
 ### Phase D — known fast-follows (closes G7 and documented debts)
 
 | # | Issue | Depends on |
 |---|---|---|
-| D1 | Draw HERE polylines as solid corridors on the map; arcs only for estimates | — |
-| D2 | Corridor-faithful navigation handoff (Google Routes API `via` intermediates; HERE WeGo option) | — |
-| D3 | Dashboard miles from routed drives (one number everywhere) | B4 |
-| D4 | Trip status automation (planning → upcoming → complete by dates) + settings surface (units, theme, default map style) | A1 |
+| D1 · [#35](https://github.com/bradenrc/rv-trip/issues/35) | Draw HERE polylines as solid corridors on the map; arcs only for estimates | — |
+| D2 · [#36](https://github.com/bradenrc/rv-trip/issues/36) | Corridor-faithful navigation handoff (Google Routes API `via` intermediates; HERE WeGo option) | — |
+| D3 · [#37](https://github.com/bradenrc/rv-trip/issues/37) | Dashboard miles from routed drives (one number everywhere) | B4 |
+| D4 · [#38](https://github.com/bradenrc/rv-trip/issues/38) | Trip status automation (planning → upcoming → complete by dates) + settings surface (units, theme, default map style) | A1 |
 
 Already on the board and unchanged by this audit: **#19** (palette + light
 theme, Ready to Dev — see §4.5) and **#1** (calendar sync — recommend Todo).
