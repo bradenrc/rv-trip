@@ -1,8 +1,9 @@
 import { eq, and, asc, desc } from "drizzle-orm";
-import { deriveDays, isScheduled } from "@rv-trip/core";
+import { deriveDays, deriveTripStatus, isScheduled, todayIso } from "@rv-trip/core";
 import { db } from "./index";
 import { trips, savedPlaces, rigs } from "./schema";
 import type {
+  IsoDate,
   Trip,
   Leg,
   Stop,
@@ -40,7 +41,12 @@ type TripRow = NonNullable<
   Awaited<ReturnType<typeof db.query.trips.findFirst<{ with: typeof TRIP_WITH }>>>
 >;
 
-function mapTripRow(row: TripRow): Trip {
+/**
+ * The one seam both `Trip` and `TripSummary` pass through — so status is
+ * derived exactly once, here, and the two shapes can never disagree. `today` is
+ * threaded in so every row of one listing is evaluated against the same date.
+ */
+function mapTripRow(row: TripRow, today: IsoDate = todayIso()): Trip {
   return {
     id: row.id,
     ownerId: row.ownerId,
@@ -48,16 +54,20 @@ function mapTripRow(row: TripRow): Trip {
     homeBase: row.homeBase,
     startDate: row.startDate,
     endDate: row.endDate,
-    status: row.status,
+    status: deriveTripStatus(
+      {
+        startDate: row.startDate,
+        endDate: row.endDate,
+        status: row.status,
+        statusAuto: row.statusAuto,
+      },
+      today,
+    ),
+    statusAuto: row.statusAuto,
     rating: row.rating,
     note: row.note,
     legs: row.legs.map(mapLeg),
   };
-}
-
-export async function getTripForOwner(ownerId: string): Promise<Trip | null> {
-  const row = await db.query.trips.findFirst({ where: eq(trips.ownerId, ownerId), with: TRIP_WITH });
-  return row ? mapTripRow(row) : null;
 }
 
 export async function getTripById(ownerId: string, tripId: string): Promise<Trip | null> {
@@ -77,7 +87,8 @@ export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]>
     orderBy: [asc(trips.startDate)],
     with: TRIP_WITH,
   });
-  return rows.map((r) => summarize(mapTripRow(r)));
+  const today = todayIso();
+  return rows.map((r) => summarize(mapTripRow(r, today)));
 }
 
 /**
@@ -91,7 +102,8 @@ export async function listTripsWithStopsForOwner(ownerId: string): Promise<Trip[
     orderBy: [asc(trips.startDate)],
     with: TRIP_WITH,
   });
-  return rows.map(mapTripRow);
+  const today = todayIso();
+  return rows.map((r) => mapTripRow(r, today));
 }
 
 function summarize(trip: Trip): TripSummary {
@@ -112,6 +124,7 @@ function summarize(trip: Trip): TripSummary {
     startDate: trip.startDate,
     endDate: trip.endDate,
     status: trip.status,
+    statusAuto: trip.statusAuto,
     rating: trip.rating,
     note: trip.note,
     days: days.length,

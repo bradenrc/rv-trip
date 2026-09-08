@@ -7,6 +7,7 @@ import type {
   IsoDate,
   RigProfile,
   RigProfileInput,
+  TripStatus,
 } from "@rv-trip/core";
 import { mapRigRow } from "./queries";
 
@@ -26,6 +27,78 @@ const ownedLegIds = (owner: string) =>
 
 const ownedStopIds = (owner: string) =>
   db.select({ id: stops.id }).from(stops).where(inArray(stops.legId, ownedLegIds(owner)));
+
+// ── trips ─────────────────────────────────────────────────────────────────
+//
+// A trip is the ownership root: it carries `ownerId` itself, so its writes scope
+// on that column directly rather than through the leg/stop subqueries below.
+// Update and delete report whether the owner-scoped statement matched a row, so
+// the handler can answer 404 instead of pretending a foreign id succeeded.
+
+export async function createTrip(
+  owner: string,
+  input: {
+    title: string;
+    startDate: IsoDate;
+    endDate: IsoDate;
+    homeBase: string | null;
+  },
+) {
+  // One empty leg in the SAME transaction: RouteView renders per leg, so a trip
+  // with none opens with nothing to hang "Add stop" on.
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(trips)
+      .values({
+        ownerId: owner,
+        title: input.title,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        homeBase: input.homeBase,
+      })
+      .returning();
+    await tx.insert(legs).values({ tripId: row!.id, title: "Leg 1", sortOrder: 0 });
+    return row!;
+  });
+}
+
+export async function updateTripFields(
+  owner: string,
+  tripId: string,
+  patch: {
+    title?: string;
+    homeBase?: string | null;
+    startDate?: IsoDate;
+    endDate?: IsoDate;
+    status?: TripStatus;
+    statusAuto?: boolean;
+    rating?: number | null;
+    note?: string | null;
+  },
+): Promise<boolean> {
+  const scope = and(eq(trips.id, tripId), eq(trips.ownerId, owner));
+  // An empty patch is a legal no-op, but `.set({})` is not a legal statement —
+  // fall back to the existence check so the answer is still 204 vs 404.
+  if (Object.keys(patch).length === 0) {
+    const rows = await db.select({ id: trips.id }).from(trips).where(scope);
+    return rows.length > 0;
+  }
+  const updated = await db
+    .update(trips)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(scope)
+    .returning({ id: trips.id });
+  return updated.length > 0;
+}
+
+export async function deleteTrip(owner: string, tripId: string): Promise<boolean> {
+  // Legs -> stops -> reservations/ideas all cascade from the FK (schema.ts).
+  const deleted = await db
+    .delete(trips)
+    .where(and(eq(trips.id, tripId), eq(trips.ownerId, owner)))
+    .returning({ id: trips.id });
+  return deleted.length > 0;
+}
 
 export async function updateStopFields(
   owner: string,

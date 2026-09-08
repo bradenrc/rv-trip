@@ -111,11 +111,48 @@ export const trip = z.object({
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus.default("planning"),
+  /** Whether `status` is derived from the dates (`deriveTripStatus`) or pinned.
+   * `false` is the ONLY thing stored about status — a manual choice, which the
+   * derivation then steps aside for and never re-derives. */
+  statusAuto: z.boolean().default(true),
   rating: rating,
   note: z.string().nullable().default(null),
   legs: z.array(leg).default([]),
 });
 export type Trip = z.infer<typeof trip>;
+
+/**
+ * The trip WRITE contract, derived from the grammar above rather than re-typed
+ * beside it — so a new field lands in the schema once and the handlers inherit
+ * it. `id`, `ownerId` and `legs` are never client-supplied.
+ */
+
+/** `POST /api/trips`. `homeBase` defaults to null when omitted. */
+export const tripCreateInput = trip.pick({
+  title: true,
+  startDate: true,
+  endDate: true,
+  homeBase: true,
+});
+export type TripCreateInput = z.infer<typeof tripCreateInput>;
+
+/** `PATCH /api/trips/:id` — every editable field, all optional, because the
+ * settings dialog sends only what it changed. `.partial()` over a defaulted
+ * field yields an ABSENT key, not the default, so an omitted field is left
+ * alone rather than reset (pinned by trip-write-contract.test.ts). */
+export const tripPatchInput = trip
+  .pick({
+    title: true,
+    homeBase: true,
+    startDate: true,
+    endDate: true,
+    status: true,
+    statusAuto: true,
+    rating: true,
+    note: true,
+  })
+  .partial();
+export type TripPatchInput = z.infer<typeof tripPatchInput>;
 
 /**
  * The Places library: an account-scoped, cross-trip collection of spots.
@@ -164,6 +201,9 @@ export const tripSummary = z.object({
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus,
+  /** Mirrors `trip.statusAuto` so the dashboard row and the trip agree about
+   * whether the status it shows was derived or pinned. */
+  statusAuto: z.boolean(),
   rating,
   note: z.string().nullable(),
   days: z.number().int(),

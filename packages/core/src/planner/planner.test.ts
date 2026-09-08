@@ -50,6 +50,7 @@ function fixture(endDate = "2026-08-10"): Trip {
     startDate: "2026-08-01",
     endDate,
     status: "planning",
+    statusAuto: true,
     rating: null,
     note: null,
     legs: [
