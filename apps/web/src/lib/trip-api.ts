@@ -4,6 +4,9 @@ import type {
   IsoDate,
   LatLng,
   RigProfileInput,
+  Trip,
+  TripCreateInput,
+  TripPatchInput,
 } from "@rv-trip/core";
 import type { RouteMap } from "./trip-logic";
 
@@ -18,6 +21,19 @@ async function req(url: string, method: string, body?: unknown) {
 }
 
 export const tripApi = {
+  /**
+   * Create a trip. 201 carries the whole tree — including the one empty "Leg 1"
+   * the create seeds — so the page can redirect straight into the planner.
+   */
+  createTrip: (input: TripCreateInput): Promise<Trip> =>
+    req(`/api/trips`, "POST", input) as Promise<Trip>,
+
+  /** The settings dialog. Send only what changed: an omitted key is left alone. */
+  updateTrip: (id: string, patch: TripPatchInput) => req(`/api/trips/${id}`, "PATCH", patch),
+
+  /** Legs, stops, reservations and ideas cascade with it. */
+  deleteTrip: (id: string) => req(`/api/trips/${id}`, "DELETE"),
+
   updateStop: (
     id: string,
     patch: {
