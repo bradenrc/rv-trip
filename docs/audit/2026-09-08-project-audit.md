@@ -221,8 +221,16 @@ the fix is a decision, not code — see §4.
 
 ## 5. Completion path
 
-Four phases. Each phase is shippable on its own; each row is one issue on the
-board. Phase C starts now (this audit's session) because it is where the
+Four phases, grouped on the board into six **epics** by the files they
+touch (issues are GitHub sub-issues of their epic, so the board's "Parent
+issue" and "Sub-issues progress" fields track them):
+[#40](https://github.com/bradenrc/rv-trip/issues/40) trip grammar writes ·
+[#41](https://github.com/bradenrc/rv-trip/issues/41) places ·
+[#42](https://github.com/bradenrc/rv-trip/issues/42) go-live substrate ·
+[#43](https://github.com/bradenrc/rv-trip/issues/43) routing corridors ·
+[#44](https://github.com/bradenrc/rv-trip/issues/44) native app ·
+[#45](https://github.com/bradenrc/rv-trip/issues/45) web shell.
+Each phase is shippable on its own; each row is one issue on the board. Phase C starts now (this audit's session) because it is where the
 "native iOS app" request lands and because its first two rows (C0, C1) are
 pure architecture fixes that every later phase benefits from.
 
@@ -264,7 +272,7 @@ pure architecture fixes that every later phase benefits from.
 | D1 · [#35](https://github.com/bradenrc/rv-trip/issues/35) | Draw HERE polylines as solid corridors on the map; arcs only for estimates | — |
 | D2 · [#36](https://github.com/bradenrc/rv-trip/issues/36) | Corridor-faithful navigation handoff (Google Routes API `via` intermediates; HERE WeGo option) | — |
 | D3 · [#37](https://github.com/bradenrc/rv-trip/issues/37) | Dashboard miles from routed drives (one number everywhere) | B4 |
-| D4 · [#38](https://github.com/bradenrc/rv-trip/issues/38) | Trip status automation (planning → upcoming → complete by dates) + settings surface (units, theme, default map style) | A1 |
+| D4 · [#38](https://github.com/bradenrc/rv-trip/issues/38) | Settings surface (units, theme, default map style, cost default); retire "People & groups". *Trip status automation moved into #21.* | #19, B1 |
 
 Already on the board and unchanged by this audit: **#19** (palette + light
 theme, Ready to Dev — see §4.5) and **#1** (calendar sync — recommend Todo).
