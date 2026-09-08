@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import {
   Pin,
   GripVertical,
   CalendarDays,
   Caravan,
+  Navigation,
+  TriangleAlert,
   Plus,
   CirclePlus,
   Calendar,
@@ -12,13 +15,21 @@ import {
   MapPin,
   type LucideIcon,
 } from "lucide-react";
-import { FloatingTag, Stars, ReservationLineItem, IdeaLineItem, money } from "@rv-trip/ui";
-import type { RouteLeg, RouteSummary } from "@/lib/trip-logic";
+import {
+  FloatingTag,
+  Stars,
+  ReservationLineItem,
+  IdeaLineItem,
+  RouteNotice,
+  money,
+} from "@rv-trip/ui";
+import type { RouteDrive, RouteLeg, RouteSummary } from "@/lib/trip-logic";
 
 export function RouteView({
   legs,
   summary,
   costs,
+  hasRig,
   onOpenStop,
   routeDrag,
   onRowDragStart,
@@ -28,6 +39,9 @@ export function RouteView({
   legs: RouteLeg[];
   summary: RouteSummary;
   costs: boolean;
+  /** No rig yet = no routing input: every drive falls to a straight-line
+   * estimate and the rail carries one dashed nudge. Never a blocking wizard. */
+  hasRig: boolean;
   onOpenStop: (id: string) => void;
   routeDrag: { legId: string; stopId: string } | null;
   onRowDragStart: (legId: string, stopId: string) => void;
@@ -40,7 +54,7 @@ export function RouteView({
       <div className="min-w-0 flex-1 basis-[520px] [max-width:760px]">
         <p className="m-0 mb-6 max-w-[60ch] text-[15px] text-rv-ink-muted">
           Lay out the places and take it as you go — dates are optional. Drag to reorder; drives
-          between scheduled stops are shown as you plan them.
+          are shown between any two places, dated or not.
         </p>
 
         {legs.map((leg) => (
@@ -137,14 +151,21 @@ export function RouteView({
                   </button>
                 </div>
 
-                {row.driveLabel && (
-                  <div className="my-1 ml-8 flex items-center gap-2 py-[5px] font-mono text-[12px] text-rv-ink-faded">
-                    <Caravan className="size-4 text-rv-ink" />
-                    <span>{row.driveLabel}</span>
-                  </div>
-                )}
+                {row.drive && <Drive drive={row.drive} />}
               </div>
             ))}
+
+            {leg.outboundDrive && (
+              <>
+                <div className="my-0.5 ml-8 flex items-center gap-[9px]">
+                  <span className="font-mono text-[9px] uppercase tracking-[0.11em] text-rv-ink-faded">
+                    {leg.outboundSeam}
+                  </span>
+                  <span className="h-px flex-1 bg-rv-border-soft" />
+                </div>
+                <Drive drive={leg.outboundDrive} />
+              </>
+            )}
           </div>
         ))}
 
@@ -157,8 +178,102 @@ export function RouteView({
         </button>
       </div>
 
-      <RouteRail summary={summary} costs={costs} />
+      <RouteRail summary={summary} costs={costs} hasRig={hasRig} />
     </div>
+  );
+}
+
+/**
+ * A drive has exactly three renderings, and only one of them is amber.
+ *
+ *  1. routed + clean      → one mono line (what the connector has always been)
+ *  2. routed + restricted → a bordered card, one amber notice row per notice
+ *  3. un-routed           → the same one line, `~` kept, neutral "estimate" chip
+ *
+ * There is no fourth state: a drive we cannot route is a missing value, never a
+ * spinner and never a blocked save. A pair with no coordinates yields no
+ * connector at all — it never reaches here.
+ *
+ * Navigate is the same plain Google link in all three: origin and destination,
+ * never the corridor. In state 2 it carries an amber caption saying so.
+ */
+function Drive({ drive }: { drive: RouteDrive }) {
+  if (drive.notices.length === 0) {
+    return (
+      <div className="my-1 ml-8 flex flex-wrap items-center gap-[9px] py-[5px] font-mono text-[12px] text-rv-ink-faded">
+        <Caravan className="size-4 text-rv-ink" />
+        <span className="text-rv-ink-muted">{drive.label}</span>
+        {drive.primaryRoad && (
+          <>
+            <span aria-hidden>·</span>
+            <span>{drive.primaryRoad}</span>
+          </>
+        )}
+        {drive.estimate && <EstimateChip />}
+        <NavigateButton href={drive.navUrl} className="ml-2" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-1 ml-8">
+      <div className="rounded-rv-md border border-l-[3px] border-rv-border border-l-rv-travel bg-rv-surface px-[13px] pb-[11px] pt-2.5 shadow-rv-sm">
+        <div className="flex flex-wrap items-center gap-[9px]">
+          <Caravan className="size-4 text-rv-ink" />
+          <span className="font-mono text-[12px] text-rv-ink-muted">{drive.label}</span>
+          {drive.primaryRoad && (
+            <span className="font-mono text-[12px] text-rv-ink-faded">· {drive.primaryRoad}</span>
+          )}
+          {drive.estimate && <EstimateChip />}
+          <NavigateButton href={drive.navUrl} className="ml-auto" />
+        </div>
+        {/* The caveat belongs ON the action. The handoff is origin and
+            destination only — Google's URL scheme has no pass-through waypoint,
+            so the link is not the corridor HERE cleared for the rig. Amber
+            because it is a real restriction, but plain text rather than a
+            bordered row: a caption on a button, not a second error. */}
+        <div className="mt-[7px] text-right text-[11.5px] text-rv-warning">
+          Navigation may not follow the RV-safe route — check notices.
+        </div>
+        {/* One row per notice, unbounded — no truncation. The notices do NOT
+            dismiss on handoff — they are the thing you can still read at the
+            next fuel stop, and the only place your clearance is written down. */}
+        <div className="mt-2 flex flex-col gap-2">
+          {drive.notices.map((notice, i) => (
+            <RouteNotice key={`${notice.code}-${i}`} message={notice.message} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** An un-routed number is an unfinished measurement, not a warning. */
+function EstimateChip() {
+  return (
+    <span className="rounded-rv-pill border border-rv-border-hi px-2 py-px font-mono text-[9px] uppercase tracking-[0.08em] text-rv-ink-faded">
+      estimate
+    </span>
+  );
+}
+
+/**
+ * The slice's primary action, and one you press at a fuel stop with the engine
+ * running — so it carries a 32px floor (`min-h-8`) on top of the design's
+ * padding. Type, colour and padding are the wireframe's; the floor only stops
+ * the box shrinking under the touch target.
+ */
+function NavigateButton({ href, className }: { href: string; className: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className={`inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-rv-md bg-rv-ember px-3 py-[5px] text-[13px] font-bold text-rv-navy no-underline shadow-rv-sm ${className}`}
+    >
+      <Navigation className="size-3.5" />
+      Navigate
+    </a>
   );
 }
 
@@ -176,7 +291,15 @@ function Stat({ Icon, label, value, warn }: { Icon: LucideIcon; label: string; v
 
 const kicker = "font-mono text-[11px] uppercase tracking-[0.1em] text-rv-ink-faded";
 
-function RouteRail({ summary, costs }: { summary: RouteSummary; costs: boolean }) {
+function RouteRail({
+  summary,
+  costs,
+  hasRig,
+}: {
+  summary: RouteSummary;
+  costs: boolean;
+  hasRig: boolean;
+}) {
   return (
     <aside className="w-[260px] flex-none">
       <div className="sticky top-6 flex flex-col gap-[18px] rounded-rv-card border border-rv-border bg-rv-surface p-[18px] shadow-rv-sm">
@@ -192,8 +315,38 @@ function RouteRail({ summary, costs }: { summary: RouteSummary; costs: boolean }
             )}
           </div>
           <div className="mt-1 text-[12px] text-rv-ink-faded">
-            {summary.driveMiles > 0 ? `${summary.driveTime} behind the wheel` : "add dates to estimate driving"}
+            {summary.driveMiles > 0
+              ? `${summary.driveTime} behind the wheel`
+              : "add stops with places to estimate driving"}
           </div>
+
+          {/* Only when there is something to say — a permanent "0 restrictions"
+              would train the eye to skip the slot. */}
+          {summary.restrictionCount > 0 && (
+            <div className="mt-2 inline-flex items-center gap-[7px] rounded-rv-md border border-rv-warning bg-rv-warning-soft px-[9px] py-[5px] text-[12px] text-rv-warning">
+              <TriangleAlert className="size-3.5 shrink-0" />
+              <span>
+                {summary.restrictionCount} restriction{summary.restrictionCount === 1 ? "" : "s"} on
+                this route
+              </span>
+            </div>
+          )}
+
+          {/* The rig is the only thing standing between an estimate and a real
+              route, so the ask belongs exactly where the estimate is showing. */}
+          {!hasRig && summary.driveMiles > 0 && (
+            <div className="mt-3 rounded-rv-md border border-dashed border-rv-border-hi px-[11px] py-2.5">
+              <div className="text-[12.5px] text-rv-ink-muted">
+                Drive times are straight-line estimates until you tell us about your rig.
+              </div>
+              <Link
+                href="/rig"
+                className="mt-1.5 inline-block text-[12.5px] font-bold text-rv-ember no-underline"
+              >
+                Set up your rig →
+              </Link>
+            </div>
+          )}
         </div>
 
         {/* Planned cost — only when tracking */}

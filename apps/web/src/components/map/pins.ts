@@ -1,16 +1,17 @@
 import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
-import { hasCoords, isScheduled } from "@rv-trip/core";
+import { driveMiles, estimateRoute, hasCoords, isScheduled } from "@rv-trip/core";
 import type { ReservationType, SavedPlace, Stop, Trip } from "@rv-trip/core";
-import { dateRange, estimateDrive } from "@/lib/trip-ui";
+import { dateRange } from "@/lib/trip-ui";
 
 /**
  * The pin model behind every map surface: one flat list of drawable points, the
  * coordless rows the map can't take, and the estimated-drive arcs.
  *
  * Nothing here styles anything — `MapView` reads `layer` / `kind` / `floating`
- * and applies the pin grammar. The miles come from the shipped `estimateDrive()`
- * so the map and the trip's Route rail can never print different numbers.
+ * and applies the pin grammar. The miles come from core's `estimateRoute()` —
+ * the one surviving haversine, which the Route rail also falls back to — so the
+ * map and the rail can never print different numbers.
  */
 
 /** The four layers, in the order their chips read — labelled verbatim from the
@@ -188,15 +189,14 @@ export function buildMapModel(trips: Trip[], places: SavedPlace[]): MapModel {
       const a = sequence[i]!.place;
       const b = sequence[i + 1]!.place;
       if (!hasCoords(a) || !hasCoords(b)) continue;
-      const d = estimateDrive(a, b);
-      if (!d) continue;
+      const miles = driveMiles(estimateRoute(a, b));
       arcs.push({
         id: `${sequence[i]!.id}->${sequence[i + 1]!.id}`,
         layer,
         from: { lat: a.lat, lng: a.lng },
         to: { lat: b.lat, lng: b.lng },
-        miles: d.miles,
-        label: `~${d.miles} mi · est.`,
+        miles,
+        label: `~${miles} mi · est.`,
       });
     }
   }

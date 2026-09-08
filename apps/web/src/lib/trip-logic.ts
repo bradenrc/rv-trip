@@ -1,6 +1,16 @@
 import {
   deriveDays,
   isScheduled,
+  orderedLegStops,
+  orderedPairs,
+  routeCacheKey,
+  estimateRoute,
+  driveLabel,
+  driveMiles,
+  driveMinutes,
+  formatDriveTime,
+  buildNavigationHandoff,
+  NO_RIG_HASH,
   type Trip,
   type Leg,
   type Stop,
@@ -8,8 +18,11 @@ import {
   type Idea,
   type IsoDate,
   type ReservationType,
+  type OrderedPair,
+  type RouteResult,
+  type RouteNotice,
 } from "@rv-trip/core";
-import { dateRange, estimateDrive } from "./trip-ui";
+import { dateRange } from "./trip-ui";
 
 // ── date helpers (plain UTC dates) ─────────────────────────────────────────
 const MS = 86_400_000;
@@ -218,56 +231,131 @@ export interface RouteRow {
   reservations: RouteReservation[];
   ideas: RouteIdea[];
   showIdeaDivider: boolean;
-  driveLabel: string | null;
+  /** The drive OUT of this stop, when the next stop is in the same leg. */
+  drive: RouteDrive | null;
 }
 export interface RouteLeg {
   id: string;
   kicker: string;
   name: string;
   rows: RouteRow[];
+  /** The drive that crosses out of this leg — drawn after the rows, under a
+   * hairline seam, so it reads as a crossing rather than an orphan row (G1). */
+  outboundDrive: RouteDrive | null;
+  /** "Leg 1 → Leg 2" */
+  outboundSeam: string | null;
 }
 
-export function routeModel(trip: Trip): RouteLeg[] {
-  return trip.legs.map((leg, i) => {
-    const scheduled = leg.stops
-      .filter(isScheduled)
-      .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
-    const floats = leg.stops
-      .filter((s) => !isScheduled(s))
-      .sort((a, b) => a.sortOrder - b.sortOrder);
-    const ordered = [...scheduled, ...floats];
+/**
+ * The server-resolved routes, keyed by `from|to|rigHash` — a map, never a
+ * positional array, so it crosses the RSC boundary and survives client-side
+ * reordering. A key MISS (you dragged a floating stop and invented a pair the
+ * server never routed) falls straight to the synchronous estimate: no spinner,
+ * no layout jump, no blocked save.
+ */
+export type RouteMap = Record<string, RouteResult>;
 
-    const rows: RouteRow[] = ordered.map((stop, idx) => {
-      const next = ordered[idx + 1];
-      const drive =
-        next && isScheduled(stop) && isScheduled(next)
-          ? estimateDrive(stop.place, next.place)
-          : null;
-      return {
-        stop,
-        dates: isScheduled(stop) ? dateRange(stop.arriveDate, stop.departDate) : null,
-        floating: !isScheduled(stop),
-        rating: stop.rating ?? 0,
-        note: stop.notes,
-        reservations: stop.reservations.map((r) => ({
-          id: r.id,
-          name: r.name,
-          type: r.type,
-          cost: r.cost,
-          dates: resDates(r),
-        })),
-        ideas: stop.ideas.map((it) => ({
-          id: it.id,
-          title: it.title,
-          type: "activity" as ReservationType,
-          status: it.status,
-        })),
-        showIdeaDivider: stop.reservations.length > 0 && stop.ideas.length > 0,
-        driveLabel: drive?.label ?? null,
-      };
-    });
+/** One drive, as the connector and the rail both need it. */
+export interface RouteDrive {
+  key: string;
+  /** "3h 12m · 136 mi", or "~3h 02m · 141 mi" when it is only an estimate. */
+  label: string;
+  /** An unfinished measurement, not a warning — neutral chip, never amber. */
+  estimate: boolean;
+  primaryRoad: string | null;
+  notices: RouteNotice[];
+  /** Google Maps deep link — origin and destination only, never the corridor.
+   * See buildNavigationHandoff: the notices are what carry the RV-safe caveat. */
+  navUrl: string;
+  miles: number;
+  minutes: number;
+}
 
-    return { id: leg.id, kicker: `Leg ${i + 1}`, name: leg.title, rows };
+function toDrive(pair: OrderedPair, routes: RouteMap, rigHash: string): RouteDrive {
+  const key = routeCacheKey(pair.from, pair.to, rigHash);
+  const result = routes[key] ?? estimateRoute(pair.from, pair.to);
+  // Endpoints only. Google cannot be handed a pass-through waypoint, so the
+  // link is honestly "get me there", and the notices below it are what says
+  // the RV-safe corridor may not be what Google picks.
+  const handoff = buildNavigationHandoff(pair.from, pair.to);
+  return {
+    key,
+    label: driveLabel(result),
+    estimate: result.source === "estimate",
+    primaryRoad: result.primaryRoad,
+    notices: result.notices,
+    navUrl: handoff.url,
+    miles: driveMiles(result),
+    minutes: driveMinutes(result),
+  };
+}
+
+/**
+ * Every drive on the trip, resolved once and indexed the two ways the screen
+ * needs it. The rail and the connectors read the SAME list, which is what makes
+ * the rail exactly the sum of the drives you can see.
+ */
+function resolveDrives(trip: Trip, routes: RouteMap, rigHash: string) {
+  const byFromStop = new Map<string, RouteDrive>();
+  // Keyed by the leg the drive leaves, but it carries the leg it ARRIVES in:
+  // an emptied leg in between means the crossing is not always i → i + 1.
+  const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
+  const all: RouteDrive[] = [];
+  for (const pair of orderedPairs(trip)) {
+    const drive = toDrive(pair, routes, rigHash);
+    all.push(drive);
+    if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
+    else byFromStop.set(pair.fromStopId, drive);
+  }
+  return { byFromStop, boundaryByLeg, all };
+}
+
+export function routeModel(
+  trip: Trip,
+  routes: RouteMap = {},
+  rigHash: string = NO_RIG_HASH,
+): RouteLeg[] {
+  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, rigHash);
+  const legs = [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder);
+  const legNumber = new Map(legs.map((l, i) => [l.id, i + 1]));
+
+  return legs.map((leg, i) => {
+    const ordered = orderedLegStops(leg.stops);
+
+    const rows: RouteRow[] = ordered.map((stop) => ({
+      stop,
+      dates: isScheduled(stop) ? dateRange(stop.arriveDate, stop.departDate) : null,
+      floating: !isScheduled(stop),
+      rating: stop.rating ?? 0,
+      note: stop.notes,
+      reservations: stop.reservations.map((r) => ({
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        cost: r.cost,
+        dates: resDates(r),
+      })),
+      ideas: stop.ideas.map((it) => ({
+        id: it.id,
+        title: it.title,
+        type: "activity" as ReservationType,
+        status: it.status,
+      })),
+      showIdeaDivider: stop.reservations.length > 0 && stop.ideas.length > 0,
+      drive: byFromStop.get(stop.id) ?? null,
+    }));
+
+    const boundary = boundaryByLeg.get(leg.id) ?? null;
+    return {
+      id: leg.id,
+      kicker: `Leg ${i + 1}`,
+      name: leg.title,
+      rows,
+      outboundDrive: boundary?.drive ?? null,
+      outboundSeam: boundary
+        ? `Leg ${i + 1} → Leg ${legNumber.get(boundary.toLegId) ?? i + 2}`
+        : null,
+    };
   });
 }
 
@@ -281,6 +369,9 @@ export function resDates(r: Reservation): string | null {
 export interface RouteSummary {
   driveMiles: number;
   driveTime: string;
+  /** How many amber notices the whole route carries. Rendered only when > 0 —
+   * a permanent "0 restrictions" would train the eye to skip the slot. */
+  restrictionCount: number;
   totalCost: number;
   stops: number;
   scheduled: number;
@@ -291,7 +382,11 @@ export interface RouteSummary {
   legs: { id: string; name: string; stops: number; cost: number }[];
 }
 
-export function routeSummary(trip: Trip): RouteSummary {
+export function routeSummary(
+  trip: Trip,
+  routes: RouteMap = {},
+  rigHash: string = NO_RIG_HASH,
+): RouteSummary {
   const stops = allStops(trip);
   const stopCost = (s: Stop) => s.reservations.reduce((x, r) => x + (r.cost ?? 0), 0);
   const { days } = deriveDays(trip, stops);
@@ -300,36 +395,33 @@ export function routeSummary(trip: Trip): RouteSummary {
   days.forEach((d, i) => {
     if (d.kind === "empty" && (i === 0 || days[i - 1]!.kind !== "empty")) gapCount++;
   });
-  const sched = stops
-    .filter(isScheduled)
-    .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
-  let driveMiles = 0;
-  let driveMins = 0;
-  for (let i = 0; i < sched.length - 1; i++) {
-    const d = estimateDrive(sched[i]!.place, sched[i + 1]!.place);
-    if (d) {
-      driveMiles += d.miles;
-      driveMins += d.minutes;
-    }
-  }
-  const dh = Math.floor(driveMins / 60);
-  const dm = driveMins % 60;
+
+  // The SAME drives the connectors render — including the leg-boundary drive
+  // and the floating one. The rail used to sum trip-wide scheduled pairs while
+  // the screen drew per-leg ones, so the two had never agreed (G1/G2).
+  const { all } = resolveDrives(trip, routes, rigHash);
+  const driveMilesTotal = all.reduce((a, d) => a + d.miles, 0);
+  const driveMins = all.reduce((a, d) => a + d.minutes, 0);
+
   return {
-    driveMiles,
-    driveTime: driveMiles ? (dh > 0 ? `${dh}h ${String(dm).padStart(2, "0")}m` : `${dm}m`) : "—",
+    driveMiles: driveMilesTotal,
+    driveTime: driveMilesTotal ? formatDriveTime(driveMins) : "—",
+    restrictionCount: all.reduce((a, d) => a + d.notices.length, 0),
     totalCost: stops.reduce((a, s) => a + stopCost(s), 0),
     stops: stops.length,
-    scheduled: sched.length,
+    scheduled: stops.filter(isScheduled).length,
     floating: stops.filter((s) => !isScheduled(s)).length,
     days: days.length,
     openCount,
     gapCount,
-    legs: trip.legs.map((l) => ({
-      id: l.id,
-      name: l.title,
-      stops: l.stops.length,
-      cost: l.stops.reduce((a, s) => a + stopCost(s), 0),
-    })),
+    legs: [...trip.legs]
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((l) => ({
+        id: l.id,
+        name: l.title,
+        stops: l.stops.length,
+        cost: l.stops.reduce((a, s) => a + stopCost(s), 0),
+      })),
   };
 }
 

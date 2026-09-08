@@ -18,6 +18,10 @@ or new class names — the palette below is the whole vocabulary.
 - Green (accents/CTAs/"stay"): `rv-green`, `rv-green-cta` (text-bearing green), `rv-green-soft` (tint), `rv-green-ink` (text on tint).
 - Borders: `rv-border`, `rv-border-soft` (hairlines), `rv-border-hi`.
 - Status: `rv-warning` / `rv-warning-soft` (amber — attention, floating); `rv-info-ink` / `rv-info-soft` (blue — activities).
+- Travel: `rv-travel` / `rv-travel-ink` / `rv-travel-soft` (slate-violet). The
+  "Travel" category color, and — as a 3px `border-l` only — the structural accent
+  that marks a card as being about a *drive* (the restricted drive card in the
+  route view). Never a text or fill color outside the category language.
 
 **Radius**: `rounded-rv-sm|md|card|pill`. **Shadow**: `shadow-rv-sm|md|lg|xl`.
 

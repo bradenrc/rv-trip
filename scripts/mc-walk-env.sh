@@ -34,8 +34,12 @@ dotenv_db_url() { # echo DATABASE_URL out of a dotenv file (last wins, quotes st
   printf '%s\n' "$val"
 }
 
-free_port() { # first free port from 3200
-  local p=3200
+free_port() { # first free port from 3980 (issue-rotated so consecutive walks don't share an origin)
+  # NOT 3200, and not a fixed number (rv-trip#14): with walks serial, a fixed base means
+  # every walk reuses one browser origin forever, inheriting whatever state any earlier
+  # tenant left there. A leftover service worker on localhost:3200 reload-looped issue 9's
+  # walk while the server was healthy — the operator rejected a slice over browser state.
+  local p=$((3980 + ${1:-0} % 20))
   while lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; do p=$((p + 1)); done
   echo "$p"
 }
@@ -58,10 +62,16 @@ standup)
   [ -n "$branch" ] || die "standup $issue: --branch is required"
 
   wt="$ROOT/.claude/worktrees/$issue"
+  # DETACHED, never on the branch: a walk tree that holds the code branch checked out
+  # squats on it — git's one-branch-one-worktree rule then collides with every later
+  # dispatch worktree the engine cuts for that same branch, and the engine's collision
+  # handling evicted this tree out from under a LIVE walk server, twice in one day
+  # (issue 9, 2026-09-07 — mc-dev#112). btrip's walk trees are detached for the same
+  # reason; the branch name still rides walk.json for the glass.
   if [ ! -d "$wt" ]; then
-    git -C "$ROOT" worktree add "$wt" "$branch"
+    git -C "$ROOT" worktree add --detach "$wt" "$branch"
   else
-    git -C "$wt" checkout "$branch"
+    git -C "$wt" checkout --detach "$branch"
   fi
   # Untracked env files don't follow a worktree — and Next loads env from the APP
   # directory (apps/web/, its cwd), NOT the monorepo root the README's
@@ -91,7 +101,7 @@ standup)
     die "standup $issue: pnpm install failed — see .mc/walk/$issue-install.log"
   (cd "$ROOT" && docker compose up -d >>"$WALK_DIR/$issue-standup.log" 2>&1) || true
 
-  port="$(free_port)"
+  port="$(free_port "$issue")"
   (cd "$wt/apps/web" && PORT="$port" nohup pnpm dev >"$WALK_DIR/$issue-web.log" 2>&1 &
     echo $! >"$WALK_DIR/$issue-web.pid")
   pid="$(cat "$WALK_DIR/$issue-web.pid")"
@@ -137,14 +147,28 @@ down)
     esac done
   [ -n "$slug" ] || die "down: --slug is required"
   json="$WALK_DIR/$slug.json"
-  if [ -f "$WALK_DIR/$slug-web.pid" ]; then
-    pid="$(cat "$WALK_DIR/$slug-web.pid")"
+  # REGISTRY FIRST, sweep second: the registry entry is the operator-facing contract (the
+  # glass renders it), so it must not survive a sweep that dies. It did — every down.log in
+  # this dir was zero bytes and every entry survived teardown, because the sweep below
+  # killed its own shell before reaching these lines.
+  port="$(python3 -c "import json;print(json.load(open('$json')).get('web_port',''))" 2>/dev/null || true)"
+  pid=""
+  if [ -f "$WALK_DIR/$slug-web.pid" ]; then pid="$(cat "$WALK_DIR/$slug-web.pid")"; fi
+  rm -f "$WALK_DIR/$slug-web.pid" "$json"
+  # `kill -0` LIVENESS GUARD before any signal: a recorded pid outlives its process, and on
+  # macOS `pkill -P <stale-pid>` is a MASSACRE — pgrep -P against a dead ppid empirically
+  # matched ~827 processes (zombies + real pids), so the old sweep TERMed unrelated
+  # processes (it killed another issue's live walk server, and always killed this script's
+  # own shell — the zero-byte logs). Never signal from a stale pid; sweep by PORT instead,
+  # which names exactly the processes serving this walk and nothing else.
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null && echo "  killed pid $pid" || true
-    # next dev spawns children; sweep the process group best-effort.
-    pkill -P "$pid" 2>/dev/null || true
-    rm -f "$WALK_DIR/$slug-web.pid"
   fi
-  rm -f "$json"
+  if [ -n "$port" ]; then
+    for p in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null); do
+      kill "$p" 2>/dev/null && echo "  killed port-holder pid $p" || true
+    done
+  fi
   echo "walk down: $slug (registry entry removed; worktree kept for the ship)"
   ;;
 
