@@ -151,3 +151,25 @@ export function isScheduled(
 ): s is Stop & { arriveDate: IsoDate; departDate: IsoDate } {
   return s.arriveDate !== null && s.departDate !== null;
 }
+
+/**
+ * A dashboard row: the trip's identity + status/memory + the stats the cards
+ * show. Computed server-side (`listTripsForOwner`), returned by
+ * `GET /api/trips`, validated by the api-client on the way in.
+ */
+export const tripSummary = z.object({
+  id: z.string(),
+  title: z.string(),
+  homeBase: z.string().nullable(),
+  startDate: isoDate,
+  endDate: isoDate,
+  status: tripStatus,
+  rating,
+  note: z.string().nullable(),
+  days: z.number().int(),
+  stops: z.number().int(),
+  legs: z.number().int(),
+  miles: z.number(),
+  open: z.number().int(),
+});
+export type TripSummary = z.infer<typeof tripSummary>;

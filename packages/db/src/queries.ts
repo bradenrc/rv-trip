@@ -9,9 +9,9 @@ import type {
   Reservation,
   Idea,
   Place,
-  TripStatus,
   SavedPlace,
   RigProfile,
+  TripSummary,
 } from "@rv-trip/core";
 
 /**
@@ -68,22 +68,8 @@ export async function getTripById(ownerId: string, tripId: string): Promise<Trip
   return row ? mapTripRow(row) : null;
 }
 
-/** Dashboard row: a trip's identity + status/memory + computed stats. */
-export interface TripSummary {
-  id: string;
-  title: string;
-  homeBase: string | null;
-  startDate: string;
-  endDate: string;
-  status: TripStatus;
-  rating: number | null;
-  note: string | null;
-  days: number;
-  stops: number;
-  legs: number;
-  miles: number;
-  open: number;
-}
+/** Dashboard row — the shape is owned by @rv-trip/core so the API client can validate it. */
+export type { TripSummary };
 
 export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]> {
   const rows = await db.query.trips.findMany({
