@@ -1,13 +1,13 @@
-import { Caravan } from "lucide-react";
-import { StubPage } from "@/components/nav/StubPage";
+import { getRigByOwner } from "@rv-trip/db";
+import { RigForm } from "@/components/rig/RigForm";
+import { getOwner } from "@/lib/owner";
 
-export default function RigPage() {
-  return (
-    <StubPage
-      kicker="Profile"
-      title="Your rig"
-      blurb="Your RV's dimensions, weight, and hookup needs — used to tailor routing and filter campgrounds that actually fit."
-      Icon={Caravan}
-    />
-  );
+// Reads the account's rig on every request; don't statically prerender.
+export const dynamic = "force-dynamic";
+
+export default async function RigPage() {
+  // null on a brand-new account — the form renders with every field blank and
+  // no preset selected, which is the same surface, not a separate empty state.
+  const rig = await getRigByOwner(getOwner());
+  return <RigForm rig={rig} />;
 }

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { Trip, Reservation, ReservationType } from "@rv-trip/core";
-import { isScheduled } from "@rv-trip/core";
+import { isScheduled, orderedPairs, routeCacheKey } from "@rv-trip/core";
 import { Compass, House, CalendarDays, CircleAlert, Route, ChartNoAxesGantt, Plus } from "lucide-react";
 import {
   timelineModel,
@@ -20,6 +20,7 @@ import {
   setIdeaNote,
   scheduleFloating,
   reorderFloating,
+  type RouteMap,
 } from "@/lib/trip-logic";
 import { tripApi } from "@/lib/trip-api";
 import { fullRange } from "@/lib/trip-ui";
@@ -55,8 +56,20 @@ function mapRes(row: Record<string, unknown>): Reservation {
 const persist = (p: Promise<unknown>) =>
   p.catch(() => toast.error("That change didn't save — check your connection."));
 
-export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
+export function TripPlanner({
+  trip: initialTrip,
+  routes: initialRoutes,
+  rigHash,
+  hasRig,
+}: {
+  trip: Trip;
+  /** Server-resolved drives, keyed `from|to|rigHash`. */
+  routes: RouteMap;
+  rigHash: string;
+  hasRig: boolean;
+}) {
   const [trip, setTrip] = useState(initialTrip);
+  const [routes, setRoutes] = useState(initialRoutes);
   const [lens, setLens] = useState<"timeline" | "route">("timeline");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -67,8 +80,8 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const [costTracking, changeCostTracking] = useBooleanPref("rv-track-costs");
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
-  const route = useMemo(() => routeModel(trip), [trip]);
-  const summary = useMemo(() => routeSummary(trip), [trip]);
+  const route = useMemo(() => routeModel(trip, routes, rigHash), [trip, routes, rigHash]);
+  const summary = useMemo(() => routeSummary(trip, routes, rigHash), [trip, routes, rigHash]);
   const byId = useMemo(() => stopMap(trip), [trip]);
   // Trip-wide scheduled sequence — the same ordering routeSummary() and /map use.
   const scheduledOrdinal = useMemo(
@@ -107,6 +120,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
   const doSchedule = (id: string) => {
     const next = scheduleFloating(trip, id);
     setTrip(next);
+    upgradeRoutes(next);
     const s = stopMap(next).get(id);
     if (s?.arriveDate && s?.departDate) {
       persist(tripApi.updateStop(id, { arriveDate: s.arriveDate, departDate: s.departDate }));
@@ -148,6 +162,31 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
     } catch {
       toast.error("Couldn't book that idea.");
     }
+  };
+
+  /**
+   * Reordering invents pairs the server never routed. Those render immediately
+   * from the synchronous straight-line estimate; this asks for the real ones in
+   * the background. A failure is silent on purpose — the estimate is already on
+   * screen and is honestly labelled.
+   */
+  const upgradeRoutes = (next: Trip) => {
+    const missing = orderedPairs(next).filter(
+      (p) => !routes[routeCacheKey(p.from, p.to, rigHash)],
+    );
+    if (missing.length === 0) return;
+    tripApi
+      .routePairs(missing.map((p) => ({ from: p.from, to: p.to })))
+      // Merge ONLY when the reply was keyed with the rig this page rendered
+      // against. Edit the rig in another tab and the server keys with the new
+      // hash — merging those would add keys nothing ever looks up, so every
+      // later reorder would re-request the same pairs forever. A mismatch
+      // means the page is stale: the estimate stands until reload.
+      .then((fresh) => {
+        if (fresh.rigHash !== rigHash) return;
+        setRoutes((prev) => ({ ...prev, ...fresh.routes }));
+      })
+      .catch(() => {});
   };
 
   const dayCount = timeline.rhythm.length;
@@ -218,6 +257,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
             legs={route}
             summary={summary}
             costs={costTracking}
+            hasRig={hasRig}
             onOpenStop={openStop}
             routeDrag={routeDrag}
             onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
@@ -226,6 +266,7 @@ export function TripPlanner({ trip: initialTrip }: { trip: Trip }) {
               if (routeDrag && routeDrag.legId === legId) {
                 const next = reorderFloating(trip, legId, routeDrag.stopId, targetId);
                 setTrip(next);
+                upgradeRoutes(next);
                 const leg = next.legs.find((l) => l.id === legId);
                 if (leg) {
                   const order = [...leg.stops].sort((a, b) => a.sortOrder - b.sortOrder).map((s) => s.id);
