@@ -33,6 +33,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const read = (p: string) => readFileSync(p, "utf8");
 
 const PALETTE = read(join(REPO, "apps/web/src/components/map/palette.ts"));
+const NIGHTFALL = read(join(REPO, "apps/web/src/components/map/nightfall.ts"));
 const ENTRY_CSS = read(join(REPO, "packages/ui/styles/entry.css"));
 
 /** The `const <NAME>: OverlayPalette = { … };` body, by declaration name. */
@@ -209,6 +210,22 @@ describe("Map overlay palette — the three-mode contract", () => {
     // lands on a DOM marker's inline style, never in a Mapbox paint property.
     // No *colour* may take that shape.
     expect(PALETTE).not.toContain("var(--color-");
+  });
+
+  it("restyles the night BASEMAP from the same dark half (nightfall.ts)", () => {
+    // nightfall.ts states the same invariant as the night column above — every
+    // literal is its rv-* token's dark-half value, with the token name beside
+    // it — but nothing guarded it (qa's DD). Retune a token and this reds
+    // instead of the basemap quietly staying on the old palette.
+    const rows = [...NIGHTFALL.matchAll(/token: "(--color-rv-[a-z-]+)",\s*color: "([^"]+)"/g)];
+    expect(rows.length, "NIGHTFALL_PAINT rows").toBe(6);
+    const actual: Record<string, string> = {};
+    const resolved: Record<string, string> = {};
+    for (const m of rows) {
+      actual[m[1]!] = m[2]!;
+      resolved[m[1]!] = tokenValue(m[1]!);
+    }
+    expect(actual).toEqual(resolved);
   });
 
   it("adds no rv-* token, so the Nightfall toEqual guard stays untouched", () => {

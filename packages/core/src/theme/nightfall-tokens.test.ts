@@ -386,7 +386,11 @@ describe("Slate + Sky — default dark, the toggle, and the chrome islands", () 
     expect(layout, "dark on <html>").toMatch(/className=\{`[^`]*\bdark`\}/);
     // The vet's HIGH: React 19 diffs <html>'s className during hydration, so
     // the element the inline script mutates must suppress the warning.
-    expect(layout, "suppressHydrationWarning on <html>").toContain("suppressHydrationWarning");
+    // Anchored INSIDE the tag: a bare `toContain` also matches the prose in the
+    // comment above it, so deleting the attribute left this green (qa's FN).
+    expect(layout, "suppressHydrationWarning on <html>").toMatch(
+      /<html[^>]*\bsuppressHydrationWarning\b/s,
+    );
     expect(layout, "the script only ever REMOVES the class").toContain(
       "classList.remove('dark')",
     );
@@ -420,6 +424,25 @@ describe("Slate + Sky — default dark, the toggle, and the chrome islands", () 
       ["apps/web/src/components/map/MapOverview.tsx", 'className="dark flex flex-wrap'],
     ] as const) {
       expect(read(join(REPO, file)), `${file} island`).toContain(marker);
+    }
+  });
+
+  it("§5: the legend island's swatches take the className path, not inline vars", () => {
+    // The vet's MED, made a test. `@theme` emits `--color-rv-*` on `:root` only
+    // and CSS substitutes custom properties at computed-value time, so an inline
+    // `style` reading var(--color-rv-X) inherits the DOCUMENT half and does NOT
+    // flip inside a `.dark` island. rv-* classNames DO re-resolve per island.
+    // TeardropKey renders inside the legend bar (the third island), so its two
+    // colours must be classNames or the light theme paints two greens on one bar.
+    const map = read(join(REPO, "apps/web/src/components/map/MapOverview.tsx"));
+    const start = map.indexOf("function TeardropKey(");
+    expect(start, "function TeardropKey").toBeGreaterThan(-1);
+    const teardrop = map.slice(start, map.indexOf("\n}", start));
+    expect(teardrop, "no inline token read inside a .dark island").not.toContain(
+      "var(--color-rv-",
+    );
+    for (const cls of ["bg-rv-green", "border-rv-green", "bg-rv-navy-deep"]) {
+      expect(teardrop, cls).toContain(cls);
     }
   });
 

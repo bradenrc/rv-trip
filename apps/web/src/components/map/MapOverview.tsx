@@ -215,15 +215,19 @@ function LegendKey({ swatch, children }: { swatch: React.ReactNode; children: Re
   );
 }
 
+/** Colours are classNames, not inline `var(--color-rv-*)`: `@theme` maps the
+ * rv-* names on `:root` only, so an inline read resolves the DOCUMENT half and
+ * would keep painting light-half green inside this `.dark` legend bar. Only the
+ * teardrop geometry — which has no half — stays inline. */
 function TeardropKey({ hollow = false }: { hollow?: boolean }) {
   return (
     <i
-      className="size-[13px] flex-none border-2"
+      className={`size-[13px] flex-none border-2 ${
+        hollow ? "border-rv-green bg-rv-navy-deep" : "border-transparent bg-rv-green"
+      }`}
       style={{
         borderRadius: "50% 50% 50% 0",
         transform: "rotate(-45deg)",
-        background: hollow ? "var(--color-rv-navy-deep)" : "var(--color-rv-green)",
-        borderColor: hollow ? "var(--color-rv-green)" : "transparent",
       }}
     />
   );
