@@ -1,7 +1,7 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { deriveDays, deriveTripStatus, isScheduled, todayIso } from "@rv-trip/core";
 import { db } from "./index";
-import { trips, savedPlaces, rigs } from "./schema";
+import { trips, legs, stops, savedPlaces, rigs } from "./schema";
 import type {
   IsoDate,
   Trip,
@@ -136,6 +136,39 @@ function summarize(trip: Trip): TripSummary {
 }
 
 /**
+ * Everything `PATCH /api/stops/:id` needs to judge a date write: the stop's
+ * CURRENT dates (a patch may send only one of the pair) and the window of the
+ * trip it hangs under, owner-scoped through the same stops -> legs -> trips
+ * join every stop write uses. `deriveDays` clamps to that window
+ * (derive-days.ts), so dates outside it would make the stop invisible rather
+ * than wrong — hence the 409. `null` means the owner has no such stop: a 404.
+ */
+export async function getStopDateContext(
+  ownerId: string,
+  stopId: string,
+): Promise<{
+  tripId: string;
+  tripStartDate: IsoDate;
+  tripEndDate: IsoDate;
+  arriveDate: IsoDate | null;
+  departDate: IsoDate | null;
+} | null> {
+  const rows = await db
+    .select({
+      tripId: trips.id,
+      tripStartDate: trips.startDate,
+      tripEndDate: trips.endDate,
+      arriveDate: stops.arriveDate,
+      departDate: stops.departDate,
+    })
+    .from(stops)
+    .innerJoin(legs, eq(stops.legId, legs.id))
+    .innerJoin(trips, eq(legs.tripId, trips.id))
+    .where(and(eq(stops.id, stopId), eq(trips.ownerId, ownerId)));
+  return rows[0] ?? null;
+}
+
+/**
  * The Places library for an account — both shelves in one list. The page
  * partitions by `status`; sending both keeps the shelf counts honest without a
  * second round-trip. `tripName` is denormalized from the visited-on trip.
@@ -179,7 +212,7 @@ function mapPlace(name: string, lat: number | null, lng: number | null, gid: str
   return { name, lat, lng, googlePlaceId: gid };
 }
 
-function mapLeg(l: {
+export function mapLeg(l: {
   id: string;
   tripId: string;
   title: string;
@@ -195,7 +228,7 @@ function mapLeg(l: {
   };
 }
 
-interface MapStopRow {
+export interface MapStopRow {
   id: string;
   legId: string;
   placeName: string;
@@ -211,7 +244,7 @@ interface MapStopRow {
   ideas: MapIdeaRow[];
 }
 
-function mapStop(s: MapStopRow): Stop {
+export function mapStop(s: MapStopRow): Stop {
   return {
     id: s.id,
     legId: s.legId,

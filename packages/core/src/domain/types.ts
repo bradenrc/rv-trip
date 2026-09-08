@@ -155,6 +155,61 @@ export const tripPatchInput = trip
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
 
 /**
+ * The leg + stop WRITE contract — derived from the grammar above for the same
+ * reason the trip one is: a field lands in the schema once and the handlers
+ * inherit it. `id` and `sortOrder` are never client-supplied on a create (the
+ * server appends), and `legs`/`stops`/`reservations`/`ideas` are never written
+ * through their parent.
+ *
+ * The id-shaped fields are tightened to `.uuid()` here rather than in the
+ * grammar: they address a real `uuid` column, so a malformed one is a 400 at
+ * the boundary instead of a Postgres cast error deeper in. Same convention the
+ * shipped handlers already use (`api/reservations/route.ts:7`).
+ */
+
+/** `POST /api/legs` — the "Add leg" button. The server appends the sortOrder. */
+export const legCreateInput = leg
+  .pick({ title: true })
+  .extend({ tripId: z.string().uuid() });
+export type LegCreateInput = z.infer<typeof legCreateInput>;
+
+/** `PATCH /api/legs/:id` — the inline rename. Order moves through reorder. */
+export const legPatchInput = leg.pick({ title: true }).partial();
+export type LegPatchInput = z.infer<typeof legPatchInput>;
+
+/** `POST /api/trips/:id/legs/reorder` — "Move leg up/down" sends the whole new
+ * order, so the renumber is one transaction rather than a swap of two rows. */
+export const legReorderInput = z.object({
+  order: z.array(z.string().uuid()).min(1),
+});
+export type LegReorderInput = z.infer<typeof legReorderInput>;
+
+/** `POST /api/stops` — per-leg "Add stop". A stop is born floating unless the
+ * caller already has dates for it; the server appends the sortOrder. */
+export const stopCreateInput = stop
+  .pick({ place: true, arriveDate: true, departDate: true })
+  .extend({ legId: z.string().uuid() });
+export type StopCreateInput = z.infer<typeof stopCreateInput>;
+
+/**
+ * `PATCH /api/stops/:id` — the widened stop write. `placeName` is the rename
+ * (the row menu edits the name, never the coordinates), `legId` is "Move to
+ * leg", `sortOrder` is the floating-rail reorder, and both dates going null is
+ * "Unschedule". Every key optional: the menu sends one field at a time.
+ */
+export const stopPatchInput = stop
+  .pick({
+    arriveDate: true,
+    departDate: true,
+    sortOrder: true,
+    rating: true,
+    notes: true,
+  })
+  .extend({ placeName: place.shape.name, legId: z.string().uuid() })
+  .partial();
+export type StopPatchInput = z.infer<typeof stopPatchInput>;
+
+/**
  * The Places library: an account-scoped, cross-trip collection of spots.
  * ONE record with ONE status field — a place graduates want -> been after a
  * visit rather than being re-entered into a second collection.

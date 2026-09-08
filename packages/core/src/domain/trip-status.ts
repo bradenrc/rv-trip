@@ -118,3 +118,41 @@ export function orphanedStopsMessage(orphans: readonly OrphanedStop[]): string {
     orphans.length === 1 ? "it" : "them"
   } first.`;
 }
+
+// ── the mirror refusal, on a stop write ────────────────────────────────────
+//
+// Same clamp, other side of the write. `PATCH /api/stops/:id` with dates the
+// trip window does not contain would put the stop in the DB and nowhere on the
+// calendar, so the handler refuses with 409 `stop_dates_outside_trip` and hands
+// back the trip's range for the dialog to show.
+
+/** The trip window a stop's dates have to live inside. */
+export interface TripDateRange {
+  startDate: IsoDate;
+  endDate: IsoDate;
+}
+
+/**
+ * Would these stop dates fall (partly) outside the trip? A floating stop —
+ * either date null — is never outside anything: it is not on the calendar at
+ * all, which is a legal state, not a lost one.
+ */
+export function stopDatesOutsideTrip(
+  range: TripDateRange,
+  dates: { arriveDate: IsoDate | null; departDate: IsoDate | null },
+): boolean {
+  if (dates.arriveDate === null || dates.departDate === null) return false;
+  return dates.arriveDate < range.startDate || dates.departDate > range.endDate;
+}
+
+/** The human sentence the 409 carries: the span, the trip, the way out. */
+export function stopOutsideTripMessage(
+  range: TripDateRange,
+  arrive: IsoDate,
+  depart: IsoDate,
+): string {
+  return `${formatDateSpan(arrive, depart)} is outside the trip, which runs ${formatDateSpan(
+    range.startDate,
+    range.endDate,
+  )}. Change the trip's dates first.`;
+}

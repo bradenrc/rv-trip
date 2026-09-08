@@ -402,3 +402,176 @@ item that are logic rather than markup went there.
 **SKIPPED (no env):** `pnpm db:push` / `pnpm db:seed` / `pnpm dev`, and every
 browser-side behaviour above (InlineText's key handling, the two dialogs, the
 redirect after create). No HTTP request in this item was observed at runtime.
+
+---
+
+# dev notes — issue 40, item **i3** of 6
+
+**Leg + stop write contract.** Scope is i3 only: `packages/core` schemas + the
+one guard, `packages/db` mutations/queries, and the five API route files. No
+component, no `trip-api.ts` method (that is i4), no UI copy.
+
+Design read: `mc/wireframe/issue-40-v0:docs/design/40/index.html` §8 (the
+contract table, the mirror refusal at :948-949) + `plan.json` i3. Vet findings
+from the brief are answered one by one below.
+
+---
+
+## What changed
+
+### `packages/core` — the write contract the handlers parse against
+
+- **`src/domain/types.ts`** — a new "leg + stop WRITE contract" block, derived
+  from the grammar exactly the way i1 derived the trip one:
+  - `legCreateInput` :171 — `leg.pick({ title }).extend({ tripId: uuid })`.
+    `sortOrder` is **not** in it: the server appends.
+  - `legPatchInput` :177 — `leg.pick({ title }).partial()` (the inline rename;
+    order moves through reorder, never through PATCH).
+  - `legReorderInput` :182 — `{ order: uuid[] }`, min 1.
+  - `stopCreateInput` :189 —
+    `stop.pick({ place, arriveDate, departDate }).extend({ legId: uuid })`; a
+    stop is born floating unless the caller already has dates.
+  - `stopPatchInput` :200 — the widened stop write:
+    `stop.pick({ arriveDate, departDate, sortOrder, rating, notes })
+     .extend({ placeName: place.shape.name, legId: uuid }).partial()`.
+    `placeName` (not `place`) because the DB column and the rename affordance
+    are the name alone.
+  - **Decision — `.uuid()` on the id-shaped fields.** The grammar keeps
+    `z.string()` for ids (a `Trip` read must not care), but these fields address
+    a real `uuid` column: without the tightening a malformed id is a Postgres
+    cast error (500) instead of a 400 at the boundary. Same convention the
+    shipped handlers already use (`api/reservations/route.ts:7`).
+- **`src/domain/trip-status.ts`** — the mirror of i1's one refusal:
+  `TripDateRange` :130, `stopDatesOutsideTrip(range, dates)` :140 (a floating
+  stop — either date null — is never "outside": that is a legal state, not a
+  lost one) and `stopOutsideTripMessage()` :149, which reuses i1's
+  `formatDateSpan`.
+- **`src/domain/leg-stop-write-contract.test.ts`** (new, 21 cases) — the same
+  technique as `trip-write-contract.test.ts`: the handlers parse bodies with
+  these schemas, so what the schemas do IS the contract. Covers the append-only
+  creates (`sortOrder`/`id` stripped), the absent-not-defaulted PATCH keys, the
+  three widened stop fields, "Unschedule" as `{arriveDate: null, departDate:
+  null}`, the rejections (blank name, non-ISO date, non-uuid id, fractional
+  `sortOrder`, rating 9), and the 409 guard on both edges + its sentence.
+
+### `packages/db`
+
+- **`src/queries.ts`**
+  - `getStopDateContext(owner, stopId)` :146 — **the data path the vet said the
+    409 did not have.** One `stops -> legs -> trips` join scoped on
+    `trips.owner_id`, returning the trip window *and the stop's current dates*
+    (a PATCH may send only one of the pair, so the guard has to judge the pair
+    the row will actually hold). `null` = the owner has no such stop = 404.
+  - `mapLeg` :215 / `mapStop` :247 (+ `MapStopRow`) exported so a create can
+    answer in the core `Leg`/`Stop` shape instead of a raw row — the same
+    precedent as `mapRigRow`, which `mutations.ts` already imports.
+- **`src/mutations.ts`** — a `// ── legs` block at :114 and `// ── stops` at
+  :221.
+  - `assertOwnedTrip` :116 / `assertOwnedLeg` :129 — the two prechecks, both
+    the explicit select-then-throw of `createReservation:50-54`. `assertOwnedLeg`
+    proves ownership **through the shared `ownedLegIds(owner)` subquery**, so
+    the acceptance's "owner-scoped through the shared subquery helpers" is
+    literally true of it. Both take the tx/db handle so a create can prove
+    ownership inside the same transaction it writes in.
+  - `createLeg` :147 — appends (`max(sortOrder) + 1`) and inserts in ONE
+    transaction, so two concurrent adds cannot claim one position. Returns
+    `Leg` with `stops: []`.
+  - `updateLegFields` :170 / `deleteLeg` :185 — `boolean` (did the owner-scoped
+    statement match?), scoped `and(eq(legs.id, id), inArray(legs.id,
+    ownedLegIds(owner)))`. The empty-patch no-op falls back to an existence
+    check, same as i1's `updateTripFields`.
+  - `reorderTripLegs` :199 — `assertOwnedTrip`, then the renumber loop in a
+    transaction, copied from `reorderLegStops`. Each statement also carries
+    `eq(legs.tripId, tripId)`, so an id from another trip renumbers nothing.
+  - `createStop` :223 — `assertOwnedLeg` on the **destination** leg, then
+    append + insert in one transaction; returns the core `Stop`.
+  - `updateStopFields` :264 — widened to `placeName`/`legId`/`sortOrder`, now
+    returns `boolean`, and **checks the destination leg** :277 when the patch
+    carries `legId`.
+  - `deleteStop` :288.
+
+### `apps/web` — five route files
+
+- **`api/legs/route.ts`** (new) — POST, 201 with the `Leg`, 400 on `safeParse`,
+  404 `trip not found`.
+- **`api/legs/[id]/route.ts`** (new) — PATCH 204/404, DELETE 204/404.
+- **`api/trips/[id]/legs/reorder/route.ts`** (new) — POST 204/400/404.
+- **`api/stops/route.ts`** (new) — POST, 201 with the `Stop`, 404
+  `leg not found`.
+- **`api/stops/[id]/route.ts`** — the hand-rolled `patchSchema` replaced with
+  `stopPatchInput`; the date guard at :27-45 (merge the patch over the stored
+  pair, then 409 `{error, message, trip:{startDate,endDate}}`); 404 on a
+  zero-row match :49; 404 `leg not found` :50-52 for a move into a leg the
+  caller does not own; DELETE :59.
+  Every `ctx.params` is awaited (Next 16).
+
+---
+
+## Vet findings — each one, and where it landed
+
+- **HIGH · `legId` move was unvalidated.** Fixed at `mutations.ts:277`: the
+  WHERE's `ownedLegIds` only proves where the stop IS, so the DESTINATION leg
+  gets its own `assertOwnedLeg` (the `createReservation` pattern) and the write
+  throws before it runs. `createStop:233` closes the mirror hole. **Verified at
+  runtime** (see checks): owner A moving a stop into owner B's leg is refused
+  and the row keeps its old `leg_id`.
+- **MED · "owner-scoped through the subqueries" is not a thing an INSERT can
+  do.** Agreed — the two creates use the explicit select-then-throw the vet
+  named, and `assertOwnedLeg` runs it *through* `ownedLegIds` so both statements
+  are true at once. Documented in the block comment at `mutations.ts:114-121`.
+- **MED · the 409 had no data path.** `getStopDateContext` (`queries.ts:146`) is
+  it. It returns the stop's own dates too, so a one-sided patch
+  (`{departDate}` only) is judged against the pair the row will hold — verified:
+  `PATCH {"departDate":"2026-08-31"}` on Bend (stored arrive Aug 12) refuses
+  with `Aug 12–31 is outside the trip…`.
+- The three fixture/typecheck findings and the `scheduleFloating` default are
+  i1/i5 items and are untouched here.
+
+## Decisions + things to flag
+
+- **Authored copy (flag for the walk/qa).** The design fixes the 409's *code*
+  and that it carries the trip's range, but quotes no sentence for the stop side
+  (only the trip side's). Mine mirrors that sentence's shape — what is wrong,
+  then the way out: `"Aug 30–Sep 2 is outside the trip, which runs Aug 1–28.
+  Change the trip's dates first."` If the design owner wants different words,
+  it is one string at `trip-status.ts:149` and one test assertion.
+- **A move + a date change in one PATCH** is judged against the window of the
+  trip the stop is in *now*. That is the same trip in every affordance the
+  design draws ("Move to leg" lists the legs of this trip), so no cross-trip
+  case exists to get wrong yet.
+- **Deleting a leg leaves a gap in `sortOrder`** (0,1,2 → 1,2 after deleting the
+  first). Ordering is by `sortOrder ASC`, so this is invisible; I did not add a
+  renumber-after-delete because the design does not ask for one and it would be
+  a second write on every delete.
+- **`POST /api/legs` and `POST /api/stops` answer 201 with the core shape**
+  (`Leg` with `stops: []`, `Stop` with empty `reservations`/`ideas`) rather than
+  204, so i4 can splice the new row into the tree it holds without a re-fetch.
+- **Not touched:** `trip-api.ts`, `api-client`, `RouteView.tsx`,
+  `TripPlanner.tsx`, `api/legs/[id]/reorder/route.ts` (the *stop* reorder — the
+  design says a hand-rolled body is converted only where an item already edits
+  the file, never as a drive-by).
+- **No migration.** No column, enum or table changed in this item — only new
+  statements against the existing schema. `pnpm db:push` is still owed for i1's
+  `trips.status_auto`, and that is operator-owned: the shared local DB
+  (`rvtrip`) does not have the column yet, which is why the runtime checks below
+  ran against a throwaway database instead.
+
+## Checks run
+
+| check | command | result |
+|---|---|---|
+| full gate | `pnpm turbo run lint typecheck test` | `Tasks: 8 successful, 8 total` |
+| unit tests | (same run, `@rv-trip/core:test`) | `Test Files 18 passed (18)` · `Tests 250 passed (250)` |
+| TDD red first | `pnpm --filter @rv-trip/core test` before implementing | `Tests 21 failed | 229 passed (250)` |
+| mutations vs a real Postgres | scratch `tsx` script, 24 assertions, throwaway DB `rvtrip_i3_smoke` (drizzle-kit push + drop) | all `PASS`, incl. `updateStopFields REFUSES a move into another owner's leg` and `the refused move did not land` |
+| handlers vs a real dev server | `next dev -p 3117` on the throwaway DB + `curl` | `POST /api/legs` 201/400/404 · `PATCH /api/legs/:id` 204/404/400 · `POST /api/trips/:id/legs/reorder` 204/404/400 · `POST /api/stops` 201/400/404 · `PATCH /api/stops/:id` 204/404 (stop) /404 (dest leg) /409 /400 · `DELETE` 204 then 404 for both nouns |
+
+`pnpm install` was run first — this worktree had no `node_modules`.
+
+The runtime checks used a **throwaway database** (created, `drizzle-kit push`,
+seeded, exercised, dropped) so the operator's `rvtrip` dev DB was neither
+migrated nor written to. The scratch script and the dev server are gone; nothing
+from them is in the worktree.
+
+**SKIPPED (no env):** nothing in this item — the two runtime checks above
+replaced what i1/i2 had to argue from code.
