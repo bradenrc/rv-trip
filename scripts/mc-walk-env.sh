@@ -34,8 +34,12 @@ dotenv_db_url() { # echo DATABASE_URL out of a dotenv file (last wins, quotes st
   printf '%s\n' "$val"
 }
 
-free_port() { # first free port from 3200
-  local p=3200
+free_port() { # first free port from 3980 (issue-rotated so consecutive walks don't share an origin)
+  # NOT 3200, and not a fixed number (rv-trip#14): with walks serial, a fixed base means
+  # every walk reuses one browser origin forever, inheriting whatever state any earlier
+  # tenant left there. A leftover service worker on localhost:3200 reload-looped issue 9's
+  # walk while the server was healthy — the operator rejected a slice over browser state.
+  local p=$((3980 + ${1:-0} % 20))
   while lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; do p=$((p + 1)); done
   echo "$p"
 }
@@ -58,10 +62,16 @@ standup)
   [ -n "$branch" ] || die "standup $issue: --branch is required"
 
   wt="$ROOT/.claude/worktrees/$issue"
+  # DETACHED, never on the branch: a walk tree that holds the code branch checked out
+  # squats on it — git's one-branch-one-worktree rule then collides with every later
+  # dispatch worktree the engine cuts for that same branch, and the engine's collision
+  # handling evicted this tree out from under a LIVE walk server, twice in one day
+  # (issue 9, 2026-09-07 — mc-dev#112). btrip's walk trees are detached for the same
+  # reason; the branch name still rides walk.json for the glass.
   if [ ! -d "$wt" ]; then
-    git -C "$ROOT" worktree add "$wt" "$branch"
+    git -C "$ROOT" worktree add --detach "$wt" "$branch"
   else
-    git -C "$wt" checkout "$branch"
+    git -C "$wt" checkout --detach "$branch"
   fi
   # Untracked env files don't follow a worktree — and Next loads env from the APP
   # directory (apps/web/, its cwd), NOT the monorepo root the README's
@@ -91,7 +101,7 @@ standup)
     die "standup $issue: pnpm install failed — see .mc/walk/$issue-install.log"
   (cd "$ROOT" && docker compose up -d >>"$WALK_DIR/$issue-standup.log" 2>&1) || true
 
-  port="$(free_port)"
+  port="$(free_port "$issue")"
   (cd "$wt/apps/web" && PORT="$port" nohup pnpm dev >"$WALK_DIR/$issue-web.log" 2>&1 &
     echo $! >"$WALK_DIR/$issue-web.pid")
   pid="$(cat "$WALK_DIR/$issue-web.pid")"
