@@ -522,10 +522,8 @@ export function promoteIdea(trip: Trip, stopId: string, ideaId: string): Trip {
   });
 }
 
-/** Assign dates to a floating stop by dropping it into the largest open run. */
-export function scheduleFloating(trip: Trip, stopId: string, nights = 3): Trip {
-  const stops = allStops(trip);
-  const { days } = deriveDays(trip, stops);
+/** The longest open run in the trip window, as `[startIndex, length]`. */
+function longestOpenRun(days: { kind: DayKind }[]): [number, number] {
   let best = -1,
     bestLen = 0,
     cur = -1,
@@ -540,9 +538,47 @@ export function scheduleFloating(trip: Trip, stopId: string, nights = 3): Trip {
       }
     } else curLen = 0;
   });
-  if (best < 0) return trip;
-  const span = Math.min(nights, bestLen);
-  const arriveDate = days[best]!.date;
+  return [best, bestLen];
+}
+
+/**
+ * Assign dates to a floating stop.
+ *
+ * `gap` is the open span it was DROPPED on — the same `TimelineGap` the gantt's
+ * `OpenLane` rendered, so `startCol` is a 1-based column into the very day list
+ * `deriveDays` builds here. The stop takes the gap's first date and
+ * `min(nights, gap.span)` days of it; a 1-day gap therefore yields
+ * `arrive === depart`, a legal single-day stop.
+ *
+ * `gap === null` — the stop sheet's "Schedule" button, which has no drop target
+ * — keeps the original behaviour: the LARGEST open run. It is the default, so
+ * every existing two-argument call site is unchanged.
+ */
+export function scheduleFloating(
+  trip: Trip,
+  stopId: string,
+  gap: TimelineGap | null = null,
+  nights = 3,
+): Trip {
+  const stops = allStops(trip);
+  const { days } = deriveDays(trip, stops);
+
+  let start: number;
+  let runLen: number;
+  if (gap) {
+    start = gap.startCol - 1;
+    // A gap the trip no longer has (the window moved under the drag) is a
+    // no-op rather than a guess.
+    if (start < 0 || start >= days.length) return trip;
+    runLen = Math.min(gap.span, days.length - start);
+  } else {
+    [start, runLen] = longestOpenRun(days);
+    if (start < 0) return trip;
+  }
+  if (runLen < 1) return trip;
+
+  const span = Math.min(nights, runLen);
+  const arriveDate = days[start]!.date;
   const departDate = addDays(arriveDate, span - 1);
   return updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate }));
 }

@@ -73,9 +73,10 @@ import {
   scheduleFloating,
   reorderFloating,
   type RouteMap,
+  type TimelineGap,
 } from "@/lib/trip-logic";
 import { tripApi } from "@/lib/trip-api";
-import { fullRange } from "@/lib/trip-ui";
+import { fullRange, monthDay } from "@/lib/trip-ui";
 import { useBooleanPref } from "@/lib/pref";
 import { InlineText } from "@/components/ui/inline-text";
 import { Input } from "@/components/ui/input";
@@ -255,22 +256,51 @@ export function TripPlanner({
     });
 
   // ── mutations: optimistic local update + persist ─────────────────────────
-  const doSchedule = (id: string) => {
+
+  /**
+   * The gantt drop — and the stop sheet's "Schedule" button, which has no drop
+   * target and passes no gap.
+   *
+   * `gap` is the open span the card was dropped ON: the stop takes that gap's
+   * first date and `min(3, gap.span)` days of it, so dropping on Aug 10–11
+   * lands on Aug 10–11 rather than on the trip's longest empty run. `null`
+   * keeps the longest-run fallback the sheet's button has always used.
+   *
+   * Two fields, one PATCH — no `sortOrder` write. `orderedLegStops()` sorts
+   * scheduled stops by `arriveDate`, so the dates alone reorder the leg
+   * everywhere the stop appears.
+   */
+  const doSchedule = (id: string, gap: TimelineGap | null = null) => {
     const undo = trip;
-    const next = scheduleFloating(trip, id);
+    const next = scheduleFloating(trip, id, gap);
+    if (next === undo) return; // no open day to land on — nothing happened
     setTrip(next);
     upgradeRoutes(next);
     const s = stopMap(next).get(id);
-    if (s?.arriveDate && s?.departDate) {
-      persist(
-        tripApi.updateStop(id, {
-          arriveDate: s.arriveDate,
-          departDate: s.departDate,
-        }),
-        undo,
-        `Couldn't schedule ${s.place.name} — put back to floating.`,
-      );
-    }
+    if (!s?.arriveDate || !s.departDate) return;
+    const arriveDate = s.arriveDate;
+    const departDate = s.departDate;
+    persist(
+      tripApi.updateStop(id, { arriveDate, departDate }),
+      undo,
+      `Couldn't schedule ${s.place.name} — put back to floating.`,
+    );
+    // The drop is the one gesture with no dialog in front of it, so the toast
+    // is where it becomes reversible: Undo puts the stop back to floating and
+    // writes that back too.
+    toast.success(`Scheduled ${s.place.name} · ${monthDay(arriveDate)} – ${monthDay(departDate)}`, {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          setTrip(undo);
+          persist(
+            tripApi.updateStop(id, { arriveDate: null, departDate: null }),
+            next,
+            `Couldn't undo — ${s.place.name} still has dates.`,
+          );
+        },
+      },
+    });
   };
 
   // ── legs ─────────────────────────────────────────────────────────────────

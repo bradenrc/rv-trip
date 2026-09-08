@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Leg, Trip, Stop } from "../domain/types";
-import { routeCacheKey } from "../domain/route-order";
+import { orderedLegStops, routeCacheKey } from "../domain/route-order";
 import type { RouteResult } from "../providers/index";
 import {
   timelineModel,
@@ -51,6 +51,81 @@ function stop(partial: Partial<Stop> & Pick<Stop, "id" | "legId" | "sortOrder">)
     ideas: [],
     ...partial,
   };
+}
+
+/**
+ * The SEED trip (packages/db/src/seed.ts) as a plain fixture: Aug 1–28, two
+ * legs, three dated stops and Crater Lake floating. Its open runs are what the
+ * gantt drop is specified against, so the drop tests read off the real trip
+ * rather than a shape invented for them.
+ */
+function seedTrip(): Trip {
+  return {
+    id: "seed",
+    ownerId: "o",
+    title: "Pacific Northwest Loop",
+    homeBase: "Boise, ID",
+    startDate: "2026-08-01",
+    endDate: "2026-08-28",
+    status: "planning",
+    statusAuto: false,
+    rating: null,
+    note: null,
+    legs: [
+      {
+        id: "coast",
+        tripId: "seed",
+        title: "Oregon Coast",
+        sortOrder: 0,
+        stops: [
+          stop({
+            id: "astoria",
+            legId: "coast",
+            sortOrder: 0,
+            place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
+            arriveDate: "2026-08-02",
+            departDate: "2026-08-05",
+          }),
+          stop({
+            id: "newport",
+            legId: "coast",
+            sortOrder: 1,
+            place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
+            arriveDate: "2026-08-05",
+            departDate: "2026-08-09",
+          }),
+        ],
+      },
+      {
+        id: "mountains",
+        tripId: "seed",
+        title: "Cascades & Home",
+        sortOrder: 1,
+        stops: [
+          stop({
+            id: "bend",
+            legId: "mountains",
+            sortOrder: 0,
+            place: { name: "Bend, OR", lat: 44.0582, lng: -121.3153, googlePlaceId: null },
+            arriveDate: "2026-08-12",
+            departDate: "2026-08-16",
+          }),
+          stop({
+            id: "crater",
+            legId: "mountains",
+            sortOrder: 1,
+            place: { name: "Crater Lake NP", lat: 42.9446, lng: -122.109, googlePlaceId: null },
+          }),
+        ],
+      },
+    ],
+  };
+}
+
+/** Crater Lake's [arrive, depart] after a drop. */
+function crater(trip: Trip): (string | null)[] {
+  const s = trip.legs[1]!.stops.find((x) => x.id === "crater")!;
+  return [s.arriveDate, s.departDate];
 }
 
 function fixture(endDate = "2026-08-10"): Trip {
@@ -278,6 +353,84 @@ describe("pure mutations", () => {
     t.legs[0]!.stops[0]!.arriveDate = "2026-08-01";
     t.legs[0]!.stops[1]!.departDate = "2026-08-08";
     expect(scheduleFloating(t, "S4")).toBe(t);
+  });
+
+  /**
+   * The gantt drop (#40 i5). The dates below are the SEED trip's, so the three
+   * gaps are the ones the masthead counts — "15 open days across 3 gaps":
+   *
+   *   Aug 1 (1 day, before the first arrival) · Aug 10–11 (2, between Newport
+   *   and Bend) · Aug 17–28 (12, the tail after Bend).
+   */
+  describe("scheduleFloating takes the gap it was dropped on", () => {
+    it("the seed trip really has those three gaps", () => {
+      expect(timelineModel(seedTrip()).gaps).toEqual([
+        { startCol: 1, span: 1 },
+        { startCol: 10, span: 2 },
+        { startCol: 17, span: 12 },
+      ]);
+    });
+
+    it.each([
+      ["Aug 1", { startCol: 1, span: 1 }, ["2026-08-01", "2026-08-01"]],
+      ["Aug 10–11", { startCol: 10, span: 2 }, ["2026-08-10", "2026-08-11"]],
+      ["Aug 17–28", { startCol: 17, span: 12 }, ["2026-08-17", "2026-08-19"]],
+    ] as const)("dropped on %s → %s", (_label, gap, dates) => {
+      const next = scheduleFloating(seedTrip(), "crater", gap);
+      expect(crater(next)).toEqual(dates);
+    });
+
+    it("a one-day gap yields arrive === depart", () => {
+      const next = scheduleFloating(seedTrip(), "crater", { startCol: 1, span: 1 });
+      const [arrive, depart] = crater(next);
+      expect(arrive).toBe(depart);
+    });
+
+    it("gap === null keeps the longest-run behaviour the sheet's Schedule button uses", () => {
+      expect(crater(scheduleFloating(seedTrip(), "crater", null))).toEqual([
+        "2026-08-17",
+        "2026-08-19",
+      ]);
+      // …and omitting the argument entirely is the same call.
+      expect(crater(scheduleFloating(seedTrip(), "crater"))).toEqual([
+        "2026-08-17",
+        "2026-08-19",
+      ]);
+    });
+
+    it("clamps the span to `nights`, and `nights` to the gap", () => {
+      expect(crater(scheduleFloating(seedTrip(), "crater", { startCol: 17, span: 12 }, 5))).toEqual([
+        "2026-08-17",
+        "2026-08-21",
+      ]);
+      expect(crater(scheduleFloating(seedTrip(), "crater", { startCol: 10, span: 2 }, 5))).toEqual([
+        "2026-08-10",
+        "2026-08-11",
+      ]);
+    });
+
+    it("a gap that starts outside the trip window is a no-op", () => {
+      const t = seedTrip();
+      expect(scheduleFloating(t, "crater", { startCol: 99, span: 3 })).toBe(t);
+      expect(scheduleFloating(t, "crater", { startCol: 0, span: 3 })).toBe(t);
+    });
+
+    it("no sortOrder is written — the dates alone reorder the leg", () => {
+      const next = scheduleFloating(seedTrip(), "crater", { startCol: 10, span: 2 });
+      const leg = next.legs[1]!;
+      expect(leg.stops.map((s) => [s.id, s.sortOrder])).toEqual([
+        ["bend", 0],
+        ["crater", 1],
+      ]);
+      expect(orderedLegStops(leg.stops).map((s) => s.id)).toEqual(["crater", "bend"]);
+    });
+
+    it("does not mutate its input", () => {
+      const t = seedTrip();
+      const before = JSON.stringify(t);
+      scheduleFloating(t, "crater", { startCol: 10, span: 2 });
+      expect(JSON.stringify(t)).toBe(before);
+    });
   });
 
   it("reorderFloating moves the dragged stop before the target and renumbers the leg", () => {

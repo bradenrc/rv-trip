@@ -810,3 +810,162 @@ called out in the vet:
 render + pointer behaviour, which is precisely what the walk gate is for; the
 three items above are what it should look at. No database was touched (this item
 adds no query or mutation).
+
+---
+---
+
+# dev notes — issue 40, item **i5** of 6
+
+**The gantt drop takes the gap it was dropped on.** Scope is i5 only; i1–i4 are
+already on this branch and untouched, i6 is a separate dispatch.
+
+Design read: `mc/wireframe/issue-40-v0:docs/design/40/index.html` §7 (the
+resolved rule, the worked drop table, the toast, the "no `sortOrder` write"
+note) and the epic plan's i5. Vet feedback: the one i5 finding — `gap` must
+default so the five existing 2-arg call sites keep compiling — is honoured
+(`gap = null` is the default, not a required positional).
+
+---
+
+## What changed
+
+### 1 · `scheduleFloating` takes the gap
+
+`packages/core/src/planner/index.ts:526` — new `longestOpenRun(days)` helper,
+the old scan lifted verbatim out of the function so both branches read the same
+day list.
+
+`packages/core/src/planner/index.ts:557` — the new signature:
+
+```ts
+scheduleFloating(trip, stopId, gap: TimelineGap | null = null, nights = 3)
+```
+
+- `gap` is the **same `TimelineGap`** the gantt already renders (`startCol` is
+  1-based into the very day list `deriveDays` rebuilds here), so nothing new is
+  invented and no drag context is plumbed.
+- `arriveDate = days[gap.startCol - 1].date`, `span = min(nights, gap.span)`,
+  `departDate = addDays(arriveDate, span - 1)` — the design's rule literally.
+- `gap === null` → `longestOpenRun()`, i.e. today's behaviour, byte-for-byte.
+  It is the **default**, so `scheduleFloating(trip, id)` still compiles and
+  still means what it meant. That is the vet's i5 finding, closed.
+- Guard I added (the design does not name it): a `startCol` outside the trip
+  window returns the SAME trip object, matching the existing "no open day" case
+  which callers already test with `toBe(t)`. `span` is also clamped to
+  `days.length - start` so a stale gap can never produce a date past `endDate`.
+
+### 2 · the gap reaches the handler
+
+`apps/web/src/components/trip/Timeline.tsx:31` — `onSchedule` is now
+`(stopId, gap: TimelineGap | null) => void`.
+`apps/web/src/components/trip/Timeline.tsx:76` — `OpenSpan`'s `onDrop` already
+closed over `g` and threw it away; it now calls `onSchedule(draggedId, g)`.
+That is the whole plumbing change — no new state.
+
+### 3 · the write + the toast
+
+`apps/web/src/components/trip/TripPlanner.tsx:273` — `doSchedule(id, gap = null)`:
+
+- `scheduleFloating(trip, id, gap)`; an identity return (nothing to land on) is
+  an early return, so a dead drop raises no toast and sends no PATCH.
+- persists **two fields only** — `tripApi.updateStop(id, { arriveDate,
+  departDate })`. No `sortOrder`: `orderedLegStops()` sorts scheduled stops by
+  `arriveDate` (`route-order.ts:38`), so the dates alone move Crater Lake ahead
+  of Bend in the gantt, the route list and the drive pairs. The test at
+  `planner.test.ts:410` asserts exactly that (sortOrder unchanged, order flipped).
+- raises `toast.success("Scheduled <name> · <arrive> – <depart>")` with an
+  **Undo** action that puts the pre-drop trip back and writes
+  `{ arriveDate: null, departDate: null }` — the same "both null is Unschedule"
+  the i3 stop contract already accepts. The undo's own failure rolls forward to
+  the scheduled trip via the existing `persist()`.
+- `apps/web/src/components/trip/TripPlanner.tsx:711` — the stop sheet's
+  "Schedule" button is unchanged (`doSchedule(selectedStop.id)`); it now gets
+  the toast too, which the design's own drop-table row for it implies.
+
+### 4 · tests — `packages/core/src/planner/planner.test.ts`
+
+- `:62 seedTrip()` — the **real seed trip** (`packages/db/src/seed.ts`) as a
+  plain fixture: Aug 1–28, Astoria 08-02–05, Newport 08-05–09, Bend 08-12–16,
+  Crater Lake floating. `:126 crater()` reads its `[arrive, depart]`.
+- `:367` asserts the seed's gaps really are `[{1,1},{10,2},{17,12}]` — so the
+  three acceptance cases below are anchored on the trip, not on numbers I typed.
+- `:379` the three acceptance drops: Aug 1 → `08-01/08-01`, Aug 10–11 →
+  `08-10/08-11`, Aug 17–28 → `08-17/08-19`.
+- `:384` the 1-day gap yields `arrive === depart`; `:389` the `gap === null`
+  **and** the omitted-argument fallbacks both give `08-17/08-19`; `:401` the
+  `nights` clamp both ways; `:414` the out-of-window gap is a no-op; `:421` no
+  input mutation.
+- The four pre-existing `scheduleFloating` tests (`:337`–`:349`) are untouched
+  and still pass on the 2-arg form — that is the "unchanged" claim, executed.
+
+---
+
+## Decisions, deviations and defaults — worth qa's eye
+
+1. **Toast date format is the wireframe's, not `dateRange()`.** §7's toast reads
+   `Aug 10 – Aug 11` and its drop table reads `Aug 1 – Aug 1`, i.e. both
+   endpoints always. `dateRange()` (the gantt bar's formatter) would collapse
+   those to `Aug 10–11` and `Aug 1`. I matched the wireframe copy —
+   `` `${monthDay(a)} – ${monthDay(b)}` ``, `monthDay` re-exported from
+   `@/lib/trip-ui` — rather than the bar formatter. **Claim for qa:** this is
+   the deliberate choice, not an oversight; flip it to `dateRange` if the vet
+   reads §7's toast as illustrative.
+2. **Out-of-window gap guard** is mine, not the design's. A drop can only carry
+   a gap the current render produced, so it should be unreachable; it exists so
+   a stale gap degrades to "nothing happened" instead of `addDays(undefined)`.
+3. **The early `next === undo` return** in `doSchedule` is new. Previously a
+   no-op schedule silently did nothing anyway (the `arriveDate && departDate`
+   guard); now it also suppresses the toast, which would otherwise lie.
+4. **Undo is a toast action, not a dialog.** The design puts it in the toast
+   (§7) and i4's notes already reserve the pattern for leaves. It re-uses
+   `persist()` so the rollback semantics are the file's existing ones.
+5. **No `sortOrder` write, and no new endpoint.** i3's widened
+   `PATCH /api/stops/:id` already accepts the two dates; nothing in
+   `packages/db` or `apps/web/src/app/api` was touched by this item.
+
+---
+
+## Flagged for the walk
+
+- **FLAG (carried from the vet, still live): the drop must land on the intended
+  gap.** `OpenSpan` is an HTML5 drop target positioned by `grid-column` inside
+  `OpenLane`. That the `drop` event fires on the gap element under the pointer —
+  not on a sibling span or the lane — is pointer behaviour static analysis
+  cannot prove. Now that the gap *decides the dates*, a mis-targeted drop is
+  visible (wrong dates) rather than silent. **Walk check:** drag Crater Lake
+  onto the Aug 10–11 span; the bar must land on Aug 10–11 and the toast must
+  read `Scheduled Crater Lake NP · Aug 10 – Aug 11`. Then drop on Aug 1 (a
+  single-column target — the hardest one to hit) and on the 12-day tail.
+- **Walk check: the Undo action.** Clicking Undo must return the card to the
+  "Not yet scheduled" rail and leave the gantt as it was.
+- **Walk check: the sheet's "Schedule" button is unchanged** — it must still
+  take the longest run (Aug 17–19 on the seed trip).
+
+---
+
+## Not done, deliberately
+
+- No i6 surface (reservations/ideas), no i1–i4 rework.
+- No drag-and-drop library, no drag context, no `OpenSpan`/`OpenLane` change in
+  `packages/ui` — the design's §7 note is explicit that the gap already reaches
+  the handler and only needs passing through.
+- No `sortOrder` PATCH (see §3 above).
+
+---
+
+## Checks run
+
+| check | command | result |
+|---|---|---|
+| TDD red first | `pnpm exec vitest run src/planner/planner.test.ts` (in `packages/core`, before implementing) | `Tests  9 failed | 33 passed (42)` |
+| TDD green | same command after implementing | `Test Files  1 passed (1)` · `Tests  42 passed (42)` |
+| full gate | `pnpm turbo run lint typecheck test` | `Tasks:    8 successful, 8 total` |
+| unit tests | (same run, `@rv-trip/core:test`) | `Test Files  18 passed (18)` · `Tests  283 passed (283)` |
+
+`pnpm install --prefer-offline` was run first — this worktree had no
+`node_modules` (`Done in 6.5s`).
+
+**SKIPPED (no env):** no browser/runtime check — the drop target, the toast and
+the Undo click are exactly the render-required surface the walk gate owns (the
+three walk checks above). No database was touched: this item adds no query,
+mutation, schema column or migration.
