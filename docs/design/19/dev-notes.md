@@ -262,3 +262,94 @@ both fixtures agree, which is the point.
 
 `pnpm turbo run lint typecheck test` → **7 successful, 7 total**; `170 passed (170)` (was 168; the
 two new guards). `pnpm install` was needed first — this worktree came without `node_modules`.
+
+## Fixup round — re-land on current `origin/main`
+
+Ship failed `[ci-red]`, not `[merge-conflict]`: `git merge --no-ff mc/dev/issue-19-v0` onto current
+`origin/main` (`7f51341`) applies **with zero conflicts** — no hunk in any file, `pnpm-lock.yaml`
+unchanged, `pnpm install --frozen-lockfile` clean, no Drizzle migration generated. The breakage is
+purely semantic drift: `main` grew a second consumer of the palette while #19 was being walked.
+
+### What moved underneath
+
+`2d6ecf7` — *"feat(31): native app v1 foundation"* (#39) — added **`packages/core/src/theme/tokens.ts`**,
+a hand-written mirror of the palette **as data**, for the Expo app (React Native cannot read CSS
+custom properties), plus **`tokens.test.ts`** which reads `entry.css` and asserts the mirror. Its
+resolver (`tokens.test.ts:16`) matched `--color-rv-<name>: <#hex>`.
+
+#19 makes both halves of that assumption false at once:
+
+- there is no longer **any** `--color-rv-*: #hex` literal in `entry.css` — `@theme inline`
+  (`entry.css:45-80`) maps every `--color-rv-*` to a raw `--rv-*` twin, so the regex finds nothing
+  and the test throws `--color-rv-navy not found in entry.css`;
+- the **`rv-ember-*` family no longer exists** — renamed to `rv-accent-*` and revalued to Sky.
+
+So `tokens.ts` was mirroring a palette that had been both renamed and revalued out from under it.
+This is the same break the dev round already fixed for `map-palette.test.ts:66-76`; #39 landed a
+second copy of the pattern after that fix was written.
+
+### How each piece was resolved
+
+Integration only — `main` moved, the feature had to follow. No token value, no `entry.css` /
+`globals.css` byte, and no web call site was touched (`git diff HEAD -- packages/ui/styles/entry.css`
+→ empty).
+
+1. **`packages/core/src/theme/tokens.test.ts:15-31`** — resolver re-pointed at the raw **dark** half,
+   mirroring the precedent the dev round set in `map-palette.test.ts`: slice `.dark { … }`
+   (`entry.css:130-166`) and match `--rv-<name>: <#hex>` inside it. Reading the `@theme inline` map
+   instead would compare each native literal against the string `var(--rv-…)`, which nothing can
+   equal. **Why the dark half:** night is the product default and the native app ships no theme
+   toggle, so it is the half the phone wears. Rationale written into the file's docblock so the next
+   reader does not "fix" it back to `:root`.
+
+2. **`packages/core/src/theme/tokens.ts:15-41`** — all 25 mirrored values revalued to the dark half's
+   Slate + Sky literals (`navy #0a1520 → #020617`, `green #7cd897 → #34d399`, `ink #eef5fa → #f1f5f9`,
+   …), and the four `ember*` keys renamed `accent*` (`ember → accent #38bdf8`, `emberBright →
+   accentBright #7dd3fc`, `emberDeep → accentDeep #0ea5e9`, `emberSoft → accentSoft #082f49`).
+   The key set is unchanged at 25 — #39's coverage level is preserved, not extended; the five tokens
+   `tokens.ts` never mirrored (`green-cta`, `green-on-dark`, `accent-ink`, `info-ink`, `travel-ink`)
+   are still unmirrored, which is a pre-existing gap for the native app's own issue, not this one.
+   `MIRROR` is typed `Record<keyof typeof RV, string>`, so the mirror stays exhaustive by construction.
+   Provenance docblock (`tokens.ts:4-16`) updated to name the `.dark` half as the source.
+
+3. **`apps/mobile` — mechanical `C.ember*` → `C.accent*`** (`C = RV`, `src/theme.ts:5`; the app holds
+   **zero** hex literals of its own, so `tokens.ts` is its only palette source): `app/index.tsx:12,64`,
+   `app/rig.tsx:44`, `app/trips/[id]/index.tsx:67`, `app/trips/[id]/stops/[stopId].tsx:80,150`,
+   `src/ui.tsx:54`. Forced by the rename — these would not compile otherwise.
+   `src/ui.tsx:80-101` also renames `Button`'s local variant `tone: "ember" | "ghost"` → `"accent" |
+   "ghost"` and its local `const ember` → `const accent`; the prop has **no call site anywhere**
+   (`grep -rn 'tone=' apps/mobile` → 0 hits), so this is contained to the one file and only avoids a
+   variant named after a retired family sitting next to `C.accent`.
+
+   Note `src/ui.tsx:54` (star fill) lands on `C.accent`, which is exactly where the web's Stars went
+   (`nightfall-tokens.test.ts` *"sweep 2: stars are the accent, not Eat's amber"*) — the rename agrees
+   with the walked design by construction.
+
+### Deliberately NOT done (would be feature judgment, not integration)
+
+- **Mobile's `Button` keeps the mechanical pair** `bg C.accent #38bdf8` + `ink C.navy #020617`, not
+  the web's dark-half CTA pair (`accent-deep` + `accent-ink`). Contrast is high either way and
+  choosing between them is a design call on a surface no gate in this issue reviewed. Flagged, not guessed.
+- **The open design decisions from the vet/qa rounds are untouched** — the light-half CTA's 4.10:1
+  (`accent-deep` + `accent-ink`) and light-half `ink-subtle`'s 2.56:1 still stand exactly as the walk
+  left them. Both are design-inherited from the signed §1 table; re-landing on `main` is not the
+  place to resolve them. The native mirror wears the **dark** half, where both pairs already clear
+  (accent CTA 7.28:1, `ink-subtle` 3.07:1), so this fixup neither improves nor worsens them.
+
+### Gate — fixup round
+
+Ran in this worktree after `pnpm install --frozen-lockfile` (it arrived without `node_modules`):
+
+- `pnpm install --frozen-lockfile` → `Done in 7s` — lockfile up to date, resolution skipped; no
+  re-resolve was needed, so `pnpm-lock.yaml` is untouched.
+- `pnpm turbo run lint typecheck test` → **8 successful, 8 total**; `@rv-trip/core:test` →
+  `Test Files 14 passed (14)` / `Tests 201 passed (201)` (was `1 failed | 200 passed`).
+  `@rv-trip/mobile:typecheck` is in that set and passes — it is what covers the `C.ember` rename.
+- Mutation-proved the re-pointed guard is not vacuous, in **both** directions:
+  `accent: "#38bdf8" → "#38bdf9"` in `tokens.ts` reds it
+  (`expected { accent: '#38bdf9' } to deeply equal { accent: '#38bdf8' }`), and
+  `--rv-ink-subtle: #64748b → #64748c` in `entry.css`'s dark half reds it
+  (`expected { inkSubtle: '#64748b' } to deeply equal { inkSubtle: '#64748c' }`). Both mutations
+  reverted; `git diff HEAD -- packages/ui/styles/entry.css` → empty, and the suite is green again.
+
+The walk list is unchanged — this round touched no rendered web surface.

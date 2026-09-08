@@ -41,7 +41,7 @@ export default function RigScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      <Kicker color={C.ember}>Routing input</Kicker>
+      <Kicker color={C.accent}>Routing input</Kicker>
       <Text style={styles.h1}>{rig.name}</Text>
       <Text style={{ color: C.inkMuted, fontSize: 14, lineHeight: 20 }}>
         Every drive on every trip is routed under these numbers — low bridges, weight limits and
