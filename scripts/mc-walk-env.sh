@@ -147,14 +147,28 @@ down)
     esac done
   [ -n "$slug" ] || die "down: --slug is required"
   json="$WALK_DIR/$slug.json"
-  if [ -f "$WALK_DIR/$slug-web.pid" ]; then
-    pid="$(cat "$WALK_DIR/$slug-web.pid")"
+  # REGISTRY FIRST, sweep second: the registry entry is the operator-facing contract (the
+  # glass renders it), so it must not survive a sweep that dies. It did — every down.log in
+  # this dir was zero bytes and every entry survived teardown, because the sweep below
+  # killed its own shell before reaching these lines.
+  port="$(python3 -c "import json;print(json.load(open('$json')).get('web_port',''))" 2>/dev/null || true)"
+  pid=""
+  if [ -f "$WALK_DIR/$slug-web.pid" ]; then pid="$(cat "$WALK_DIR/$slug-web.pid")"; fi
+  rm -f "$WALK_DIR/$slug-web.pid" "$json"
+  # `kill -0` LIVENESS GUARD before any signal: a recorded pid outlives its process, and on
+  # macOS `pkill -P <stale-pid>` is a MASSACRE — pgrep -P against a dead ppid empirically
+  # matched ~827 processes (zombies + real pids), so the old sweep TERMed unrelated
+  # processes (it killed another issue's live walk server, and always killed this script's
+  # own shell — the zero-byte logs). Never signal from a stale pid; sweep by PORT instead,
+  # which names exactly the processes serving this walk and nothing else.
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null && echo "  killed pid $pid" || true
-    # next dev spawns children; sweep the process group best-effort.
-    pkill -P "$pid" 2>/dev/null || true
-    rm -f "$WALK_DIR/$slug-web.pid"
   fi
-  rm -f "$json"
+  if [ -n "$port" ]; then
+    for p in $(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null); do
+      kill "$p" 2>/dev/null && echo "  killed port-holder pid $p" || true
+    done
+  fi
   echo "walk down: $slug (registry entry removed; worktree kept for the ship)"
   ;;
 
