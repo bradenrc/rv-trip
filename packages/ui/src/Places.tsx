@@ -116,26 +116,33 @@ export function SegmentedControl<T extends string>({
   value,
   options,
   onChange,
+  mono = false,
 }: {
   value: T;
   options: SegmentOption<T>[];
   onChange: (v: T) => void;
+  /** The compact mono variant: mono type one step down, tighter padding, and
+   * the active icon takes the button's own ink instead of green. For a pill
+   * that sits *over* a surface rather than in a control row — the map's style
+   * switch. Type only; the labels are content and stay as written. */
+  mono?: boolean;
 }) {
   return (
     <div className="inline-flex gap-0.5 rounded-rv-pill border border-rv-border bg-rv-surface-alt p-[3px]">
       {options.map((o) => {
         const on = o.value === value;
+        const activeIcon = mono ? "text-rv-ink" : "text-rv-green";
         return (
           <button
             key={o.value}
             type="button"
             onClick={() => onChange(o.value)}
             aria-pressed={on}
-            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border-none px-3.5 py-1.5 text-[13px] font-bold ${
-              on ? "bg-rv-surface text-rv-ink shadow-rv-sm" : "bg-transparent text-rv-ink-faded"
-            }`}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border-none font-bold ${
+              mono ? "px-2.5 py-[5px] font-mono text-[11px]" : "px-3.5 py-1.5 text-[13px]"
+            } ${on ? "bg-rv-surface text-rv-ink shadow-rv-sm" : "bg-transparent text-rv-ink-faded"}`}
           >
-            <o.Icon className={`size-3.5 ${on ? "text-rv-green" : "text-rv-ink-subtle"}`} />
+            <o.Icon className={`size-3.5 ${on ? activeIcon : "text-rv-ink-subtle"}`} />
             {o.label}
             {o.count != null && <span className="font-mono text-[11px] opacity-70">{o.count}</span>}
           </button>

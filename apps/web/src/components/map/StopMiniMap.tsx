@@ -57,6 +57,9 @@ export function StopMiniMap({
       selectedId={stop.id}
       height={STOP_MINI_MAP_HEIGHT}
       unmappedCount={pins.length === 0 ? 1 : 0}
+      // Follows the style preference, offers no control: 150px is not a canvas
+      // anyone works in, and it inherits the mode through MapMount for free.
+      showStyleControl={false}
     />
   );
 }
