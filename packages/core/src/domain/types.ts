@@ -210,6 +210,65 @@ export const stopPatchInput = stop
 export type StopPatchInput = z.infer<typeof stopPatchInput>;
 
 /**
+ * The reservation + idea WRITE contract — the two LEAVES of the tree, derived
+ * from the grammar for the same reason the trip/leg/stop ones are.
+ *
+ * Both creates carry the whole editable row rather than the handful of fields
+ * the add form fills in, because a create is also how an UNDONE DELETE puts a
+ * row back: the DELETE has already committed by the time the toast is gone, so
+ * "Undo" re-POSTs the row it was holding rather than resurrecting the id. A
+ * body that could not carry `rating`/`notes` would silently drop them.
+ *
+ * `id`, `stopId` (path/body-supplied) and `ideaId` (only `promote` sets it) are
+ * never client-editable, and `sortOrder` is the server's to append.
+ */
+
+/** `POST /api/reservations` — the stop sheet's reservation form, and the undo. */
+export const reservationCreateInput = reservation
+  .pick({
+    type: true,
+    name: true,
+    checkIn: true,
+    checkOut: true,
+    confirmationNumber: true,
+    cost: true,
+    notes: true,
+  })
+  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+export type ReservationCreateInput = z.infer<typeof reservationCreateInput>;
+
+/** `PATCH /api/reservations/:id` — every editable field, all optional, because
+ * the form sends only what it changed (and the card's stars/note send one). */
+export const reservationPatchInput = reservation
+  .pick({
+    type: true,
+    name: true,
+    checkIn: true,
+    checkOut: true,
+    confirmationNumber: true,
+    cost: true,
+    rating: true,
+    notes: true,
+  })
+  .partial();
+export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
+
+/** `POST /api/ideas` — the stop sheet's "Add idea", and the undo. */
+export const ideaCreateInput = idea
+  .pick({ title: true, status: true, place: true, notes: true })
+  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
+
+/**
+ * `POST /api/ideas/:id/promote` — the type the promoted reservation lands as.
+ *
+ * Optional, defaulting to the `"activity"` the mutation used to hardcode, so a
+ * caller that posts no body at all (as the shipped client did) is unaffected.
+ */
+export const ideaPromoteInput = z.object({ type: reservationType.default("activity") });
+export type IdeaPromoteInput = z.infer<typeof ideaPromoteInput>;
+
+/**
  * The Places library: an account-scoped, cross-trip collection of spots.
  * ONE record with ONE status field — a place graduates want -> been after a
  * visit rather than being re-entered into a second collection.

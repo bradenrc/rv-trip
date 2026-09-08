@@ -1,5 +1,15 @@
 import { deriveDays, type DayKind } from "../domain/derive-days";
-import { isScheduled, type Trip, type Leg, type Stop, type Reservation, type Idea, type IsoDate, type ReservationType } from "../domain/types";
+import {
+  isScheduled,
+  type Trip,
+  type Leg,
+  type Stop,
+  type Reservation,
+  type ReservationPatchInput,
+  type Idea,
+  type IsoDate,
+  type ReservationType,
+} from "../domain/types";
 import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "../domain/route-order";
 import { NO_RIG_HASH } from "../domain/rig";
 import { estimateRoute, type RouteResult, type RouteNotice } from "../providers/index";
@@ -445,29 +455,40 @@ export function setReservationNote(trip: Trip, stopId: string, resId: string, no
     reservations: s.reservations.map((r) => (r.id === resId ? { ...r, notes } : r)),
   }));
 }
-export function addReservation(
+/**
+ * Splice the reservation `POST /api/reservations` just created onto the stop.
+ *
+ * A create is the one write with nothing to be optimistic about — only the
+ * server can mint the id — so this takes the row the 201 handed back rather
+ * than inventing one. It is also what an UNDONE delete calls: the row comes
+ * back with a new id, which is why the toast re-POSTs instead of resurrecting.
+ */
+export function appendReservation(trip: Trip, stopId: string, r: Reservation): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, reservations: [...s.reservations, r] }));
+}
+
+/** The leaf delete: optimistic, and reversed by re-appending the 201's row. */
+export function removeReservation(trip: Trip, stopId: string, resId: string): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    reservations: s.reservations.filter((r) => r.id !== resId),
+  }));
+}
+
+/**
+ * The edit form's Save, applied optimistically. It takes the SAME patch the
+ * PATCH body carries, so a key the form left out is a field left alone here
+ * too — the screen and the row can't disagree about what was sent.
+ */
+export function setReservationFields(
   trip: Trip,
   stopId: string,
-  input: { type: ReservationType; name: string; cost: number | null; checkIn: IsoDate | null },
+  resId: string,
+  patch: ReservationPatchInput,
 ): Trip {
   return updateStop(trip, stopId, (s) => ({
     ...s,
-    reservations: [
-      ...s.reservations,
-      {
-        id: crypto.randomUUID(),
-        stopId,
-        ideaId: null,
-        type: input.type,
-        name: input.name,
-        checkIn: input.checkIn,
-        checkOut: null,
-        confirmationNumber: null,
-        cost: input.cost,
-        rating: null,
-        notes: null,
-      },
-    ],
+    reservations: s.reservations.map((r) => (r.id === resId ? { ...r, ...patch } : r)),
   }));
 }
 export function cycleIdeaStatus(trip: Trip, stopId: string, ideaId: string): Trip {
@@ -495,31 +516,38 @@ export function setIdeaNote(trip: Trip, stopId: string, ideaId: string, notes: s
     ideas: s.ideas.map((it) => (it.id === ideaId ? { ...it, notes } : it)),
   }));
 }
-export function promoteIdea(trip: Trip, stopId: string, ideaId: string): Trip {
-  return updateStop(trip, stopId, (s) => {
-    const idea = s.ideas.find((it) => it.id === ideaId);
-    if (!idea) return s;
-    return {
-      ...s,
-      ideas: s.ideas.filter((it) => it.id !== ideaId),
-      reservations: [
-        ...s.reservations,
-        {
-          id: crypto.randomUUID(),
-          stopId,
-          ideaId: null,
-          type: "activity",
-          name: idea.title,
-          checkIn: null,
-          checkOut: null,
-          confirmationNumber: null,
-          cost: null,
-          rating: null,
-          notes: "Promoted from idea",
-        },
-      ],
-    };
-  });
+/** Splice the idea `POST /api/ideas` just created onto the stop. */
+export function appendIdea(trip: Trip, stopId: string, i: Idea): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, ideas: [...s.ideas, i] }));
+}
+
+/** The other leaf delete — same shape, same undo. */
+export function removeIdea(trip: Trip, stopId: string, ideaId: string): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    ideas: s.ideas.filter((it) => it.id !== ideaId),
+  }));
+}
+
+/**
+ * "Book" — the idea leaves and the reservation the server minted takes its
+ * place, in one tree update so the sheet never renders both.
+ *
+ * The reservation is the row the 201 handed back, TYPE INCLUDED: the type is
+ * the one you picked on the way in, not a client guess. (This used to build
+ * the row locally and hardcode "activity".)
+ */
+export function applyPromotion(
+  trip: Trip,
+  stopId: string,
+  ideaId: string,
+  r: Reservation,
+): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    ideas: s.ideas.filter((it) => it.id !== ideaId),
+    reservations: [...s.reservations, r],
+  }));
 }
 
 /** The longest open run in the trip window, as `[startIndex, length]`. */

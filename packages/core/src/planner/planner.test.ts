@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Leg, Trip, Stop } from "../domain/types";
+import type { Idea, Leg, Reservation, Trip, Stop } from "../domain/types";
 import { orderedLegStops, routeCacheKey } from "../domain/route-order";
 import type { RouteResult } from "../providers/index";
 import {
@@ -22,6 +22,12 @@ import {
   renameLeg,
   renameStop,
   setStopDates,
+  appendReservation,
+  removeReservation,
+  setReservationFields,
+  appendIdea,
+  removeIdea,
+  applyPromotion,
   dateRange,
   fullRange,
   addDays,
@@ -587,6 +593,120 @@ describe("leg and stop structure mutations", () => {
     moveLeg(t, "A", 1);
     moveStopToLeg(t, "S1", "B");
     setStopDates(t, "S1", null, null);
+    expect(JSON.stringify(t)).toBe(before);
+  });
+});
+
+/**
+ * The two LEAVES. A reservation and an idea are the only rows the sheet
+ * creates, deletes and puts BACK — so the tree helpers under those gestures are
+ * pinned here, including the one an "Undo" runs.
+ */
+describe("reservation and idea tree mutations", () => {
+  function res(over: Partial<Reservation> = {}): Reservation {
+    return {
+      id: "r1",
+      stopId: "S1",
+      ideaId: null,
+      type: "dining",
+      name: "Rogue Ales brewery lunch",
+      checkIn: null,
+      checkOut: null,
+      confirmationNumber: null,
+      cost: 64,
+      rating: null,
+      notes: null,
+      ...over,
+    };
+  }
+  function ideaRow(over: Partial<Idea> = {}): Idea {
+    return {
+      id: "i1",
+      stopId: "S1",
+      title: "Rogue Ales brewery lunch",
+      status: "planned",
+      place: null,
+      rating: null,
+      notes: null,
+      sortOrder: 0,
+      ...over,
+    };
+  }
+  /** A trip with one stop carrying one reservation and one idea. */
+  function leafTrip(): Trip {
+    const base = fixture();
+    return {
+      ...base,
+      legs: base.legs.map((l) =>
+        l.id === "A"
+          ? {
+              ...l,
+              stops: l.stops.map((s) =>
+                s.id === "S1" ? { ...s, reservations: [res()], ideas: [ideaRow()] } : s,
+              ),
+            }
+          : l,
+      ),
+    };
+  }
+
+  it("appendReservation splices the row the 201 handed back", () => {
+    const next = appendReservation(leafTrip(), "S1", res({ id: "r2", name: "Fort Stevens" }));
+    expect(next.legs[0]!.stops[0]!.reservations.map((r) => r.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("removeReservation drops it — and appendReservation puts it back (the Undo)", () => {
+    const t = leafTrip();
+    const gone = removeReservation(t, "S1", "r1");
+    expect(gone.legs[0]!.stops[0]!.reservations).toEqual([]);
+    // Undo re-POSTs the row, so it comes back with a NEW id and the same fields.
+    const back = appendReservation(gone, "S1", res({ id: "r9" }));
+    expect(back.legs[0]!.stops[0]!.reservations[0]).toMatchObject({
+      id: "r9",
+      name: "Rogue Ales brewery lunch",
+      cost: 64,
+    });
+  });
+
+  it("setReservationFields applies only the keys the patch carries", () => {
+    const next = setReservationFields(leafTrip(), "S1", "r1", {
+      name: "Rogue Ales lunch",
+      cost: null,
+    });
+    const r = next.legs[0]!.stops[0]!.reservations[0]!;
+    expect(r.name).toBe("Rogue Ales lunch");
+    expect(r.cost).toBeNull();
+    // untouched keys survive
+    expect(r.type).toBe("dining");
+  });
+
+  it("appendIdea and removeIdea are the idea's create and delete", () => {
+    const added = appendIdea(leafTrip(), "S1", ideaRow({ id: "i2", title: "Cape Perpetua" }));
+    expect(added.legs[0]!.stops[0]!.ideas.map((i) => i.id)).toEqual(["i1", "i2"]);
+    expect(removeIdea(added, "S1", "i1").legs[0]!.stops[0]!.ideas.map((i) => i.id)).toEqual(["i2"]);
+  });
+
+  it("applyPromotion swaps the idea for the reservation the server minted", () => {
+    // The chosen type is the SERVER's answer, not a client guess — this used to
+    // hardcode "activity".
+    const next = applyPromotion(leafTrip(), "S1", "i1", res({ id: "r5", type: "dining" }));
+    const s = next.legs[0]!.stops[0]!;
+    expect(s.ideas).toEqual([]);
+    expect(s.reservations.map((r) => [r.id, r.type])).toEqual([
+      ["r1", "dining"],
+      ["r5", "dining"],
+    ]);
+  });
+
+  it("none of them mutates its input", () => {
+    const t = leafTrip();
+    const before = JSON.stringify(t);
+    appendReservation(t, "S1", res({ id: "r2" }));
+    removeReservation(t, "S1", "r1");
+    setReservationFields(t, "S1", "r1", { name: "x" });
+    appendIdea(t, "S1", ideaRow({ id: "i2" }));
+    removeIdea(t, "S1", "i1");
+    applyPromotion(t, "S1", "i1", res({ id: "r5" }));
     expect(JSON.stringify(t)).toBe(before);
   });
 });

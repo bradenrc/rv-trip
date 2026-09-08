@@ -273,7 +273,9 @@ interface MapReservationRow {
   notes: string | null;
 }
 
-function mapReservation(r: MapReservationRow): Reservation {
+/** Exported so a create/promote can hand its INSERT ... returning row back in
+ * the core shape — the same seam the read path maps through. */
+export function mapReservation(r: MapReservationRow): Reservation {
   return {
     id: r.id,
     stopId: r.stopId,
@@ -303,7 +305,9 @@ interface MapIdeaRow {
   sortOrder: number;
 }
 
-function mapIdea(i: MapIdeaRow): Idea {
+/** Exported for the same reason `mapReservation` is: `createIdea` returns the
+ * row it just inserted, and the client splices exactly that shape. */
+export function mapIdea(i: MapIdeaRow): Idea {
   return {
     id: i.id,
     stopId: i.stopId,

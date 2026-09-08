@@ -5,7 +5,9 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type {
   CascadeCounts,
+  Idea,
   Reservation,
+  ReservationDraft,
   ReservationType,
   Stop,
   StopDatesDraft,
@@ -14,12 +16,20 @@ import type {
   TripSettingsDraft,
 } from "@rv-trip/core";
 import {
+  BLANK_RESERVATION_DRAFT,
+  UNDO_WINDOW_MS,
   cascadeLossSentence,
+  ideaDraftInput,
+  ideaRestoreInput,
   isScheduled,
   legCascadeCounts,
   nextLegTitle,
   orderedPairs,
   orphanedStopsMessage,
+  reservationDraft,
+  reservationDraftInput,
+  reservationDraftPatch,
+  reservationRestoreInput,
   routeCacheKey,
   stopCascadeCounts,
   stopDatesDraft,
@@ -47,13 +57,18 @@ import {
 } from "lucide-react";
 import {
   allStops,
+  appendIdea,
   appendLeg,
+  appendReservation,
   appendStop,
+  applyPromotion,
   canMoveLeg,
   legOrder,
   moveLeg,
   moveStopToLeg,
+  removeIdea,
   removeLeg,
+  removeReservation,
   removeStop,
   renameLeg,
   renameStop,
@@ -62,11 +77,11 @@ import {
   routeModel,
   routeSummary,
   stopMap,
-  updateStop,
   setStopRating,
   setStopNote,
   setReservationRating,
   setReservationNote,
+  setReservationFields,
   cycleIdeaStatus,
   setIdeaRating,
   setIdeaNote,
@@ -116,29 +131,14 @@ import { StopDetailSheet } from "./StopDetailSheet";
  */
 const NEW_STOP_NAME = "New stop";
 
-export interface AddForm {
-  type: ReservationType;
-  name: string;
-  dates: string;
-  cost: string;
-}
-
-/** Map a DB reservation row (cost-as-string, nullable cols) to the core shape. */
-function mapRes(row: Record<string, unknown>): Reservation {
-  return {
-    id: row.id as string,
-    stopId: row.stopId as string,
-    ideaId: (row.ideaId as string | null) ?? null,
-    type: row.type as ReservationType,
-    name: row.name as string,
-    checkIn: (row.checkIn as string | null) ?? null,
-    checkOut: (row.checkOut as string | null) ?? null,
-    confirmationNumber: (row.confirmationNumber as string | null) ?? null,
-    cost: row.cost == null ? null : Number(row.cost),
-    rating: (row.rating as number | null) ?? null,
-    notes: (row.notes as string | null) ?? null,
-  };
-}
+/**
+ * The reservation form's state, and the shape the two write helpers in
+ * `@rv-trip/core` speak. It used to be a local `AddForm` with a `dates` string
+ * that was collected and never sent; it is now the draft the core schema is
+ * derived from, so every field on a `reservation` is here and every one of them
+ * reaches the API.
+ */
+type AddForm = ReservationDraft;
 
 export function TripPlanner({
   trip: initialTrip,
@@ -159,19 +159,22 @@ export function TripPlanner({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
+  /** The reservation form: `"new"` is the add form, an id is that row's full
+   * edit, `null` is closed. One form, two jobs. */
+  const [formTarget, setFormTarget] = useState<string | "new" | null>(null);
   /** The leg or stop whose inline rename is open — set by the row menu's
    * "Rename" and by a create, so a new row lands ready to be named. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [datesStopId, setDatesStopId] = useState<string | null>(null);
   const [deleteLegId, setDeleteLegId] = useState<string | null>(null);
   const [deleteStopId, setDeleteStopId] = useState<string | null>(null);
-  const [form, setForm] = useState<AddForm>({
-    type: "campground",
-    name: "",
-    dates: "",
-    cost: "",
-  });
+  const [form, setForm] = useState<AddForm>(BLANK_RESERVATION_DRAFT);
+  const [ideaAddOpen, setIdeaAddOpen] = useState(false);
+  const [ideaDraft, setIdeaDraft] = useState("");
+  /** The idea whose "Book as" picker is open, and the type it is set to. The
+   * default is the `"activity"` the server used to hardcode. */
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [promoteType, setPromoteType] = useState<ReservationType>("activity");
   const [ideaNoteOpen, setIdeaNoteOpen] = useState<Set<string>>(new Set());
   const [routeDrag, setRouteDrag] = useState<{
     legId: string;
@@ -239,13 +242,21 @@ export function TripPlanner({
   const deleteStop = deleteStopId ? (byId.get(deleteStopId) ?? null) : null;
   const datesStop = datesStopId ? (byId.get(datesStopId) ?? null) : null;
 
+  /** Every leaf surface is per-stop, so opening or closing the sheet closes all
+   * of them — a form left open over another stop would write to the wrong row. */
+  const resetLeafForms = () => {
+    setFormTarget(null);
+    setIdeaAddOpen(false);
+    setIdeaDraft("");
+    setPromotingId(null);
+  };
   const openStop = (id: string) => {
     setSelectedId(id);
-    setAddOpen(false);
+    resetLeafForms();
   };
   const closeStop = () => {
     setSelectedId(null);
-    setAddOpen(false);
+    resetLeafForms();
   };
   const toggleIdeaNote = (ideaId: string) =>
     setIdeaNoteOpen((prev) => {
@@ -499,41 +510,141 @@ export function TripPlanner({
     }
   };
 
-  const submitAdd = async () => {
-    if (!form.name.trim() || !selectedId) return;
+  // ── the two leaves: reservations and ideas ───────────────────────────────
+  //
+  // Neither cascades, so neither gets a confirm dialog. A delete happens
+  // immediately, optimistically, and the toast is where it becomes reversible
+  // for six seconds — Undo re-POSTs the row, because the DELETE has already
+  // committed by the time the toast is gone and the id is not coming back.
+
+  const openAddReservation = () => {
+    setForm(BLANK_RESERVATION_DRAFT);
+    setFormTarget("new");
+  };
+
+  /** The full edit: the same form, seeded from the row it is editing. */
+  const openEditReservation = (resId: string) => {
+    const r = selectedStop?.reservations.find((x) => x.id === resId);
+    if (!r) return;
+    setForm(reservationDraft(r));
+    setFormTarget(resId);
+  };
+
+  const submitReservationForm = async () => {
+    if (!selectedId || !formTarget) return;
+    if (formTarget === "new") {
+      const body = reservationDraftInput(selectedId, form);
+      if (!body) return;
+      const stopId = selectedId;
+      try {
+        // A create is the one write with nothing to be optimistic about: only
+        // the server can mint the id, so it awaits the 201 and splices the row.
+        const row = await tripApi.createReservation(body);
+        setTrip((t) => appendReservation(t, stopId, row));
+        setForm(BLANK_RESERVATION_DRAFT);
+        setFormTarget(null);
+      } catch {
+        toast.error("Couldn't save that reservation.");
+      }
+      return;
+    }
+    const r = selectedStop?.reservations.find((x) => x.id === formTarget);
+    if (!r) return;
+    const patch = reservationDraftPatch(r, form);
+    if (patch === null) return;
+    setFormTarget(null);
+    if (Object.keys(patch).length === 0) return;
+    const undo = trip;
+    setTrip(setReservationFields(trip, r.stopId, r.id, patch));
+    persist(
+      tripApi.updateReservation(r.id, patch),
+      undo,
+      `Couldn't save ${r.name} — your changes are back as they were.`,
+    );
+  };
+
+  const doDeleteReservation = (resId: string) => {
+    const r = selectedStop?.reservations.find((x) => x.id === resId);
+    if (!r) return;
+    if (formTarget === resId) setFormTarget(null);
+    const undo = trip;
+    const next = removeReservation(trip, r.stopId, resId);
+    setTrip(next);
+    persist(
+      tripApi.deleteReservation(resId),
+      undo,
+      `Couldn't delete ${r.name} — the reservation is back.`,
+    );
+    toast.success(`Deleted ${r.name}`, {
+      duration: UNDO_WINDOW_MS,
+      action: {
+        label: "Undo",
+        onClick: () => void restoreReservation(r),
+      },
+    });
+  };
+
+  /** Undo. The row comes back with a NEW id — same fields, rating and note. */
+  const restoreReservation = async (r: Reservation) => {
     try {
-      const row = await tripApi.createReservation({
-        stopId: selectedId,
-        type: form.type,
-        name: form.name.trim(),
-        cost: form.cost ? Number(form.cost) : null,
-        checkIn: null,
-      });
-      setTrip((t) =>
-        updateStop(t, selectedId, (s) => ({
-          ...s,
-          reservations: [...s.reservations, mapRes(row)],
-        })),
-      );
-      setForm({ type: "campground", name: "", dates: "", cost: "" });
-      setAddOpen(false);
+      const row = await tripApi.createReservation(reservationRestoreInput(r));
+      setTrip((t) => appendReservation(t, r.stopId, row));
     } catch {
-      toast.error("Couldn't save that reservation.");
+      toast.error(`Couldn't put ${r.name} back.`);
     }
   };
 
-  const doPromote = async (ideaId: string) => {
-    if (!selectedStop) return;
-    const stopId = selectedStop.id;
+  const submitIdea = async () => {
+    if (!selectedId) return;
+    const body = ideaDraftInput(selectedId, ideaDraft);
+    if (!body) return;
+    const stopId = selectedId;
     try {
-      const row = await tripApi.promoteIdea(ideaId);
-      setTrip((t) =>
-        updateStop(t, stopId, (s) => ({
-          ...s,
-          ideas: s.ideas.filter((i) => i.id !== ideaId),
-          reservations: [...s.reservations, mapRes(row)],
-        })),
-      );
+      const created = await tripApi.createIdea(body);
+      setTrip((t) => appendIdea(t, stopId, created));
+      setIdeaDraft("");
+      setIdeaAddOpen(false);
+    } catch {
+      toast.error("Couldn't save that idea.");
+    }
+  };
+
+  const doDeleteIdea = (ideaId: string) => {
+    const it = selectedStop?.ideas.find((x) => x.id === ideaId);
+    if (!it) return;
+    if (promotingId === ideaId) setPromotingId(null);
+    const undo = trip;
+    setTrip(removeIdea(trip, it.stopId, ideaId));
+    persist(tripApi.deleteIdea(ideaId), undo, `Couldn't delete ${it.title} — the idea is back.`);
+    toast.success(`Deleted ${it.title}`, {
+      duration: UNDO_WINDOW_MS,
+      action: { label: "Undo", onClick: () => void restoreIdea(it) },
+    });
+  };
+
+  /** Undo — with its status and note, so a "planned" idea does not come back
+   * as a fresh maybe. */
+  const restoreIdea = async (it: Idea) => {
+    try {
+      const created = await tripApi.createIdea(ideaRestoreInput(it));
+      setTrip((t) => appendIdea(t, it.stopId, created));
+    } catch {
+      toast.error(`Couldn't put ${it.title} back.`);
+    }
+  };
+
+  /**
+   * "Book" — the idea becomes a reservation OF THE TYPE YOU PICKED. The server
+   * used to hardcode "activity", so a promoted lunch arrived as a blue "Do".
+   */
+  const confirmPromote = async () => {
+    const ideaId = promotingId;
+    if (!ideaId || !selectedStop) return;
+    const stopId = selectedStop.id;
+    setPromotingId(null);
+    try {
+      const row = await tripApi.promoteIdea(ideaId, promoteType);
+      setTrip((t) => applyPromotion(t, stopId, ideaId, row));
     } catch {
       toast.error("Couldn't book that idea.");
     }
@@ -704,8 +815,31 @@ export function TripPlanner({
           legName={selectedLegName}
           stopOrdinal={scheduledOrdinal.get(selectedStop.id) ?? null}
           costs={costTracking}
-          addOpen={addOpen}
-          form={form}
+          leaves={{
+            formTarget,
+            form,
+            onOpenAdd: openAddReservation,
+            onOpenEdit: openEditReservation,
+            onFormChange: (patch) => setForm((f) => ({ ...f, ...patch })),
+            onFormCancel: () => setFormTarget(null),
+            onFormSubmit: () => void submitReservationForm(),
+            onDeleteReservation: doDeleteReservation,
+            ideaAddOpen,
+            ideaDraft,
+            onToggleIdeaAdd: () => setIdeaAddOpen((v) => !v),
+            onIdeaDraftChange: setIdeaDraft,
+            onSubmitIdea: () => void submitIdea(),
+            onDeleteIdea: doDeleteIdea,
+            promotingId,
+            promoteType,
+            onStartPromote: (ideaId) => {
+              setPromoteType("activity");
+              setPromotingId(ideaId);
+            },
+            onPromoteTypeChange: setPromoteType,
+            onCancelPromote: () => setPromotingId(null),
+            onConfirmPromote: () => void confirmPromote(),
+          }}
           ideaNoteOpen={ideaNoteOpen}
           onClose={closeStop}
           onSchedule={() => doSchedule(selectedStop.id)}
@@ -734,9 +868,6 @@ export function TripPlanner({
               "Couldn't save that note — the old note is back.",
             )
           }
-          onToggleAdd={() => setAddOpen((v) => !v)}
-          onFormChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
-          onSubmitAdd={submitAdd}
           onResRating={(resId, n) => {
             const undo = trip;
             const next = setReservationRating(trip, selectedStop.id, resId, n);
@@ -803,7 +934,6 @@ export function TripPlanner({
             );
           }}
           onIdeaToggleNote={toggleIdeaNote}
-          onPromote={doPromote}
         />
       )}
 

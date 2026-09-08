@@ -1,11 +1,15 @@
 import type {
-  ReservationType,
+  Idea,
+  IdeaCreateInput,
   IdeaStatus,
-  IsoDate,
   LatLng,
   Leg,
   LegCreateInput,
   LegPatchInput,
+  Reservation,
+  ReservationCreateInput,
+  ReservationPatchInput,
+  ReservationType,
   RigProfileInput,
   Stop,
   StopCreateInput,
@@ -73,23 +77,38 @@ export const tripApi = {
   /** Reservations and ideas cascade with it. */
   deleteStop: (id: string) => req(`/api/stops/${id}`, "DELETE"),
 
-  createReservation: (input: {
-    stopId: string;
-    type: ReservationType;
-    name: string;
-    cost: number | null;
-    checkIn: IsoDate | null;
-  }) => req(`/api/reservations`, "POST", input),
+  /**
+   * "Add reservation" — and what an undone delete re-POSTs, which is why the
+   * body is the whole row. 201 carries the created reservation, because only
+   * the server can mint the id.
+   */
+  createReservation: (input: ReservationCreateInput): Promise<Reservation> =>
+    req(`/api/reservations`, "POST", input) as Promise<Reservation>,
 
-  updateReservation: (id: string, patch: { rating?: number | null; notes?: string | null }) =>
+  /** The widened reservation write: the full field set, all optional — the edit
+   * form sends what changed, the card's stars and note send one. */
+  updateReservation: (id: string, patch: ReservationPatchInput) =>
     req(`/api/reservations/${id}`, "PATCH", patch),
+
+  /** A leaf: no confirm dialog, an undo toast instead. */
+  deleteReservation: (id: string) => req(`/api/reservations/${id}`, "DELETE"),
+
+  /** "Add idea". 201 carries the created idea, for the same reason. */
+  createIdea: (input: IdeaCreateInput): Promise<Idea> =>
+    req(`/api/ideas`, "POST", input) as Promise<Idea>,
 
   updateIdea: (
     id: string,
     patch: { status?: IdeaStatus; rating?: number | null; notes?: string | null },
   ) => req(`/api/ideas/${id}`, "PATCH", patch),
 
-  promoteIdea: (id: string) => req(`/api/ideas/${id}/promote`, "POST"),
+  /** The other leaf. */
+  deleteIdea: (id: string) => req(`/api/ideas/${id}`, "DELETE"),
+
+  /** "Book" — the idea becomes a reservation of the type you picked, instead of
+   * the "activity" the server used to hardcode. */
+  promoteIdea: (id: string, type: ReservationType): Promise<Reservation> =>
+    req(`/api/ideas/${id}/promote`, "POST", { type }) as Promise<Reservation>,
 
   reorderLeg: (legId: string, order: string[]) =>
     req(`/api/legs/${legId}/reorder`, "POST", { order }),

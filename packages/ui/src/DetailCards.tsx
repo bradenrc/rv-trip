@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Map as MapIcon, CornerRightUp, SquarePen } from "lucide-react";
 import type { Reservation, Idea } from "@rv-trip/core";
 import { categoryMeta } from "./category";
@@ -20,10 +21,15 @@ export function MapPlaceholder({ label }: { label: string }) {
  * A reservation in the stop-detail sheet: category tile, name, cost, a mono meta
  * line (category · type · dates · #conf), an editable rating, and an
  * always-available note.
+ *
+ * `actions` is a composition slot at the end of the meta line — the row menu
+ * (Edit… / Delete) the app hangs there. The DS stays display-only: it renders
+ * whatever it is handed and knows nothing about the verbs.
  */
 export function ReservationCard({
   reservation,
   dates,
+  actions,
   onRating,
   onNote,
   onCommitNote,
@@ -31,6 +37,8 @@ export function ReservationCard({
   reservation: Reservation;
   /** preformatted date range (e.g. "Aug 2–5") */
   dates: string | null;
+  /** optional row-menu slot, pinned to the end of the meta line */
+  actions?: ReactNode;
   onRating: (n: number) => void;
   onNote: (v: string) => void;
   onCommitNote: () => void;
@@ -68,6 +76,7 @@ export function ReservationCard({
           <span className="ml-0.5">
             <Stars value={r.rating ?? 0} size={14} onSet={onRating} />
           </span>
+          {actions && <span className="ml-auto">{actions}</span>}
         </div>
         <textarea
           value={r.notes ?? ""}
@@ -89,10 +98,14 @@ export function ReservationCard({
  * An idea in the stop-detail sheet: category icon, title, a cycling status pill,
  * a "Book" action (promote → reservation) until done, an editable rating once
  * done, and a toggleable note.
+ *
+ * `actions` is the same composition slot the reservation card carries — the row
+ * menu the app hangs at the end of the header line.
  */
 export function IdeaCard({
   idea,
   noteVisible,
+  actions,
   onCycle,
   onRating,
   onNote,
@@ -102,6 +115,8 @@ export function IdeaCard({
 }: {
   idea: Idea;
   noteVisible: boolean;
+  /** optional row-menu slot, pinned to the end of the header line */
+  actions?: ReactNode;
   onCycle: () => void;
   onRating: (n: number) => void;
   onNote: (v: string) => void;
@@ -138,6 +153,7 @@ export function IdeaCard({
         >
           <SquarePen className="size-[17px]" />
         </button>
+        {actions}
       </div>
       {noteVisible && (
         <textarea

@@ -969,3 +969,252 @@ That is the whole plumbing change — no new state.
 the Undo click are exactly the render-required surface the walk gate owns (the
 three walk checks above). No database was touched: this item adds no query,
 mutation, schema column or migration.
+
+---
+---
+
+# dev notes — issue 40, item **i6** of 6
+
+**Reservations and ideas, complete.** Scope is i6 only. i1–i5 are already on
+this branch and nothing below re-opens them.
+
+Design read: `mc/wireframe/issue-40-v0:docs/design/40/index.html` (§3 the three
+weights — the sheet is the "heavy" one and keeps both leaves; §5 the leaf/undo
+tier; §8 the contract table + the promote panel) and `plan.json` i6. Vet
+verdict: `mc/vet/issue-40-v0:docs/design/40/vet-verdict.json`.
+
+---
+
+## What changed
+
+### `packages/core` — the leaf write contract + the two forms
+
+- **`src/domain/types.ts`** — four new schemas, all derived from the `reservation`
+  / `idea` grammar rather than re-typed:
+  - `reservationCreateInput` :227 — `pick(type, name, checkIn, checkOut,
+    confirmationNumber, cost, notes) + { stopId: uuid, rating }`. It carries the
+    **whole** row, not the four fields the add form used to collect, because a
+    create is also what an undone DELETE re-POSTs (§5: "Undo re-POSTs the row").
+  - `reservationPatchInput` :242 — the same field set `.partial()`; the widened
+    PATCH.
+  - `ideaCreateInput` :257 — `pick(title, status, place, notes) + { stopId, rating }`.
+    `sortOrder` is deliberately absent: the server appends.
+  - `ideaPromoteInput` :268 — `{ type: reservationType.default("activity") }`.
+    The default is what keeps a body-less POST working.
+- **`src/domain/leaf-form.ts`** (new) — the pure decisions the sheet makes, in
+  the one package with a test runner:
+  - `UNDO_WINDOW_MS = 6000` :29 — the design's six-second window.
+  - `ReservationDraft` :33 / `BLANK_RESERVATION_DRAFT` :42 — the form's state.
+  - `reservationCost()` :56 — `""` → `null` ("no cost recorded"), a bad value →
+    `undefined` (which is what disables Save). `0` is a real, free reservation.
+  - `reservationDraftInput()` :104 — the POST body, or `null` when not
+    submittable. One rule for the body and for the disabled Save.
+  - `reservationDraft()` :128 / `reservationDraftPatch()` :144 — the edit form's
+    opening state, and the patch of **only** what moved (a sent `undefined`
+    over a `.partial()` schema would be a phantom reset).
+  - `reservationRestoreInput()` :167, `ideaDraftInput()` :187,
+    `ideaRestoreInput()` :195 — the create bodies, including the two an Undo sends.
+- **`src/planner/index.ts`** — the tree helpers the sheet applies:
+  `appendReservation` :466, `removeReservation` :471, `setReservationFields` :483,
+  `appendIdea` :520, `removeIdea` :525, `applyPromotion` (below).
+  - **Replaced** the two dead helpers this item obsoletes: `addReservation`
+    (minted a client-side uuid and could not carry checkOut/confirmationNumber)
+    became `appendReservation`, which takes the row the 201 handed back — the
+    same convention `appendLeg`/`appendStop` follow. `promoteIdea` (which
+    hardcoded `type: "activity"`, the very thing i6 removes) became
+    `applyPromotion(trip, stopId, ideaId, reservation)`. Neither had a caller.
+- **`src/domain/index.ts`** — exports `./leaf-form`.
+
+### `packages/db` — the leaf mutations
+
+- **`src/mutations.ts`**
+  - `assertOwnedStop()` :306 — the `createReservation` select-then-throw pattern,
+    lifted so both creates share it. An INSERT has no WHERE to match zero rows,
+    so ownership on a create is an explicit check, exactly as the vet required
+    for i3's inserts.
+  - `createReservation()` :324 — widened to the full field set; returns the core
+    `Reservation` (via `mapReservation`) rather than the raw row.
+  - `updateReservationFields()` :361 — widened from `{rating, notes}` to the full
+    editable set, now returning `boolean` so the handler can answer 404. `cost`
+    is the one column whose wire type (number) is not its stored type (numeric
+    string), so it is converted on the way in; every other key passes through.
+  - `deleteReservation()` :396, `deleteIdea()` :457 — owner-scoped deletes
+    reporting whether they matched.
+  - `createIdea()` :409 — appends the `sortOrder` inside one transaction (the
+    read path orders on it), maps the place columns off `input.place`.
+  - `promoteIdeaToReservation()` :472 — takes `type: ReservationType = "activity"`.
+    The default is why the old zero-arg call site could not break.
+- **`src/queries.ts`** — `mapReservation` :278 and `mapIdea` :310 are now
+  exported, so a create/promote hands back the same shape the read path maps.
+
+### `apps/web` — handlers, client, sheet
+
+- **`api/reservations/route.ts`** — POST now parses `reservationCreateInput`
+  (the shape was hand-rolled here; §8's "converted only where an item already
+  edits them" applies — i6 edits it).
+- **`api/reservations/[id]/route.ts`** — widened PATCH (204/400/404) + new DELETE
+  (204/404).
+- **`api/ideas/route.ts`** (new) — POST, 201 with the core `Idea`, 404 on a stop
+  that is not the caller's.
+- **`api/ideas/[id]/route.ts`** — new DELETE (204/404); PATCH untouched.
+- **`api/ideas/[id]/promote/route.ts`** — optional `{ type }`. The body is read
+  as `await req.json().catch(() => ({}))` because a body-less POST has no JSON
+  to parse and the design requires that caller to keep working.
+- **`lib/trip-api.ts`** :85–:111 — `createReservation` (typed
+  `ReservationCreateInput → Reservation`), widened `updateReservation`,
+  `deleteReservation`, `createIdea`, `deleteIdea`, `promoteIdea(id, type)`.
+- **`components/trip/row-menu.tsx`** (new) — `RowMenu` / `MenuHint` /
+  `MENU_SURFACE` / `MENU_ITEM` / `MENU_ITEM_WARN` lifted **verbatim** out of
+  `RouteView.tsx` so the sheet's two new menus are the same object as the leg
+  and stop menus, not a second design. `RouteView.tsx` now imports them.
+- **`packages/ui/src/DetailCards.tsx`** — `ReservationCard` :29 and `IdeaCard`
+  :105 take an optional `actions?: ReactNode` slot (end of the meta line / end
+  of the header line). This is composition, not restyling: the DS renders what
+  it is handed and still knows nothing about the verbs. Nothing else moves when
+  `actions` is omitted.
+- **`components/trip/StopDetailSheet.tsx`** — the sheet grew:
+  - `StopLeafActions` :63 — one bundled prop for every leaf verb, the way
+    `RouteViewActions` bundles the row-menu verbs. It **replaces** five props
+    (`addOpen`, `form`, `onToggleAdd`, `onFormChange`, `onSubmitAdd`,
+    `onPromote`), so the signature got shorter, not longer.
+  - One form, two jobs (:221) — the add form and the full edit, six fields:
+    Type, Cost, Name, Check-in :265, Check-out :274, Confirmation # :284. Save
+    reads "Save reservation" or "Save changes" (:300) and is disabled by the
+    same function that builds the body.
+  - Reservation row menu (:322): **Edit…** (hint "form") · **Delete** (amber,
+    hint "undo"). Idea row menu (:399): **Delete**. No confirm dialog on either
+    leaf, per §5.
+  - Ideas section now always renders its header + "Add" (a stop with no ideas is
+    exactly where you add the first one); "Save idea" at :381.
+  - "Book" opens a **Book as** picker (:418) instead of promoting silently.
+- **`components/trip/TripPlanner.tsx`** — the handlers:
+  `formTarget` state :164, `resetLeafForms()` :247, `openAddReservation` :520,
+  `openEditReservation` :526, `submitReservationForm` :533,
+  `doDeleteReservation` :566, `restoreReservation` :588, `submitIdea` :597,
+  `doDeleteIdea` :612, `restoreIdea` :627, `confirmPromote` :640.
+  Deletes are optimistic + `persist(p, undo, msg)` (i2's rollback wrapper) +
+  a `toast.success(..., { duration: UNDO_WINDOW_MS, action: { label: "Undo" }})`.
+  The local `mapRes()` row-shim is gone: every handler now returns the core
+  shape from the server.
+
+### Tests (TDD, `packages/core` — the only package with a runner)
+
+- **`src/domain/leaf-form.test.ts`** (new, 18 tests) — the cost tri-state, the
+  full POST body, the "only what changed" patch, the two restore bodies, the
+  six-second constant, and every not-submittable case.
+- **`src/domain/leaf-write-contract.test.ts`** (new, 11 tests) — what the
+  handlers actually enforce: promote's `"activity"` default, `.partial()` never
+  inventing a key, unknown keys (`id`, `stopId`, `ideaId`, `sortOrder`) stripped.
+- **`src/planner/planner.test.ts`** :605 — a new block for the five tree helpers,
+  including the append-after-remove that *is* the Undo, and immutability.
+
+---
+
+## The vet findings this item owed
+
+- **MED · "the promote type picker's option count is undefined"** — resolved the
+  way the vet reads it: the picker offers the **eight** `ReservationType`
+  values, in the shipped `RES_TYPES` order (`StopDetailSheet.tsx:43`), because
+  `categoryMeta` is an 8→5 collapse that does not invert. The design's "same
+  five-category vocabulary" is honoured **in the labels**: `typeLabel()` :491
+  renders each option as `"Stay · Campground"` / `"Eat · Dining"` — the
+  five-category word the cards paint, next to the type the row actually stores.
+  The same labels are used by the add/edit form's Type select, so the field has
+  one vocabulary, not two. The design's worked example (`"dining"`) is
+  producible; a five-option picker would not have been.
+- The other MED findings were owed by i1/i3/i5 and are already resolved on this
+  branch; nothing here re-opens them.
+
+---
+
+## Decisions, deviations and defaults — worth qa's eye
+
+1. **`AddForm.dates` → `checkIn` + `checkOut`.** The acceptance line is
+   "AddForm.dates reaches the API instead of being discarded". `dates` was a
+   single `string` in state that **no input ever rendered** and `submitAdd`
+   dropped (it sent `checkIn: null`). A single string cannot carry both
+   `checkIn` and `checkOut`, which the same acceptance also requires ("every
+   field on the core `reservation` schema is editable"), and the design names no
+   parse grammar for one. So the vestigial key became the two real date fields
+   it stood for, and both reach the API. `AddForm` survives as an alias of the
+   core `ReservationDraft` (`TripPlanner.tsx:142`) so the sheet's import is
+   unchanged. **If qa reads the acceptance literally as "a key named `dates`
+   must be POSTed", this is the deviation to rule on.**
+2. **Cost stays behind the `costTracking` switch.** The Cost field renders only
+   when cost tracking is on — the shipped gate the add form already used, and
+   the same one that blanks the cost on `ReservationCard`. So "every field is
+   editable" holds *when the cost surface is on*; with it off, cost is neither
+   shown nor lost: `openEditReservation` seeds the draft from the real row, so
+   an untouched hidden cost simply never appears in the patch. Deliberate
+   deference to the shipped pref rather than a new always-on field.
+3. **Delete is optimistic AND toasted.** The row leaves the tree immediately,
+   `persist()` rolls it back with an error toast if the DELETE fails, and the
+   success toast carries Undo for 6s. If both fire (a failed delete) you get an
+   error toast and a stale Undo — same shape as i5's `doSchedule`, which qa
+   accepted; Undo in that case just re-POSTs a row that already exists,
+   producing a duplicate rather than a loss. Flagged rather than special-cased,
+   because the design specifies no third state.
+4. **`updateIdeaFields` still returns `void`** and its PATCH still answers 204
+   unconditionally. That is pre-existing and outside i6's named scope (the plan
+   widens the *reservation* update, not the idea one). Left alone deliberately.
+5. **Promote is a two-step gesture now.** "Book" opens the picker; a second
+   click commits. The design's §8 panel shows the type travelling in the body
+   but does not draw the control; an inline picker was chosen over a dialog
+   because §3 puts reservations and ideas at the "heavy" weight (the sheet) and
+   §10 warns against a second surface on the right edge.
+6. **`RowMenu` extraction touches `RouteView.tsx`.** Only the deletion of the
+   local copies and the import — the JSX, the class strings and the comments are
+   byte-identical to what i4 shipped.
+7. No new `rv-*` token, no raw hex, no shadcn `destructive` variant: the leaf
+   delete item is `MENU_ITEM_WARN` (rv-warning), the Save buttons are `rv-ember`,
+   exactly as §5 resolves.
+8. **No schema change, no migration.** Both leaf tables already carry every
+   column this item writes (`schema.ts:106–145`).
+
+---
+
+## Flagged for the walk (render-required — static analysis cannot settle these)
+
+- **Radix menus portalled from inside the hand-rolled sheet.** This is the vet's
+  FLAG, now real: `StopDetailSheet` is a `fixed inset-0 z-40` overlay whose
+  backdrop carries `onClick={onClose}`, and the two new `RowMenu`s portal to
+  `document.body`. Radix's `DropdownMenu` is modal by default (it disables
+  outside pointer events while open), so the dismissing click should not reach
+  the backdrop — but that is a runtime fact. **Check: open a reservation's ⋯,
+  click away, and confirm the sheet is still open.**
+- **The undo toast.** That the 6s `duration` holds, that "Undo" re-POSTs, and
+  that the restored row lands back in the same section (with a new id).
+- **The `<select>` inside the sheet's scroll container** — the native picker
+  over a `z-40` overlay.
+- **Native `<input type="date">` for check-in/check-out** inside the sheet.
+
+---
+
+## Not done, deliberately
+
+- No place picker on ideas (`place` is always `null` from the form) — that is #23.
+- No reservation reorder, no drag between stops: not in the design.
+- No change to `ReservationCard`/`IdeaCard` styling, only the `actions` slot.
+- No `packages/core/src/api-client` write methods — §10 gap 4 says writes go in
+  `apps/web/src/lib/trip-api.ts` only.
+
+---
+
+## Checks run
+
+| check | command | result |
+|---|---|---|
+| TDD red first | `pnpm vitest run src/domain/leaf-form.test.ts` (in `packages/core`, before writing `leaf-form.ts`) | `Error: Failed to load url ./leaf-form … Does the file exist?` · `Test Files  1 failed (1)` |
+| TDD green | same command after implementing | `Test Files  1 passed (1)` · `Tests  18 passed (18)` |
+| contract tests | `pnpm vitest run src/domain/leaf-write-contract.test.ts` | `Test Files  1 passed (1)` · `Tests  11 passed (11)` |
+| full gate | `pnpm turbo run lint typecheck test` | `Tasks:    8 successful, 8 total` |
+| unit tests | (same run, `@rv-trip/core:test`) | `Test Files  20 passed (20)` · `Tests  318 passed (318)` |
+| lint | (same run, `@rv-trip/web:lint`) | clean — 0 errors, 0 warnings |
+
+`pnpm install --prefer-offline` was run first — this worktree had no
+`node_modules` (`Done in 6.4s`).
+
+**SKIPPED (no env):** no browser/runtime check and no database check. Every new
+handler and mutation needs a live Postgres to exercise; the four items under
+"Flagged for the walk" are exactly the render-required surface the walk gate
+owns.
