@@ -6,6 +6,7 @@ import {
   integer,
   smallint,
   date,
+  boolean,
   doublePrecision,
   numeric,
   timestamp,
@@ -39,6 +40,12 @@ export const tripStatus = pgEnum("trip_status", ["planning", "upcoming", "comple
 
 // Places library shelves. One record, one status — want graduates to been.
 export const savedPlaceStatus = pgEnum("saved_place_status", ["want", "been"]);
+
+// What the rig IS, not what class it was picked from. The four rig classes on
+// /rig (Class A / Class C / travel trailer / fifth wheel) are a presentation
+// preset in @rv-trip/core (RIG_PRESETS) — they fill these fields and are not
+// stored. See docs/design/9 §4 G5.
+export const rigType = pgEnum("rig_type", ["motorhome", "trailer"]);
 
 export const trips = pgTable(
   "trips",
@@ -161,6 +168,36 @@ export const savedPlaces = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("saved_places_owner_idx").on(t.ownerId)],
+);
+
+/**
+ * The rig — ONE per account, and the routing input for every drive on every
+ * trip. Owner-scoped like everything else; the unique constraint on owner_id is
+ * what makes the upsert a real upsert.
+ *
+ * Dimensions are stored METRIC at millimetre precision (numeric, never float):
+ * 11'6" is exactly 3.5052 m, so the imperial round-trip on /rig is lossless.
+ * Whole centimetres are what the vendor is handed, never what we store.
+ */
+export const rigs = pgTable(
+  "rigs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    ownerId: text("owner_id").notNull().unique(),
+    name: text("name").notNull(),
+    type: rigType("type").notNull(),
+    heightMeters: numeric("height_meters", { precision: 6, scale: 4 }).notNull(),
+    widthMeters: numeric("width_meters", { precision: 6, scale: 4 }).notNull(),
+    lengthMeters: numeric("length_meters", { precision: 6, scale: 4 }).notNull(),
+    grossWeightKg: numeric("gross_weight_kg", { precision: 10, scale: 2 }).notNull(),
+    propaneOnBoard: boolean("propane_on_board").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  // No owner index: `.unique()` on owner_id already gives Postgres a btree, and
+  // it is the only way this table is ever read. A second one is write cost for
+  // nothing — the other tables index owner_id because theirs is NOT unique.
+  () => [],
 );
 
 export const tripsRelations = relations(trips, ({ many }) => ({

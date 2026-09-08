@@ -1,7 +1,7 @@
 import { eq, and, asc, desc } from "drizzle-orm";
 import { deriveDays, isScheduled } from "@rv-trip/core";
 import { db } from "./index";
-import { trips, savedPlaces } from "./schema";
+import { trips, savedPlaces, rigs } from "./schema";
 import type {
   Trip,
   Leg,
@@ -11,6 +11,7 @@ import type {
   Place,
   TripStatus,
   SavedPlace,
+  RigProfile,
 } from "@rv-trip/core";
 
 /**
@@ -283,5 +284,41 @@ function mapIdea(i: MapIdeaRow): Idea {
     rating: i.rating,
     notes: i.notes,
     sortOrder: i.sortOrder,
+  };
+}
+
+// ── the rig ────────────────────────────────────────────────────────────────
+/**
+ * The account's single rig, or null on a brand-new account. `null` is a real,
+ * expected state — it is the same code path as a missing HERE key: every drive
+ * falls back to a straight-line estimate and the trip still opens.
+ */
+export async function getRigByOwner(ownerId: string): Promise<RigProfile | null> {
+  const row = await db.query.rigs.findFirst({ where: eq(rigs.ownerId, ownerId) });
+  return row ? mapRigRow(row) : null;
+}
+
+/** numeric columns arrive as strings; the domain works in numbers. */
+export function mapRigRow(row: {
+  id: string;
+  ownerId: string;
+  name: string;
+  type: "motorhome" | "trailer";
+  heightMeters: string;
+  widthMeters: string;
+  lengthMeters: string;
+  grossWeightKg: string;
+  propaneOnBoard: boolean;
+}): RigProfile {
+  return {
+    id: row.id,
+    ownerId: row.ownerId,
+    name: row.name,
+    type: row.type,
+    heightMeters: Number(row.heightMeters),
+    widthMeters: Number(row.widthMeters),
+    lengthMeters: Number(row.lengthMeters),
+    grossWeightKg: Number(row.grossWeightKg),
+    propaneOnBoard: row.propaneOnBoard,
   };
 }

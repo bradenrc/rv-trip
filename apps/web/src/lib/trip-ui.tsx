@@ -1,4 +1,4 @@
-import type { IsoDate, Place } from "@rv-trip/core";
+import type { IsoDate } from "@rv-trip/core";
 
 // ── date formatting (plain YYYY-MM-DD, UTC — no tz drift) ──────────────────
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -32,27 +32,7 @@ export function fullRange(start: IsoDate, end: IsoDate): string {
   return `${monthDay(start)} – ${monthDay(end)}, ${yr}`;
 }
 
-// ── drive-time estimate (haversine at a nominal RV highway speed) ──────────
-export function estimateDrive(
-  from: Place,
-  to: Place,
-  avgKmh = 75,
-): { miles: number; minutes: number; label: string } | null {
-  if (from.lat == null || from.lng == null || to.lat == null || to.lng == null) return null;
-  const R = 6371;
-  const dLat = deg(to.lat - from.lat);
-  const dLng = deg(to.lng - from.lng);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.sin(dLng / 2) ** 2 * Math.cos(deg(from.lat)) * Math.cos(deg(to.lat));
-  const km = 2 * R * Math.asin(Math.sqrt(h));
-  const miles = Math.round(km * 0.621371);
-  const minutes = Math.round((km / avgKmh) * 60);
-  const h2 = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  const time = h2 > 0 ? `${h2}h ${String(m).padStart(2, "0")}m` : `${m}m`;
-  return { miles, minutes, label: `~${time} · ${miles} mi` };
-}
-function deg(x: number): number {
-  return (x * Math.PI) / 180;
-}
+// The drive-time estimate that used to live here is gone. It was a SECOND
+// haversine (at 75 km/h) duplicating StubRoutingProvider's (at 80), and it was
+// the one the app actually rendered. There is now one implementation —
+// `estimateRoute` in @rv-trip/core — and the stub wraps it.

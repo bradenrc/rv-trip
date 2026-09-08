@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./domain": "./src/domain/index.ts",
-    "./providers": "./src/providers/index.ts"
+    "./providers": "./src/providers/index.ts",
+    "./providers/here": "./src/providers/here.ts"
   },
   "scripts": {
     "test": "vitest run",
