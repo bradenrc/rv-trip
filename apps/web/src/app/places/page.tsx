@@ -1,16 +1,28 @@
-import { Plus } from "lucide-react";
-import { listSavedPlacesForOwner } from "@rv-trip/db";
+import { listSavedPlacesForOwner, listTripsForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
-import { PlacesLibrary } from "@/components/places/PlacesLibrary";
+import { PlacesWorkspace } from "@/components/places/PlacesWorkspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function PlacesPage() {
-  const places = await listSavedPlacesForOwner(getOwner());
+  const owner = getOwner();
+  const [places, trips] = await Promise.all([
+    listSavedPlacesForOwner(owner),
+    listTripsForOwner(owner),
+  ]);
 
+  // The graduate sheet's "Visited on" list (docs/design/41 §5): complete trips
+  // only, narrowed here to what the dropdown draws so the whole summary — days,
+  // miles, open stops — does not cross into a client island to fill a <select>.
+  const visitedOn = trips
+    .filter((t) => t.status === "complete")
+    .map((t) => ({ id: t.id, title: t.title }));
+
+  // The header copy stays on the server; the island owns only the button beside
+  // it, both sheets and the ⋯ menu.
   return (
     <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
-      <div className="mb-[26px] flex flex-wrap items-end justify-between gap-5">
+      <PlacesWorkspace places={places} trips={visitedOn}>
         <div>
           <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
             Your places
@@ -23,16 +35,7 @@ export default async function PlacesPage() {
             the raw material for the next trip.
           </p>
         </div>
-        <button
-          type="button"
-          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-ember px-[18px] py-[11px] text-[14px] font-bold text-rv-navy"
-        >
-          <Plus className="size-[15px]" fill="currentColor" strokeWidth={2.5} />
-          Save a place
-        </button>
-      </div>
-
-      <PlacesLibrary places={places} />
+      </PlacesWorkspace>
     </main>
   );
 }

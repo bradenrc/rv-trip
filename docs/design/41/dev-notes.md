@@ -430,3 +430,141 @@ rejection." The vet's HIGH finding about unwired runners is correct and I did no
   - owner DELETE → `true`, the row is gone, and a second DELETE of the same id → `false`.
 - **NOT run:** any HTTP-level test of the three handlers — `apps/web` has no test runner (the same
   limitation i2/i3 recorded). The handler bodies are thin: parse → mutate → status.
+
+---
+
+# Issue 41 — dev notes · epic item **i5**
+
+**Wire the Save-a-place sheet, the graduate sheet and the ⋯ menu.** `/places` is a `force-dynamic`
+server component whose "Save a place" button had no handler, and the library had no write surface at
+all. i4 gave `saved_places` its API; i5 gives it its UI: one client island beside `PlacesLibrary`
+owning that button, both sheets from wireframe §5, and the ⋯ menu (Edit place / Been there… /
+Delete) with an undo toast on delete.
+
+## What changed
+
+- **`packages/core/src/domain/place-form.ts`** (new, 246 lines) — both sheets *as data*, so their
+  decisions land where the only test runner in the repo can execute them:
+  - `SAVE_SHEET_TYPES` (`:28-34`) — one representative `ReservationType` per category in §5's order
+    (Stay · Eat · Do · Travel · Other). The sheet maps each through `categoryMeta`; it names no icon,
+    label or color of its own.
+  - `SavePlaceForm` (`:39-50`) / `GraduateForm` (`:52-56`) — the two field sets.
+  - `regionFromAddress` (`:73-83`) — the "from the address, editable" seed.
+  - `pickPlace` (`:99-104`) — the picker's `onChange`: seeds Region only while the field is untouched.
+  - `savePlaceFormFromSaved` (`:106-127`) — seeds the sheet from a row (the ⋯ menu's *Edit place*).
+  - `savePlaceBody` (`:130-150`) — the flat `POST /api/places` body of §3; `null` until a place is
+    chosen (the picker's free-text escape row counts, so a coordless save is legal).
+  - `editPlacePatch` (`:153-166`) — the same sheet as a PATCH, naming only what it can edit; it never
+    names `status`, `rating` or `tripId`.
+  - `graduateFormFromSaved` (`:169-171`) / `graduatePatch` (`:178-186`) — `{ status: "been", rating,
+    tripId, note, source: null }`, the §5 body verbatim.
+  - `applySavedPlacePatch` (`:199-227`) — the island's local echo of a successful PATCH, including the
+    server's own rule that graduation clears `source`.
+  - `savedPlaceToCreate` (`:232-245`) — a row flattened back into a create body: the undo toast's
+    re-save.
+- **`packages/core/src/domain/place-form.test.ts`** (new, 23 tests) — written red first.
+- **`packages/core/src/domain/index.ts:2`** — re-exports the module.
+- **`apps/web/src/components/places/SheetShell.tsx`** (new) — the chrome both sheets share
+  (`:17-92`), lifted from the shipped planner idiom (`StopDetailSheet.tsx:80-127`): scrim, right-hand
+  panel, sticky navy header with kicker over title, body, footer carrying the mono hint + Cancel +
+  primary. Plus `SheetField` (`:104-133`, composing the DS `FieldLabel` and §5's mono asides) and the
+  single `SHEET_INPUT` skin (`:135-137`).
+- **`apps/web/src/components/places/PlaceSheet.tsx`** (new) — "Save a place", and *Edit place* on the
+  same five fields: Place (`:51-56`, `PlacePicker`), Category (`:58-83`, `categoryMeta`), Region
+  (`:85-93`), Who told you (`:95-107`), Note (`:109-117`). Footer hint `saves to · want`, primary
+  "Save to library".
+- **`apps/web/src/components/places/GraduateSheet.tsx`** (new) — "Been there": the shipped
+  interactive `<Stars value onSet>` (`:50-54`), "Visited on … · complete trips only" (`:56-70`), the
+  carried-over Note (`:72-80`), and §5's one-record strip (`:82-93`). Primary "Move to Been there".
+- **`apps/web/src/components/places/PlaceCardMenu.tsx`** (new) — the ⋯ dropdown on the shipped shadcn
+  `dropdown-menu` (`:37-62`), anchored beside the card.
+- **`apps/web/src/components/places/PlacesWorkspace.tsx`** (new) — the island: the "Save a place"
+  button (`:150-158`), the write handlers (`submitSave` `:57-94`, `submitGraduate` `:96-121`, `remove`
+  `:123-146`) and both sheets (`:172-193`).
+- **`apps/web/src/components/places/PlacesLibrary.tsx:41-52, 88-98`** — one new optional prop,
+  `cardMenu?: (place) => ReactNode`, and the card wrapper that anchors it.
+- **`apps/web/src/app/places/page.tsx`** — the header copy stays on the server and is passed as
+  `children`; the page also resolves the graduate sheet's trip list (`:14-19`).
+
+## Acceptance, checked
+
+- `git status` shows **no** modification under `packages/ui/` (`git status --porcelain packages/ui`
+  → 0 lines). `packages/ui/src/Places.tsx` is untouched; the DS ships zero API change in this item.
+- The sheets **compose** `PlacePicker`, `Stars`, `FieldLabel` and `categoryMeta`. There is no star
+  glyph, no label style, no category icon and no category color defined anywhere under
+  `components/places/` — `grep -n "Star\|lucide.*Tent" GraduateSheet.tsx PlaceSheet.tsx` finds only
+  the DS imports.
+- `PlaceCard`'s `onAddToTrip` **stays unpassed**, with the source comment naming #22 at
+  `PlacesLibrary.tsx:88-92`.
+- `pnpm turbo run lint typecheck test` → `Tasks: 8 successful, 8 total`.
+
+## Key decisions (and where they answer a vet finding)
+
+1. **MED "refresh path unnamed" — answered: the island owns the list, no `router.refresh()`.**
+   `PlacesWorkspace` seeds `places` from the server render and applies each write locally: the row the
+   POST returns is appended, a PATCH goes through `applySavedPlacePatch`, a DELETE splices. That is
+   `TripPlanner`'s shipped shape, and it is why `applySavedPlacePatch` exists as a *tested* function
+   rather than an inline spread — the echo cannot drift from what the wire does.
+2. **MED "the ⋯ trigger's positioning is unpinned" — resolved as a corner anchor, and flagged.**
+   §5 draws the trigger inside the card's footer row, but `PlaceCard` owns that row end to end
+   (`Places.tsx:67`, a `justify-between` flex whose right-hand child is a *variable-width* action
+   button — "Add to trip" vs "Plan a revisit"). With `packages/ui` frozen, an in-footer anchor would
+   need either a DS slot or a guess at that button's width. The trigger therefore sits on the card's
+   **bottom-right corner** (`-bottom-3 -right-3`, a 28 px pill) — level with the footer, 12 px into
+   the grid's 16 px gutter, clear of every element the card draws. The card wrapper is
+   `relative grid` so the card still stretches to the row height.
+3. **HIGH "Google type has no carrier" — the copy is wrong; the sheet opens on Other.** Neither
+   `PlaceSummary` nor `PickedPlace` carries `types`, and this epic does not widen that API, so §5's
+   "Category defaults from Google's type" is unimplementable as written. `pickPlace` leaves the
+   category alone and the user picks — asserted by a test that says so out loud
+   (`place-form.test.ts`, "leaves the category alone — nothing on the wire carries Google's type").
+4. **MED "Region 'from the address' is not derivable" — rule pinned, worked value unreachable.**
+   `regionFromAddress` takes the last two comma-parts, dropping a trailing country and a trailing ZIP.
+   From §3's own details payload (`156954 US-101, Forks, WA 98331`) that is **"Forks, WA"**, not the
+   "Olympic NP, WA" §5 draws — exactly what the vet predicted. It is a seed, not a fact: the field is
+   editable and the value is display-only, never geocoded.
+5. **MED "the 'Visited on' dropdown has no data path" — resolved on the server.**
+   `places/page.tsx` now also calls `listTripsForOwner`, filters to `status === "complete"` and maps
+   to `{ id, title }` before it crosses into the island — a `<select>` has no use for days, miles or
+   open-stop counts, and the narrow shape keeps the client payload honest. No new db query.
+6. **Undo is a re-save, not a restore.** DELETE is a hard delete with no tombstone (i4's note), so the
+   toast's Undo re-POSTs `savedPlaceToCreate(place)` from the row the island still holds: same
+   content, new id. The card leaves the grid immediately and comes back only if the server refuses.
+7. **The sheet idiom is the planner's, not shadcn's.** `components/ui/sheet.tsx` stays unused, per
+   scope: a second sheet grammar on the same product is the drift this repo keeps out.
+8. **Two small scope judgements, both narrowing.** "Been there…" is hidden on a row already on the
+   "been" shelf (graduation is one-way), and the edit sheet hides "Who told you" for a `been` row
+   (§5 clears it on graduation; offering it back would re-add queue metadata to an archive row).
+
+## Flagged for the walk — cannot be certified statically
+
+- The ⋯ trigger's corner anchor (decision 2) and the radix portal opening over a card that lifts on
+  hover: geometry and pointer behaviour, not types.
+- `PlacePicker`'s absolutely-positioned result list inside the sheet's `overflow-y-auto` panel — the
+  panel scrolls rather than clipping in every case I can reason about, but that is a render claim.
+- The sonner undo toast's action button, and the debounce/keyboard path through the picker inside a
+  sheet (i3 flagged the same for the picker standalone).
+- With no `GOOGLE_API_KEY` the picker is always in its degraded state, so the walk exercises the
+  free-text escape row and a coordless save — which is the path that must work anyway.
+
+## Checks run
+
+- `pnpm install --prefer-offline` → `Done in 6.2s` (fresh worktree had no `node_modules`).
+- **TDD red:** `pnpm test` in `packages/core` with `place-form.test.ts` written and no
+  implementation → `FAIL src/domain/place-form.test.ts … Failed to load url ./place-form`,
+  `Test Files  1 failed | 18 passed (19)`.
+- **TDD green:** same command after `place-form.ts` → `Test Files 19 passed (19) · Tests 297 passed
+  (297)` (23 new).
+- **The gate:** `pnpm turbo run lint typecheck test` → `Tasks: 8 successful, 8 total`, with
+  `@rv-trip/core:test: Tests  297 passed (297)` and `@rv-trip/web:lint` / `:typecheck` clean. The
+  token contract (`nightfall-tokens.test.ts`) sweeps `apps/web/src`, so it covers the five new
+  components: no raw hex, no `text-rv-navy` off an ember/green fill, no `rv-ink-subtle` on a text
+  glyph.
+- **Production build:** `pnpm --filter @rv-trip/web build` → succeeded; `/places` still listed as
+  `ƒ (Dynamic)`. This exercises the server/client boundary the island introduces (`children` from a
+  server component into a client one) that `tsc` alone does not.
+- **NOT run — SKIPPED (no runner):** any component-level render test. `apps/web` declares no `test`
+  script and no runner (the limitation i2/i3/i4 each recorded); every testable decision was pushed
+  into `packages/core/src/domain/place-form.ts` instead, and what is left in the components is JSX
+  and handler wiring. **NOT run:** the live app against a database — no Postgres was started in this
+  dispatch and nothing was written to the operator's database. The walk owns that.
