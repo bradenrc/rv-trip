@@ -12,7 +12,7 @@ import { routeTrip } from "@/lib/routing";
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const owner = getOwner();
+  const owner = await getOwner();
   const trip = await getTripById(owner, id);
   if (!trip) return NextResponse.json({ error: "trip not found" }, { status: 404 });
   const rig = await getRigByOwner(owner);
@@ -32,7 +32,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const owner = getOwner();
+  const owner = await getOwner();
   const patch = parsed.data;
 
   if (patch.startDate !== undefined || patch.endDate !== undefined) {
@@ -66,7 +66,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 /** Delete a trip. Legs, stops, reservations and ideas cascade with it. */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const matched = await deleteTrip(getOwner(), id);
+  const matched = await deleteTrip(await getOwner(), id);
   if (!matched) return NextResponse.json({ error: "trip not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }

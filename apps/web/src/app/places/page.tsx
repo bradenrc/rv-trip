@@ -9,7 +9,7 @@ import { PlacesWorkspace } from "@/components/places/PlacesWorkspace";
 export const dynamic = "force-dynamic";
 
 export default async function PlacesPage() {
-  const owner = getOwner();
+  const owner = await getOwner();
   const [places, trips, suggestions] = await Promise.all([
     listSavedPlacesForOwner(owner),
     listTripsForOwner(owner),

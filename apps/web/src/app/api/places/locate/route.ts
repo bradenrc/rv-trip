@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const owner = getOwner();
+  const owner = await getOwner();
   const { provider } = placesProvider();
   const result = await locatePlaces({
     rows: parsed.data.rows,

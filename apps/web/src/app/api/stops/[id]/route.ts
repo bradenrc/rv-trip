@@ -21,7 +21,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const owner = getOwner();
+  const owner = await getOwner();
   const patch = parsed.data;
 
   if (patch.arriveDate !== undefined || patch.departDate !== undefined) {
@@ -57,7 +57,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  * client confirms with the real counts first. */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const matched = await deleteStop(getOwner(), id);
+  const matched = await deleteStop(await getOwner(), id);
   if (!matched) return NextResponse.json({ error: "stop not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }

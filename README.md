@@ -76,8 +76,12 @@ gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).
 ## Local-dev accommodations (seams to the cloud target)
 
 - **DB:** local Postgres in Docker instead of Neon — same Drizzle schema.
-- **Auth:** a dev-stub owner (`dev-user`) instead of Clerk — drops into the
-  same middleware seam later.
+- **Auth:** Clerk when both `CLERK_*` keys are set (every page needs a session,
+  `/api/*` answers 401 without one, mobile clients send the session JWT as
+  `Authorization: Bearer`); without keys the app runs as the seeded
+  `dev-user` stub. Keep local keys in `apps/web/.env.development.local` so the
+  pipeline's walk worktrees (which copy `.env.local`) stay key-free. To see the
+  seed data as your real account: `pnpm db:reown <your Clerk user id>`.
 - **Maps:** Mapbox GL display · HERE RV-safe routing · Google Maps handoff are
   live with keys in `.env` (see `.env.example`); without keys every map
   degrades to a placeholder and every drive to a labelled estimate. Google

@@ -16,7 +16,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const matched = await updateReservationFields(getOwner(), id, parsed.data);
+  const matched = await updateReservationFields(await getOwner(), id, parsed.data);
   if (!matched) return NextResponse.json({ error: "reservation not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }
@@ -28,7 +28,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const matched = await deleteReservation(getOwner(), id);
+  const matched = await deleteReservation(await getOwner(), id);
   if (!matched) return NextResponse.json({ error: "reservation not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }

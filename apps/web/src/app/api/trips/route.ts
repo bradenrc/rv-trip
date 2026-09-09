@@ -5,7 +5,7 @@ import { getOwner } from "@/lib/owner";
 
 /** The dashboard rows — `TripSummary[]` (schema in @rv-trip/core). */
 export async function GET() {
-  return NextResponse.json(await listTripsForOwner(getOwner()));
+  return NextResponse.json(await listTripsForOwner(await getOwner()));
 }
 
 /**
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const owner = getOwner();
+  const owner = await getOwner();
   const row = await createTrip(owner, parsed.data);
   return NextResponse.json(await getTripById(owner, row.id), { status: 201 });
 }

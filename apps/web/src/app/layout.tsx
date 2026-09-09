@@ -4,6 +4,8 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { Nav } from "@/components/nav/Nav";
+import { ClerkProvider } from "@clerk/nextjs";
+import { clerkEnabled } from "@/lib/owner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -45,12 +47,20 @@ export default function RootLayout({
               "document.documentElement.classList.remove('dark')}catch{}",
           }}
         />
-        <TooltipProvider>
-          <Nav />
-          {children}
-        </TooltipProvider>
-        <Toaster />
+        {/* Clerk only when configured (#26): keyless local dev and the mc
+            pipeline's walks run as the dev-user stub with no provider at all. */}
+        <MaybeClerk>
+          <TooltipProvider>
+            <Nav />
+            {children}
+          </TooltipProvider>
+          <Toaster />
+        </MaybeClerk>
       </body>
     </html>
   );
+}
+
+function MaybeClerk({ children }: { children: React.ReactNode }) {
+  return clerkEnabled() ? <ClerkProvider>{children}</ClerkProvider> : <>{children}</>;
 }

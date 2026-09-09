@@ -5,7 +5,7 @@ import { getOwner } from "@/lib/owner";
 
 /** The Places library, both shelves — `SavedPlace[]`. */
 export async function GET() {
-  return NextResponse.json(await listSavedPlacesForOwner(getOwner()));
+  return NextResponse.json(await listSavedPlacesForOwner(await getOwner()));
 }
 
 /**
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const saved = await createSavedPlace(getOwner(), parsed.data);
+    const saved = await createSavedPlace(await getOwner(), parsed.data);
     return NextResponse.json(saved, { status: 201 });
   } catch {
     // The only guarded input is `tripId` — a trip this owner does not own.

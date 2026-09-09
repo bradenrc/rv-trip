@@ -29,7 +29,7 @@ function NewTripTile({ label = "Start a new trip" }: { label?: string }) {
 }
 
 export default async function Home() {
-  const trips = await listTripsForOwner(getOwner());
+  const trips = await listTripsForOwner(await getOwner());
   const planning = trips.filter((t) => t.status === "planning");
   const upcoming = trips.filter((t) => t.status === "upcoming");
   const traveled = trips.filter((t) => t.status === "complete");

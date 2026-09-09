@@ -5,7 +5,7 @@ import { MapOverview } from "@/components/map/MapOverview";
 export const dynamic = "force-dynamic";
 
 export default async function MapPage() {
-  const owner = getOwner();
+  const owner = await getOwner();
   const [trips, places] = await Promise.all([
     listTripsWithStopsForOwner(owner),
     listSavedPlacesForOwner(owner),

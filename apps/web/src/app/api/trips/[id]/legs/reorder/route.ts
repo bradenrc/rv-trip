@@ -17,7 +17,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    await reorderTripLegs(getOwner(), id, parsed.data.order);
+    await reorderTripLegs(await getOwner(), id, parsed.data.order);
     return new NextResponse(null, { status: 204 });
   } catch {
     return NextResponse.json({ error: "trip not found" }, { status: 404 });
