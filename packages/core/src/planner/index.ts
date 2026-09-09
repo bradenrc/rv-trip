@@ -1,5 +1,15 @@
 import { deriveDays, type DayKind } from "../domain/derive-days";
-import { isScheduled, type Trip, type Leg, type Stop, type Reservation, type Idea, type IsoDate, type ReservationType } from "../domain/types";
+import {
+  isScheduled,
+  type Trip,
+  type Leg,
+  type Stop,
+  type Reservation,
+  type ReservationPatchInput,
+  type Idea,
+  type IsoDate,
+  type ReservationType,
+} from "../domain/types";
 import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "../domain/route-order";
 import { NO_RIG_HASH } from "../domain/rig";
 import { estimateRoute, type RouteResult, type RouteNotice } from "../providers/index";
@@ -445,29 +455,40 @@ export function setReservationNote(trip: Trip, stopId: string, resId: string, no
     reservations: s.reservations.map((r) => (r.id === resId ? { ...r, notes } : r)),
   }));
 }
-export function addReservation(
+/**
+ * Splice the reservation `POST /api/reservations` just created onto the stop.
+ *
+ * A create is the one write with nothing to be optimistic about — only the
+ * server can mint the id — so this takes the row the 201 handed back rather
+ * than inventing one. It is also what an UNDONE delete calls: the row comes
+ * back with a new id, which is why the toast re-POSTs instead of resurrecting.
+ */
+export function appendReservation(trip: Trip, stopId: string, r: Reservation): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, reservations: [...s.reservations, r] }));
+}
+
+/** The leaf delete: optimistic, and reversed by re-appending the 201's row. */
+export function removeReservation(trip: Trip, stopId: string, resId: string): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    reservations: s.reservations.filter((r) => r.id !== resId),
+  }));
+}
+
+/**
+ * The edit form's Save, applied optimistically. It takes the SAME patch the
+ * PATCH body carries, so a key the form left out is a field left alone here
+ * too — the screen and the row can't disagree about what was sent.
+ */
+export function setReservationFields(
   trip: Trip,
   stopId: string,
-  input: { type: ReservationType; name: string; cost: number | null; checkIn: IsoDate | null },
+  resId: string,
+  patch: ReservationPatchInput,
 ): Trip {
   return updateStop(trip, stopId, (s) => ({
     ...s,
-    reservations: [
-      ...s.reservations,
-      {
-        id: crypto.randomUUID(),
-        stopId,
-        ideaId: null,
-        type: input.type,
-        name: input.name,
-        checkIn: input.checkIn,
-        checkOut: null,
-        confirmationNumber: null,
-        cost: input.cost,
-        rating: null,
-        notes: null,
-      },
-    ],
+    reservations: s.reservations.map((r) => (r.id === resId ? { ...r, ...patch } : r)),
   }));
 }
 export function cycleIdeaStatus(trip: Trip, stopId: string, ideaId: string): Trip {
@@ -495,37 +516,42 @@ export function setIdeaNote(trip: Trip, stopId: string, ideaId: string, notes: s
     ideas: s.ideas.map((it) => (it.id === ideaId ? { ...it, notes } : it)),
   }));
 }
-export function promoteIdea(trip: Trip, stopId: string, ideaId: string): Trip {
-  return updateStop(trip, stopId, (s) => {
-    const idea = s.ideas.find((it) => it.id === ideaId);
-    if (!idea) return s;
-    return {
-      ...s,
-      ideas: s.ideas.filter((it) => it.id !== ideaId),
-      reservations: [
-        ...s.reservations,
-        {
-          id: crypto.randomUUID(),
-          stopId,
-          ideaId: null,
-          type: "activity",
-          name: idea.title,
-          checkIn: null,
-          checkOut: null,
-          confirmationNumber: null,
-          cost: null,
-          rating: null,
-          notes: "Promoted from idea",
-        },
-      ],
-    };
-  });
+/** Splice the idea `POST /api/ideas` just created onto the stop. */
+export function appendIdea(trip: Trip, stopId: string, i: Idea): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, ideas: [...s.ideas, i] }));
 }
 
-/** Assign dates to a floating stop by dropping it into the largest open run. */
-export function scheduleFloating(trip: Trip, stopId: string, nights = 3): Trip {
-  const stops = allStops(trip);
-  const { days } = deriveDays(trip, stops);
+/** The other leaf delete — same shape, same undo. */
+export function removeIdea(trip: Trip, stopId: string, ideaId: string): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    ideas: s.ideas.filter((it) => it.id !== ideaId),
+  }));
+}
+
+/**
+ * "Book" — the idea leaves and the reservation the server minted takes its
+ * place, in one tree update so the sheet never renders both.
+ *
+ * The reservation is the row the 201 handed back, TYPE INCLUDED: the type is
+ * the one you picked on the way in, not a client guess. (This used to build
+ * the row locally and hardcode "activity".)
+ */
+export function applyPromotion(
+  trip: Trip,
+  stopId: string,
+  ideaId: string,
+  r: Reservation,
+): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    ideas: s.ideas.filter((it) => it.id !== ideaId),
+    reservations: [...s.reservations, r],
+  }));
+}
+
+/** The longest open run in the trip window, as `[startIndex, length]`. */
+function longestOpenRun(days: { kind: DayKind }[]): [number, number] {
   let best = -1,
     bestLen = 0,
     cur = -1,
@@ -540,9 +566,47 @@ export function scheduleFloating(trip: Trip, stopId: string, nights = 3): Trip {
       }
     } else curLen = 0;
   });
-  if (best < 0) return trip;
-  const span = Math.min(nights, bestLen);
-  const arriveDate = days[best]!.date;
+  return [best, bestLen];
+}
+
+/**
+ * Assign dates to a floating stop.
+ *
+ * `gap` is the open span it was DROPPED on — the same `TimelineGap` the gantt's
+ * `OpenLane` rendered, so `startCol` is a 1-based column into the very day list
+ * `deriveDays` builds here. The stop takes the gap's first date and
+ * `min(nights, gap.span)` days of it; a 1-day gap therefore yields
+ * `arrive === depart`, a legal single-day stop.
+ *
+ * `gap === null` — the stop sheet's "Schedule" button, which has no drop target
+ * — keeps the original behaviour: the LARGEST open run. It is the default, so
+ * every existing two-argument call site is unchanged.
+ */
+export function scheduleFloating(
+  trip: Trip,
+  stopId: string,
+  gap: TimelineGap | null = null,
+  nights = 3,
+): Trip {
+  const stops = allStops(trip);
+  const { days } = deriveDays(trip, stops);
+
+  let start: number;
+  let runLen: number;
+  if (gap) {
+    start = gap.startCol - 1;
+    // A gap the trip no longer has (the window moved under the drag) is a
+    // no-op rather than a guess.
+    if (start < 0 || start >= days.length) return trip;
+    runLen = Math.min(gap.span, days.length - start);
+  } else {
+    [start, runLen] = longestOpenRun(days);
+    if (start < 0) return trip;
+  }
+  if (runLen < 1) return trip;
+
+  const span = Math.min(nights, runLen);
+  const arriveDate = days[start]!.date;
   const departDate = addDays(arriveDate, span - 1);
   return updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate }));
 }
@@ -576,3 +640,102 @@ export function reorderFloating(
   });
 }
 
+
+// ── leg + stop structure (pure; return a new Trip) ─────────────────────────
+//
+// The row menus in the route lens. A CREATE is the one write with nothing to
+// be optimistic about — only the server can mint the id — so the two `append`
+// helpers take the row the 201 handed back; everything else here is applied
+// optimistically, and its caller keeps the pre-change trip as the snapshot a
+// failed write rolls back to.
+
+/** Splice the leg `POST /api/legs` just created onto the end of the trip. */
+export function appendLeg(trip: Trip, leg: Leg): Trip {
+  return { ...trip, legs: [...trip.legs, leg] };
+}
+
+/** Splice the stop `POST /api/stops` just created into the leg it belongs to. */
+export function appendStop(trip: Trip, stop: Stop): Trip {
+  return mapLegs(trip, (l) =>
+    l.id === stop.legId ? { ...l, stops: [...l.stops, stop] } : l,
+  );
+}
+
+/** The leg header's inline rename. */
+export function renameLeg(trip: Trip, legId: string, title: string): Trip {
+  return mapLegs(trip, (l) => (l.id === legId ? { ...l, title } : l));
+}
+
+/**
+ * The stop row's inline rename. It edits the NAME only — the coordinates and
+ * the Google id are what the place picker owns (#23), not a text field.
+ */
+export function renameStop(trip: Trip, stopId: string, name: string): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, place: { ...s.place, name } }));
+}
+
+/** Delete a leg. Its stops go with it, the way the FK cascade does server-side. */
+export function removeLeg(trip: Trip, legId: string): Trip {
+  return { ...trip, legs: trip.legs.filter((l) => l.id !== legId) };
+}
+
+/** Delete a stop. Its reservations and ideas go with it. */
+export function removeStop(trip: Trip, stopId: string): Trip {
+  return mapLegs(trip, (l) => ({ ...l, stops: l.stops.filter((s) => s.id !== stopId) }));
+}
+
+/** The leg ids in render order — the whole new order `reorder` POSTs. */
+export function legOrder(trip: Trip): string[] {
+  return [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder).map((l) => l.id);
+}
+
+/** Is there a leg on that side to swap with? (The menu item is disabled if not.) */
+export function canMoveLeg(trip: Trip, legId: string, delta: -1 | 1): boolean {
+  const order = legOrder(trip);
+  const from = order.indexOf(legId);
+  return from >= 0 && from + delta >= 0 && from + delta < order.length;
+}
+
+/**
+ * "Move leg up/down". Every leg is renumbered from its new position, so a
+ * half-applied swap can never leave two legs sharing a sortOrder — the same
+ * shape the server's one-transaction renumber uses.
+ */
+export function moveLeg(trip: Trip, legId: string, delta: -1 | 1): Trip {
+  if (!canMoveLeg(trip, legId, delta)) return trip;
+  const order = legOrder(trip);
+  const from = order.indexOf(legId);
+  const [moved] = order.splice(from, 1);
+  order.splice(from + delta, 0, moved!);
+  return { ...trip, legs: trip.legs.map((l) => ({ ...l, sortOrder: order.indexOf(l.id) })) };
+}
+
+/**
+ * "Move to leg". The stop is re-parented and appended to the end of the
+ * destination — the same "the server appends" rule a create follows, so the
+ * optimistic tree and the row the PATCH writes agree.
+ */
+export function moveStopToLeg(trip: Trip, stopId: string, legId: string): Trip {
+  const moving = stopMap(trip).get(stopId);
+  if (!moving || moving.legId === legId) return trip;
+  const highest = trip.legs
+    .find((l) => l.id === legId)
+    ?.stops.reduce((n, s) => Math.max(n, s.sortOrder), -1);
+  if (highest === undefined) return trip;
+  const moved: Stop = { ...moving, legId, sortOrder: highest + 1 };
+  return mapLegs(trip, (l) => {
+    if (l.id === moving.legId) return { ...l, stops: l.stops.filter((s) => s.id !== stopId) };
+    if (l.id === legId) return { ...l, stops: [...l.stops, moved] };
+    return l;
+  });
+}
+
+/** The stop-dates dialog, and "Unschedule" — which is both dates going null. */
+export function setStopDates(
+  trip: Trip,
+  stopId: string,
+  arriveDate: IsoDate | null,
+  departDate: IsoDate | null,
+): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate }));
+}
