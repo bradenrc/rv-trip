@@ -22,6 +22,7 @@ const summary = {
   startDate: "2026-08-01",
   endDate: "2026-08-10",
   status: "planning",
+  statusAuto: true,
   rating: null,
   note: null,
   days: 10,
@@ -123,6 +124,7 @@ describe("createApiClient", () => {
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
     const b = await api.trips.get("t1");
     expect(b.trip.status).toBe("planning");
+    expect(b.trip.statusAuto).toBe(true);
     expect(b.trip.homeBase).toBeNull();
     expect(Object.keys(b.routes)).toEqual(["1,2|3,4|no-rig"]);
   });

@@ -1,27 +1,21 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
+import { reservationCreateInput } from "@rv-trip/core";
 import { createReservation } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 
-const bodySchema = z.object({
-  stopId: z.string().uuid(),
-  type: z.enum([
-    "campground",
-    "lodging",
-    "dining",
-    "event",
-    "tour",
-    "activity",
-    "transport",
-    "other",
-  ]),
-  name: z.string().min(1),
-  cost: z.number().nonnegative().nullable(),
-  checkIn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
-});
-
+/**
+ * "Add reservation" — and the body an undone DELETE re-POSTs, which is why the
+ * whole editable row travels rather than the four fields the form used to
+ * collect. 201 carries the core `Reservation` shape, so the sheet can splice
+ * exactly what it renders.
+ *
+ * The body is derived from the core schema now that this item edits it (the
+ * shape was hand-rolled here). An insert has no WHERE to match zero rows, so
+ * ownership is proved by an explicit check on the parent STOP inside the
+ * mutation, and a stop the caller does not own reads as 404.
+ */
 export async function POST(req: Request) {
-  const parsed = bodySchema.safeParse(await req.json());
+  const parsed = reservationCreateInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }

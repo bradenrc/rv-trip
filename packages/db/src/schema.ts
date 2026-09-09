@@ -57,6 +57,9 @@ export const trips = pgTable(
     startDate: date("start_date").notNull(),
     endDate: date("end_date").notNull(),
     status: tripStatus("status").notNull().default("planning"),
+    // Whether `status` is derived from the dates at read (deriveTripStatus) or
+    // pinned by hand. The override is the only thing stored about status.
+    statusAuto: boolean("status_auto").notNull().default(true),
     // Trip-level "revisit" memory shown on the dashboard's Traveled cards.
     rating: smallint("rating"),
     note: text("note"),

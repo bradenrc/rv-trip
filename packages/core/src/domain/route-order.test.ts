@@ -27,6 +27,7 @@ function seedTrip(): Trip {
     startDate: "2026-08-01",
     endDate: "2026-08-28",
     status: "planning",
+    statusAuto: true,
     rating: null,
     note: null,
     legs: [
