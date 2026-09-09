@@ -26,11 +26,25 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // `dark` is the literal default in the HTML, so it is true with JS off and
+    // on a first-ever visit. suppressHydrationWarning: the inline script below
+    // removes the class before hydration for anyone who chose light, and React
+    // would otherwise report a recoverable className mismatch on <html>.
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
       <body className="min-h-full flex flex-col bg-rv-surface-alt">
+        {/* First child of <body>: runs before any content paints. It only ever
+            REMOVES the class — dark is never a JS conclusion. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "try{if(localStorage.getItem('rv-theme')==='light')" +
+              "document.documentElement.classList.remove('dark')}catch{}",
+          }}
+        />
         <TooltipProvider>
           <Nav />
           {children}

@@ -55,7 +55,7 @@ export function AllScheduledCard() {
   return (
     <div className="rounded-rv-card border border-rv-green bg-rv-green-soft p-4">
       <div className="flex items-center gap-2.5">
-        <CircleCheck className="size-[22px] text-rv-ember" />
+        <CircleCheck className="size-[22px] text-rv-accent" />
         <div>
           <div className="text-[15px] font-bold text-rv-green-ink">Everything scheduled</div>
           <p className="m-0 mt-0.5 text-[13px] text-rv-green-ink/85">

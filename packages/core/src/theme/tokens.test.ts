@@ -8,13 +8,23 @@ import { RV, categoryOf, dayKindColor } from "./tokens";
  * `tokens.ts` mirrors `packages/ui/styles/entry.css` by hand. This test reads
  * the stylesheet and checks every mirrored value, so a palette change that
  * forgets the native side fails here rather than on someone's phone.
+ *
+ * Since issue #19 the stylesheet holds no `--color-rv-*: #hex` literals at all:
+ * `@theme inline` maps every `--color-rv-*` to a raw `--rv-*` twin, and the raw
+ * twins are declared twice — light on `:root`, dark on `.dark`. Reading the
+ * `@theme inline` map would compare each native literal against the string
+ * "var(--rv-…)", which nothing can equal, so the resolver is pointed at the raw
+ * DARK half: night is the product default and the native app ships no toggle.
  */
 const here = dirname(fileURLToPath(import.meta.url));
 const css = readFileSync(join(here, "../../../ui/styles/entry.css"), "utf8");
 
+/** The raw dark half — `.dark { --rv-*: <literal>; }`. */
+const darkHalf = css.slice(css.indexOf(".dark {"), css.indexOf("}", css.indexOf(".dark {")));
+
 function cssVar(name: string): string {
-  const m = css.match(new RegExp(`--color-rv-${name}:\\s*(#[0-9a-fA-F]{6})`));
-  if (!m) throw new Error(`--color-rv-${name} not found in entry.css`);
+  const m = darkHalf.match(new RegExp(`--rv-${name}:\\s*(#[0-9a-fA-F]{6})`));
+  if (!m) throw new Error(`--rv-${name} not found in the .dark half of entry.css`);
   return m[1]!.toLowerCase();
 }
 
@@ -25,10 +35,10 @@ const MIRROR: Record<keyof typeof RV, string> = {
   green: "green",
   greenSoft: "green-soft",
   greenInk: "green-ink",
-  ember: "ember",
-  emberBright: "ember-bright",
-  emberDeep: "ember-deep",
-  emberSoft: "ember-soft",
+  accent: "accent",
+  accentBright: "accent-bright",
+  accentDeep: "accent-deep",
+  accentSoft: "accent-soft",
   ink: "ink",
   inkMuted: "ink-muted",
   inkFaded: "ink-faded",

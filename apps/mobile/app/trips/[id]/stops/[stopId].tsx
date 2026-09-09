@@ -77,7 +77,7 @@ export default function StopScreen() {
           )}
           {costTotal > 0 && (
             <Text style={[styles.mono, { textAlign: "right" }]}>
-              Stop total <Text style={{ color: C.ember, fontWeight: "700" }}>${costTotal.toLocaleString("en-US")}</Text>
+              Stop total <Text style={{ color: C.accent, fontWeight: "700" }}>${costTotal.toLocaleString("en-US")}</Text>
             </Text>
           )}
         </Section>
@@ -147,7 +147,7 @@ function ReservationCard({ r }: { r: Reservation }) {
       </View>
       <View style={{ alignItems: "flex-end", gap: 4 }}>
         {r.cost != null && (
-          <Text style={{ fontFamily: F.mono, color: C.ember, fontWeight: "700", fontSize: 13 }}>
+          <Text style={{ fontFamily: F.mono, color: C.accent, fontWeight: "700", fontSize: 13 }}>
             ${r.cost.toLocaleString("en-US")}
           </Text>
         )}

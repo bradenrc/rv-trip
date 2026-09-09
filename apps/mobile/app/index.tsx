@@ -9,7 +9,7 @@ import { C, F, R } from "../src/theme";
 import { Button, Card, Centered, Kicker, Muted, Pill, Stars } from "../src/ui";
 
 const STATUS: Record<TripStatus, { label: string; color: string }> = {
-  planning: { label: "Planning", color: C.ember },
+  planning: { label: "Planning", color: C.accent },
   upcoming: { label: "Upcoming", color: C.info },
   complete: { label: "Traveled", color: C.green },
 };
@@ -61,7 +61,7 @@ export default function TripsScreen() {
           contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
         >
-          <Kicker color={C.ember}>Your trips</Kicker>
+          <Kicker color={C.accent}>Your trips</Kicker>
           <Text style={styles.h1}>Where to next?</Text>
 
           {GROUPS.map((g) => {

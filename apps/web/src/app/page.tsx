@@ -40,7 +40,7 @@ export default async function Home() {
       {/* Header */}
       <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
         <div>
-          <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
+          <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
             Your trips
           </div>
           <h1 className="m-0 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
@@ -49,7 +49,7 @@ export default async function Home() {
         </div>
         <Link
           href="/trips/new"
-          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-ember px-[18px] py-[11px] text-[14px] font-bold text-rv-navy"
+          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-accent-deep px-[18px] py-[11px] text-[14px] font-bold text-rv-accent-ink"
         >
           <Plus className="size-[15px]" fill="currentColor" strokeWidth={2.5} />
           New trip

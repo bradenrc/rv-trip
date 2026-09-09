@@ -51,7 +51,7 @@ export function Stars({ value, size = 16, onSet }: { value: number; size?: numbe
           accessibilityRole={onSet ? "button" : undefined}
           accessibilityLabel={`${n} star${n === 1 ? "" : "s"}`}
         >
-          <Text style={{ fontSize: size, color: n <= value ? C.ember : C.borderHi, lineHeight: size + 4 }}>★</Text>
+          <Text style={{ fontSize: size, color: n <= value ? C.accent : C.borderHi, lineHeight: size + 4 }}>★</Text>
         </Pressable>
       ))}
     </View>
@@ -81,23 +81,23 @@ export function CategoryTile({ type, size = 34 }: { type: ReservationType; size?
 export function Button({
   children,
   onPress,
-  tone = "ember",
+  tone = "accent",
 }: {
   children: ReactNode;
   onPress: () => void;
-  tone?: "ember" | "ghost";
+  tone?: "accent" | "ghost";
 }) {
-  const ember = tone === "ember";
+  const accent = tone === "accent";
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       style={({ pressed }) => [
         styles.button,
-        ember ? { backgroundColor: pressed ? C.emberBright : C.ember } : { borderWidth: 1, borderColor: C.borderHi },
+        accent ? { backgroundColor: pressed ? C.accentBright : C.accent } : { borderWidth: 1, borderColor: C.borderHi },
       ]}
     >
-      <Text style={[styles.buttonText, { color: ember ? C.navy : C.ink }]}>{children}</Text>
+      <Text style={[styles.buttonText, { color: accent ? C.navy : C.ink }]}>{children}</Text>
     </Pressable>
   );
 }

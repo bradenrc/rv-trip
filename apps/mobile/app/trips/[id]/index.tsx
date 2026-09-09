@@ -64,7 +64,7 @@ export default function TripScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
       >
         {/* Masthead */}
-        <Kicker color={C.ember}>Trip planner</Kicker>
+        <Kicker color={C.accent}>Trip planner</Kicker>
         <Text style={styles.h1}>{trip.title}</Text>
         <Text style={styles.mono}>
           {fullRange(trip.startDate, trip.endDate)} · {timeline!.rhythm.length} days

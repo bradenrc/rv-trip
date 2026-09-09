@@ -5,39 +5,44 @@ import type { DayKind } from "../domain/derive-days";
  * The design system's colour tokens as DATA — for clients that cannot read
  * CSS custom properties (React Native, map SDKs).
  *
- * Provenance: `packages/ui/styles/entry.css` `@theme` block ("Nightfall &
- * Ember", issue #3). The web reads the CSS variables; this file mirrors their
- * values so the native app wears the same palette. When the palette changes
- * (issue #19 revalues these to Tailwind Slate + Sky), change both — the
- * nightfall-tokens test already guards the two stylesheets against drift, and
+ * Provenance: `packages/ui/styles/entry.css`, the raw `.dark { --rv-*: … }`
+ * half ("Nightfall & Ember" from issue #3, revalued to Tailwind Slate + Sky by
+ * issue #19). The web reads the CSS variables; this file mirrors their values
+ * so the native app wears the same palette.
+ *
+ * Why the DARK half specifically: since #19 the stylesheet carries the palette
+ * twice — light on `:root`, dark on `.dark` — behind one `@theme inline` map.
+ * Night is the product default and the native app ships no theme toggle, so
+ * the dark half is the one it mirrors. Change both when the palette changes:
+ * the nightfall-tokens test guards the two stylesheets against drift, and
  * `tokens.test.ts` guards this file against `entry.css`.
  */
 export const RV = {
-  navy: "#0a1520",
-  navyDeep: "#08182b",
-  navySoft: "#21374d",
-  green: "#7cd897",
-  greenSoft: "#1c3a2b",
-  greenInk: "#a8e8bd",
-  ember: "#f28c5e",
-  emberBright: "#ffa477",
-  emberDeep: "#c14d20",
-  emberSoft: "#3a2b22",
-  ink: "#eef5fa",
-  inkMuted: "#b8cbda",
-  inkFaded: "#8fa8bd",
-  inkSubtle: "#5f7690",
-  surface: "#182b3d",
-  surfaceAlt: "#101f2d",
-  border: "#2e4459",
-  borderSoft: "#26394b",
-  borderHi: "#3d566c",
-  warning: "#f0bc55",
-  warningSoft: "#3a3220",
-  info: "#6fc4d8",
-  infoSoft: "#183440",
-  travel: "#a79ec8",
-  travelSoft: "#2b2839",
+  navy: "#020617",
+  navyDeep: "#0f172a",
+  navySoft: "#334155",
+  green: "#34d399",
+  greenSoft: "#022c22",
+  greenInk: "#6ee7b7",
+  accent: "#38bdf8",
+  accentBright: "#7dd3fc",
+  accentDeep: "#0ea5e9",
+  accentSoft: "#082f49",
+  ink: "#f1f5f9",
+  inkMuted: "#cbd5e1",
+  inkFaded: "#94a3b8",
+  inkSubtle: "#64748b",
+  surface: "#1e293b",
+  surfaceAlt: "#0f172a",
+  border: "#334155",
+  borderSoft: "#1e293b",
+  borderHi: "#475569",
+  warning: "#fbbf24",
+  warningSoft: "#451a03",
+  info: "#22d3ee",
+  infoSoft: "#083344",
+  travel: "#a78bfa",
+  travelSoft: "#2e1065",
 } as const;
 
 export type RvColor = keyof typeof RV;
