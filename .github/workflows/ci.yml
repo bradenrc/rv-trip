@@ -1,0 +1,50 @@
+# CI — the mc-dev pipeline's `test_cmd` run on GitHub, plus a production build of
+# apps/web (issue #28, phase B3). One job on purpose: a single check name (`ci`)
+# is what branch protection on `main` will require, and what the pipeline's ship
+# driver waits on before its auto-merge lands.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A newer push to the same PR/branch cancels the run it superseded.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TURBO_TELEMETRY_DISABLED: "1"
+  NEXT_TELEMETRY_DISABLED: "1"
+  DO_NOT_TRACK: "1"
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # Version comes from the root package.json `packageManager` pin.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Mirrors .mc/config.yaml `test_cmd` exactly — this IS the pipeline's check.
+      - name: lint · typecheck · test
+        run: pnpm turbo run lint typecheck test
+
+      # The web app's production build. Every DB-backed route is `force-dynamic`
+      # and the pg Pool connects lazily, so the build needs DATABASE_URL to be SET
+      # (the db client throws at import when it is missing) but never reachable.
+      - name: build apps/web
+        run: pnpm turbo run build --filter=@rv-trip/web
+        env:
+          DATABASE_URL: postgres://ci:ci@127.0.0.1:1/ci
