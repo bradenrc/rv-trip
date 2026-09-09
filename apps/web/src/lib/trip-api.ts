@@ -6,11 +6,17 @@ import type {
   Leg,
   LegCreateInput,
   LegPatchInput,
+  LocateResponse,
+  LocateRow,
+  PlacesEnvelope,
   Reservation,
   ReservationCreateInput,
   ReservationPatchInput,
   ReservationType,
   RigProfileInput,
+  SavedPlace,
+  SavedPlaceCreateInput,
+  SavedPlacePatch,
   Stop,
   StopCreateInput,
   StopPatchInput,
@@ -125,4 +131,57 @@ export const tripApi = {
     pairs: { from: LatLng; to: LatLng }[],
   ): Promise<{ rigHash: string; routes: RouteMap }> =>
     req(`/api/routes`, "POST", { pairs }) as Promise<{ rigHash: string; routes: RouteMap }>,
+
+  /**
+   * The Places library's writes (docs/design/41 §3). They go through `req` like
+   * every other mutation — the library is our own data, so a failure is a real
+   * error to surface, not the picker's renderable degraded envelope.
+   *
+   * `savePlace` is also how a "Been there?" suggestion is accepted: POST with
+   * `status: "been"`, because the library row does not exist yet.
+   * `updatePlace` covers the edit sheet AND the graduation want → been (the
+   * server clears `source` on any patch that sets `status: "been"`).
+   */
+  savePlace: (input: SavedPlaceCreateInput): Promise<SavedPlace> =>
+    req(`/api/places`, "POST", input) as Promise<SavedPlace>,
+
+  updatePlace: (id: string, patch: SavedPlacePatch) =>
+    req(`/api/places/${id}`, "PATCH", patch),
+
+  deletePlace: (id: string) => req(`/api/places/${id}`, "DELETE"),
+
+  /**
+   * Locate — the bounded coordinate backfill (docs/design/41 §6). Ids only on
+   * the way in; the route re-reads each row's name and region under the
+   * owner's scope, so nothing here carries a name. At most `LOCATE_MAX_ROWS`
+   * rows per call, and the caller slices to that before it presses.
+   *
+   * Through `req` like the library's other writes: this is our own data, so a
+   * failure is a real error to surface, not a renderable degraded envelope. A
+   * row Google cannot place is not a failure — it comes back in
+   * `stillUnmapped` on a 200.
+   */
+  locatePlaces: (rows: LocateRow[]): Promise<LocateResponse> =>
+    req(`/api/places/locate`, "POST", { rows }) as Promise<LocateResponse>,
+
+  /**
+   * Place search for the picker (docs/design/41 §3). Deliberately NOT through
+   * `req`: the throttled answer is a 429 whose body is the real, renderable
+   * degraded envelope (`places-search.ts:placesEnvelopeStatus`), and `req`
+   * throws on !ok. Any other failure — offline, a proxy, a non-JSON body — is
+   * reported as the same degraded shape, so the picker has exactly one shape
+   * to render and never a thrown error to catch.
+   */
+  searchPlaces: async (q: string, near?: LatLng | null): Promise<PlacesEnvelope> => {
+    const params = new URLSearchParams({ q });
+    if (near) params.set("near", `${near.lat},${near.lng}`);
+    try {
+      const res = await fetch(`/api/places/search?${params}`);
+      const body = (await res.json()) as PlacesEnvelope;
+      if (!Array.isArray(body?.results)) throw new Error("not an envelope");
+      return body;
+    } catch {
+      return { results: [], degraded: true, reason: "upstream_error" };
+    }
+  },
 };
