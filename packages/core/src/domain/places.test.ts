@@ -127,6 +127,9 @@ function pnwLoop(status: Trip["status"]): Trip {
     startDate: "2026-08-01",
     endDate: "2026-08-28",
     status,
+    // `statusAuto` arrived with the trip-grammar writes (#40); a fixture that
+    // pins `status` explicitly is by definition not auto-derived.
+    statusAuto: false,
     rating: null,
     note: null,
     legs: [

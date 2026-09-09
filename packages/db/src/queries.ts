@@ -1,8 +1,15 @@
 import { eq, and, asc, desc } from "drizzle-orm";
-import { deriveDays, isScheduled, suggestionsFromTrips } from "@rv-trip/core";
+import {
+  deriveDays,
+  deriveTripStatus,
+  isScheduled,
+  suggestionsFromTrips,
+  todayIso,
+} from "@rv-trip/core";
 import { db } from "./index";
-import { trips, savedPlaces, rigs } from "./schema";
+import { trips, legs, stops, savedPlaces, rigs } from "./schema";
 import type {
+  IsoDate,
   Trip,
   Leg,
   Stop,
@@ -41,7 +48,12 @@ type TripRow = NonNullable<
   Awaited<ReturnType<typeof db.query.trips.findFirst<{ with: typeof TRIP_WITH }>>>
 >;
 
-function mapTripRow(row: TripRow): Trip {
+/**
+ * The one seam both `Trip` and `TripSummary` pass through — so status is
+ * derived exactly once, here, and the two shapes can never disagree. `today` is
+ * threaded in so every row of one listing is evaluated against the same date.
+ */
+function mapTripRow(row: TripRow, today: IsoDate = todayIso()): Trip {
   return {
     id: row.id,
     ownerId: row.ownerId,
@@ -49,16 +61,20 @@ function mapTripRow(row: TripRow): Trip {
     homeBase: row.homeBase,
     startDate: row.startDate,
     endDate: row.endDate,
-    status: row.status,
+    status: deriveTripStatus(
+      {
+        startDate: row.startDate,
+        endDate: row.endDate,
+        status: row.status,
+        statusAuto: row.statusAuto,
+      },
+      today,
+    ),
+    statusAuto: row.statusAuto,
     rating: row.rating,
     note: row.note,
     legs: row.legs.map(mapLeg),
   };
-}
-
-export async function getTripForOwner(ownerId: string): Promise<Trip | null> {
-  const row = await db.query.trips.findFirst({ where: eq(trips.ownerId, ownerId), with: TRIP_WITH });
-  return row ? mapTripRow(row) : null;
 }
 
 export async function getTripById(ownerId: string, tripId: string): Promise<Trip | null> {
@@ -78,7 +94,8 @@ export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]>
     orderBy: [asc(trips.startDate)],
     with: TRIP_WITH,
   });
-  return rows.map((r) => summarize(mapTripRow(r)));
+  const today = todayIso();
+  return rows.map((r) => summarize(mapTripRow(r, today)));
 }
 
 /**
@@ -92,7 +109,8 @@ export async function listTripsWithStopsForOwner(ownerId: string): Promise<Trip[
     orderBy: [asc(trips.startDate)],
     with: TRIP_WITH,
   });
-  return rows.map(mapTripRow);
+  const today = todayIso();
+  return rows.map((r) => mapTripRow(r, today));
 }
 
 function summarize(trip: Trip): TripSummary {
@@ -113,6 +131,7 @@ function summarize(trip: Trip): TripSummary {
     startDate: trip.startDate,
     endDate: trip.endDate,
     status: trip.status,
+    statusAuto: trip.statusAuto,
     rating: trip.rating,
     note: trip.note,
     days: days.length,
@@ -121,6 +140,39 @@ function summarize(trip: Trip): TripSummary {
     miles: Math.round(miles),
     open,
   };
+}
+
+/**
+ * Everything `PATCH /api/stops/:id` needs to judge a date write: the stop's
+ * CURRENT dates (a patch may send only one of the pair) and the window of the
+ * trip it hangs under, owner-scoped through the same stops -> legs -> trips
+ * join every stop write uses. `deriveDays` clamps to that window
+ * (derive-days.ts), so dates outside it would make the stop invisible rather
+ * than wrong — hence the 409. `null` means the owner has no such stop: a 404.
+ */
+export async function getStopDateContext(
+  ownerId: string,
+  stopId: string,
+): Promise<{
+  tripId: string;
+  tripStartDate: IsoDate;
+  tripEndDate: IsoDate;
+  arriveDate: IsoDate | null;
+  departDate: IsoDate | null;
+} | null> {
+  const rows = await db
+    .select({
+      tripId: trips.id,
+      tripStartDate: trips.startDate,
+      tripEndDate: trips.endDate,
+      arriveDate: stops.arriveDate,
+      departDate: stops.departDate,
+    })
+    .from(stops)
+    .innerJoin(legs, eq(stops.legId, legs.id))
+    .innerJoin(trips, eq(legs.tripId, trips.id))
+    .where(and(eq(stops.id, stopId), eq(trips.ownerId, ownerId)));
+  return rows[0] ?? null;
 }
 
 /**
@@ -157,7 +209,8 @@ export async function listSuggestionCandidatesForOwner(
     orderBy: [desc(trips.endDate)],
     with: TRIP_WITH,
   });
-  return suggestionsFromTrips(rows.map(mapTripRow));
+  const today = todayIso();
+  return suggestionsFromTrips(rows.map((r) => mapTripRow(r, today)));
 }
 
 /**
@@ -217,7 +270,7 @@ function mapPlace(name: string, lat: number | null, lng: number | null, gid: str
   return { name, lat, lng, googlePlaceId: gid };
 }
 
-function mapLeg(l: {
+export function mapLeg(l: {
   id: string;
   tripId: string;
   title: string;
@@ -233,7 +286,7 @@ function mapLeg(l: {
   };
 }
 
-interface MapStopRow {
+export interface MapStopRow {
   id: string;
   legId: string;
   placeName: string;
@@ -249,7 +302,7 @@ interface MapStopRow {
   ideas: MapIdeaRow[];
 }
 
-function mapStop(s: MapStopRow): Stop {
+export function mapStop(s: MapStopRow): Stop {
   return {
     id: s.id,
     legId: s.legId,
@@ -278,7 +331,9 @@ interface MapReservationRow {
   notes: string | null;
 }
 
-function mapReservation(r: MapReservationRow): Reservation {
+/** Exported so a create/promote can hand its INSERT ... returning row back in
+ * the core shape — the same seam the read path maps through. */
+export function mapReservation(r: MapReservationRow): Reservation {
   return {
     id: r.id,
     stopId: r.stopId,
@@ -308,7 +363,9 @@ interface MapIdeaRow {
   sortOrder: number;
 }
 
-function mapIdea(i: MapIdeaRow): Idea {
+/** Exported for the same reason `mapReservation` is: `createIdea` returns the
+ * row it just inserted, and the client splices exactly that shape. */
+export function mapIdea(i: MapIdeaRow): Idea {
   return {
     id: i.id,
     stopId: i.stopId,

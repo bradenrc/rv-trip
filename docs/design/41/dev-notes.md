@@ -942,3 +942,125 @@ feature had to follow" in both cases — no colour was chosen here.
 - **Not run** (unchanged from the dev round, recorded so the walk is not misled):
   `pnpm backfill:places` and the real Google round-trip — SKIPPED, no `GOOGLE_API_KEY` and no
   database in this environment. The fixup changed no code on either path.
+
+---
+
+## Fixup round 2 — re-land on `origin/main` @ `b57c5ae` (Epic #40, trip-grammar writes)
+
+Second ship attempt on `mc/fixup/issue-41-v0` was blocked `[merge-conflict]`: PR #50
+("feat(40): Epic · Trip grammar writes") landed on main after round 1 rebased onto
+`0a9284c`. `git merge --no-ff origin/main` reproduced it exactly — three `UU` files, all
+three of them **import-block collisions only**, plus two type errors that surfaced only
+after the markers were gone. No hunk required feature judgment; every resolution below is
+"both sides keep what they added" or "main moved, the feature followed".
+
+### Conflict 1 — `apps/web/src/lib/trip-api.ts:1-30` (type import)
+
+Both epics widened the same single `import type { … } from "@rv-trip/core"` block. #41
+added `LocateResponse, LocateRow, PlacesEnvelope, SavedPlace, SavedPlaceCreateInput,
+SavedPlacePatch`; #40 added the whole trip/leg/stop/reservation write vocabulary. `git`
+could not union them because `RigProfileInput` sat on both sides.
+
+**Resolved: union, re-alphabetized** (`trip-api.ts:1-22`). The two method sets are in
+disjoint regions of the `tripApi` object and auto-merged cleanly — verified by listing the
+object's keys: #40's `createTrip`/`createLeg`/`createStop`/`createReservation`/`createIdea`/
+`promoteIdea`/`reorderLegs`/`reorderLeg` (`:44-121`) and #41's `savePlace`/`updatePlace`/
+`deletePlace`/`locatePlaces`/`searchPlaces` (`:145-183`) are all present.
+
+### Conflict 2 — `packages/db/src/queries.ts:2` (value import)
+
+One-line collision on the `@rv-trip/core` import: #41 added `suggestionsFromTrips`, #40
+added `deriveTripStatus` + `todayIso`, both keeping `deriveDays, isScheduled`.
+
+**Resolved: union, expanded to a multi-line import** (`queries.ts:2-8`).
+
+### Conflict 3 — `packages/db/src/mutations.ts:15-25` (type + value imports)
+
+Same shape: #41 added the `SavedPlace`/`SavedPlaceCreate`/`SavedPlacePatch` types and the
+`mapSavedPlaceRow` re-import from `./queries`; #40 added `TripStatus` and the
+`mapIdea/mapLeg/mapReservation/mapStop` mappers.
+
+**Resolved: union of both** (`mutations.ts:15-33`). The bodies never collided — #41's
+`mutations.ts` delta is purely additive (a trailing `createSavedPlace` /
+`updateSavedPlaceFields` / `deleteSavedPlace` block, `:584-622`), and #40 rewrote only the
+functions above it. Export list after the merge carries all 22: #40's trip/leg/stop/
+reservation/idea writes plus #41's three saved-place writes.
+
+### Post-merge break 1 — `packages/db/src/queries.ts:212` (`mapTripRow` grew a parameter)
+
+Not a textual conflict, so `git` merged it silently and `tsc` caught it:
+
+```
+src/queries.ts(212,40): error TS2345: … Types of parameters 'today' and 'index' are
+incompatible. Type 'number' is not assignable to type 'string'.
+```
+
+#40 changed `mapTripRow(row)` → `mapTripRow(row, today: IsoDate = todayIso())`
+(`queries.ts:56`) so `deriveTripStatus` gets one stable "today" per query. #41's
+`listSuggestionCandidatesForOwner` had written `rows.map(mapTripRow)` point-free, which
+after the widening feeds the array **index** in as `today`.
+
+**Fixed** by adopting #40's own idiom verbatim — hoist `todayIso()` once, pass it
+explicitly (`queries.ts:211-212`), exactly as `listTripsForOwner:97-98` and
+`listTripsWithStopsForOwner:112-113` already do. Behaviourally identical for #41 (the
+suggestion rule filters on `status === "complete"`, which the query already does in SQL).
+
+### Post-merge break 2 — `packages/core/src/domain/places.test.ts:122` (`Trip.statusAuto`)
+
+```
+src/domain/places.test.ts(122,3): error TS2741: Property 'statusAuto' is missing …
+```
+
+#40 added the required `statusAuto: boolean` to `Trip` (`types.ts:117`). #41's `pnwLoop()`
+fixture predates it.
+
+**Fixed** by adding `statusAuto: false` to the fixture (`places.test.ts:126-128`) — the
+fixture takes `status` as a parameter, i.e. it is pinning status explicitly, which is what
+`statusAuto: false` means. This is an existing test's type following main; no assertion,
+input or expectation changed, and all 23 `places.test.ts` cases still pass.
+
+### What did NOT need doing
+
+- **`pnpm-lock.yaml`** — untouched by the merge and by both branches. #41's `package.json`
+  deltas are a script (`backfill:places`) and an export subpath
+  (`./providers/google-places`); it added no dependency, and #40 added none either.
+  `pnpm install --frozen-lockfile` succeeded, which is the check the ship's setup step runs.
+- **The `rv-*` token mirror** (`packages/ui/styles/entry.css` ↔ `apps/web/src/app/globals.css`)
+  — neither file is in this merge's blast radius; #40 touched no CSS. Round 1's mirror
+  still holds.
+- **A Drizzle migration** — `packages/db/drizzle/` still does not exist. #40 added three
+  columns to `schema.ts` and, like #41, relies on `db:push`. Nothing to regenerate.
+- **`apps/web/src/app/places/page.tsx` and `components/map/MapOverview.tsx`** — round 1's
+  conflicts. #40 touched neither, so both auto-merged with no marker this time.
+- **`packages/core/src/domain/types.ts` and `domain/index.ts`** — both epics appended, in
+  different regions; `git` unioned them without a marker and `tsc` confirms no duplicate
+  declaration or export.
+
+### Checks run (this round, in the worktree, after the resolutions)
+
+- `pnpm install --frozen-lockfile` → `Done in 6.5s` (1191 packages, offline from the store;
+  the lockfile is up to date, so the ship's setup step will not fail here).
+- `pnpm turbo run lint typecheck test --force` → **`Tasks: 8 successful, 8 total`**
+  (`Time: 5.035s`, 0 cached). This is the brief's exact command.
+- `pnpm turbo run test` (inside the above) → `Test Files 27 passed (27) · Tests 493 passed
+  (493)`, including #41's own `places.test.ts` (23), `place-form.test.ts` (23),
+  `places-search.test.ts` (22), `places-locate.test.ts` (24), `place-picker.test.ts` (38),
+  `google-places.test.ts` (15), `types.test.ts` (14) **and** #40's `trip-form` (34),
+  `trip-status` (15), `leaf-form` (18), `leg-stop-write-contract` (21).
+- `pnpm turbo run typecheck --filter=@rv-trip/web --force` → `Tasks: 2 successful, 2 total`
+  (run separately to be certain the app's `tsc --noEmit` was not skipped by the cache).
+- **SKIPPED (no env), unchanged from the dev round**: `pnpm backfill:places`, `pnpm db:push`
+  and the live Google Places round-trip — no database and no `GOOGLE_API_KEY` here. The
+  fixup changed no code on any of those paths.
+- `DATABASE_URL=postgres://ci:ci@127.0.0.1:1/ci pnpm turbo run build --filter=@rv-trip/web
+  --env-mode=loose` → `Tasks: 2 successful, 2 total`. Run because `origin/main` moved once
+  more *during* this fixup — `d97cb1a` ("ci(28): GitHub Actions running the pipeline's
+  test_cmd + apps/web build", PR #51) added a real `apps/web` production build to CI. The
+  route table it printed carries all six of #41's new handlers (`/api/places`,
+  `/api/places/[id]`, `/api/places/details/[id]`, `/api/places/locate`, `/api/places/search`)
+  next to #40's, every one `ƒ` (dynamic), so the new gate is green on this tree.
+  `--env-mode=loose` stands in for `d97cb1a`'s `turbo.json` `passThroughEnv: ["DATABASE_URL"]`,
+  which this merge does not yet contain.
+- **This merge's second parent is `b57c5ae`, the main the brief pinned, not `d97cb1a`.**
+  `d97cb1a` touches only `.github/workflows/ci.yml` and `turbo.json`; #41 touches neither, so
+  the ship's own merge picks it up conflict-free and no second local merge was warranted.

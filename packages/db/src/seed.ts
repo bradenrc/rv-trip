@@ -19,6 +19,10 @@ async function main() {
       startDate: "2026-08-01",
       endDate: "2026-08-28",
       status: "planning",
+      // Pinned: the demo trip's dates have passed, and deriveTripStatus would
+      // otherwise read it as complete. The whole app is built around it being
+      // the trip you are planning, so the seed makes that a manual choice.
+      statusAuto: false,
     })
     .returning();
 

@@ -13,7 +13,7 @@ import {
   FloatingStopCard,
   AllScheduledCard,
 } from "@rv-trip/ui";
-import type { TimelineModel } from "@/lib/trip-logic";
+import type { TimelineGap, TimelineModel } from "@/lib/trip-logic";
 
 /** Locked to Compact per the app-framework v2 handoff — the exploratory
  * Comfortable/Compact/Dense control was retired. One density, one rhythm. */
@@ -26,7 +26,9 @@ export function Timeline({
 }: {
   model: TimelineModel;
   onOpenStop: (id: string) => void;
-  onSchedule: (stopId: string) => void;
+  /** `gap` is the open span the card was DROPPED on — the stop takes its first
+   * date, not the trip's longest empty run (#40). */
+  onSchedule: (stopId: string, gap: TimelineGap | null) => void;
 }) {
   const [draggedId, setDraggedId] = useState<string | null>(null);
 
@@ -71,7 +73,7 @@ export function Timeline({
                     active={dragging}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={() => {
-                      if (draggedId) onSchedule(draggedId);
+                      if (draggedId) onSchedule(draggedId, g);
                       setDraggedId(null);
                     }}
                   />

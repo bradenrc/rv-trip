@@ -111,11 +111,162 @@ export const trip = z.object({
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus.default("planning"),
+  /** Whether `status` is derived from the dates (`deriveTripStatus`) or pinned.
+   * `false` is the ONLY thing stored about status — a manual choice, which the
+   * derivation then steps aside for and never re-derives. */
+  statusAuto: z.boolean().default(true),
   rating: rating,
   note: z.string().nullable().default(null),
   legs: z.array(leg).default([]),
 });
 export type Trip = z.infer<typeof trip>;
+
+/**
+ * The trip WRITE contract, derived from the grammar above rather than re-typed
+ * beside it — so a new field lands in the schema once and the handlers inherit
+ * it. `id`, `ownerId` and `legs` are never client-supplied.
+ */
+
+/** `POST /api/trips`. `homeBase` defaults to null when omitted. */
+export const tripCreateInput = trip.pick({
+  title: true,
+  startDate: true,
+  endDate: true,
+  homeBase: true,
+});
+export type TripCreateInput = z.infer<typeof tripCreateInput>;
+
+/** `PATCH /api/trips/:id` — every editable field, all optional, because the
+ * settings dialog sends only what it changed. `.partial()` over a defaulted
+ * field yields an ABSENT key, not the default, so an omitted field is left
+ * alone rather than reset (pinned by trip-write-contract.test.ts). */
+export const tripPatchInput = trip
+  .pick({
+    title: true,
+    homeBase: true,
+    startDate: true,
+    endDate: true,
+    status: true,
+    statusAuto: true,
+    rating: true,
+    note: true,
+  })
+  .partial();
+export type TripPatchInput = z.infer<typeof tripPatchInput>;
+
+/**
+ * The leg + stop WRITE contract — derived from the grammar above for the same
+ * reason the trip one is: a field lands in the schema once and the handlers
+ * inherit it. `id` and `sortOrder` are never client-supplied on a create (the
+ * server appends), and `legs`/`stops`/`reservations`/`ideas` are never written
+ * through their parent.
+ *
+ * The id-shaped fields are tightened to `.uuid()` here rather than in the
+ * grammar: they address a real `uuid` column, so a malformed one is a 400 at
+ * the boundary instead of a Postgres cast error deeper in. Same convention the
+ * shipped handlers already use (`api/reservations/route.ts:7`).
+ */
+
+/** `POST /api/legs` — the "Add leg" button. The server appends the sortOrder. */
+export const legCreateInput = leg
+  .pick({ title: true })
+  .extend({ tripId: z.string().uuid() });
+export type LegCreateInput = z.infer<typeof legCreateInput>;
+
+/** `PATCH /api/legs/:id` — the inline rename. Order moves through reorder. */
+export const legPatchInput = leg.pick({ title: true }).partial();
+export type LegPatchInput = z.infer<typeof legPatchInput>;
+
+/** `POST /api/trips/:id/legs/reorder` — "Move leg up/down" sends the whole new
+ * order, so the renumber is one transaction rather than a swap of two rows. */
+export const legReorderInput = z.object({
+  order: z.array(z.string().uuid()).min(1),
+});
+export type LegReorderInput = z.infer<typeof legReorderInput>;
+
+/** `POST /api/stops` — per-leg "Add stop". A stop is born floating unless the
+ * caller already has dates for it; the server appends the sortOrder. */
+export const stopCreateInput = stop
+  .pick({ place: true, arriveDate: true, departDate: true })
+  .extend({ legId: z.string().uuid() });
+export type StopCreateInput = z.infer<typeof stopCreateInput>;
+
+/**
+ * `PATCH /api/stops/:id` — the widened stop write. `placeName` is the rename
+ * (the row menu edits the name, never the coordinates), `legId` is "Move to
+ * leg", `sortOrder` is the floating-rail reorder, and both dates going null is
+ * "Unschedule". Every key optional: the menu sends one field at a time.
+ */
+export const stopPatchInput = stop
+  .pick({
+    arriveDate: true,
+    departDate: true,
+    sortOrder: true,
+    rating: true,
+    notes: true,
+  })
+  .extend({ placeName: place.shape.name, legId: z.string().uuid() })
+  .partial();
+export type StopPatchInput = z.infer<typeof stopPatchInput>;
+
+/**
+ * The reservation + idea WRITE contract — the two LEAVES of the tree, derived
+ * from the grammar for the same reason the trip/leg/stop ones are.
+ *
+ * Both creates carry the whole editable row rather than the handful of fields
+ * the add form fills in, because a create is also how an UNDONE DELETE puts a
+ * row back: the DELETE has already committed by the time the toast is gone, so
+ * "Undo" re-POSTs the row it was holding rather than resurrecting the id. A
+ * body that could not carry `rating`/`notes` would silently drop them.
+ *
+ * `id`, `stopId` (path/body-supplied) and `ideaId` (only `promote` sets it) are
+ * never client-editable, and `sortOrder` is the server's to append.
+ */
+
+/** `POST /api/reservations` — the stop sheet's reservation form, and the undo. */
+export const reservationCreateInput = reservation
+  .pick({
+    type: true,
+    name: true,
+    checkIn: true,
+    checkOut: true,
+    confirmationNumber: true,
+    cost: true,
+    notes: true,
+  })
+  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+export type ReservationCreateInput = z.infer<typeof reservationCreateInput>;
+
+/** `PATCH /api/reservations/:id` — every editable field, all optional, because
+ * the form sends only what it changed (and the card's stars/note send one). */
+export const reservationPatchInput = reservation
+  .pick({
+    type: true,
+    name: true,
+    checkIn: true,
+    checkOut: true,
+    confirmationNumber: true,
+    cost: true,
+    rating: true,
+    notes: true,
+  })
+  .partial();
+export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
+
+/** `POST /api/ideas` — the stop sheet's "Add idea", and the undo. */
+export const ideaCreateInput = idea
+  .pick({ title: true, status: true, place: true, notes: true })
+  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
+
+/**
+ * `POST /api/ideas/:id/promote` — the type the promoted reservation lands as.
+ *
+ * Optional, defaulting to the `"activity"` the mutation used to hardcode, so a
+ * caller that posts no body at all (as the shipped client did) is unaffected.
+ */
+export const ideaPromoteInput = z.object({ type: reservationType.default("activity") });
+export type IdeaPromoteInput = z.infer<typeof ideaPromoteInput>;
 
 /**
  * The Places library: an account-scoped, cross-trip collection of spots.
@@ -222,6 +373,9 @@ export const tripSummary = z.object({
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus,
+  /** Mirrors `trip.statusAuto` so the dashboard row and the trip agree about
+   * whether the status it shows was derived or pinned. */
+  statusAuto: z.boolean(),
   rating,
   note: z.string().nullable(),
   days: z.number().int(),

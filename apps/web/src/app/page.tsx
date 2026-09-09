@@ -88,7 +88,7 @@ export default async function Home() {
               <SectionHead kicker="Been there" title="Traveled" count={traveled.length} />
               <p className="m-0 mb-4 mt-[-6px] max-w-[64ch] text-[14px] text-rv-ink-muted">
                 What you loved and the notes worth keeping — the seed for the next trip. Reopen any to
-                revisit or clone.
+                revisit.
               </p>
               <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
                 {traveled.map((t) => (
