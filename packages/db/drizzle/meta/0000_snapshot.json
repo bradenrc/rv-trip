@@ -1,0 +1,814 @@
+{
+  "id": "ad866767-b7a9-46e2-8b73-28fb6c39158a",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.ideas": {
+      "name": "ideas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "stop_id": {
+          "name": "stop_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "idea_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'idea'"
+        },
+        "place_name": {
+          "name": "place_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lat": {
+          "name": "lat",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lng": {
+          "name": "lng",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "google_place_id": {
+          "name": "google_place_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "ideas_stop_idx": {
+          "name": "ideas_stop_idx",
+          "columns": [
+            {
+              "expression": "stop_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "ideas_stop_id_stops_id_fk": {
+          "name": "ideas_stop_id_stops_id_fk",
+          "tableFrom": "ideas",
+          "tableTo": "stops",
+          "columnsFrom": [
+            "stop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.legs": {
+      "name": "legs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "trip_id": {
+          "name": "trip_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "legs_trip_idx": {
+          "name": "legs_trip_idx",
+          "columns": [
+            {
+              "expression": "trip_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "legs_trip_id_trips_id_fk": {
+          "name": "legs_trip_id_trips_id_fk",
+          "tableFrom": "legs",
+          "tableTo": "trips",
+          "columnsFrom": [
+            "trip_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.reservations": {
+      "name": "reservations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "stop_id": {
+          "name": "stop_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idea_id": {
+          "name": "idea_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "reservation_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "check_in": {
+          "name": "check_in",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "check_out": {
+          "name": "check_out",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confirmation_number": {
+          "name": "confirmation_number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cost": {
+          "name": "cost",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "reservations_stop_idx": {
+          "name": "reservations_stop_idx",
+          "columns": [
+            {
+              "expression": "stop_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "reservations_stop_id_stops_id_fk": {
+          "name": "reservations_stop_id_stops_id_fk",
+          "tableFrom": "reservations",
+          "tableTo": "stops",
+          "columnsFrom": [
+            "stop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "reservations_idea_id_ideas_id_fk": {
+          "name": "reservations_idea_id_ideas_id_fk",
+          "tableFrom": "reservations",
+          "tableTo": "ideas",
+          "columnsFrom": [
+            "idea_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.rigs": {
+      "name": "rigs",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "type": {
+          "name": "type",
+          "type": "rig_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "height_meters": {
+          "name": "height_meters",
+          "type": "numeric(6, 4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "width_meters": {
+          "name": "width_meters",
+          "type": "numeric(6, 4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "length_meters": {
+          "name": "length_meters",
+          "type": "numeric(6, 4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gross_weight_kg": {
+          "name": "gross_weight_kg",
+          "type": "numeric(10, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "propane_on_board": {
+          "name": "propane_on_board",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "rigs_owner_id_unique": {
+          "name": "rigs_owner_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "owner_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.saved_places": {
+      "name": "saved_places",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "region": {
+          "name": "region",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lat": {
+          "name": "lat",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lng": {
+          "name": "lng",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "google_place_id": {
+          "name": "google_place_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "type": {
+          "name": "type",
+          "type": "reservation_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'other'"
+        },
+        "status": {
+          "name": "status",
+          "type": "saved_place_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'want'"
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "trip_id": {
+          "name": "trip_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "saved_places_owner_idx": {
+          "name": "saved_places_owner_idx",
+          "columns": [
+            {
+              "expression": "owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "saved_places_trip_id_trips_id_fk": {
+          "name": "saved_places_trip_id_trips_id_fk",
+          "tableFrom": "saved_places",
+          "tableTo": "trips",
+          "columnsFrom": [
+            "trip_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.stops": {
+      "name": "stops",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "leg_id": {
+          "name": "leg_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "place_name": {
+          "name": "place_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lat": {
+          "name": "lat",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lng": {
+          "name": "lng",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "google_place_id": {
+          "name": "google_place_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arrive_date": {
+          "name": "arrive_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "depart_date": {
+          "name": "depart_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "stops_leg_idx": {
+          "name": "stops_leg_idx",
+          "columns": [
+            {
+              "expression": "leg_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "stops_leg_id_legs_id_fk": {
+          "name": "stops_leg_id_legs_id_fk",
+          "tableFrom": "stops",
+          "tableTo": "legs",
+          "columnsFrom": [
+            "leg_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.trips": {
+      "name": "trips",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "home_base": {
+          "name": "home_base",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "start_date": {
+          "name": "start_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_date": {
+          "name": "end_date",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "trip_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'planning'"
+        },
+        "status_auto": {
+          "name": "status_auto",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "rating": {
+          "name": "rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "trips_owner_idx": {
+          "name": "trips_owner_idx",
+          "columns": [
+            {
+              "expression": "owner_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.idea_status": {
+      "name": "idea_status",
+      "schema": "public",
+      "values": [
+        "idea",
+        "planned",
+        "done"
+      ]
+    },
+    "public.reservation_type": {
+      "name": "reservation_type",
+      "schema": "public",
+      "values": [
+        "campground",
+        "lodging",
+        "dining",
+        "event",
+        "tour",
+        "activity",
+        "transport",
+        "other"
+      ]
+    },
+    "public.rig_type": {
+      "name": "rig_type",
+      "schema": "public",
+      "values": [
+        "motorhome",
+        "trailer"
+      ]
+    },
+    "public.saved_place_status": {
+      "name": "saved_place_status",
+      "schema": "public",
+      "values": [
+        "want",
+        "been"
+      ]
+    },
+    "public.trip_status": {
+      "name": "trip_status",
+      "schema": "public",
+      "values": [
+        "planning",
+        "upcoming",
+        "complete"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

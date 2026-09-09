@@ -10,6 +10,7 @@
   "scripts": {
     "generate": "drizzle-kit generate",
     "migrate": "drizzle-kit migrate",
+    "baseline": "tsx src/baseline.ts",
     "push": "drizzle-kit push",
     "studio": "drizzle-kit studio",
     "seed": "tsx src/seed.ts",
