@@ -138,6 +138,7 @@ function deg2rad(d: number): number {
 
 export * from "./polyline";
 export * from "./navigation";
+export * from "./places-search";
 export * from "./route-format";
 export * from "./notices";
 
