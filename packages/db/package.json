@@ -14,6 +14,7 @@
     "push": "drizzle-kit push",
     "studio": "drizzle-kit studio",
     "seed": "tsx src/seed.ts",
+    "backfill:places": "tsx src/backfill-places.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

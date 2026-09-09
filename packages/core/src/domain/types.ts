@@ -296,6 +296,64 @@ export const savedPlace = z.object({
 });
 export type SavedPlace = z.infer<typeof savedPlace>;
 
+/**
+ * The WRITE grammar for the Places library (docs/design/41 §3).
+ *
+ * `savedPlace` above is the READ shape: the place fields are nested under
+ * `place`, `id`/`ownerId` are server-owned and `tripName` is joined. The bodies
+ * the picker and the library sheets actually send are FLAT and — for a PATCH —
+ * partial, so they get their own named schemas. Validating a create body
+ * against `savedPlace` fails on the missing `place`/`id`/`ownerId` and silently
+ * drops every flat key, which is exactly the bug these two exist to prevent.
+ *
+ * The field set is the mutable half of `saved_places` and maps 1:1 onto the
+ * columns (packages/db/src/schema.ts), so the mutations pass it straight
+ * through. `id`, `ownerId`, `createdAt` and the joined `tripName` are
+ * server-owned and are stripped from any body that sends them.
+ */
+export const savedPlaceCreate = z.object({
+  name: z.string().min(1),
+  region: z.string().nullable().default(null),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+  googlePlaceId: z.string().nullable().default(null),
+  type: reservationType.default("other"),
+  status: savedPlaceStatus.default("want"),
+  note: z.string().nullable().default(null),
+  source: z.string().nullable().default(null),
+  /** Set on a POST only when a suggestion is accepted straight onto "been". */
+  rating: rating.default(null),
+  tripId: z.string().uuid().nullable().default(null),
+});
+/** Post-parse: every default resolved. What the mutations receive. */
+export type SavedPlaceCreate = z.infer<typeof savedPlaceCreate>;
+/** Pre-parse: `name` and whatever else the caller chose to send. What a client
+ * hands `tripApi.savePlace`. */
+export type SavedPlaceCreateInput = z.input<typeof savedPlaceCreate>;
+
+/**
+ * PATCH /api/places/:id — every field optional, absent keys left absent so a
+ * patch never blanks a column it did not name. At least one recognized key is
+ * required: an empty `.set({})` is a Drizzle error, and a body of nothing but
+ * unknown keys is a caller bug that deserves a 400 rather than a 500.
+ */
+export const savedPlacePatch = savedPlaceCreate
+  .partial()
+  .refine((p) => Object.keys(p).length > 0, {
+    message: "patch must name at least one field",
+  });
+export type SavedPlacePatch = z.infer<typeof savedPlacePatch>;
+
+/**
+ * Graduation invariant, enforced server-side: "who told you about it" is queue
+ * metadata, not archive metadata, so a patch that moves a row onto the "been"
+ * shelf clears `source` whether or not the client remembered to send
+ * `source: null`.
+ */
+export function normalizeSavedPlacePatch(patch: SavedPlacePatch): SavedPlacePatch {
+  return patch.status === "been" ? { ...patch, source: null } : patch;
+}
+
 /** A stop is "scheduled" iff it has both dates. */
 export function isScheduled(
   s: Pick<Stop, "arriveDate" | "departDate">,

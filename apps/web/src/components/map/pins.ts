@@ -1,7 +1,7 @@
 import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
 import { driveMiles, estimateRoute, hasCoords, isScheduled } from "@rv-trip/core";
-import type { ReservationType, SavedPlace, Stop, Trip } from "@rv-trip/core";
+import type { LocateRow, ReservationType, SavedPlace, Stop, Trip } from "@rv-trip/core";
 import { dateRange } from "@/lib/trip-ui";
 
 /**
@@ -84,6 +84,17 @@ export interface UnmappedRow {
   id: string;
   name: string;
   layer: MapLayer;
+}
+
+/**
+ * The row as POST /api/places/locate wants it: ids only, plus which table the
+ * id names. The `kind` is derivable and is NOT a new field — "saved" is the one
+ * layer built from `savedPlaces` (buildMapModel below pushes those with
+ * `layer: "saved"`); the other three are all trip stops. Named here, beside the
+ * type it reads, so nothing downstream has to re-derive it.
+ */
+export function locateRowOf(row: UnmappedRow): LocateRow {
+  return { kind: row.layer === "saved" ? "place" : "stop", id: row.id };
 }
 
 /** One leg of the dashed estimate between consecutive scheduled stops. */

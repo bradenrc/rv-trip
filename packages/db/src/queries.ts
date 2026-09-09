@@ -1,5 +1,11 @@
 import { eq, and, asc, desc } from "drizzle-orm";
-import { deriveDays, deriveTripStatus, isScheduled, todayIso } from "@rv-trip/core";
+import {
+  deriveDays,
+  deriveTripStatus,
+  isScheduled,
+  suggestionsFromTrips,
+  todayIso,
+} from "@rv-trip/core";
 import { db } from "./index";
 import { trips, legs, stops, savedPlaces, rigs } from "./schema";
 import type {
@@ -11,6 +17,7 @@ import type {
   Idea,
   Place,
   SavedPlace,
+  PlaceSuggestion,
   RigProfile,
   TripSummary,
 } from "@rv-trip/core";
@@ -179,7 +186,58 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
     orderBy: [desc(savedPlaces.createdAt)],
     with: { trip: { columns: { title: true } } },
   });
-  return rows.map((r) => ({
+  return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null));
+}
+
+/**
+ * The "Been there?" candidates (docs/design/41 §7) — every stop AND every
+ * reservation rated ≥ 4 on a trip that is `complete`. Same `TRIP_WITH` load as
+ * the map's query; only the mapping differs, and that mapping is
+ * `suggestionsFromTrips` in @rv-trip/core so the ≥ 4 filter, the reservation's
+ * borrowed-region-but-never-borrowed-pin rule and the ordering are unit-tested
+ * where a test runner actually runs (packages/core/src/domain/places.test.ts).
+ *
+ * De-duplication against the library is NOT done here: it is `isAlreadySaved`
+ * against `listSavedPlacesForOwner`, applied in the island so that accepting a
+ * suggestion drops it without a second round-trip.
+ */
+export async function listSuggestionCandidatesForOwner(
+  ownerId: string,
+): Promise<PlaceSuggestion[]> {
+  const rows = await db.query.trips.findMany({
+    where: and(eq(trips.ownerId, ownerId), eq(trips.status, "complete")),
+    orderBy: [desc(trips.endDate)],
+    with: TRIP_WITH,
+  });
+  const today = todayIso();
+  return suggestionsFromTrips(rows.map((r) => mapTripRow(r, today)));
+}
+
+/**
+ * The saved_places row → `SavedPlace` seam: flat place columns in, the nested
+ * `place` the clients read out. Shared with the write path (mutations.ts) so a
+ * created or patched row comes back in exactly the shape the library renders —
+ * `tripName` is joined on read and passed in, never stored on the row.
+ */
+export function mapSavedPlaceRow(
+  r: {
+    id: string;
+    ownerId: string;
+    name: string;
+    lat: number | null;
+    lng: number | null;
+    googlePlaceId: string | null;
+    region: string | null;
+    type: SavedPlace["type"];
+    status: SavedPlace["status"];
+    note: string | null;
+    source: string | null;
+    rating: number | null;
+    tripId: string | null;
+  },
+  tripName: string | null,
+): SavedPlace {
+  return {
     id: r.id,
     ownerId: r.ownerId,
     place: mapPlace(r.name, r.lat, r.lng, r.googlePlaceId),
@@ -190,8 +248,8 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
     source: r.source,
     rating: r.rating,
     tripId: r.tripId,
-    tripName: r.trip?.title ?? null,
-  }));
+    tripName,
+  };
 }
 
 function haversineMiles(a: Place, b: Place): number {

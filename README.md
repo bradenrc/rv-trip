@@ -36,7 +36,11 @@ pnpm dev                     # http://localhost:3000
 ```
 
 Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
-(Drizzle Studio), `pnpm db:down`.
+(Drizzle Studio), `pnpm db:down`, `pnpm backfill:places` (geocode every
+coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
+is the Locate button beside the map's "N unmapped" count). Phone:
+`pnpm --filter @rv-trip/mobile ios` (Expo Go on the iOS Simulator, against the
+running web app).
 
 ### Schema changes
 
@@ -64,8 +68,7 @@ Only do that when the schema already matches `schema.ts`.
 
 Neon: the Vercel integration provides a pooled `DATABASE_URL` for the app and
 `DATABASE_URL_UNPOOLED` for DDL; `db:migrate` uses the unpooled one when it is
-set (see `.env.example`). Local docker needs only `DATABASE_URL`. Phone: `pnpm --filter @rv-trip/mobile ios`
-(Expo Go on the iOS Simulator, against the running web app).
+set (see `.env.example`). Local docker needs only `DATABASE_URL`.
 
 Where things stand: `docs/audit/2026-09-08-project-audit.md` (feature matrix,
 gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).

@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CircleDashed } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CircleDashed, LocateFixed } from "lucide-react";
+import { toast } from "sonner";
+import { LOCATE_MAX_ROWS, locateToastMessage } from "@rv-trip/core";
 import type { ReservationType, SavedPlace, Trip } from "@rv-trip/core";
 import {
   CategoryTile,
@@ -11,6 +14,7 @@ import {
   money,
   type CategoryLabel,
 } from "@rv-trip/ui";
+import { tripApi } from "@/lib/trip-api";
 import { MapMount } from "./MapMount";
 import {
   LAYER_LABEL,
@@ -18,10 +22,12 @@ import {
   buildMapModel,
   categoryCounts,
   layerCounts,
+  locateRowOf,
   type MapLayer,
   type MapPin,
   type PlacePin,
   type StopPin,
+  type UnmappedRow,
 } from "./pins";
 
 /**
@@ -49,6 +55,8 @@ export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPla
   const [layers, setLayers] = useState<Set<MapLayer>>(() => new Set(LAYER_ORDER));
   const [cat, setCat] = useState<CatFilter>("All");
   const [pickedId, setPickedId] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+  const router = useRouter();
 
   const lCounts = useMemo(() => layerCounts(model.pins, model.unmapped), [model]);
   const cCounts = useMemo(() => categoryCounts(places), [places]);
@@ -77,6 +85,34 @@ export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPla
   // so the rail is never pointing at something the map isn't drawing.
   const selected = visible.find((p) => p.id === pickedId) ?? visible[0] ?? null;
   const others = selected ? visible.filter((p) => p.id !== selected.id) : visible;
+
+  /**
+   * Locate (docs/design/41 §6) — one press, one bounded batch of at most
+   * LOCATE_MAX_ROWS, the button disabled for the duration. Ids only leave the
+   * browser; the route re-reads each row's name and region under the owner's
+   * scope and geocodes server-side.
+   *
+   * The refresh path (the design left it unnamed): `router.refresh()`. /map is
+   * a force-dynamic server component, and a written coordinate is not just a
+   * pin — it is an ordinal, a rail row and possibly two drive arcs, all
+   * recomputed by `buildMapModel` from props this island does not own. Patching
+   * that locally would be a second, divergent copy of the model.
+   */
+  const locate = () => {
+    const batch = unmappedVisible.slice(0, LOCATE_MAX_ROWS);
+    if (batch.length === 0) return;
+    setLocating(true);
+    tripApi
+      .locatePlaces(batch.map(locateRowOf))
+      .then(({ located, results }) => {
+        const found = new Set(results.map((r) => r.id));
+        const stuck = batch.filter((u) => !found.has(u.id)).map((u) => u.name);
+        toast.success(locateToastMessage(located, stuck));
+        router.refresh();
+      })
+      .catch(() => toast.error("Locate didn't run — check your connection."))
+      .finally(() => setLocating(false));
+  };
 
   const toggleLayer = (l: MapLayer) => {
     setLayers((prev) => {
@@ -119,11 +155,20 @@ export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPla
           />
         ))}
         {unmappedVisible.length > 0 && (
-          // A quiet fact, never a warning — and deliberately NOT a FilterChip:
-          // there is nothing here to press.
-          <span className="inline-flex items-center rounded-rv-pill border border-dashed border-rv-border-hi bg-transparent px-[13px] py-1.5 font-mono text-[11px] text-rv-ink-faded">
-            {unmappedVisible.length} unmapped
-          </span>
+          <>
+            {/* A quiet fact, never a warning — and deliberately NOT a
+                FilterChip: there is nothing here to press. The pressable thing
+                is the Locate button BESIDE it (§6, Gap 2), which appears and
+                disappears with this same count. */}
+            <span className="inline-flex items-center rounded-rv-pill border border-dashed border-rv-border-hi bg-transparent px-[13px] py-1.5 font-mono text-[11px] text-rv-ink-faded">
+              {unmappedVisible.length} unmapped
+            </span>
+            <LocateButton
+              rows={unmappedVisible}
+              running={locating}
+              onClick={locate}
+            />
+          </>
         )}
       </div>
 
@@ -195,6 +240,41 @@ export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPla
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * The one pressable thing in the unmapped row. A button that looks like a
+ * button — never a FilterChip, which reads as a filter — and it renders only
+ * beside a count above zero, because its caller does.
+ *
+ * Its label says what the press costs: at most LOCATE_MAX_ROWS rows, so a
+ * larger backlog reports the size of THIS batch, not of the backlog.
+ */
+function LocateButton({
+  rows,
+  running,
+  onClick,
+}: {
+  rows: UnmappedRow[];
+  running: boolean;
+  onClick: () => void;
+}) {
+  const n = Math.min(rows.length, LOCATE_MAX_ROWS);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={running}
+      className={`inline-flex items-center gap-1.5 rounded-rv-pill border px-[13px] py-1.5 font-mono text-[11px] ${
+        running
+          ? "cursor-default border-rv-border-hi bg-rv-surface text-rv-ink-faded"
+          : "cursor-pointer border-rv-green bg-rv-green-soft font-bold text-rv-green"
+      }`}
+    >
+      <LocateFixed className="size-3.5" />
+      {running ? `Looking up ${n} ${n === 1 ? "place" : "places"}…` : "Locate"}
+    </button>
   );
 }
 
