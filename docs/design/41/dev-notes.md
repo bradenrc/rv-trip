@@ -300,3 +300,133 @@ that is i5's island.
     also committed the escape row.
 - **NOT run:** any automated test that mounts the JSX — `apps/web` has no test runner (decision 1).
   The browser transcript above is the evidence for the render, and it is manual.
+
+---
+
+# Issue 41 — dev notes · epic item **i4**
+
+**Give `saved_places` a write path in db and API.** `packages/db/src/mutations.ts` had seven exports
+and none touched `savedPlaces`; the library was read-only. POST lands on the existing
+`api/places/route.ts`, PATCH + DELETE on a new `api/places/[id]/route.ts`, all owner-scoped via
+`getOwner()`.
+
+## What changed
+
+- **`packages/core/src/domain/types.ts:148-204`** — the write grammar, new:
+  - `savedPlaceCreate` (`:163-176`) — the FLAT `POST /api/places` body from wireframe §3
+    (`name`, `region`, `lat`, `lng`, `googlePlaceId`, `type`, `status`, `note`, `source`, `rating`,
+    `tripId`). Only `name` is required; every other field carries the column's default.
+  - `SavedPlaceCreate` (`:178`, post-parse — what the mutation takes) and `SavedPlaceCreateInput`
+    (`:181`, pre-parse — what a client hands `tripApi.savePlace`).
+  - `savedPlacePatch` (`:189-193`) — `savedPlaceCreate.partial()` plus a refine that rejects a body
+    with no recognized key.
+  - `normalizeSavedPlacePatch` (`:202-204`) — the graduation invariant, server-side.
+- **`packages/db/src/queries.ts:145-172`** — `mapSavedPlaceRow(row, tripName)` extracted from the
+  inline mapper `listSavedPlacesForOwner` used (`:130-131`, now one line), and exported so the write
+  path returns rows in exactly the shape the library renders.
+- **`packages/db/src/mutations.ts:165-229`** — the three mutations:
+  - `ownedTripTitle` (`:181-189`) — guard + join in one: a `tripId` this owner does not own throws
+    `"trip not found"`; an owned one hands back the title the created row displays.
+  - `createSavedPlace` (`:191-201`) → the created `SavedPlace`.
+  - `updateSavedPlaceFields` (`:208-220`) → `boolean`, from `.returning({ id })`.
+  - `deleteSavedPlace` (`:223-229`) → `boolean`, same mechanism. Hard delete, per §3.
+  - Import line `:3` gains `savedPlaces`; `:14` gains `mapSavedPlaceRow`.
+- **`apps/web/src/app/api/places/route.ts:17-28`** — `POST`, `savedPlaceCreate.safeParse` → 400,
+  201 with the created row, 404 on a foreign `tripId`. `GET` (`:7-9`) unchanged.
+- **`apps/web/src/app/api/places/[id]/route.ts`** (new) — `PATCH` (`:23-46`) and `DELETE` (`:48-56`).
+- **`apps/web/src/lib/trip-api.ts:69-85`** — `savePlace` / `updatePlace` / `deletePlace` on `tripApi`.
+- **`packages/core/src/domain/types.test.ts`** (new, 14 tests) — the write grammar, TDD (written
+  red first: `normalizeSavedPlacePatch is not a function`, 13 failed / 1 passed).
+
+## Key decisions (and where they answer a vet finding)
+
+1. **HIGH "data-shape claim fails" — resolved by naming the derived schemas.** The vet was right:
+   `savedPlace` is the READ shape (nested `place`, required `id`/`ownerId`), so `safeParse` of the
+   flat §3 body fails on the missing keys and drops every flat one. The routes validate against
+   `savedPlaceCreate` / `savedPlacePatch` instead, and `types.test.ts:36-40` pins the regression
+   directly — it asserts `savedPlace.safeParse(SAVE_BODY).success === false`.
+2. **HIGH "no write path for Locate" — the lat/lng write for a saved place is `savedPlacePatch`.**
+   `lat`/`lng` are ordinary patchable fields, so `updateSavedPlaceFields(owner, id, { lat, lng })`
+   is i7's write for `kind: "place"` — no new mutation needed, verified live (see Checks).
+   **Still open for i7:** the `kind: "stop"` half. `updateStopFields` (`mutations.ts:33-47`) takes
+   only `{ rating, notes, arriveDate, departDate }`; widening it to `{ lat, lng }` is i7's call, not
+   mine, and I did not touch it.
+3. **Graduation clears `source` on the server, not just in the client's body.** The acceptance body
+   is `{ status: "been", rating, tripId }` — no `source` key — and the row must still end with
+   `source` null. §3's example sends `source: null` explicitly; relying on that would make the
+   acceptance fail whenever a caller omits it. `normalizeSavedPlacePatch` forces it, and it is a
+   pure function in core so it is unit-tested where a runner exists.
+4. **`updateSavedPlaceFields` / `deleteSavedPlace` return `boolean`, not `void`.** This is what makes
+   the acceptance "a PATCH or DELETE naming another owner's id … does not 200" true rather than
+   aspirational: the WHERE is `id = ? AND owner_id = ?`, `.returning({ id })` reports whether it
+   matched, and the route turns `false` into 404. The existing `updateStopFields` returns `void` and
+   therefore 204s over a no-op write; I did not change it (out of scope), but qa may want to note it.
+5. **A foreign `tripId` is refused too.** Graduating your place onto someone else's trip is a
+   cross-tenant write the design does not mention. `ownedTripTitle` throws and the route 404s
+   ("trip not found"), matching `createReservation`'s shipped idiom (`mutations.ts:49-69` →
+   `api/reservations/route.ts:29-31`).
+6. **A malformed `:id` is a 404, not a 500.** `uuid` columns reject a non-uuid at the driver, so the
+   handler validates the param with `z.string().uuid()` first.
+7. **Next 16 `ctx.params` is awaited** (the MED finding), matching `api/stops/[id]/route.ts:13-14`.
+8. **Route collision:** `/api/places/[id]` sits beside the static `search/` and `details/` segments
+   from i2. Next resolves static before dynamic, and ids are uuids, so there is no ambiguity.
+9. **MED "no client seam named" — answered for i4's three endpoints.** `savePlace`/`updatePlace`/
+   `deletePlace` go through `req` (unlike i2's `searchPlaces`, which deliberately bypasses it): the
+   library is our own data, so a failure is a real error to surface, not a renderable degraded
+   envelope. i5's island consumes these rather than calling `fetch` itself.
+10. **No migration.** `saved_places` already has every column this writes (`schema.ts:150-171`);
+    `lat`/`lng` are already nullable. The vet confirmed this independently.
+
+## Where the tests live, honestly
+
+The acceptance says "Mutation tests cover create, graduate and delete plus the cross-owner
+rejection." The vet's HIGH finding about unwired runners is correct and I did not paper over it:
+
+- **Committed + executing:** `packages/core/src/domain/types.test.ts` — 14 vitest tests over the
+  write grammar and the graduation normalizer. This is the only package with a `test` script.
+- **NOT committed:** a `packages/db` mutation test. `packages/db/package.json` declares no `test`
+  script and no runner, and adding one that needs a live Postgres would make
+  `pnpm turbo run lint typecheck test` — which CI and the ship gate re-run — fail without a database.
+  Committing a test file into a package with no runner would be coverage that never executes, which
+  is what the vet flagged. So the DB-level acceptance was verified by an **out-of-tree integration
+  run against a throwaway database** instead (transcript under "Checks run"). That run is evidence,
+  not a regression guard: **flagging for qa/the walk** that the create/graduate/delete/cross-owner
+  behaviour has no standing automated test until `packages/db` gets a runner.
+
+## Flagged for i5 / i7 / the walk
+
+- **i5** owns the refresh path (the MED finding): nothing here calls `router.refresh()`. The routes
+  answer 201 with the created row and 204 on patch/delete, so an island can update locally or refresh
+  — i5 decides.
+- **i7** still needs the `kind: "stop"` lat/lng write (decision 2). The `kind` carrier is derivable
+  as `layer === "saved" ? "place" : "stop"` (`pins.ts:160,206`), per the MED finding.
+- **Walk:** the undo toast on delete is i5's; DELETE here is a hard delete with no tombstone, so
+  "undo" must be a re-POST of the row the island still holds, not a server-side restore.
+
+## Checks run
+
+- `pnpm install --frozen-lockfile` → `Done in 6.6s` (fresh worktree had no `node_modules`).
+- **TDD red:** `pnpm vitest run src/domain/types.test.ts` (in `packages/core`, before the
+  implementation) → `Tests  13 failed | 1 passed (14)`, `TypeError: normalizeSavedPlacePatch is not a
+  function`.
+- **TDD green:** same command after → `Test Files  1 passed (1) · Tests  14 passed (14)`.
+- **The gate:** `pnpm turbo run lint typecheck test` →
+  `Tasks: 8 successful, 8 total`, with `@rv-trip/core:test: Tests  274 passed (274)`.
+- **DB integration, against a throwaway database — 24/24 PASS.** Created `rvtrip_i4_verify` on the
+  local Postgres (`localhost:5433`), loaded the schema with `pg_dump --schema-only` from `rvtrip`
+  (read-only on the operator's database — nothing was written to it), ran the three mutations
+  through `tsx` with `DATABASE_URL` pointed at the throwaway, then
+  `DROP DATABASE rvtrip_i4_verify` (verified gone). The script lived in the scratchpad and its
+  temporary copy under `packages/db/` was deleted; `git status` shows no stray file. Asserted:
+  - create → nested read shape, flat coords preserved, `ownerId` = caller, want shelf + source kept;
+  - **graduate with `{ status, rating, tripId }` and NO `source` key** → `source` null, `status`
+    "been", rating + tripId set, **the SAME row id**, **exactly one row** (no second insert), `note`
+    untouched, `tripName` joined on read as "Pacific Northwest Loop";
+  - locate backfill → a coordless row patched with `{ lat, lng }` reads back
+    `46.1712 / −123.9012` with its name untouched;
+  - **cross-owner PATCH → `false`** (route 404s) and the note is unchanged;
+    **cross-owner DELETE → `false`** and the row count is unchanged;
+  - graduating onto **another owner's trip** → throws `trip not found`;
+  - owner DELETE → `true`, the row is gone, and a second DELETE of the same id → `false`.
+- **NOT run:** any HTTP-level test of the three handlers — `apps/web` has no test runner (the same
+  limitation i2/i3 recorded). The handler bodies are thin: parse → mutate → status.

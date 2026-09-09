@@ -133,7 +133,34 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
     orderBy: [desc(savedPlaces.createdAt)],
     with: { trip: { columns: { title: true } } },
   });
-  return rows.map((r) => ({
+  return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null));
+}
+
+/**
+ * The saved_places row → `SavedPlace` seam: flat place columns in, the nested
+ * `place` the clients read out. Shared with the write path (mutations.ts) so a
+ * created or patched row comes back in exactly the shape the library renders —
+ * `tripName` is joined on read and passed in, never stored on the row.
+ */
+export function mapSavedPlaceRow(
+  r: {
+    id: string;
+    ownerId: string;
+    name: string;
+    lat: number | null;
+    lng: number | null;
+    googlePlaceId: string | null;
+    region: string | null;
+    type: SavedPlace["type"];
+    status: SavedPlace["status"];
+    note: string | null;
+    source: string | null;
+    rating: number | null;
+    tripId: string | null;
+  },
+  tripName: string | null,
+): SavedPlace {
+  return {
     id: r.id,
     ownerId: r.ownerId,
     place: mapPlace(r.name, r.lat, r.lng, r.googlePlaceId),
@@ -144,8 +171,8 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
     source: r.source,
     rating: r.rating,
     tripId: r.tripId,
-    tripName: r.trip?.title ?? null,
-  }));
+    tripName,
+  };
 }
 
 function haversineMiles(a: Place, b: Place): number {

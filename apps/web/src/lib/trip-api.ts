@@ -5,6 +5,9 @@ import type {
   LatLng,
   PlacesEnvelope,
   RigProfileInput,
+  SavedPlace,
+  SavedPlaceCreateInput,
+  SavedPlacePatch,
 } from "@rv-trip/core";
 import type { RouteMap } from "./trip-logic";
 
@@ -62,6 +65,24 @@ export const tripApi = {
     pairs: { from: LatLng; to: LatLng }[],
   ): Promise<{ rigHash: string; routes: RouteMap }> =>
     req(`/api/routes`, "POST", { pairs }) as Promise<{ rigHash: string; routes: RouteMap }>,
+
+  /**
+   * The Places library's writes (docs/design/41 §3). They go through `req` like
+   * every other mutation — the library is our own data, so a failure is a real
+   * error to surface, not the picker's renderable degraded envelope.
+   *
+   * `savePlace` is also how a "Been there?" suggestion is accepted: POST with
+   * `status: "been"`, because the library row does not exist yet.
+   * `updatePlace` covers the edit sheet AND the graduation want → been (the
+   * server clears `source` on any patch that sets `status: "been"`).
+   */
+  savePlace: (input: SavedPlaceCreateInput): Promise<SavedPlace> =>
+    req(`/api/places`, "POST", input) as Promise<SavedPlace>,
+
+  updatePlace: (id: string, patch: SavedPlacePatch) =>
+    req(`/api/places/${id}`, "PATCH", patch),
+
+  deletePlace: (id: string) => req(`/api/places/${id}`, "DELETE"),
 
   /**
    * Place search for the picker (docs/design/41 §3). Deliberately NOT through

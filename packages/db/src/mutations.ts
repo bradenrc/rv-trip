@@ -1,14 +1,17 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { db } from "./index";
-import { legs, stops, ideas, reservations, trips, rigs } from "./schema";
+import { legs, stops, ideas, reservations, trips, rigs, savedPlaces } from "./schema";
 import type {
   ReservationType,
   IdeaStatus,
   IsoDate,
   RigProfile,
   RigProfileInput,
+  SavedPlace,
+  SavedPlaceCreate,
+  SavedPlacePatch,
 } from "@rv-trip/core";
-import { mapRigRow } from "./queries";
+import { mapRigRow, mapSavedPlaceRow } from "./queries";
 
 /**
  * Owner-scoped writes. Every mutation is constrained to resources belonging to
@@ -157,4 +160,70 @@ export async function upsertRig(owner: string, input: RigProfileInput): Promise<
     })
     .returning();
   return mapRigRow(row!);
+}
+
+/**
+ * ── The Places library (docs/design/41 §3) ───────────────────────────────────
+ *
+ * saved_places is account-scoped, not trip-scoped, so these three scope on
+ * `owner_id` directly rather than through the leg/stop subqueries above. The
+ * update and the delete RETURN the ids they matched: a row belonging to another
+ * owner matches nothing, so the caller gets `false` and answers 404 instead of
+ * a silent 200 over a write that never happened.
+ *
+ * ONE row, ONE status field — graduating want → been is a PATCH of the existing
+ * row, never a second insert. `tripName` is joined on read (queries.ts's
+ * `mapSavedPlaceRow`) and is never written.
+ */
+
+/** Guard + join in one: a foreign or unknown `tripId` is refused, an owned one
+ * hands back the title the created/patched row displays. */
+async function ownedTripTitle(owner: string, tripId: string | null): Promise<string | null> {
+  if (tripId == null) return null;
+  const [row] = await db
+    .select({ title: trips.title })
+    .from(trips)
+    .where(and(eq(trips.id, tripId), eq(trips.ownerId, owner)));
+  if (!row) throw new Error("trip not found");
+  return row.title;
+}
+
+export async function createSavedPlace(
+  owner: string,
+  input: SavedPlaceCreate,
+): Promise<SavedPlace> {
+  const tripName = await ownedTripTitle(owner, input.tripId);
+  const [row] = await db
+    .insert(savedPlaces)
+    .values({ ownerId: owner, ...input })
+    .returning();
+  return mapSavedPlaceRow(row!, tripName);
+}
+
+/**
+ * Patch a library row in place — the edit sheet, the graduation ("been" +
+ * rating + tripId, source cleared) and the Locate coordinate backfill all land
+ * here. Returns false when the id is not this owner's.
+ */
+export async function updateSavedPlaceFields(
+  owner: string,
+  placeId: string,
+  patch: SavedPlacePatch,
+): Promise<boolean> {
+  if (patch.tripId !== undefined) await ownedTripTitle(owner, patch.tripId);
+  const rows = await db
+    .update(savedPlaces)
+    .set(patch)
+    .where(and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner)))
+    .returning({ id: savedPlaces.id });
+  return rows.length > 0;
+}
+
+/** Hard delete, owner-scoped. Returns false when the id is not this owner's. */
+export async function deleteSavedPlace(owner: string, placeId: string): Promise<boolean> {
+  const rows = await db
+    .delete(savedPlaces)
+    .where(and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner)))
+    .returning({ id: savedPlaces.id });
+  return rows.length > 0;
 }
