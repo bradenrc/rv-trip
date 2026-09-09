@@ -9,6 +9,9 @@ export default defineConfig({
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_URL!,
+    // Neon: the Vercel integration sets a pooled DATABASE_URL for the app and an
+    // unpooled one for DDL; migrations must use the direct connection. Local
+    // docker has only DATABASE_URL, so fall back to it.
+    url: (process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL)!,
   },
 });

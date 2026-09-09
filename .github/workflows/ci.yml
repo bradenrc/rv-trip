@@ -24,6 +24,24 @@ jobs:
     name: ci
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # A throwaway Postgres for the migration check (issue #27): the checked-in
+    # migrations must build the schema from nothing, and schema.ts must not have
+    # drifted from them.
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ci:ci@127.0.0.1:5432/ci
     steps:
       - uses: actions/checkout@v4
 
@@ -41,10 +59,24 @@ jobs:
       - name: lint · typecheck · test
         run: pnpm turbo run lint typecheck test
 
+      # Migrations are the schema's source of truth (#27): apply them to the empty
+      # service DB, seed on top (exercises every table + enum), then prove
+      # schema.ts has no drift — `generate` must produce no new migration file.
+      - name: db · migrate · seed · drift check
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+          pnpm --filter @rv-trip/db exec drizzle-kit check
+          pnpm db:generate
+          if [ -n "$(git status --porcelain packages/db/drizzle)" ]; then
+            echo "::error::schema.ts changed without a migration — run 'pnpm db:generate' and commit packages/db/drizzle" >&2
+            git status --porcelain packages/db/drizzle
+            exit 1
+          fi
+
       # The web app's production build. Every DB-backed route is `force-dynamic`
-      # and the pg Pool connects lazily, so the build needs DATABASE_URL to be SET
-      # (the db client throws at import when it is missing) but never reachable.
+      # and the pg Pool connects lazily, so the build only needs DATABASE_URL to
+      # be SET (the db client throws at import when it is missing) — the job env
+      # above covers it; the service DB is never touched by the build.
       - name: build apps/web
         run: pnpm turbo run build --filter=@rv-trip/web
-        env:
-          DATABASE_URL: postgres://ci:ci@127.0.0.1:1/ci

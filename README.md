@@ -30,7 +30,7 @@ Requires Node (see `.nvmrc`), pnpm, and Docker.
 pnpm install
 cp .env.example .env         # local Postgres URL (already set for docker compose)
 pnpm db:up                   # start local Postgres (docker, host port 5433)
-pnpm db:push                 # create the schema
+pnpm db:migrate              # build the schema from packages/db/drizzle/
 pnpm db:seed                 # load a sample 4-week trip
 pnpm dev                     # http://localhost:3000
 ```
@@ -41,6 +41,34 @@ coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
 is the Locate button beside the map's "N unmapped" count). Phone:
 `pnpm --filter @rv-trip/mobile ios` (Expo Go on the iOS Simulator, against the
 running web app).
+
+### Schema changes
+
+The checked-in migrations in `packages/db/drizzle/` are the schema's source of
+truth — every environment (a teammate, CI, Neon) reaches the current schema by
+running them, never by pushing from a laptop. After editing
+`packages/db/src/schema.ts`:
+
+```bash
+pnpm db:generate             # writes the next drizzle/NNNN_*.sql — commit it
+pnpm db:migrate              # applies it locally
+```
+
+CI applies the migrations to an empty Postgres, seeds on top, and fails if
+`schema.ts` has drifted from them (`db:generate` would produce a new file).
+`pnpm db:push` still works as a quick local experiment, but a pushed change
+that is not also generated will fail that check.
+
+**Have a local DB from before migrations existed?** (built with `db:push`;
+`db:migrate` fails on it with "relation already exists"). Either reset it —
+`pnpm db:down && rm -rf pgdata && pnpm db:up && pnpm db:migrate && pnpm db:seed`
+— or keep your data: `pnpm db:baseline` records the existing migrations as
+already applied without running them, and `db:migrate` picks up from there.
+Only do that when the schema already matches `schema.ts`.
+
+Neon: the Vercel integration provides a pooled `DATABASE_URL` for the app and
+`DATABASE_URL_UNPOOLED` for DDL; `db:migrate` uses the unpooled one when it is
+set (see `.env.example`). Local docker needs only `DATABASE_URL`.
 
 Where things stand: `docs/audit/2026-09-08-project-audit.md` (feature matrix,
 gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).
