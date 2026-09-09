@@ -36,8 +36,11 @@ pnpm dev                     # http://localhost:3000
 ```
 
 Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
-(Drizzle Studio), `pnpm db:down`. Phone: `pnpm --filter @rv-trip/mobile ios`
-(Expo Go on the iOS Simulator, against the running web app).
+(Drizzle Studio), `pnpm db:down`, `pnpm backfill:places` (geocode every
+coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
+is the Locate button beside the map's "N unmapped" count). Phone:
+`pnpm --filter @rv-trip/mobile ios` (Expo Go on the iOS Simulator, against the
+running web app).
 
 Where things stand: `docs/audit/2026-09-08-project-audit.md` (feature matrix,
 gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).

@@ -3,6 +3,8 @@ import type {
   IdeaStatus,
   IsoDate,
   LatLng,
+  LocateResponse,
+  LocateRow,
   PlacesEnvelope,
   RigProfileInput,
   SavedPlace,
@@ -83,6 +85,20 @@ export const tripApi = {
     req(`/api/places/${id}`, "PATCH", patch),
 
   deletePlace: (id: string) => req(`/api/places/${id}`, "DELETE"),
+
+  /**
+   * Locate — the bounded coordinate backfill (docs/design/41 §6). Ids only on
+   * the way in; the route re-reads each row's name and region under the
+   * owner's scope, so nothing here carries a name. At most `LOCATE_MAX_ROWS`
+   * rows per call, and the caller slices to that before it presses.
+   *
+   * Through `req` like the library's other writes: this is our own data, so a
+   * failure is a real error to surface, not a renderable degraded envelope. A
+   * row Google cannot place is not a failure — it comes back in
+   * `stillUnmapped` on a 200.
+   */
+  locatePlaces: (rows: LocateRow[]): Promise<LocateResponse> =>
+    req(`/api/places/locate`, "POST", { rows }) as Promise<LocateResponse>,
 
   /**
    * Place search for the picker (docs/design/41 §3). Deliberately NOT through

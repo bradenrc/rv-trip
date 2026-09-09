@@ -705,3 +705,126 @@ Delete) with an undo toast on delete.
   `buildSuggestionShelf(...) === null` in `packages/core`, and what remains in the component is the
   one-line `{shelf && …}` conditional. **NOT run:** the app against a database — no Postgres was
   started and nothing was written to the operator's database.
+
+---
+
+# Issue 41 — dev notes · epic item **i7**
+
+**Scope: i7 only** — the Locate backfill route, the button beside (never on) the map's
+unmapped count, and the `pnpm backfill:places` ops script. i1–i6 are already on this branch
+and were not re-done; nothing here touches `packages/ui`, the picker, the sheets or the
+suggestion shelf.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/core/src/providers/places-locate.ts` (new, 171 lines) | The whole of Locate, pure: `LOCATE_MAX_ROWS = 25` (:30), `locateRowSchema` (:40) + `locateRequestSchema` (:52), the `LocateTarget` / `LocatedRow` / `LocateResponse` shapes (:58-78), the owner-scoped `LocateStore` seam (:87), `locateQuery` (:100), `dedupeLocateRows` (:107), the batch itself `locatePlaces` (:132), and the §6 completion copy `locateToastMessage` (:166). |
+| `packages/core/src/providers/places-locate.test.ts` (new, **24 tests**) | The cap, the empty batch, the bad kind/id, the dropped client `name`, the query, the dedupe, the happy row, the partial batch, the coordless answer, the foreign row, the throwing provider, the failed write, `StubPlacesProvider`, and every branch of the toast copy. |
+| `packages/core/src/providers/index.ts:142` | `export * from "./places-locate";` — pure and key-free (zod only), so the map island can import `LOCATE_MAX_ROWS` and `locateToastMessage`. Unlike `google-places.ts`, which stays quarantined. |
+| `packages/db/src/locate.ts` (new, 147 lines) | `dbLocateStore(owner)` (:131) — the drizzle `LocateStore`. `loadStops` (:41) scopes through leg → trip exactly as `mutations.ts` does; `loadPlaces` (:54) scopes on `owner_id`. Both filter to **coordless rows only** (:29-30). `setStopCoords` (:95) is the stop write the repo did not have (`updateStopFields` takes only rating/notes/dates); `setSavedPlaceCoords` (:112) is its saved-place twin. `listLocateTargetsForOwner` (:68) is what the ops script walks. |
+| `packages/db/src/index.ts:18` | `export * from "./locate";` |
+| `packages/db/src/backfill-places.ts` (new, 86 lines) | `pnpm backfill:places [ownerId]`. Same helper, same store, unbounded — it batches only so a long run prints progress. Refuses to run with no `GOOGLE_API_KEY` (:44) rather than reporting "0 of 42" as if Google had looked. |
+| `packages/db/package.json:16`, `package.json:22` | `"backfill:places"`, mirroring the shipped `db:seed` pair. |
+| `apps/web/src/app/api/places/locate/route.ts` (new, 41 lines) | `POST` (:28): `locateRequestSchema.safeParse` → 400 on failure, `getOwner()`, `placesProvider()`, `locatePlaces` with `dbLocateStore(owner)`. Eleven lines of glue; every decision is in core. |
+| `apps/web/src/components/map/pins.ts:96` | `locateRowOf(row)` — the `kind` carrier the vet flagged as unnamed. `layer === "saved" ? "place" : "stop"` is exact (the saved layer is the only one built from `savedPlaces`); named beside `UnmappedRow` so `UnmappedRow` itself never widens. |
+| `apps/web/src/components/map/MapOverview.tsx:157-172` | The count keeps its shipped span, its dashed grammar and its no-`onClick` rule; its comment now names the adjacent button. `<LocateButton>` (:254) sits beside it inside the **same** `unmappedVisible.length > 0` guard, so the two appear and disappear together. `locate()` (:101) posts the batch, toasts, and refreshes. |
+| `apps/web/src/lib/trip-api.ts:100` | `tripApi.locatePlaces(rows)` — the client seam the vet found missing for the new endpoints. Through `req` like the library's other writes. |
+| `README.md:38-41` | `pnpm backfill:places` listed with the other scripts. |
+
+## Acceptance, checked
+
+- **Rejects above 25.** `locateRequestSchema` is `.min(1).max(LOCATE_MAX_ROWS)`; the route
+  400s with the shipped `{ error: flatten() }` shape. Chosen over truncation *because* the
+  response is two counts: silently dropping 15 of 40 rows would report "located 25 of 40"
+  for a batch that never looked at 15 of them. The button slices to the cap itself, so an
+  oversized body is a caller bug.
+- **Never accepts a name from the client.** `locateRowSchema` is `{ kind, id }` and zod
+  strips everything else (pinned by a test that posts a `name` and asserts it is gone). The
+  search text is built by `locateQuery` from what `LocateStore.load` returned. Verified
+  live against Postgres below: a foreign stop named "Astoria/Warrenton KOA" was never
+  searched and never written, even though the owner's own row of that name was.
+- **A row the provider cannot place comes back in `stillUnmapped`, never thrown.** `geocode`
+  (:118) is the one place a provider throw is swallowed, per row — the rest of the batch
+  still runs. Covered by the broken-provider, coordless-answer and partial-batch tests.
+- **The unmapped count is still a span with no `onClick`** (MapOverview.tsx:163-165) — the
+  shipped element is unchanged apart from its comment and one level of indentation.
+- **Both render only above zero**: they are two children of one
+  `{unmappedVisible.length > 0 && (…)}` fragment, so there is no state where one shows
+  without the other.
+
+## Key decisions
+
+1. **`stillUnmapped` is a count, not a list — and no name travels back.** §3's payload draws
+   `"stillUnmapped": 0` beside `"located": 1`, so it is a number. The caller already knows
+   the ids it sent, so the rows that stayed unmapped are (sent − `results`), which is exactly
+   how MapOverview builds the toast's names. That keeps the "ids only" property symmetric:
+   no name in, no name out.
+2. **Only coordless rows load.** `load` filters `lat IS NULL OR lng IS NULL`, so an unknown
+   id, another tenant's id and an already-mapped id all resolve identically — nothing loads,
+   nothing is billed, the row counts as still unmapped. It also means pressing Locate can
+   never move a pin the user placed by hand.
+3. **The refresh path is `router.refresh()`** (the design left it unnamed, and the vet asked).
+   /map is a `force-dynamic` server component and a written coordinate is not just a pin — it
+   is an ordinal, a rail row and up to two drive arcs, all recomputed by `buildMapModel` from
+   props the island does not own. `PlacesWorkspace` keeps local state because a sheet closes
+   onto a list it fully owns; that is not this surface. **qa: this is the one place i7 differs
+   from i5's stated refresh idiom, deliberately.**
+4. **Serial, not parallel.** 25 sequential lookups keep the vendor spike and the bill legible,
+   and the button is disabled for the duration — the whole point of Q3=C over read-repair.
+5. **A stop's query is its bare name; no region is borrowed.** Stops have no region column,
+   and the parent trip's geography is not a fact about a pullout — the same
+   "never borrow a coordinate" rule §7 applies to the de-dup.
+6. **The Locate glyph is lucide's `LocateFixed`**, the frame's `◎` translated into the app's
+   icon system (the frame's `◌` is already `CircleDashed` in the shipped rail). Chip geometry
+   is copied from the shipped row verbatim: `rounded-rv-pill px-[13px] py-1.5 font-mono
+   text-[11px]`; idle is the frame's `.chip.act` (`border-rv-green` / `bg-rv-green-soft` /
+   `text-rv-green` / bold), busy its `.chip.busy` (`border-rv-border-hi` / `bg-rv-surface` /
+   `text-rv-ink-faded`). No raw hex, no new token.
+7. **The script refuses to run without a key** rather than walking the library and reporting
+   zeroes. The route does not: a keyless press is a legitimate 200 that locates nothing, and
+   the toast says so.
+
+## Flagged for the walk / qa
+
+- **Not exercised against live Google.** `GOOGLE_API_KEY` is unset here, so every local press
+  resolves through `StubPlacesProvider` and locates nothing — the toast reads "Located 0 of
+  N. … still have no coordinates." That is the honest keyless answer, but the *healthy*
+  round-trip (does `places:searchText` return a usable pin for "Astoria/Warrenton KOA,
+  Astoria, OR"?) is walk-only, exactly as i1/i2 flagged.
+- **Today's seed has zero coordless rows**, so neither the count nor the button renders on a
+  freshly seeded /map (§6 state 1). To see states 2-4 the walk must null a `lat/lng` pair
+  first, e.g. `update stops set lat = null, lng = null where place_name = 'Astoria, OR';`.
+- **The button, the toast and the disabled state are pointer behaviour** static analysis
+  cannot prove. The pure parts under them — the copy, the counts, the batching, the kind
+  derivation — are unit tested.
+- **`apps/web` still ships no test runner**, so the route handler's ~11 lines of glue
+  (`req.json`, `safeParse`, `NextResponse.json`) and `MapOverview`'s wiring are NOT covered
+  by an executing test, exactly as i2 recorded. I did not claim otherwise. What I did instead
+  is the real-Postgres check below, which covers the half a route test would have caught
+  anyway: the SQL.
+
+## Checks run
+
+- `pnpm install --frozen-lockfile` → `Done in 6.3s` (the worktree had no `node_modules`).
+- `pnpm vitest run src/providers/places-locate.test.ts` in `packages/core`, **before** the
+  module existed → `Error: Failed to load url ./places-locate` (the red); **after** →
+  `Test Files 1 passed (1) · Tests 24 passed (24)`.
+- `pnpm turbo run lint typecheck test` from the worktree root →
+  `Tasks: 8 successful, 8 total`, with `@rv-trip/core:test: Tests 344 passed (344)`.
+- **Real-Postgres check of `packages/db/src/locate.ts`** (typecheck cannot prove drizzle SQL).
+  A throwaway `postgres:18-alpine` container on port **55433** (created and `docker rm -f`'d
+  by name; the operator's own DB on 5433 was never started or touched), schema via
+  `DATABASE_URL=… pnpm --filter @rv-trip/db push --force` → `[✓] Changes applied`. Fixtures:
+  owner-a with one coordless stop, one mapped stop, one coordless saved place, one mapped
+  saved place; owner-b with a coordless stop *of the same name* as owner-a's saved place.
+  Running `locatePlaces` over all four of owner-a's-plus-owner-b's ids with a fake provider:
+  - `coordless rows for owner-a: ['place:Astoria/Warrenton KOA:Astoria, OR', 'stop:Forest Road 25 pullout:null']`
+  - `result: {"located":1,"stillUnmapped":3,"results":[{"id":"c2dfd438…","lat":46.1712,"lng":-123.9012}]}`
+  - `queries google saw: [ 'Astoria/Warrenton KOA, Astoria, OR', 'Forest Road 25 pullout' ]`
+    — the foreign stop and the already-mapped stop were never searched.
+  - `koa row after: 46.1712 -123.9012 ChIJkoa` · `foreign stop after (must be null,null): null null`
+    · `already-mapped place untouched: 47.6 -124.3`
+- `pnpm backfill:places` itself was **NOT executed** (SKIPPED — it needs both a database and a
+  real `GOOGLE_API_KEY`; neither is configured here). Its two helpers are the ones exercised
+  above and by the 24 unit tests; only its argv/logging shell is unrun.
