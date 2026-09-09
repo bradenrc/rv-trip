@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const owner = getOwner();
+  const owner = await getOwner();
   const rig = await getRigByOwner(owner);
   const hash = await rigHash(rig);
   return NextResponse.json({ rigHash: hash, routes: await routePairs(parsed.data.pairs, rig, hash) });

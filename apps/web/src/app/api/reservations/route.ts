@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const row = await createReservation(getOwner(), parsed.data);
+    const row = await createReservation(await getOwner(), parsed.data);
     return NextResponse.json(row, { status: 201 });
   } catch {
     return NextResponse.json({ error: "stop not found" }, { status: 404 });

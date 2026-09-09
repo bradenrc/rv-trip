@@ -12,7 +12,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    await reorderLegStops(getOwner(), id, parsed.data.order);
+    await reorderLegStops(await getOwner(), id, parsed.data.order);
     return new NextResponse(null, { status: 204 });
   } catch {
     return NextResponse.json({ error: "leg not found" }, { status: 404 });

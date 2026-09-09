@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TripPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const owner = getOwner();
+  const owner = await getOwner();
   const trip = await getTripById(owner, id);
   if (!trip) notFound();
 

@@ -8,6 +8,6 @@ export const dynamic = "force-dynamic";
 export default async function RigPage() {
   // null on a brand-new account — the form renders with every field blank and
   // no preset selected, which is the same surface, not a separate empty state.
-  const rig = await getRigByOwner(getOwner());
+  const rig = await getRigByOwner(await getOwner());
   return <RigForm rig={rig} />;
 }

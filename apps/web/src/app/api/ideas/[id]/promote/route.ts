@@ -19,7 +19,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const row = await promoteIdeaToReservation(getOwner(), id, parsed.data.type);
+    const row = await promoteIdeaToReservation(await getOwner(), id, parsed.data.type);
     return NextResponse.json(row, { status: 201 });
   } catch {
     return NextResponse.json({ error: "idea not found" }, { status: 404 });

@@ -20,7 +20,7 @@ const rigSchema = z.object({
 });
 
 export async function GET() {
-  return NextResponse.json(await getRigByOwner(getOwner()));
+  return NextResponse.json(await getRigByOwner(await getOwner()));
 }
 
 export async function PUT(req: Request) {
@@ -28,6 +28,6 @@ export async function PUT(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const rig = await upsertRig(getOwner(), parsed.data);
+  const rig = await upsertRig(await getOwner(), parsed.data);
   return NextResponse.json(rig);
 }

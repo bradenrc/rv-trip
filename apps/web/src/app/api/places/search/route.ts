@@ -45,7 +45,7 @@ export async function GET(req: Request) {
   const envelope = await searchPlacesEnvelope({
     provider,
     configured,
-    owner: getOwner(),
+    owner: await getOwner(),
     query: parsed.data.q,
     near: parsed.data.near,
     limiter,

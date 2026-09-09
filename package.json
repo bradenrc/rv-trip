@@ -20,6 +20,7 @@
     "db:push": "pnpm --filter @rv-trip/db push",
     "db:studio": "pnpm --filter @rv-trip/db studio",
     "db:seed": "pnpm --filter @rv-trip/db seed",
+    "db:reown": "pnpm --filter @rv-trip/db reown",
     "backfill:places": "pnpm --filter @rv-trip/db backfill:places"
   },
   "devDependencies": {

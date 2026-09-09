@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Compass, Route, Bookmark, Map as MapIcon, Caravan, ChevronDown, Sun, Moon } from "lucide-react";
+import { Compass, Route, Bookmark, Map as MapIcon, Caravan, Sun, Moon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useTheme } from "@/lib/theme";
+import { Account } from "./Account";
 
 const LINKS: { href: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
   { href: "/", label: "Trips", Icon: Route, match: (p) => p === "/" || p.startsWith("/trips") },
@@ -62,17 +63,7 @@ export function Nav() {
           <Moon className="block size-[17px] theme-dark:hidden" />
         </button>
 
-        <button
-          type="button"
-          title="Account — Braden"
-          className="inline-flex cursor-pointer items-center gap-2 rounded-rv-pill border border-rv-border bg-transparent py-1 pl-[5px] pr-2.5"
-        >
-          <span className="inline-flex size-[30px] items-center justify-center rounded-full border-2 border-rv-border-hi bg-rv-green font-mono text-[12px] font-bold text-rv-navy">
-            B
-          </span>
-          <span className="text-[13px] font-semibold text-rv-ink-muted">Braden</span>
-          <ChevronDown className="size-[13px] text-rv-ink-subtle" />
-        </button>
+        <Account />
       </div>
     </nav>
   );

@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const idea = await createIdea(getOwner(), parsed.data);
+    const idea = await createIdea(await getOwner(), parsed.data);
     return NextResponse.json(idea, { status: 201 });
   } catch {
     return NextResponse.json({ error: "stop not found" }, { status: 404 });

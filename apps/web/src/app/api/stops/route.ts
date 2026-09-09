@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const stop = await createStop(getOwner(), parsed.data);
+    const stop = await createStop(await getOwner(), parsed.data);
     return NextResponse.json(stop, { status: 201 });
   } catch {
     return NextResponse.json({ error: "leg not found" }, { status: 404 });

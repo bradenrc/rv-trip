@@ -32,7 +32,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   let updated: boolean;
   try {
     updated = await updateSavedPlaceFields(
-      getOwner(),
+      await getOwner(),
       id,
       normalizeSavedPlacePatch(parsed.data),
     );
@@ -50,7 +50,7 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string 
   if (!placeId.safeParse(id).success) {
     return NextResponse.json({ error: "place not found" }, { status: 404 });
   }
-  if (!(await deleteSavedPlace(getOwner(), id))) {
+  if (!(await deleteSavedPlace(await getOwner(), id))) {
     return NextResponse.json({ error: "place not found" }, { status: 404 });
   }
   return new NextResponse(null, { status: 204 });

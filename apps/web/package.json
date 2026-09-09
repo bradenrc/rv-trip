@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
+    "@clerk/nextjs": "^7.9.1",
     "@rv-trip/core": "workspace:*",
     "@rv-trip/db": "workspace:*",
     "@rv-trip/ui": "workspace:*",

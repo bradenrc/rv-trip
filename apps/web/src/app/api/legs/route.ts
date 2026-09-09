@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const leg = await createLeg(getOwner(), parsed.data);
+    const leg = await createLeg(await getOwner(), parsed.data);
     return NextResponse.json(leg, { status: 201 });
   } catch {
     return NextResponse.json({ error: "trip not found" }, { status: 404 });

@@ -15,7 +15,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  await updateIdeaFields(getOwner(), id, parsed.data);
+  await updateIdeaFields(await getOwner(), id, parsed.data);
   return new NextResponse(null, { status: 204 });
 }
 
@@ -26,7 +26,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
  */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const matched = await deleteIdea(getOwner(), id);
+  const matched = await deleteIdea(await getOwner(), id);
   if (!matched) return NextResponse.json({ error: "idea not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }
