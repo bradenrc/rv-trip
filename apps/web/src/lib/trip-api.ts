@@ -3,6 +3,7 @@ import type {
   IdeaStatus,
   IsoDate,
   LatLng,
+  PlacesEnvelope,
   RigProfileInput,
 } from "@rv-trip/core";
 import type { RouteMap } from "./trip-logic";
@@ -61,4 +62,25 @@ export const tripApi = {
     pairs: { from: LatLng; to: LatLng }[],
   ): Promise<{ rigHash: string; routes: RouteMap }> =>
     req(`/api/routes`, "POST", { pairs }) as Promise<{ rigHash: string; routes: RouteMap }>,
+
+  /**
+   * Place search for the picker (docs/design/41 §3). Deliberately NOT through
+   * `req`: the throttled answer is a 429 whose body is the real, renderable
+   * degraded envelope (`places-search.ts:placesEnvelopeStatus`), and `req`
+   * throws on !ok. Any other failure — offline, a proxy, a non-JSON body — is
+   * reported as the same degraded shape, so the picker has exactly one shape
+   * to render and never a thrown error to catch.
+   */
+  searchPlaces: async (q: string, near?: LatLng | null): Promise<PlacesEnvelope> => {
+    const params = new URLSearchParams({ q });
+    if (near) params.set("near", `${near.lat},${near.lng}`);
+    try {
+      const res = await fetch(`/api/places/search?${params}`);
+      const body = (await res.json()) as PlacesEnvelope;
+      if (!Array.isArray(body?.results)) throw new Error("not an envelope");
+      return body;
+    } catch {
+      return { results: [], degraded: true, reason: "upstream_error" };
+    }
+  },
 };

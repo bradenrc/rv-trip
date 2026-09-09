@@ -179,3 +179,124 @@ All from the worktree root unless noted.
   - Two billed Google requests total.
 - **NOT run:** any route-level automated test — `apps/web` has no test runner (see decision 1). The
   live curls above are the evidence for the handler glue, and they are manual.
+
+---
+
+# Issue 41 — dev notes · epic item **i3**
+
+**Scope: i3 only** — the `PlacePicker` component and its seven states (§4). Nothing here touches
+`packages/ui`, `packages/db`, a route handler, or i1/i2's files. i1 (the provider) and i2 (the two
+routes) are already on this branch and were not re-done. The picker is not mounted on any page yet —
+that is i5's island.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/core/src/providers/place-picker.ts` (new, 214 lines) | The picker's whole state machine, pure. `PickedPlace` (:24) exactly as §4 declares it; the copy constants `PICKER_DEBOUNCE_MS` (:34), `PICKER_PLACEHOLDER` (:36), `PICKER_DEGRADED_MESSAGE` (:39), `PICKER_ESCAPE_BLURB` (:42), `PICKED_COORDLESS_LABEL` (:44); `escapeRowLabel` (:47), `pickedFromSummary` (:51), `pickedFromFreeText` (:62), `pickedCoordLabel` (:87); `PickerRow` (:99) / `PickerView` (:110); `initialHighlight` (:146) and `moveHighlight` (:151); and `pickerView` (:183), which is states 1-7 in one function. The escape row is appended unconditionally at :203 — that single line is the design's "pinned to the bottom of every list state". |
+| `packages/core/src/providers/place-picker.test.ts` (new, 38 tests) | vitest, offline. All seven states from inputs alone, the escape row asserted present as the LAST row in all three list states, and the escape emitting `lat`/`lng`/`googlePlaceId` all null. |
+| `packages/core/src/providers/index.ts:142` | `export * from "./place-picker";` — pure and key-free like `places-search`, so the client can import it from `@rv-trip/core`. |
+| `apps/web/src/lib/trip-api.ts:74` | `tripApi.searchPlaces(q, near?)` — the client seam the vet's MED said was missing. Deliberately NOT through `req` (`:9-18`), which throws on `!ok`: the throttled answer is a **429 whose body is the real degraded envelope**, and any other failure (offline, non-JSON) is folded into the same shape. The picker therefore has exactly one shape to render and never a thrown error to catch. |
+| `apps/web/src/components/places/PlacePicker.tsx` (new, 307 lines) | `"use client"`. `export type { PickedPlace }` (:34) so callers can import the type from the component, as §4 draws it. The props are §4 verbatim (:39-51): `value` / `onChange` / `placeholder?` / `near?` — **no trip, leg or stop**. The debounce timer (:72-90), the keyboard handler (:173-187), states 6+7 (:120-166) and states 1-5 (:189-306). |
+
+`git status` shows **no modification under `packages/ui/`** — five files, four of them new, none in the DS.
+
+## Key decisions
+
+1. **The state machine lives in `packages/core`, the JSX in `apps/web`.** The vet's HIGH is right:
+   `apps/web` declares no `test` script and no runner, so i3's "component tests render idle, typing,
+   results, no-match, degraded and both picked states" cannot execute where the plan puts them. I did
+   not bolt a second runner + jsdom + testing-library onto `apps/web` (a lockfile-level infra
+   decision, and i2 declined the same thing for the same reason). Instead every decision the picker
+   makes moved into `place-picker.ts`, where 38 executing tests render all seven states **from props
+   alone** — which is what the acceptance is actually asking for. **What is NOT covered by an
+   executing test**: the JSX itself and the `setTimeout`. I drove those by hand in a real browser
+   instead — the transcript is under "Checks run", and it covers all seven states including the live
+   Google round-trip.
+2. **No session token, and no `details` call on pick.** i1 and i2 both flagged that a Google session
+   token is an Autocomplete↔Details pairing, that `places:searchText` accepts none and bills per
+   request, and that this was "i3's blocker". Spending it: `PlaceSummary` already carries every
+   field `PickedPlace` needs (`name`/`location`/`rating`/`address`/`googlePlaceId`), so a details
+   round-trip on pick would buy **identical data for a second billed request**. The picker emits
+   straight from the search row (`pickedFromSummary`, :51). `sessionToken` stays declared-and-unused
+   on the envelope; nothing fabricates one. **This is a deliberate departure from i3's scope prose**
+   ("one Google session token held across search → details") and is not in i3's acceptance. If the
+   epic wants Autocomplete instead, that is a `PlacesProvider` signature change and a different
+   result shape — flagging rather than guessing, per the brief.
+3. **A degraded list auto-highlights nothing; Enter still works.** §4 draws state 4's escape row
+   highlighted and state 5's not, so `initialHighlight` (:146) is `envelope.degraded ? -1 : 0` — we
+   did not look, so the picker does not light a row as though it had offered an answer. To keep that
+   from dead-ending, `Enter` with nothing highlighted falls through to the last row, which is always
+   the escape row (`PlacePicker.tsx:184`). Verified live: in the degraded state, Enter committed
+   `kalaloch` as a coordless pick.
+4. **"0 results" is never shown for a degraded answer** (:209). Nobody counted anything; claiming a
+   count would be a lie in the status line. Degraded shows the warning instead, and no status.
+5. **A stale envelope is no envelope.** `answer` and `cursor` are both stamped with the query they
+   belong to (`PlacePicker.tsx:57-62, 88-90`), so a keystroke drops straight back to state 2 without
+   a second effect resetting state. This is also what keeps the component clear of
+   `react-hooks/set-state-in-effect`, which the repo's lint enforces — nothing calls `setState`
+   during a render or in an effect body.
+6. **Google result rows get a neutral pin, not a tent.** §4 draws `⛺` on the result rows because the
+   example is a campground, but the vet's HIGH is correct that **nothing on the wire carries a Google
+   type** (`PlaceSummary` has no `types` field), so the picker cannot know a row's category. Result
+   rows take a `MapPin` on the green tile (green = "this came from Google and has coordinates",
+   matching states 6-7's green-vs-plain split) and the escape row keeps `✎`/`Pencil` on the muted
+   tile. No category is claimed anywhere in the picker. §5's "category defaults from Google's type"
+   is a **separate open problem for i5** and is not resolved here.
+7. **The placeholder uses the faded ink, not the subtle ink** (`PlacePicker.tsx:219-223`). §4's mock
+   colours it with the subtle token, but `packages/core/src/theme/nightfall-tokens.test.ts:193-207`
+   (the #19 vet's HIGH) enforces that that token paints no text glyphs — every shipped use is an icon
+   or a dot. The enforced accessibility rule wins over the mock; this is the one token substitution
+   in the file. **qa: this is a deliberate one-token deviation from the wireframe.**
+8. **The open list is absolutely positioned** (`:230`, a `relative` wrapper at `:190`). §4 stacks the
+   field and the menu in document flow because it is a static state chart; inside a real sheet the
+   menu has to overlay. It renders identically — full width, directly below the field, sharing the
+   border seam (field `rounded-t-rv-md`, menu `border-t-0`).
+
+## Flagged for i5 / the walk
+
+- **Not mounted anywhere.** i5 owns the island that renders it on `/places`. Until then the walk has
+  no route that shows the picker; I mounted it temporarily to verify (below) and reverted.
+- **`near` is unused by any caller yet.** It is wired end-to-end (prop → `lat,lng` query param →
+  `locationBias`) but no surface passes it until #21's home base.
+- **The category gap (decision 6) and the Region-from-address gap** (the vet's MED: §5 seeds
+  "Olympic NP, WA" from an address that reads "Forks, WA") are both i5's, not the picker's. The
+  picker hands `address` through untouched, exactly as §4's contract says.
+- **Google's live answer differs from §4's mock data** — for "kalaloch campground" Google now returns
+  one result rated ★4.7 with address "Forks, WA 98331, USA", not the mock's two results at ★4.4/★4.1.
+  Row copy and layout match; the numbers in the wireframe are illustrative.
+
+## Checks run
+
+- `pnpm install --frozen-lockfile` → `Done in 6.8s` (the worktree had no `node_modules`).
+- **Red:** `pnpm vitest run src/providers/place-picker.test.ts` in `packages/core`, before the module
+  existed → `Error: Failed to load url ./place-picker … Does the file exist?`
+- **Green:** same command after → `Test Files 1 passed (1) · Tests 38 passed (38)`.
+- `pnpm turbo run lint typecheck test --force` from the worktree root →
+  `Tasks: 8 successful, 8 total`, with `@rv-trip/core:test: Tests 260 passed (260)` (222 before i3).
+- `pnpm --filter @rv-trip/web build` with the picker temporarily mounted on `/places` → build
+  succeeded, `/places ƒ` — it compiles into a real client bundle and pulls nothing server-only out of
+  `@rv-trip/core`.
+- **All seven states driven live in a browser** (`next start -p 3941` against the local DB and the
+  configured Google key, picker temporarily mounted, mount reverted afterwards; the server was
+  stopped by its recorded pid):
+  - **1 idle** → `placeholder="Search a campground, diner, trailhead…"`, `aria-expanded=false`.
+  - **2 typing** → the waiting status renders between keystrokes.
+  - **3 results** (live Google) → status `1 result`; rows
+    `Kalaloch Campground | Forks, WA 98331, USA | ★ 4.7` then
+    `Use “kalaloch campground” as a plain name | No coordinates — add them later from the map`;
+    first row `aria-selected=true`.
+  - **4 no matches** (stubbed `{results:[],degraded:false}`) → status `0 results`, the escape row is
+    the only row and is already `aria-selected=true`, no warning, menu `rounded-b-rv-md`.
+  - **5 degraded** (stubbed `no_provider`) → no status, escape row only and `aria-selected=false`,
+    banner `Place search is unavailable right now — you can still type a name and save.`, menu square
+    at the bottom and the banner carrying `rounded-b-rv-md border-t-0`.
+  - **6 picked from Google** → `Kalaloch Campground` / `47.6130, −124.3761 · ChIJu4yk…` on
+    `border-rv-green bg-rv-green-soft`.
+  - **7 picked via the escape** → `kalaloch` / `No coordinates — won’t appear on the map yet` on
+    `border-rv-border-hi bg-rv-surface`.
+  - **Keyboard** → `ArrowDown` moved `aria-selected` from the result row to the escape row; `Enter`
+    committed it as a coordless `PickedPlace`; `Enter` in the degraded state (nothing highlighted)
+    also committed the escape row.
+- **NOT run:** any automated test that mounts the JSX — `apps/web` has no test runner (decision 1).
+  The browser transcript above is the evidence for the render, and it is manual.
