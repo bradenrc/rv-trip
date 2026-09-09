@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   BookmarkCheck,
   CircleCheckBig,
@@ -38,7 +38,23 @@ const CAT_CHIPS: { cat: CategoryLabel; type: ReservationType }[] = [
  * The Places library. Two shelves off one status field, a category filter
  * scoped to the active shelf, and a grid/map lens over the same filtered list.
  */
-export function PlacesLibrary({ places }: { places: SavedPlace[] }) {
+export function PlacesLibrary({
+  places,
+  leading,
+  cardMenu,
+}: {
+  places: SavedPlace[];
+  /** Cards that go before the library's own — the "Been there?" suggestions of
+   * §5, drawn in the same grid row the frame draws them in. They are not
+   * library rows: the shelf switch, the category chips and their counts all
+   * describe `places` only, and a suggestion is offered until it is accepted or
+   * dismissed. Absent (not empty-stated) when there is nothing to suggest. */
+  leading?: ReactNode;
+  /** The ⋯ menu, rendered BESIDE each card rather than inside it — PlaceCard
+   * ships two optional props and this epic gives them no siblings
+   * (docs/design/41 §5). Absent when nothing is wired to it. */
+  cardMenu?: (place: SavedPlace) => ReactNode;
+}) {
   const [status, setStatus] = useState<SavedPlaceStatus>("want");
   const [cat, setCat] = useState<CatFilter>("All");
   const [view, setView] = useState<View>("grid");
@@ -76,7 +92,17 @@ export function PlacesLibrary({ places }: { places: SavedPlace[] }) {
     setCat("All");
   };
 
-  const cards = list.map((p) => <PlaceCard key={p.id} savedPlace={p} />);
+  // The wrapper is the grid item, so the card still stretches to the row's
+  // height (`grid` on a single child stretches it) and the menu can anchor to
+  // the card's own box. `onAddToTrip` stays unpassed: the add-a-stop path it
+  // needs is issue #22, in epic #40 — until then the DS button is inert by
+  // design, not by omission.
+  const cards = list.map((p) => (
+    <div key={p.id} className="relative grid">
+      <PlaceCard savedPlace={p} />
+      {cardMenu?.(p)}
+    </div>
+  ));
 
   return (
     <>
@@ -124,7 +150,10 @@ export function PlacesLibrary({ places }: { places: SavedPlace[] }) {
             <div className="min-h-[420px]">
               <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} />
             </div>
-            <div className="grid content-start gap-3">{cards}</div>
+            <div className="grid content-start gap-3">
+              {leading}
+              {cards}
+            </div>
           </div>
           {hidden > 0 && (
             <p className="m-0 mt-[11px] font-mono text-[11px] text-rv-ink-faded">
@@ -132,8 +161,9 @@ export function PlacesLibrary({ places }: { places: SavedPlace[] }) {
             </p>
           )}
         </>
-      ) : list.length > 0 ? (
+      ) : list.length > 0 || leading ? (
         <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+          {leading}
           {cards}
         </div>
       ) : status === "want" ? (
