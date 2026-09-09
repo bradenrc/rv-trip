@@ -1,5 +1,5 @@
 import { eq, and, asc, desc } from "drizzle-orm";
-import { deriveDays, isScheduled } from "@rv-trip/core";
+import { deriveDays, isScheduled, suggestionsFromTrips } from "@rv-trip/core";
 import { db } from "./index";
 import { trips, savedPlaces, rigs } from "./schema";
 import type {
@@ -10,6 +10,7 @@ import type {
   Idea,
   Place,
   SavedPlace,
+  PlaceSuggestion,
   RigProfile,
   TripSummary,
 } from "@rv-trip/core";
@@ -134,6 +135,29 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
     with: { trip: { columns: { title: true } } },
   });
   return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null));
+}
+
+/**
+ * The "Been there?" candidates (docs/design/41 §7) — every stop AND every
+ * reservation rated ≥ 4 on a trip that is `complete`. Same `TRIP_WITH` load as
+ * the map's query; only the mapping differs, and that mapping is
+ * `suggestionsFromTrips` in @rv-trip/core so the ≥ 4 filter, the reservation's
+ * borrowed-region-but-never-borrowed-pin rule and the ordering are unit-tested
+ * where a test runner actually runs (packages/core/src/domain/places.test.ts).
+ *
+ * De-duplication against the library is NOT done here: it is `isAlreadySaved`
+ * against `listSavedPlacesForOwner`, applied in the island so that accepting a
+ * suggestion drops it without a second round-trip.
+ */
+export async function listSuggestionCandidatesForOwner(
+  ownerId: string,
+): Promise<PlaceSuggestion[]> {
+  const rows = await db.query.trips.findMany({
+    where: and(eq(trips.ownerId, ownerId), eq(trips.status, "complete")),
+    orderBy: [desc(trips.endDate)],
+    with: TRIP_WITH,
+  });
+  return suggestionsFromTrips(rows.map(mapTripRow));
 }
 
 /**

@@ -568,3 +568,140 @@ Delete) with an undo toast on delete.
   into `packages/core/src/domain/place-form.ts` instead, and what is left in the components is JSX
   and handler wiring. **NOT run:** the live app against a database — no Postgres was started in this
   dispatch and nothing was written to the operator's database. The walk owns that.
+
+---
+
+# Issue 41 — dev notes · epic item **i6**
+
+**Ship "Been there?" suggestions with the resolved de-dup rule.** The rule of
+`docs/design/41/index.html` §7 as one pure function, the candidate query beside
+`listSavedPlacesForOwner`, and the bar + suggested cards on `/places`.
+
+## What changed
+
+- **`packages/core/src/domain/places.ts`** (new, 260 lines) — the whole of the logic:
+  - `MatchCandidate` / `isAlreadySaved` (`places.ts:71`) — §7's four rules verbatim.
+  - `normalizePlaceName` (`places.ts:41`) — lowercase · trim · collapse whitespace · strip `.` `,`
+    `'` `&` (and `’`, so a curly apostrophe cannot split a name from itself).
+  - `SAME_PLACE_METERS = 150` (`places.ts:30`), `SUGGESTION_MIN_RATING = 4` (`places.ts:33`).
+  - `PlaceSuggestion` (`places.ts:101`) + `suggestionsFromTrips` (`places.ts:133`) — the Q4=B
+    candidate set.
+  - `SuggestionShelf` + `buildSuggestionShelf` (`places.ts:216`) — de-dup, dismissals, the bar copy,
+    and `null` when there is nothing to show.
+  - `suggestionToCreate` (`places.ts:246`) — "Add to Been" as a `POST /api/places` body.
+  - `matchCandidateFromSaved` (`places.ts:82`).
+- **`packages/core/src/domain/places.test.ts`** (new, 23 tests) — every rule, every acceptance case.
+- **`packages/core/src/domain/index.ts:3`** — `export * from "./places"`.
+- **`packages/db/src/queries.ts:152`** — `listSuggestionCandidatesForOwner(ownerId)`, beside
+  `listSavedPlacesForOwner`: the same `TRIP_WITH` load, filtered to `status = 'complete'` and
+  `ownerId`, mapped by `suggestionsFromTrips`. Imports at `queries.ts:2,13`.
+- **`apps/web/src/components/places/Suggestions.tsx`** (new) — `SuggestionBar` (`:22`) and
+  `SuggestedPlaceCard` (`:51`).
+- **`apps/web/src/components/places/PlacesWorkspace.tsx`** — `suggestions` prop (`:59`), `dismissed`
+  state (`:63`), the `shelf` memo (`:78`), `accept()` (`:85`), and the render at `:202` / `:211`.
+- **`apps/web/src/components/places/PlacesLibrary.tsx`** — a `leading?: ReactNode` prop (`:52`),
+  rendered first inside the grid (`:166`) and first in the map lens's side column (`:154`); the grid
+  branch's condition became `list.length > 0 || leading` so a suggestion is not swallowed by
+  `EmptyShelf` on an empty shelf.
+- **`apps/web/src/app/places/page.tsx:19`** — the third parallel query (import at `:3`), passed at
+  `:33`.
+
+## Acceptance, checked
+
+| Acceptance clause | Where |
+| --- | --- |
+| coordless South Beach reservation vs the saved South Beach row → **match** | `places.test.ts:90` |
+| same name, real coords on both sides, 3 km apart → **no match** | `places.test.ts:83` |
+| `Fishing Bridge, WY` vs `Fishing Bridge RV Park`, identical coords → **no match** | `places.test.ts:63` |
+| id-equal pair → **match** | `places.test.ts:51` |
+| the bar is absent from the render when the list is empty | `buildSuggestionShelf` returns `null` (`places.test.ts:294`); the JSX is `{shelf && <SuggestionBar …>}` and `leading={shelf?.suggestions.map(…)}`, so both the bar and every card disappear together |
+| `pnpm turbo run lint typecheck test` | green — see **Checks run** |
+
+## Key decisions (and where they answer a vet finding)
+
+1. **The vet's HIGH on the totals is real, and the code follows Q4=B rather than the §7 prose.**
+   `seed.ts:39,45` and `:50,56` do give the Pacific Northwest Loop's stops ratings — Astoria, OR ★5
+   and Newport, OR ★4 — so §7's "SeedStop carries no rating field" is true only of the two trips
+   built through the `addTrip` helper (`seed.ts:328`). Mark that trip `complete` and the rule yields
+   **3** suggestions, not 1: Astoria OR (stop ★5), Astoria/Warrenton KOA (reservation ★5), Newport
+   OR (stop ★4). South Beach State Park is correctly dropped by rule 3b. I implemented the *rule* as
+   written and the *count* as it falls out; the shelf copy is a template, not the literal string, so
+   it renders whatever the rule produces. Both wordings are design copy — the singular is §5 of the
+   signed wireframe, the plural is the mock's shelf bar — and neither is invented
+   (`places.ts:232`). **Against the seed exactly as it ships the shelf does not render at all**
+   (Gap 3b): the Pacific NW Loop is `planning` (`seed.ts:21`) and the two complete trips rate
+   nothing. To see it, mark that trip complete.
+2. **The "Suggested" card is a new app-local component, per the vet's reuse HIGH.** `PlaceCard`
+   (`packages/ui/src/Places.tsx:34`) renders exactly one action with a hard-coded label, has no badge
+   slot, and takes a full `SavedPlace` a suggestion does not have. `SuggestedPlaceCard` composes the
+   same DS parts — `CategoryTile`, `Stars` — and copies `PlaceCard`'s box so the two sit in one grid
+   without a seam. `packages/ui` is untouched by this item.
+3. **Every decision is in `packages/core`, where a runner exists** (the vet's runner HIGH). The db
+   query is a `SELECT` plus `suggestionsFromTrips`; the island is `buildSuggestionShelf` plus JSX.
+   That is why the ≥ 4 filter, the `complete` filter, the borrowed-pin rule, the ordering, the bar
+   copy, the dismissal set and the POST body are all unit-tested, and the components hold nothing
+   but markup and handlers.
+4. **Rule 1 is a positive rule only.** Two *unequal* non-null `googlePlaceId`s fall through to the
+   name rule rather than short-circuiting to "no match" — §7 says "equal → match. Nothing else is
+   consulted", and then "*Otherwise* names must match". `places.test.ts:57` pins the null-id case.
+5. **A reservation borrows its stop's NAME, never its pin** (rule 4). `suggestionsFromTrips` sets a
+   reservation candidate's `lat`/`lng` to `null` and its `region` to the parent stop's `place.name`
+   — which is how the frame's "📍 Astoria, OR" under "Astoria/Warrenton KOA" is produced from real
+   data. `places.test.ts:104` asserts that pasting the borrowed pin in would have flipped the result,
+   which is the whole reason the contract sits on the producer.
+6. **A stop candidate is category `other`.** `stops` carry no type; a town is not a campground, and
+   `categoryMeta("other")` is the five-category language's own answer for "no category".
+   `places.ts:152`.
+7. **The headline names the most recently *ended* contributing trip.** The design draws one trip's
+   worth of suggestions and never says what two complete trips do. `buildSuggestionShelf` sorts by
+   `tripEndDate` desc → rating desc → name, and reads the headline off the head of that order
+   (`places.ts:231`, tested at `places.test.ts:327`).
+8. **The refresh path, continued from i5:** the island owns the list, so accepting a suggestion
+   POSTs, appends the created row to `places`, and the shelf recomputes — `isAlreadySaved` then
+   matches the row that was just created, so the card leaves with no second bookkeeping. No
+   `router.refresh()`.
+9. **"Not now" / "Dismiss all" are session-local.** The design specifies no persistence and there is
+   no column for it; dismissals live in island state and come back on reload. Flagged below.
+10. **"Dismiss all" uses `rv-ink-faded`, not the frame's subtle ink.** The palette guard in
+    `packages/core/src/theme/nightfall-tokens.test.ts:193` (a prior vet HIGH) scopes that token to
+    non-text. This is the one place the pixels depart from the frame, by one shade, to keep a
+    shipped contrast rule. Noted in a source comment at `Suggestions.tsx:36`.
+11. **Suggestions render on both shelves and are never touched by the category filter.** They are
+    not library rows: the segmented control's counts, the chips and their counts all describe
+    `places` only. Hiding a suggestion behind the Want/Been switch or a chip would make an offer
+    disappear for a reason the user never asked for.
+
+## Flagged for the walk — cannot be certified statically
+
+- **The shelf is invisible against the seed as it ships.** To walk it: mark Pacific Northwest Loop
+  `complete` (a `trips.status` update; there is no UI for it in this epic) and reload `/places`. The
+  bar should read *"Pacific Northwest Loop is complete. 3 places you rated ★4 or better aren't in
+  your library yet."* with three suggested cards and **no** South Beach State Park card.
+- Grid geometry: a suggested card is the first item of the same `auto-fill, minmax(340px, 1fr)` grid
+  the library cards use, matching the frame's row. Whether it reads as one row at the app's real
+  widths is a render claim.
+- The accept round-trip (`POST /api/places` with `status: "been"`) needs a database; nothing was
+  written to the operator's database in this dispatch.
+- Dismissal is not persisted, so "Not now" survives navigation within the SPA but not a hard reload.
+
+## Checks run
+
+- `pnpm install --prefer-offline` → `Done in 6.2s` (fresh worktree had no `node_modules`).
+- **TDD:** `packages/core/src/domain/places.test.ts` was written before `places.ts`. First run of
+  `./node_modules/.bin/vitest run src/domain/places.test.ts` →
+  `Test Files  1 failed (1) · Tests  1 failed | 22 passed (23)`, on
+  *"names the most recently ended trip in the headline"* — `buildSuggestionShelf` was trusting the
+  caller's ordering. That drove the fix (the comparator moved out as `bySuggestionOrder` and is now
+  applied inside `buildSuggestionShelf` too). Re-run → `Test Files 1 passed (1) · Tests 23 passed`.
+- **The gate:** `pnpm turbo run lint typecheck test` → `Tasks: 8 successful, 8 total`, with
+  `@rv-trip/core:test: Tests  320 passed (320)` (23 new) and `@rv-trip/web:lint` / `:typecheck`
+  clean. The palette contract (`nightfall-tokens.test.ts`) sweeps `apps/web/src` and so covers
+  `Suggestions.tsx`: no raw hex, no invented `rv-*` name.
+- **Production build:** `pnpm --filter @rv-trip/web build` → succeeded, `/places` still `ƒ
+  (Dynamic)`. This is what exercises the new server→client prop (`PlaceSuggestion[]` across the
+  boundary) that `tsc` alone does not.
+- **NOT run — SKIPPED (no runner):** any component render test. `apps/web` still declares no `test`
+  script and no runner; the "bar is absent when the list is empty" acceptance is executed as
+  `buildSuggestionShelf(...) === null` in `packages/core`, and what remains in the component is the
+  one-line `{shelf && …}` conditional. **NOT run:** the app against a database — no Postgres was
+  started and nothing was written to the operator's database.

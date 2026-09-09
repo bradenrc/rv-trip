@@ -40,9 +40,16 @@ const CAT_CHIPS: { cat: CategoryLabel; type: ReservationType }[] = [
  */
 export function PlacesLibrary({
   places,
+  leading,
   cardMenu,
 }: {
   places: SavedPlace[];
+  /** Cards that go before the library's own — the "Been there?" suggestions of
+   * §5, drawn in the same grid row the frame draws them in. They are not
+   * library rows: the shelf switch, the category chips and their counts all
+   * describe `places` only, and a suggestion is offered until it is accepted or
+   * dismissed. Absent (not empty-stated) when there is nothing to suggest. */
+  leading?: ReactNode;
   /** The ⋯ menu, rendered BESIDE each card rather than inside it — PlaceCard
    * ships two optional props and this epic gives them no siblings
    * (docs/design/41 §5). Absent when nothing is wired to it. */
@@ -143,7 +150,10 @@ export function PlacesLibrary({
             <div className="min-h-[420px]">
               <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} />
             </div>
-            <div className="grid content-start gap-3">{cards}</div>
+            <div className="grid content-start gap-3">
+              {leading}
+              {cards}
+            </div>
           </div>
           {hidden > 0 && (
             <p className="m-0 mt-[11px] font-mono text-[11px] text-rv-ink-faded">
@@ -151,8 +161,9 @@ export function PlacesLibrary({
             </p>
           )}
         </>
-      ) : list.length > 0 ? (
+      ) : list.length > 0 || leading ? (
         <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+          {leading}
           {cards}
         </div>
       ) : status === "want" ? (

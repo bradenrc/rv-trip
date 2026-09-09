@@ -1,4 +1,8 @@
-import { listSavedPlacesForOwner, listTripsForOwner } from "@rv-trip/db";
+import {
+  listSavedPlacesForOwner,
+  listSuggestionCandidatesForOwner,
+  listTripsForOwner,
+} from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { PlacesWorkspace } from "@/components/places/PlacesWorkspace";
 
@@ -6,9 +10,13 @@ export const dynamic = "force-dynamic";
 
 export default async function PlacesPage() {
   const owner = getOwner();
-  const [places, trips] = await Promise.all([
+  const [places, trips, suggestions] = await Promise.all([
     listSavedPlacesForOwner(owner),
     listTripsForOwner(owner),
+    // The "Been there?" candidates (§7) are fetched here, on the server, and
+    // handed to the island whole; the island de-duplicates them against the
+    // library it already holds, so accepting one needs no second query.
+    listSuggestionCandidatesForOwner(owner),
   ]);
 
   // The graduate sheet's "Visited on" list (docs/design/41 §5): complete trips
@@ -22,7 +30,7 @@ export default async function PlacesPage() {
   // it, both sheets and the ⋯ menu.
   return (
     <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
-      <PlacesWorkspace places={places} trips={visitedOn}>
+      <PlacesWorkspace places={places} trips={visitedOn} suggestions={suggestions}>
         <div>
           <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-ember">
             Your places

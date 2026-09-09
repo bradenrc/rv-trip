@@ -1,24 +1,33 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
-import type { GraduateForm, SavedPlace, SavePlaceForm } from "@rv-trip/core";
+import type {
+  GraduateForm,
+  PlaceSuggestion,
+  SavedPlace,
+  SavePlaceForm,
+} from "@rv-trip/core";
 import {
   applySavedPlacePatch,
+  buildSuggestionShelf,
   editPlacePatch,
   emptySavePlaceForm,
   graduateFormFromSaved,
   graduatePatch,
+  matchCandidateFromSaved,
   savePlaceBody,
   savePlaceFormFromSaved,
   savedPlaceToCreate,
+  suggestionToCreate,
 } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { PlacesLibrary } from "./PlacesLibrary";
 import { PlaceCardMenu } from "./PlaceCardMenu";
 import { PlaceSheet } from "./PlaceSheet";
 import { GraduateSheet } from "./GraduateSheet";
+import { SuggestedPlaceCard, SuggestionBar } from "./Suggestions";
 
 /**
  * The /places client island — docs/design/41 §5.
@@ -38,14 +47,20 @@ import { GraduateSheet } from "./GraduateSheet";
 export function PlacesWorkspace({
   places: initialPlaces,
   trips,
+  suggestions = [],
   children,
 }: {
   places: SavedPlace[];
   /** Complete trips only — the graduate sheet's "Visited on" list. */
   trips: { id: string; title: string }[];
+  /** "Been there?" candidates — every stop and reservation rated ★4+ on a
+   * complete trip (§7). De-duplication against the library happens here, not in
+   * the query, so accepting one drops it on the next render. */
+  suggestions?: PlaceSuggestion[];
   children: ReactNode;
 }) {
   const [places, setPlaces] = useState(initialPlaces);
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const [saveSheet, setSaveSheet] = useState<{ id: string | null; form: SavePlaceForm } | null>(
     null,
   );
@@ -53,6 +68,33 @@ export function PlacesWorkspace({
   const [saving, setSaving] = useState(false);
 
   const failed = () => toast.error("That change didn't save — check your connection.");
+
+  /**
+   * The shelf, recomputed from the list the island already owns. `null` is the
+   * whole empty state (Gap 3b): no bar, no cards, nothing announcing that
+   * nothing is there. Accepting a suggestion needs no bookkeeping — the created
+   * row lands in `places`, and `isAlreadySaved` then matches it.
+   */
+  const shelf = useMemo(
+    () => buildSuggestionShelf(suggestions, places.map(matchCandidateFromSaved), dismissed),
+    [suggestions, places, dismissed],
+  );
+
+  /** "Add to Been" — the library row does not exist yet, so this is a POST
+   * carrying the rating and the trip it was visited on (§3). */
+  const accept = (s: PlaceSuggestion) => {
+    setSaving(true);
+    tripApi
+      .savePlace(suggestionToCreate(s))
+      .then((saved) => {
+        setPlaces((ps) => [...ps, saved]);
+        setSaving(false);
+      })
+      .catch(() => {
+        setSaving(false);
+        failed();
+      });
+  };
 
   const submitSave = () => {
     if (!saveSheet) return;
@@ -157,8 +199,24 @@ export function PlacesWorkspace({
         </button>
       </div>
 
+      {shelf && (
+        <SuggestionBar
+          shelf={shelf}
+          onDismissAll={() => setDismissed((d) => [...d, ...shelf.suggestions.map((s) => s.key)])}
+        />
+      )}
+
       <PlacesLibrary
         places={places}
+        leading={shelf?.suggestions.map((s) => (
+          <SuggestedPlaceCard
+            key={s.key}
+            suggestion={s}
+            saving={saving}
+            onDismiss={() => setDismissed((d) => [...d, s.key])}
+            onAccept={() => accept(s)}
+          />
+        ))}
         cardMenu={(p) => (
           <PlaceCardMenu
             place={p}
