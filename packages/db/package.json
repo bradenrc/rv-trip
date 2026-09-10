@@ -5,7 +5,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema.ts"
+    "./schema": "./src/schema.ts",
+    "./load-env": "./src/load-env.ts",
+    "./testing": "./src/testing/index.ts",
+    "./testing/lifecycle": "./src/testing/lifecycle.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
