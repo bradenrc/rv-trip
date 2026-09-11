@@ -2,7 +2,10 @@ import { eq, and, asc, desc, gt, inArray, sql } from "drizzle-orm";
 import {
   deriveDays,
   deriveTripStatus,
-  isScheduled,
+  orderedPairs,
+  routeCacheKey,
+  routeSummary,
+  routingHash,
   suggestionsFromTrips,
   todayIso,
 } from "@rv-trip/core";
@@ -89,14 +92,32 @@ export async function getTripById(ownerId: string, tripId: string): Promise<Trip
 /** Dashboard row — the shape is owned by @rv-trip/core so the API client can validate it. */
 export type { TripSummary };
 
+/**
+ * The dashboard listing, and the ONE place the card's miles number is produced.
+ *
+ * It reads the route cache and never the provider: landing on the dashboard
+ * can never cost money (docs/design/43 §3). The rig is resolved once and
+ * `routingHash` derived once — not per trip — and every trip's pairs are asked
+ * for in a single batched `getCachedRoutes`. A miss simply stays absent from
+ * the map, which is exactly what `routeSummary` falls back on.
+ */
 export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]> {
-  const rows = await db.query.trips.findMany({
-    where: eq(trips.ownerId, ownerId),
-    orderBy: [asc(trips.startDate)],
-    with: TRIP_WITH,
-  });
+  const [rows, rig] = await Promise.all([
+    db.query.trips.findMany({
+      where: eq(trips.ownerId, ownerId),
+      orderBy: [asc(trips.startDate)],
+      with: TRIP_WITH,
+    }),
+    getRigByOwner(ownerId),
+  ]);
   const today = todayIso();
-  return rows.map((r) => summarize(mapTripRow(r, today)));
+  const mapped = rows.map((r) => mapTripRow(r, today));
+  const hash = await routingHash(rig);
+  const keys = mapped.flatMap((trip) =>
+    orderedPairs(trip).map((p) => routeCacheKey(p.from, p.to, hash)),
+  );
+  const routes = await getCachedRoutes(keys);
+  return mapped.map((trip) => summarize(trip, routes, hash));
 }
 
 /**
@@ -114,17 +135,28 @@ export async function listTripsWithStopsForOwner(ownerId: string): Promise<Trip[
   return rows.map((r) => mapTripRow(r, today));
 }
 
-function summarize(trip: Trip): TripSummary {
+/**
+ * The card's stats. `miles` is `routeSummary().driveMiles` — the RAIL's own
+ * number, the same function the planner calls over the same `orderedPairs` —
+ * so the card and the rail cannot disagree, because they are one expression.
+ * The haversine over adjacent scheduled stops this used to sum disagreed
+ * twice: a chord instead of a road, and a pair set that never counted the
+ * drive to a floating stop.
+ */
+function summarize(
+  trip: Trip,
+  routes: Record<string, RouteResult>,
+  hash: string,
+): TripSummary {
   const stops = trip.legs.flatMap((l) => l.stops);
   const { days } = deriveDays(trip, stops);
   const open = days.filter((d) => d.kind === "empty").length;
-  const scheduled = stops
-    .filter(isScheduled)
-    .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
-  let miles = 0;
-  for (let i = 0; i < scheduled.length - 1; i++) {
-    miles += haversineMiles(scheduled[i]!.place, scheduled[i + 1]!.place);
-  }
+  const summary = routeSummary(trip, routes, hash);
+  // Honest when it is guessing: a single missed key means the total carries at
+  // least one straight-line estimate, and the card says so beside the number.
+  const milesEstimated = orderedPairs(trip).some(
+    (p) => !routes[routeCacheKey(p.from, p.to, hash)],
+  );
   return {
     id: trip.id,
     title: trip.title,
@@ -138,7 +170,8 @@ function summarize(trip: Trip): TripSummary {
     days: days.length,
     stops: stops.length,
     legs: trip.legs.length,
-    miles: Math.round(miles),
+    miles: summary.driveMiles,
+    milesEstimated,
     open,
   };
 }
@@ -251,20 +284,6 @@ export function mapSavedPlaceRow(
     tripId: r.tripId,
     tripName,
   };
-}
-
-function haversineMiles(a: Place, b: Place): number {
-  if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) return 0;
-  const R = 3958.8; // miles
-  const dLat = deg(b.lat - a.lat);
-  const dLng = deg(b.lng - a.lng);
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.sin(dLng / 2) ** 2 * Math.cos(deg(a.lat)) * Math.cos(deg(b.lat));
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-function deg(x: number): number {
-  return (x * Math.PI) / 180;
 }
 
 function mapPlace(name: string, lat: number | null, lng: number | null, gid: string | null): Place {

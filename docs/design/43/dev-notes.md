@@ -305,3 +305,131 @@ With a HERE key configured, the routed drives should draw solid at 2.6px with a 
 dash surviving only where routing failed, and each routed label should sit ON the corridor
 rather than on the chord. The three-mode toggle is the thing to eyeball: night/day estimates
 must show **no** casing, and sat's estimate dash must look exactly as it does today.
+
+---
+
+# dev notes · issue 43 · i3 — make the dashboard card call the rail's own miles function
+
+Implements **plan item i3 only** (`docs/design/43/plan.json` §3, issue #37). i4 is a
+separate dispatch; nothing here touches `navigation.ts`, `frechet.ts`, the Navigate control
+or the map.
+
+## What changed
+
+### The wire contract grows one field
+- `packages/core/src/domain/types.ts:389` `milesEstimated: z.boolean()` on `tripSummary`,
+  right after `miles`, with the doc comment naming the rule (neutral chip, never amber).
+  **Required, not defaulted** — the acceptance's own words ("rejects one without it"), and
+  see the ship-order note below.
+- `packages/core/src/api-client/api-client.test.ts:33` — the existing fake row gained the
+  field, because `tripSummaryListSchema` validates it on the way in.
+
+### One number, one expression
+- `packages/db/src/queries.ts:104-120` `listTripsForOwner` — the trips query and
+  `getRigByOwner` in one `Promise.all`, then **one** `routingHash(rig)` for the whole
+  listing, `orderedPairs` over every mapped trip flattened into **one** batched
+  `getCachedRoutes`, and `summarize(trip, routes, hash)` per row. It reads the cache and
+  **never the provider**, so landing on the dashboard cannot bill anything.
+- `packages/db/src/queries.ts:138-175` `summarize(trip, routes, hash)` —
+  `miles: routeSummary(trip, routes, hash).driveMiles` (`:171`), and
+  `milesEstimated = orderedPairs(trip).some((p) => !routes[routeCacheKey(p.from, p.to, hash)])`
+  (`:154-156`). The parameter is named `hash`, not `routingHash`, so it cannot shadow the
+  imported function.
+- `packages/db/src/queries.ts` — `haversineMiles` and `deg` are **deleted** (they were at
+  `:256-268` before this change), and `isScheduled` dropped from the import list with them.
+  `grep -rn "haversineMiles" packages/db/src` and `grep -rn '\bdeg\b' packages/db/src` both
+  return nothing.
+
+### The chip, lifted
+- `packages/ui/src/EstimateChip.tsx:13` — markup and token classes **byte-identical** to the
+  old private helper (`rounded-rv-pill border border-rv-border-hi px-2 py-px font-mono
+  text-[9px] uppercase tracking-[0.08em] text-rv-ink-faded`, copy `estimate`), which is also
+  exactly the wireframe's `.chip-est` rule (`index.html:197-202`). The doc comment keeps the
+  RouteNotice contrast the design cites as the precedent.
+- `packages/ui/src/index.ts:7` exports it beside `RouteNotice`.
+- `apps/web/src/components/trip/RouteView.tsx:25` imports it from `@rv-trip/ui`; the local
+  `function EstimateChip()` is gone. Its two call sites (`:393`, `:408`) are otherwise
+  untouched.
+- `apps/web/src/components/dashboard/TripCard.tsx:19,131-136` — the miles `Chip` now renders
+  `{trip.miles} mi` plus `{trip.milesEstimated && <EstimateChip />}`. `Chip`'s own
+  `gap-[5px]` is the spacing; no new Tailwind, no restyle of the pill.
+
+## Decisions worth checking
+
+1. **`milesEstimated` is REQUIRED, so the ship order is pinned — API before mobile.** The
+   vet's MED: `apps/mobile` parses the identical `tripSummaryListSchema`
+   (`apps/mobile/src/store.ts:13`) and ships on its own Expo cadence, so a mobile build that
+   lands *before* this API deploy would reject every dashboard row. Defaulting the field was
+   the alternative, and it is what the acceptance explicitly forbids ("rejects one without
+   it") — a row from a server that cannot tell you whether the number is a road distance
+   must not be rendered as measured. Web and the API deploy together in one Vercel build, so
+   the only rule the operator has to hold is: **do not cut a mobile build from this core
+   until this is merged and deployed.** `apps/mobile` itself is untouched here.
+2. **`apps/mobile/app/index.tsx:109` renders `trip.miles` and gains no chip.** Mobile has its
+   own react-native `EstimateChip` (`apps/mobile/src/ui.tsx:29`) but the dashboard `Stat`
+   there has no slot for it, and i3's scope names only the two web files. So the number moves
+   on mobile (249 → 427 on the seed trip) with nothing beside it saying "estimate". Flagged,
+   not fixed — it is a one-line follow-up on the mobile surface, not this item's scope.
+3. **`summarize` still calls `deriveDays` itself** for `days`/`open`, even though
+   `routeSummary` returns `days`/`openCount` too. The design's pseudocode replaces only the
+   miles arithmetic, so `days` and `open` are byte-for-byte the shipped derivation; folding
+   them into `summary` as well would have been an unscoped behaviour change on two more
+   fields. Cost is one extra `deriveDays` per row.
+4. **A trip with no routable pair is `miles: 0, milesEstimated: false`** — `.some()` over an
+   empty pair list. Nothing fell back because nothing was asked for, so no chip on a card
+   with no drives. Asserted.
+
+## Tests
+
+- `packages/core/src/planner/planner.test.ts:333-416` — a new `describe` inside
+  `routeSummary`, over the **existing `seedTrip()` fixture** (the Pacific NW Loop, Crater
+  Lake floating in `Cascades & Home`): the pair set is exactly
+  `astoria→newport`, `newport→bend`, `bend→crater` and `driveMiles` is the sum over **all
+  three** (and strictly greater than the scheduled-only two); a **partially populated**
+  `RouteMap` (one hit) yields `136` for the hit plus `estimateRoute` for the two misses,
+  with the `some(!routes[key])` flag computed off the same map; a fully populated map
+  estimates nothing; and a `routingHash` mismatch is a clean miss rather than a wrong
+  number. `driveMiles`/`estimateRoute` are imported rather than hardcoded, so the assertion
+  is "the same expression", not "this constant".
+- `packages/core/src/domain/types.test.ts:182-203` — `tripSummary.parse` accepts a row
+  carrying `milesEstimated`, carries the wireframe's cold-cache row (`336 mi`, flag true)
+  through verbatim, and `safeParse` **rejects** the same row with the key omitted.
+- `apps/web/src/app/api/trips/route.test.ts:72-186` (4 new cases, real Postgres through the
+  suite's throwaway database) — the **db seam end to end**, which is the half no core test
+  can reach: `GET /api/trips` on a seed loop plus a floating Crater Lake counts the floating
+  drive and flags the row; with all three pairs cached it returns `136 + 185 + 106 = 427`
+  and **no** flag; one hit and two misses mixes the two on one row and still flags it; and a
+  one-stop trip is `0` miles, unflagged. The routed rows are written with the real
+  `putCachedRoutes`, and the key's routing half is `NO_ROUTING_HASH` because the fixture
+  account has no rig — the same key the page would read.
+- **Not covered by a test:** the rendered card. `apps/web`'s vitest is `environment: "node"`
+  with `include: ["src/**/*.test.ts"]` and the workspace has no jsdom / testing-library
+  (the vet's HIGH against i4's render test), so `TripCard.tsx`'s chip placement is
+  **render-required at the walk**. Claimed for qa instead: the lifted `EstimateChip` markup
+  is character-identical to the helper it replaced and to `.chip-est` in the wireframe, and
+  the only new JSX on the card is the `{trip.milesEstimated && …}` guard inside the existing
+  miles `Chip`.
+
+## Checks run
+
+- `npx turbo run lint typecheck test` → `Tasks: 9 successful, 9 total`.
+- `pnpm --filter @rv-trip/core test` inside that run → `Test Files 27 passed / Tests 515
+  passed` (was 508; +4 routeSummary, +3 tripSummary).
+- `apps/web` inside that run → `Test Files 19 passed (19) / Tests 52 passed (52)` (was 48;
+  +4 GET /api/trips). A real Postgres was reachable, so no db file skipped.
+- `grep -rn "haversineMiles" packages/db/src` → no output; `grep -rn '\bdeg\b'
+  packages/db/src` → no output.
+- `pnpm install --frozen-lockfile` was needed first (fresh worktree, no `node_modules`) →
+  `Done in 6.3s`; the lockfile is unchanged.
+- NOT run: `pnpm db:push` / `db:migrate` (barred, and i3 adds no migration — `milesEstimated`
+  is a DERIVED field, no column).
+
+## For the walk
+
+The dashboard, `/`. Every card's miles number **changes** — the seed trip goes
+**249 → 427 mi** — because both the metric and the pair set changed. That is the bug being
+fixed, not a regression. With a cold `routes` table (or no HERE key) each card shows the
+estimate total with a small neutral **estimate** pill immediately right of the miles chip;
+open a trip so the rail fills the cache, come back, and the number should become the routed
+one **and the pill should disappear**. The card's number and the rail's total must read the
+same on the same trip — that is the whole point of the item.

@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  EstimateChip,
   FloatingTag,
   Stars,
   ReservationLineItem,
@@ -425,15 +426,6 @@ function Drive({ drive }: { drive: RouteDrive }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/** An un-routed number is an unfinished measurement, not a warning. */
-function EstimateChip() {
-  return (
-    <span className="rounded-rv-pill border border-rv-border-hi px-2 py-px font-mono text-[9px] uppercase tracking-[0.08em] text-rv-ink-faded">
-      estimate
-    </span>
   );
 }
 

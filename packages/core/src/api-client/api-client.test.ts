@@ -29,6 +29,7 @@ const summary = {
   stops: 3,
   legs: 2,
   miles: 412,
+  milesEstimated: false,
   open: 3,
 };
 

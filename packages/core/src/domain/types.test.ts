@@ -4,6 +4,7 @@ import {
   savedPlaceCreate,
   savedPlacePatch,
   normalizeSavedPlacePatch,
+  tripSummary,
 } from "./types";
 
 // The write grammar for the Places library (docs/design/41 §3). `savedPlace` is
@@ -151,5 +152,46 @@ describe("normalizeSavedPlacePatch — graduation clears the tip's source", () =
       status: "want",
       source: "Forum tip",
     });
+  });
+});
+
+// ── the dashboard row ──────────────────────────────────────────────────────
+// `milesEstimated` is REQUIRED, not defaulted (docs/design/43 §3): the card's
+// number is now the rail's number, and the chip is the only thing that says
+// whether that number is a road distance or a chord. A row without the flag is
+// a row from a server that cannot tell you, and the api-client must not quietly
+// render it as measured.
+const SUMMARY_ROW = {
+  id: "8c2b2c1e-6a4e-4f0e-9a0b-6f2b1d0a7c31",
+  title: "Pacific Northwest Loop",
+  homeBase: "Boise, ID",
+  startDate: "2026-08-01",
+  endDate: "2026-08-28",
+  status: "planning",
+  statusAuto: false,
+  rating: null,
+  note: null,
+  days: 28,
+  stops: 4,
+  legs: 2,
+  miles: 427,
+  milesEstimated: false,
+  open: 14,
+};
+
+describe("tripSummary — the dashboard row's wire shape", () => {
+  it("accepts a row carrying milesEstimated", () => {
+    expect(tripSummary.parse(SUMMARY_ROW)).toEqual(SUMMARY_ROW);
+  });
+
+  it("carries the cold-cache row's estimate flag through verbatim", () => {
+    // The wireframe's second card: 336 mi with the estimate chip.
+    const cold = { ...SUMMARY_ROW, miles: 336, milesEstimated: true };
+    expect(tripSummary.parse(cold).milesEstimated).toBe(true);
+  });
+
+  it("rejects a row without it", () => {
+    const { milesEstimated: _omitted, ...withoutFlag } = SUMMARY_ROW;
+    expect(tripSummary.safeParse(withoutFlag).success).toBe(false);
   });
 });

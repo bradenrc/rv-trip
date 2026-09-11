@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { Idea, Leg, Reservation, Trip, Stop } from "../domain/types";
-import { orderedLegStops, routeCacheKey } from "../domain/route-order";
-import type { RouteResult } from "../providers/index";
+import { orderedLegStops, orderedPairs, routeCacheKey } from "../domain/route-order";
+import { estimateRoute, type RouteResult } from "../providers/index";
+import { driveMiles } from "../providers/route-format";
 import {
   timelineModel,
   routeModel,
@@ -318,6 +319,92 @@ describe("routeSummary", () => {
     const s = routeSummary(trip);
     expect(visible).toHaveLength(3);
     expect(s.driveMiles).toBe(visible.reduce((a, d) => a + d.miles, 0));
+  });
+
+  /**
+   * The dashboard card's number (`summarize` in packages/db/src/queries.ts) is
+   * now THIS expression — `routeSummary(trip, routes, hash).driveMiles` — over
+   * the same `orderedPairs` the rail walks. The card used to sum a haversine
+   * over adjacent SCHEDULED stops only, so it disagreed with the rail twice:
+   * the metric (chord, not road) and the pair set (it never counted the drive
+   * to a floating stop). Both gaps are asserted here, on the seed-shaped trip
+   * the design is written against (docs/design/43 §3).
+   */
+  describe("the dashboard card's miles, over a Pacific-NW-Loop-shaped trip", () => {
+    const HASH = "rig-x";
+    const key = (p: { from: { lat: number; lng: number }; to: { lat: number; lng: number } }) =>
+      routeCacheKey(p.from, p.to, HASH);
+
+    /** 136 mi of US-101, in HERE's units. */
+    const routed = (meters: number, road: string): RouteResult => ({
+      durationSeconds: 3 * 3600,
+      distanceMeters: meters,
+      polyline: null,
+      primaryRoad: road,
+      source: "here",
+      notices: [],
+    });
+
+    it("counts every orderedPairs pair, INCLUDING the drive to the floating stop", () => {
+      const trip = seedTrip();
+      const pairs = orderedPairs(trip);
+      // Astoria→Newport, Newport→Bend (the leg crossing) and Bend→Crater Lake
+      // (floating, at the end of ITS leg) — the pair the card never had.
+      expect(pairs.map((p) => [p.fromStopId, p.toStopId])).toEqual([
+        ["astoria", "newport"],
+        ["newport", "bend"],
+        ["bend", "crater"],
+      ]);
+      const s = routeSummary(trip, {}, HASH);
+      expect(s.driveMiles).toBe(
+        pairs.reduce((a, p) => a + driveMiles(estimateRoute(p.from, p.to)), 0),
+      );
+      // The floating pair is not free — dropping it changes the total.
+      const withoutFloating = pairs
+        .slice(0, 2)
+        .reduce((a, p) => a + driveMiles(estimateRoute(p.from, p.to)), 0);
+      expect(s.driveMiles).toBeGreaterThan(withoutFloating);
+    });
+
+    it("takes the routed distance for a hit and estimateRoute for a miss", () => {
+      const trip = seedTrip();
+      const [coast, crossing, floating] = orderedPairs(trip);
+      // Partially populated, exactly as a cold-ish cache answers: one hit.
+      const routes: RouteMap = { [key(coast!)]: routed(218_866, "US-101") };
+      const s = routeSummary(trip, routes, HASH);
+      expect(driveMiles(routes[key(coast!)]!)).toBe(136);
+      expect(s.driveMiles).toBe(
+        136 +
+          driveMiles(estimateRoute(crossing!.from, crossing!.to)) +
+          driveMiles(estimateRoute(floating!.from, floating!.to)),
+      );
+      // And the flag the card reads off the SAME RouteMap: two keys missed.
+      expect(orderedPairs(trip).filter((p) => !routes[key(p)])).toHaveLength(2);
+      expect(orderedPairs(trip).some((p) => !routes[key(p)])).toBe(true);
+    });
+
+    it("is not estimating once every pair is cached", () => {
+      const trip = seedTrip();
+      const pairs = orderedPairs(trip);
+      const routes: RouteMap = Object.fromEntries(
+        pairs.map((p, i) => [key(p), routed(100_000 * (i + 1), "US-20")]),
+      );
+      expect(routeSummary(trip, routes, HASH).driveMiles).toBe(62 + 124 + 186);
+      expect(pairs.some((p) => !routes[key(p)])).toBe(false);
+    });
+
+    it("a routingHash mismatch is a clean miss, not a wrong number", () => {
+      const trip = seedTrip();
+      const routes: RouteMap = Object.fromEntries(
+        orderedPairs(trip).map((p) => [
+          routeCacheKey(p.from, p.to, "other-rig"),
+          routed(999_999, "US-101"),
+        ]),
+      );
+      expect(routeSummary(trip, routes, HASH).driveMiles).toBe(
+        routeSummary(trip, {}, HASH).driveMiles,
+      );
+    });
   });
 
   it("counts stops, days, gaps and cost", () => {
