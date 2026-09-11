@@ -17,10 +17,19 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // drives are resolved HERE, before render, and handed down as a keyed map.
   // `rig` itself stays on the server — the client only needs to know whether
   // one exists, so it can show the nudge.
+  // `nav: true` — the corridor check is BILLABLE and per drive, so only a
+  // screen that renders a Navigate control asks for it. /map does not
+  // (docs/design/43 §4).
   const rig = await getRigByOwner(owner);
-  const { routes, routingHash } = await routeTrip(trip, rig);
+  const { routes, routingHash, nav } = await routeTrip(trip, rig, { nav: true });
 
   return (
-    <TripPlanner trip={trip} routes={routes} routingHash={routingHash} hasRig={rig !== null} />
+    <TripPlanner
+      trip={trip}
+      routes={routes}
+      routingHash={routingHash}
+      nav={nav}
+      hasRig={rig !== null}
+    />
   );
 }

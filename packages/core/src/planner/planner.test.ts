@@ -32,6 +32,9 @@ import {
   dateRange,
   fullRange,
   addDays,
+  navigationCaption,
+  navigationOptions,
+  type NavMap,
   type RouteMap,
 } from "./index";
 
@@ -305,6 +308,173 @@ describe("routeModel", () => {
   it("gives every drive a Google Maps handoff URL", () => {
     const d = routeModel(fixture())[0]!.rows[0]!.drive!;
     expect(d.navUrl).toMatch(/^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&origin=46\.18/);
+  });
+
+  /**
+   * The corridor verdict (docs/design/43 §4). `toDrive` no longer decides
+   * anything about it — it READS the server-resolved NavMap, keyed by the same
+   * routeCacheKey `routes` is, and defaults to "plain" when the key is absent.
+   * Absent is the normal case: no Google key, a drive nobody checked, or a pair
+   * the client just invented by dragging a floating stop.
+   */
+  describe("the Navigate verdict, read off the NavMap", () => {
+    const HASH = "rig-x";
+    const FROM = { lat: 46.18, lng: -123.83 };
+    const TO = { lat: 44.63, lng: -124.05 };
+    const KEY = routeCacheKey(FROM, TO, HASH);
+
+    const routed: RouteResult = {
+      durationSeconds: 3 * 3600 + 12 * 60,
+      distanceMeters: 218_866,
+      polyline: null,
+      primaryRoad: "US-101",
+      source: "here",
+      notices: [],
+    };
+    const routes: RouteMap = { [KEY]: routed };
+    const first = (nav: NavMap) => routeModel(fixture(), routes, HASH, nav)[0]!.rows[0]!.drive!;
+
+    it("is 'plain' with no NavMap at all — every shipped call site's answer", () => {
+      const d = first({});
+      expect(d.navVerdict).toBe("plain");
+      expect(d.navDeviationMeters).toBeNull();
+      // routeModel's third-arity call (apps/mobile) must keep working.
+      expect(routeModel(fixture(), routes, HASH)[0]!.rows[0]!.drive!.navVerdict).toBe("plain");
+    });
+
+    it("is 'checked' when the cached check came back inside the tolerance", () => {
+      const d = first({ [KEY]: { deviationMeters: 180, intermediates: [] } });
+      expect(d.navVerdict).toBe("checked");
+      expect(d.navDeviationMeters).toBe(180);
+    });
+
+    it("is 'plain' when the cached check came back outside it", () => {
+      const d = first({ [KEY]: { deviationMeters: 1340, intermediates: [] } });
+      expect(d.navVerdict).toBe("plain");
+      expect(d.navDeviationMeters).toBe(1340);
+    });
+
+    it("is 'plain' when the check ran and could not conclude", () => {
+      const d = first({ [KEY]: { deviationMeters: null, intermediates: [] } });
+      expect(d.navVerdict).toBe("plain");
+      expect(d.navDeviationMeters).toBeNull();
+    });
+
+    it("keeps today's Google url and adds a WeGo one, in every verdict", () => {
+      for (const nav of [{}, { [KEY]: { deviationMeters: 180, intermediates: [] } }]) {
+        const d = first(nav);
+        expect(d.navUrl).toBe(
+          "https://www.google.com/maps/dir/?api=1&origin=46.1800,-123.8300&destination=44.6300,-124.0500&travelmode=driving",
+        );
+        expect(d.navWegoUrl).toBe(
+          "https://wego.here.com/directions/drive/46.1800,-123.8300/44.6300,-124.0500",
+        );
+      }
+    });
+
+    it("cannot be fooled by a NavMap keyed on another rig", () => {
+      const stale: NavMap = {
+        [routeCacheKey(FROM, TO, "some-other-rig")]: { deviationMeters: 10, intermediates: [] },
+      };
+      expect(first(stale).navVerdict).toBe("plain");
+    });
+  });
+
+  /**
+   * The split control's copy and order, as pure functions of the drive — the
+   * only way this epic's acceptance can actually EXECUTE. apps/web's vitest is
+   * `environment: "node"`, collects only `.test.ts` files, and the workspace
+   * ships no jsdom / testing-library (the vet's HIGH against i4's render
+   * test) — so RouteView renders these strings and asserts nothing about them.
+   * They are asserted here instead.
+   */
+  describe("navigationOptions / navigationCaption", () => {
+    const HASH = "rig-x";
+    const FROM = { lat: 46.18, lng: -123.83 };
+    const TO = { lat: 44.63, lng: -124.05 };
+    const KEY = routeCacheKey(FROM, TO, HASH);
+    const routed: RouteResult = {
+      durationSeconds: 11_520,
+      distanceMeters: 218_866,
+      polyline: null,
+      primaryRoad: "US-101",
+      source: "here",
+      notices: [],
+    };
+    const drive = (nav: NavMap) =>
+      routeModel(fixture(), { [KEY]: routed }, HASH, nav)[0]!.rows[0]!.drive!;
+    const checked = drive({ [KEY]: { deviationMeters: 180, intermediates: [] } });
+    const plain = drive({});
+
+    it("leads with Google when the corridor was checked", () => {
+      const [primary, alternate] = navigationOptions(checked);
+      expect(primary).toMatchObject({
+        id: "google",
+        title: "Google Maps · RV-checked",
+        caption: "within 180 m of your corridor",
+        url: checked.navUrl,
+        primary: true,
+      });
+      expect(alternate).toMatchObject({
+        id: "wego",
+        title: "HERE WeGo · truck profile",
+        url: checked.navWegoUrl,
+        primary: false,
+      });
+    });
+
+    it("leads with HERE WeGo when it did not — a worse route must not wear the label", () => {
+      const [primary, alternate] = navigationOptions(plain);
+      expect(primary).toMatchObject({ id: "wego", title: "HERE WeGo · truck profile" });
+      expect(alternate).toMatchObject({
+        id: "google",
+        title: "Google Maps · plain",
+        caption: "endpoints only — not the checked corridor",
+      });
+    });
+
+    it("puts WeGo first EXACTLY when the verdict is plain", () => {
+      for (const nav of [
+        {},
+        { [KEY]: { deviationMeters: null, intermediates: [] } },
+        { [KEY]: { deviationMeters: 401, intermediates: [] } },
+      ]) {
+        expect(navigationOptions(drive(nav))[0]!.id).toBe("wego");
+      }
+      for (const nav of [
+        { [KEY]: { deviationMeters: 0, intermediates: [] } },
+        { [KEY]: { deviationMeters: 400, intermediates: [] } },
+      ]) {
+        expect(navigationOptions(drive(nav))[0]!.id).toBe("google");
+      }
+    });
+
+    it("marks exactly one option primary, and it is the first", () => {
+      for (const d of [checked, plain]) {
+        const options = navigationOptions(d);
+        expect(options.filter((o) => o.primary)).toHaveLength(1);
+        expect(options[0]!.primary).toBe(true);
+        expect(options.map((o) => o.id).sort()).toEqual(["google", "wego"]);
+      }
+    });
+
+    it("captions a checked drive green, naming the measured deviation", () => {
+      expect(navigationCaption(checked)).toEqual({
+        tone: "checked",
+        text: "Checked against the RV-safe corridor — within 180 m.",
+      });
+      // The number is rounded to whole meters; a corridor is not measured in cm.
+      expect(
+        navigationCaption(drive({ [KEY]: { deviationMeters: 180.4, intermediates: [] } })).text,
+      ).toBe("Checked against the RV-safe corridor — within 180 m.");
+    });
+
+    it("captions a plain drive with the shipped amber string, character for character", () => {
+      expect(navigationCaption(plain)).toEqual({
+        tone: "plain",
+        text: "Navigation may not follow the RV-safe route — check notices.",
+      });
+    });
   });
 });
 

@@ -87,6 +87,7 @@ import {
   setIdeaNote,
   scheduleFloating,
   reorderFloating,
+  type NavMap,
   type RouteMap,
   type TimelineGap,
 } from "@/lib/trip-logic";
@@ -144,12 +145,23 @@ export function TripPlanner({
   trip: initialTrip,
   routes: initialRoutes,
   routingHash,
+  nav = {},
   hasRig,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
   routes: RouteMap;
   routingHash: string;
+  /**
+   * Server-resolved corridor verdicts, keyed the same way. Defaulted, because
+   * resolving it is billable and opt-in: a caller that did not ask for it
+   * renders every drive's Navigate as the shipped "plain" control.
+   *
+   * Held in props, NOT in state beside `routes`: the drag-reorder upgrade path
+   * (`POST /api/routes`) re-resolves routes only, so a pair invented by
+   * dragging stays honestly unchecked until the next full load.
+   */
+  nav?: NavMap;
   hasRig: boolean;
 }) {
   const router = useRouter();
@@ -217,7 +229,10 @@ export function TripPlanner({
   };
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
-  const route = useMemo(() => routeModel(trip, routes, routingHash), [trip, routes, routingHash]);
+  const route = useMemo(
+    () => routeModel(trip, routes, routingHash, nav),
+    [trip, routes, routingHash, nav],
+  );
   const summary = useMemo(
     () => routeSummary(trip, routes, routingHash),
     [trip, routes, routingHash],

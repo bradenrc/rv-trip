@@ -433,3 +433,264 @@ estimate total with a small neutral **estimate** pill immediately right of the m
 open a trip so the rail fills the cache, come back, and the number should become the routed
 one **and the pill should disappear**. The card's number and the rail's total must read the
 same on the same trip — that is the whole point of the item.
+
+---
+
+# dev notes · issue 43 · i4 — validate the Google corridor, then offer a split Navigate
+
+Implements **plan item i4 only** (`docs/design/43/plan.json` §4, issue #36). i1/i2/i3 landed
+in earlier dispatches; nothing here touches the map layers, the dashboard card or the route
+cache's `result` column.
+
+## What changed
+
+### The validator (core, pure, network-free, on the barrel)
+- `packages/core/src/providers/frechet.ts:28` `CORRIDOR_TOLERANCE_METERS = 400`; `:41`
+  `discreteFrechet(here, other)` — O(n·m) DP with a rolling `Float64Array` row over
+  `haversineMeters`; `:71` `withinCorridor(d)`, the ONE place the threshold is applied
+  (`null` and non-finite are both `false`).
+- It rides `providers/index.ts:140` (`export * from "./frechet"`) because it holds no
+  credential and no `fetch` — the quarantine the vet's HIGH is about applies to the CLIENT,
+  not the math.
+- **Empty in → `Infinity`, never 0.** An absent corridor must not read as a perfect match.
+
+### The billable client (quarantined, its OWN package export)
+- `packages/core/src/providers/google-routes.ts` — `COMPUTE_ROUTES_URL` (`:32`),
+  `COMPUTE_ROUTES_FIELD_MASK` (the one field: `routes.polyline.geoJsonLinestring`),
+  `MAX_VIA_POINTS = 8` (`:42`), `buildComputeRoutesBody` (`:44`, every intermediate
+  `via: true`), `sampleViaPoints` (`:77`), `parseComputeRoutesResponse` (`:99`) and
+  `GoogleRoutesProvider.checkCorridor` (`:133`).
+- **NOT on the providers barrel** — the vet's HIGH. `packages/core/package.json:12` declares
+  `"./providers/google-routes"`, exactly as `here.ts` and `google-places.ts` are reached, and
+  the file's header carries the same quarantine comment. `packages/core/src/index.ts`
+  re-exports the barrel into every client bundle; putting a keyed `fetch` client there would
+  ship the Google key handling to the browser.
+- It reuses `googleCredentialsFromEnv`/`GoogleCredentials` from `google-places.ts` — one
+  `GOOGLE_API_KEY`, read in one place.
+- `sampleViaPoints` samples the **local maxima** of the pointwise distance profile
+  (corridor vertex → nearest vertex of Google's answer), never the global top-N: one hint per
+  disagreement rather than eight hints inside one wrong turn. Endpoints are never sampled,
+  the cap is worst-first, and the result is re-sorted into **traversal order** — an
+  `intermediates` list is a sequence Google drives through, so order is the route.
+
+### The handoff seam
+- `packages/core/src/providers/navigation.ts:82` `NavigationHandoffOptions` drops
+  `reserved?: never` for `corridor?`, `googleCorridor?` **and** `deviationMeters?`;
+  `:33` `NavigationHandoff` gains `wegoUrl`, `verdict` and `deviationMeters`; `:50` `NavCheck`
+  is the cached row's shape.
+- **The extra two option fields are the vet's HIGH, resolved.** With only
+  `corridor?: LatLng[]` the interface cannot produce what it declares: the deviation is a
+  `discreteFrechet` against the GOOGLE geometry, and `buildNavigationHandoff` must stay pure.
+  So the deviation arrives one of two pure ways (`measure`, `:124`) — hand over both
+  geometries and it measures them (the server path), or hand over a number measured earlier
+  (the client path, off the cached row). `toDrive` takes the second: it runs inside a useMemo
+  and must not pay O(n·m) haversines per drive.
+- The Google url and its 4-decimal `coord()` are **untouched**; `navigation.test.ts:9-10`
+  still asserts the exact string, unedited.
+- `wegoUrl` (`:147`) is `https://wego.here.com/directions/drive/<lat>,<lng>/<lat>,<lng>` —
+  drive mode, the same 4-decimal coords. See "the WeGo claim" below.
+
+### The cached verdict
+- `packages/db/src/schema.ts:247` `nav: jsonb("nav").$type<NavCheck>()` — nullable, its own
+  column, so #29's "the row IS a RouteResult, verbatim" stays literally true and `RouteMap`
+  does not change shape. `packages/db/drizzle/0002_route_nav.sql`
+  (`alter table "routes" add column "nav" jsonb;`) + `meta/0002_snapshot.json` +
+  `meta/_journal.json`, generated with `drizzle-kit generate` and renamed to the
+  `0000_baseline` convention. **Never pushed to the operator's `rvtrip` database.**
+- `packages/db/src/queries.ts:485` `getCachedNav(keys)` — the same `inArray` + the same
+  `fetched_at > now() - 30 days` filter, so the verdict expires with the route it describes.
+- `packages/db/src/mutations.ts:664,683` `CachedNavCheck` + `putCachedNav(rows)` — a write,
+  so it is in `mutations.ts` (i1's vet MED, applied here too). An **UPDATE, never an
+  insert**: `result` is NOT NULL and a verdict without its corridor is not a row we can
+  write. `fetched_at` is deliberately not touched, which is what makes "same key, same TTL"
+  true.
+
+### The read path — opt-in, because it is billable
+- `apps/web/src/lib/routing.ts:183` `navPairs(pairs, routes, hash)` — table → vendor on the
+  same key, with `readNavCache`/`writeNavCache` (`:241`, `:250`) swallowing a db failure the
+  way i1's do, and one log line `route.nav hit=… miss=… layer=db|provider|unchecked`
+  (`:260`).
+- `:228` `routeTrip(trip, rig, { nav?: boolean })` returns `{ routes, routingHash, nav }`.
+  **The nav resolution is a parameter, not part of `routePairs`** — the vet's HIGH. Callers
+  today: `apps/web/src/app/trips/[id]/page.tsx:24` passes `{ nav: true }` (the one screen
+  with a Navigate control); `apps/web/src/app/map/page.tsx:23` and
+  `apps/web/src/app/api/trips/[id]/route.ts:19` (the mobile bundle) do not, so a `/map` load
+  bills **zero** `computeRoutes` calls.
+- Only a `here` result with a **decodable** polyline is a candidate, and a check that could
+  not conclude (`deviationMeters: null`) is **not** cached — one retry, not thirty days of
+  "plain". Asserted both ways.
+- `navProvider()` (`:49`) returns `null` with no `GOOGLE_API_KEY`. There is deliberately no
+  stub: an unchecked corridor is the honest "plain" verdict, and a stubbed verdict would be a
+  lie rendered in green.
+
+### The model and the copy
+- `packages/core/src/planner/index.ts:272` `NavMap = Record<string, NavCheck>`; `:288-293`
+  `RouteDrive` gains `navWegoUrl`, `navVerdict`, `navDeviationMeters` (`navUrl` unchanged);
+  `:299` `toDrive(pair, routes, routingHash, nav)` READS the map and defaults to "plain" when
+  the key is absent; `routeModel`'s 4th parameter is defaulted, so `apps/mobile`'s 3-arg call
+  is untouched. `routeSummary` passes `{}` (`:515`) — a verdict has no total.
+- `:341` `NavigationOption` + `:350` `navigationOptions(drive)` — two options, Google first
+  on "checked" and HERE WeGo first on "plain", `primary` on the first. `:383`
+  `NavigationCaption` + `:388` `navigationCaption(drive)` — the green
+  `Checked against the RV-safe corridor — within N m.` and the **unchanged** amber
+  `Navigation may not follow the RV-safe route — check notices.`
+- The copy lives in core, not the component, for the same reason the HERE notice messages are
+  server-composed: one place — and the only place a test runner in this repo can reach it.
+
+### The split control
+- `apps/web/src/components/trip/RouteView.tsx:475` `NavigateButton({ drive, className })` —
+  one pill (`NAV_PILL`, `:472`) holding an `<a>` body and a `DropdownMenuTrigger` caret, on
+  the shipped `apps/web/src/components/ui/dropdown-menu.tsx` primitive. `min-h-8` on the
+  pill, the body AND the caret.
+- **It composes the shipped menu design.** `MENU_SURFACE` / `MENU_ITEM` from
+  `./row-menu.tsx:24-31` — which `RouteView` already imported at `:41-47`. The vet's HIGH:
+  the wireframe's claim that `dropdown-menu` has "zero consumers" is false (it has four,
+  including RouteView itself), so there was a menu to compose, not one to invent. The active
+  row adds the wireframe's `.mi.on` tint (`bg-rv-green-soft` + `text-rv-green-ink`) and
+  nothing else.
+- `:445` `DriveCaption` renders `navigationCaption`: `text-rv-green` on "checked",
+  `text-rv-warning` otherwise. Both call sites of the button became `drive={drive}`; the
+  clean one-liner keeps NO caption, exactly as the wireframe's state ① draws it.
+- `NAV_PILL` carries `bg-rv-accent-deep text-rv-accent-ink` on **one source line** because
+  `nightfall-tokens.test.ts:289-297` sweeps that pair per call site (it failed first on the
+  split's outer div; the fix is the pairing, not a new colour). No raw hex, no new token.
+- `apps/web/src/components/trip/TripPlanner.tsx:148,164,233` — a defaulted `nav?: NavMap`
+  prop into `routeModel`. Held in props, NOT in state beside `routes`: the drag-reorder
+  upgrade path (`POST /api/routes`) re-resolves routes only, so a pair invented by dragging
+  stays honestly unchecked until the next full load.
+
+### Documentation
+- `.design-sync/conventions.md:18-22` — green gains the **verified** role the design uses and
+  the conventions did not document (the vet's MED), worded so it cannot be read as a generic
+  "success" colour.
+
+## Decisions worth checking
+
+1. **The verdict is a claim about the endpoints-only route, not the via-shaped one — the one
+   place I did not take the design literally.** §4 calls Astoria→Newport CHECKED on
+   `frechet(with via) = 180 m` while `frechet(naive) = 2,140 m`, *and* keeps the handoff url
+   endpoints-only. Those cannot both be honest: the url carries no `via` hints, so the driver
+   gets the 2,140 m route while the UI says "RV-checked". `checkCorridor`
+   (`google-routes.ts:133`) therefore measures the **endpoints-only** answer for the verdict
+   and reports the hinted one as `NavCheck.shapedDeviationMeters` (diagnostic; nothing renders
+   it). The two-pass sampling the item scopes is implemented exactly as specified and still
+   runs — it is what distinguishes "Google disagrees" from "Google cannot be persuaded", and
+   what a future turn-by-turn handoff that CAN carry a shaped route would read. The design's
+   own numbers are labelled illustrative in its dev notes, and its own principle
+   (`navigation.ts:14-16`, "a worse route with the RV-safe label on it is worse than an
+   honest plain one") is what I followed. **Flagged for the operator: if the intent really is
+   to badge the hinted answer, that is a one-line change in `checkCorridor` and a caption
+   that must then say something other than "checked".**
+2. **The WeGo claim is softened.** The menu's WeGo caption is the design's own state-③
+   string, `the only one of the two that knows your rig`, in BOTH states. State ①'s
+   `honours 12′6″ · 8′6″ · 36′ · 26,000 lb natively` is a promise about a third-party url
+   that carries no dimensions at all — the vet's FLAG — and nothing in this worktree can
+   demonstrate one. `navigation.ts:141-147` documents that the profile is the driver's own
+   setting in that app. **The url itself is unverified: render-required at the walk.**
+3. **`NavigationHandoffOptions` grew three fields, not one** (see above). qa should confirm
+   that is the right resolution of the vet's HIGH rather than a deviation.
+4. **An un-routed (estimate) drive leads with WeGo.** No corridor → verdict "plain" → WeGo
+   first, which is every drive in a keyless environment. The design calls that state ③'s
+   sibling with "a plain Navigate"; the control is still the split one (the acceptance wants
+   one Navigate control in all three states), and WeGo leading is the honest order when
+   nothing has been checked.
+5. **`routeSummary` never resolves a NavMap** — the rail sums miles and minutes and a verdict
+   has no total, so it costs nothing (`planner/index.ts:515`).
+6. **`frechet.ts` imports `haversineMeters` from `./index` while the barrel re-exports
+   `./frechet`** — a module cycle, resolved by hoisting (the import is only ever called at
+   runtime). The alternative was a second haversine, which this codebase has twice deleted.
+   Exercised by the whole core suite and by apps/web's vite build.
+
+## Tests
+
+- `packages/core/src/providers/frechet.test.ts` (new, 7 cases) — the acceptance's table:
+  identical traversals → **0**; a **reversed** traversal of the *same point set* (asserted to
+  be the same set, so Hausdorff would answer 0) → the track's end-to-end span, `> 10×` the
+  tolerance; a parallel offset track → **exactly its offset** (`toBeCloseTo(…, 6)` over four
+  offsets, measured in meters off the same sphere the code routes on); symmetry, and a
+  differently-sampled track of the same ground still inside tolerance; empty → `Infinity`;
+  and the 400 m threshold asserted at 399 / 400 / 401 — **both sides, inclusive**.
+- `packages/core/src/providers/google-routes.test.ts` (new, 9 cases, network-free) — the body
+  is endpoints-only with no `intermediates` key when nothing was sampled and every sampled
+  point carries `via: true`; the url + field mask; `sampleViaPoints` picks the profile's local
+  maxima **in traversal order**, never an endpoint, caps at 8 keeping the worst, and samples
+  nothing when Google already runs the corridor; the GeoJSON `[lng, lat]` order is read back
+  correctly and an unreadable answer degrades to `[]` rather than throwing.
+- `packages/core/src/providers/navigation.test.ts:47-…` (7 new cases; the 5 shipped ones are
+  **unedited**) — no corridor → "plain" and a **byte-identical** Google url; a corridor with
+  no check → still "plain"; a corridor + a validated deviation → "checked" with both urls;
+  both geometries → it measures 180 m / 1,340 m itself, purely; the threshold at 399/400/401;
+  the WeGo url present in every state; a degenerate corridor never says "checked".
+- `packages/core/src/planner/planner.test.ts` (+13 cases) — `toDrive` reads the NavMap:
+  "plain" with no map (and on the 3-arg call `apps/mobile` makes), "checked" at 180,
+  "plain" at 1,340 and at `null`, today's Google url plus the WeGo one in every verdict, and a
+  NavMap keyed on another rig is a clean miss. Then `navigationOptions`/`navigationCaption`:
+  Google leads on "checked" with `within 180 m of your corridor`, WeGo leads on "plain" with
+  `Google Maps · plain` second, **WeGo is first exactly when the verdict is plain** (five
+  fixtures across the boundary), exactly one option is `primary` and it is the first, and the
+  two caption strings character for character (including the rounding of 180.4 → 180).
+- `apps/web/src/lib/routing.test.ts` (+8 cases, no database) — a cold corridor is checked
+  once, with the **decoded 4-vertex** corridor handed to Google, and written through; a cached
+  verdict costs **no** Google call; an inconclusive check is not cached; **no call at all** for
+  an estimate, a `here` result with no polyline, an unreadable polyline or an unknown pair
+  (not even a table read); no `GOOGLE_API_KEY` → `layer=unchecked`, cached verdicts still
+  honoured; a missing `nav` column still renders. Plus `routeTrip`: **without** the flag it
+  bills nothing (what `/map` and the bundle call) and **with** it resolves the verdict (what
+  the trip page calls).
+- `apps/web/src/lib/route-cache.test.ts` (+5 cases, real Postgres via the suite's throwaway
+  database — so this also proves `0002_route_nav.sql` applies) — a `NavCheck` round-trips
+  through jsonb while `result` stays verbatim; an unchecked route has no verdict;
+  `putCachedNav` on a key with no route writes **nothing** (an UPDATE, never an insert); the
+  verdict expires with its route at 29 vs 31 days; and storing a verdict does not move
+  `fetched_at`.
+- `apps/web/src/components/trip/navigate-control.test.ts` (new, 5 cases) — **the render test's
+  runnable half.** The acceptance asks for a RouteView render test; there is no DOM in this
+  repo to render it in (`apps/web/vitest.config.mts:20` is `environment: "node"`, `:23`
+  collects only `.test.ts`, and the workspace has no jsdom / happy-dom /
+  @testing-library/react / @vitejs/plugin-react — the vet's HIGH). Adding four dependencies to
+  assert three class names is not this item's scope, so the copy and the order are asserted as
+  pure functions in packages/core (above) and the CLASSES are asserted here as **source
+  text**, in the idiom `nightfall-tokens.test.ts` already uses: one `NavigateButton` used by
+  both renderings (and no `href=` call site left), `min-h-8` on all three parts of the split,
+  the menu composed from `MENU_SURFACE`/`MENU_ITEM`, the caption's green/amber branch, and no
+  raw hex or hand-written vendor copy in the control.
+- **Not covered by any test:** that a radix portal actually opens inside the route rail, and
+  the WeGo url resolving to a real WeGo route. Both are render-required at the walk.
+
+## Checks run
+
+- `npx turbo run lint typecheck test` → `Tasks: 9 successful, 9 total`.
+- `packages/core` inside that run → `Test Files 29 passed (29) / Tests 550 passed (550)`
+  (was 27/515; +2 files, +35 cases).
+- `apps/web` inside that run → `Test Files 20 passed (20) / Tests 70 passed (70)`
+  (was 19/52; +1 file, +18 cases). A real Postgres was reachable, so no db file skipped.
+- `npx drizzle-kit generate` a second time (with a dummy `DATABASE_URL`) →
+  `No schema changes, nothing to migrate` — no drift for CI's check.
+- `pnpm install --frozen-lockfile` first (fresh worktree, no `node_modules`) → `Done in 6.5s`;
+  the lockfile is unchanged (no dependency was added).
+- NOT run: `pnpm db:push` / `pnpm db:migrate` against the operator's `rvtrip` database
+  (barred). `0002` was exercised only through the test harness's own throwaway database.
+- NOT run: any live vendor call. There are no HERE or Google credentials in this worktree, so
+  every corridor and every Fréchet distance asserted here is synthetic or HERE's published
+  test vector. **No `computeRoutes` request has ever been sent from this tree.**
+
+## For the walk
+
+`/trips/<id>`, route lens. With no `GOOGLE_API_KEY` (the local case) every drive is verdict
+**plain**: the Navigate pill now has a caret, the menu lists **HERE WeGo first** and
+"Google Maps · plain" second, and the restricted card's caption is the same amber string as
+before. `pnpm db:migrate` must be applied first, or the verdict degrades to plain with a
+warning in the log (the page still renders).
+
+With a Google key AND a HERE key configured, a drive whose plain Google route matches the
+corridor flips: the caption turns **green** — "Checked against the RV-safe corridor — within
+N m." — and the menu leads with "Google Maps · RV-checked". The server log says
+`route.nav hit=0 miss=N layer=provider` on the first open and `layer=db` after that; a second
+open must bill nothing. Three things to eyeball, none of them certifiable from source: the
+radix portal opening inside the rail without clipping, the caret's 32px target and 1px
+divider, and **whether the WeGo url actually opens a WeGo route** — it is unproven here, and
+the menu copy deliberately promises nothing about rig dimensions until it is.
+
+Load `/map` with both keys set and watch the log: it must print `route.cache` lines and **no**
+`route.nav` line at all. That is the vet's billing HIGH, and it is the one regression this
+item could cause.

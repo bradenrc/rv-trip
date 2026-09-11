@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { routeCacheKey, type RouteResult } from "@rv-trip/core";
-import { getCachedRoutes, putCachedRoutes } from "@rv-trip/db";
+import { routeCacheKey, type NavCheck, type RouteResult } from "@rv-trip/core";
+import { getCachedNav, getCachedRoutes, putCachedNav, putCachedRoutes } from "@rv-trip/db";
 import { fx, read } from "@rv-trip/db/testing";
 import { describeDb } from "@/test/db";
 
@@ -77,5 +77,68 @@ describeDb("the routes cache", () => {
     await fx.ageCachedRoute(KEY, 29);
 
     expect((await getCachedRoutes([KEY]))[KEY]).toEqual(ASTORIA_NEWPORT);
+  });
+});
+
+/**
+ * The `nav` column (docs/design/43 §4) — the verdict cache, on the same key and
+ * the same TTL as the route it describes. Real Postgres again, for the same
+ * reason: "shares the row's fetched_at" is only true if the SQL clock says so,
+ * and this also proves `0002_route_nav.sql` applies.
+ */
+const CHECKED: NavCheck = {
+  deviationMeters: 180,
+  intermediates: [
+    { lat: 46.0142, lng: -123.9231 },
+    { lat: 45.7208, lng: -123.9377 },
+  ],
+};
+
+describeDb("the nav column", () => {
+  it("round-trips a NavCheck without touching the verbatim RouteResult", async () => {
+    await putCachedRoutes([{ key: KEY, result: ASTORIA_NEWPORT }]);
+    await putCachedNav([{ key: KEY, nav: CHECKED }]);
+
+    expect((await getCachedNav([KEY]))[KEY]).toEqual(CHECKED);
+    // #29's contract: the row IS a RouteResult, verbatim. The verdict is a
+    // separate column precisely so that stays literally true.
+    expect((await getCachedRoutes([KEY]))[KEY]).toEqual(ASTORIA_NEWPORT);
+  });
+
+  it("is absent for a route nobody has checked", async () => {
+    await putCachedRoutes([{ key: KEY, result: ASTORIA_NEWPORT }]);
+
+    expect(await getCachedNav([KEY])).toEqual({});
+    expect(await getCachedNav([])).toEqual({}); // no keys, no query
+  });
+
+  it("writes nothing for a key with no cached route — the verdict needs its corridor", async () => {
+    await putCachedNav([{ key: KEY, nav: CHECKED }]);
+
+    expect(await getCachedNav([KEY])).toEqual({});
+    expect(await read.countRoutes()).toBe(0); // an UPDATE, never an insert
+  });
+
+  it("expires with the route it describes, on one shared fetched_at", async () => {
+    await putCachedRoutes([{ key: KEY, result: ASTORIA_NEWPORT }]);
+    await putCachedNav([{ key: KEY, nav: CHECKED }]);
+    await fx.ageCachedRoute(KEY, 29);
+
+    expect((await getCachedNav([KEY]))[KEY]).toEqual(CHECKED); // inside the window
+
+    await fx.ageCachedRoute(KEY, 31);
+
+    expect(await getCachedNav([KEY])).toEqual({});
+    expect(await getCachedRoutes([KEY])).toEqual({}); // both, together
+  });
+
+  it("does not touch fetched_at, so storing a verdict cannot extend a route's life", async () => {
+    await putCachedRoutes([{ key: KEY, result: ASTORIA_NEWPORT }]);
+    await fx.ageCachedRoute(KEY, 29);
+    const before = (await read.routeRow(KEY))!.fetchedAt;
+
+    await putCachedNav([{ key: KEY, nav: CHECKED }]);
+
+    expect((await read.routeRow(KEY))!.fetchedAt).toEqual(before);
   });
 });

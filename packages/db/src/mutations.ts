@@ -10,6 +10,7 @@ import type {
   ReservationType,
   IdeaStatus,
   IsoDate,
+  NavCheck,
   RigProfile,
   RigProfileInput,
   RouteResult,
@@ -657,4 +658,31 @@ export async function putCachedRoutes(rows: CachedRoute[]): Promise<void> {
       target: routes.key,
       set: { result: sql`excluded.result`, fetchedAt: sql`now()` },
     });
+}
+
+/** One cached corridor check: the key it shares with the route it validates. */
+export interface CachedNavCheck {
+  key: string;
+  nav: NavCheck;
+}
+
+/**
+ * Store the verdicts, as an UPDATE on rows that already exist — never an
+ * insert.
+ *
+ * `nav` is meaningful only beside the HERE polyline it was measured against, so
+ * a check without a cached route is not a row we can write: `result` is NOT
+ * NULL and there is nothing honest to put in it. In practice the route is
+ * always written first (the check is a function of its polyline), so a key that
+ * is missing here means the route write failed or its TTL just lapsed — and
+ * dropping the verdict is exactly right in both cases.
+ *
+ * `fetched_at` is deliberately NOT touched: the verdict ages with the route it
+ * describes, which is what makes "same key, same TTL" true.
+ */
+export async function putCachedNav(rows: CachedNavCheck[]): Promise<void> {
+  if (rows.length === 0) return;
+  await Promise.all(
+    rows.map((row) => db.update(routes).set({ nav: row.nav }).where(eq(routes.key, row.key))),
+  );
 }

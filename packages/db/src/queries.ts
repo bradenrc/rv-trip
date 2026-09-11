@@ -21,6 +21,7 @@ import type {
   Place,
   SavedPlace,
   PlaceSuggestion,
+  NavCheck,
   RigProfile,
   RouteResult,
   TripSummary,
@@ -468,5 +469,31 @@ export async function getCachedRoutes(keys: string[]): Promise<Record<string, Ro
     );
   const map: Record<string, RouteResult> = {};
   for (const row of rows) map[row.key] = row.result;
+  return map;
+}
+
+/**
+ * The corridor checks for those same keys, from the same rows under the same
+ * TTL — a second read rather than a wider one, because resolving the check is
+ * BILLABLE and therefore opt-in per caller: the trip page asks for it, /map and
+ * the dashboard never do, and neither should pay a wider select for a column
+ * they will not read.
+ *
+ * A key whose row has never been checked is simply absent, which is the same
+ * answer as "no Google key" — verdict "plain".
+ */
+export async function getCachedNav(keys: string[]): Promise<Record<string, NavCheck>> {
+  if (keys.length === 0) return {};
+  const rows = await db
+    .select({ key: routes.key, nav: routes.nav })
+    .from(routes)
+    .where(
+      and(
+        inArray(routes.key, keys),
+        gt(routes.fetchedAt, sql`now() - ${`${ROUTE_CACHE_TTL_DAYS} days`}::interval`),
+      ),
+    );
+  const map: Record<string, NavCheck> = {};
+  for (const row of rows) if (row.nav) map[row.key] = row.nav;
   return map;
 }

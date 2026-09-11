@@ -15,7 +15,11 @@ or new class names — the palette below is the whole vocabulary.
 **Colors** (as `bg-*` / `text-*` / `border-*`):
 - Surfaces: `rv-surface` (white cards), `rv-surface-alt` (page bg), `rv-navy` (dark chrome/headers).
 - Ink: `rv-ink` (body), `rv-ink-muted` (secondary), `rv-ink-faded` (meta), `rv-ink-subtle` (placeholder only).
-- Green (accents/CTAs/"stay"): `rv-green`, `rv-green-cta` (text-bearing green), `rv-green-soft` (tint), `rv-green-ink` (text on tint).
+- Green (accents/CTAs/"stay", and — since docs/design/43 §4 — *verified*: a claim the
+  app has actually checked, such as "Checked against the RV-safe corridor" under a
+  Navigate button, or the chosen row in a menu): `rv-green`, `rv-green-cta`
+  (text-bearing green), `rv-green-soft` (tint), `rv-green-ink` (text on tint). Green is
+  never "success" in the generic sense — only a statement we can prove.
 - Borders: `rv-border`, `rv-border-soft` (hairlines), `rv-border-hi`.
 - Status: `rv-warning` / `rv-warning-soft` (amber — attention, floating); `rv-info-ink` / `rv-info-soft` (blue — activities).
 - Travel: `rv-travel` / `rv-travel-ink` / `rv-travel-soft` (slate-violet). The

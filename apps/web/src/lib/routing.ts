@@ -1,18 +1,22 @@
 import {
   NO_ROUTING_HASH,
   StubRoutingProvider,
+  decodeFlexiblePolyline,
   orderedPairs,
   routeCacheKey,
   routingHash,
   type LatLng,
+  type NavCheck,
   type RigProfile,
   type RouteResult,
   type RoutingProvider,
   type Trip,
 } from "@rv-trip/core";
 import { HereRoutingProvider, hereCredentialsFromEnv } from "@rv-trip/core/providers/here";
-import { getCachedRoutes, putCachedRoutes } from "@rv-trip/db";
-import type { RouteMap } from "./trip-logic";
+import { googleCredentialsFromEnv } from "@rv-trip/core/providers/google-places";
+import { GoogleRoutesProvider } from "@rv-trip/core/providers/google-routes";
+import { getCachedNav, getCachedRoutes, putCachedNav, putCachedRoutes } from "@rv-trip/db";
+import type { NavMap, RouteMap } from "./trip-logic";
 
 /**
  * SERVER-SIDE ONLY. HERE is server-side only and the drive label is computed
@@ -32,6 +36,23 @@ function provider(): RoutingProvider {
     cachedProvider = credentials ? new HereRoutingProvider(credentials) : new StubRoutingProvider();
   }
   return cachedProvider;
+}
+
+/**
+ * The corridor validator's client, or `null` with no Google key — which is the
+ * local case and every pipeline stage. There is no stub: an unchecked corridor
+ * is the honest "plain" verdict, and a stubbed verdict would be a lie the UI
+ * renders in green.
+ */
+let cachedNavProvider: GoogleRoutesProvider | null = null;
+
+function navProvider(): GoogleRoutesProvider | null {
+  if (!cachedNavProvider) {
+    const credentials = googleCredentialsFromEnv();
+    if (!credentials) return null;
+    cachedNavProvider = new GoogleRoutesProvider(credentials);
+  }
+  return cachedNavProvider;
 }
 
 /**
@@ -145,16 +166,97 @@ function log(hit: number, miss: number, layer: "memory" | "db" | "provider"): vo
 }
 
 /**
+ * The corridor checks for a resolved set of pairs — table, then vendor, on
+ * exactly the same key (docs/design/43 §4).
+ *
+ * OPT-IN, never on the shared seam. The Google call is billable and per drive,
+ * so only a screen that actually renders a Navigate control may ask for it:
+ * `routeTrip(trip, rig, { nav: true })` on the trip page. /map and the
+ * dashboard resolve routes and no verdicts, and therefore bill nothing — the
+ * vet's HIGH against putting this inside `routePairs`.
+ *
+ * Only a `here` result with a readable polyline is a candidate: the validator
+ * measures Google against the HERE corridor, and there is no corridor in an
+ * estimate. A check that could not conclude is NOT cached, so a transient
+ * vendor failure costs one retry rather than thirty days of "plain".
+ */
+export async function navPairs(
+  pairs: PairInput[],
+  routes: RouteMap,
+  hash: string,
+): Promise<NavMap> {
+  const candidates: { key: string; from: LatLng; to: LatLng; corridor: LatLng[] }[] = [];
+  for (const { from, to } of pairs) {
+    const key = routeCacheKey(from, to, hash);
+    const result = routes[key];
+    if (!result || result.source !== "here" || !result.polyline) continue;
+    const corridor = decodeFlexiblePolyline(result.polyline);
+    if (corridor.length < 2) continue;
+    if (!candidates.some((c) => c.key === key)) candidates.push({ key, from, to, corridor });
+  }
+  if (candidates.length === 0) return {};
+
+  const nav: NavMap = await readNavCache(candidates.map((c) => c.key));
+  const client = navProvider();
+  const missing = candidates.filter((c) => !nav[c.key]);
+  if (!client || missing.length === 0) {
+    logNav(Object.keys(nav).length, 0, client ? "db" : "unchecked");
+    return nav;
+  }
+
+  const checked = await Promise.all(
+    missing.map(async (c) => ({
+      key: c.key,
+      nav: await client.checkCorridor(c.from, c.to, c.corridor),
+    })),
+  );
+  for (const row of checked) nav[row.key] = row.nav;
+  await writeNavCache(checked.filter((row) => row.nav.deviationMeters !== null));
+
+  logNav(Object.keys(nav).length - checked.length, checked.length, "provider");
+  return nav;
+}
+
+/**
  * Every drive on the trip, resolved before first paint (Q5 = A). The routing
  * hash comes back with it because the client needs it to build the same keys —
  * and to build a key for a pair it invents by dragging, which will miss and
  * fall to the synchronous estimate.
+ *
+ * `nav` is `{}` unless the caller asks for it: see navPairs.
  */
 export async function routeTrip(
   trip: Trip,
   rig: RigProfile | null,
-): Promise<{ routes: RouteMap; routingHash: string }> {
+  options: { nav?: boolean } = {},
+): Promise<{ routes: RouteMap; routingHash: string; nav: NavMap }> {
   const hash = rig ? await routingHash(rig) : NO_ROUTING_HASH;
-  const routes = await routePairs(orderedPairs(trip), rig, hash);
-  return { routes, routingHash: hash };
+  const pairs = orderedPairs(trip);
+  const routes = await routePairs(pairs, rig, hash);
+  const nav = options.nav ? await navPairs(pairs, routes, hash) : {};
+  return { routes, routingHash: hash, nav };
+}
+
+/** Same policy as the route cache: a broken table costs a check, not a render. */
+async function readNavCache(keys: string[]): Promise<Record<string, NavCheck>> {
+  try {
+    return await getCachedNav(keys);
+  } catch (error) {
+    console.warn("route.nav read failed — the verdict falls back to plain", error);
+    return {};
+  }
+}
+
+async function writeNavCache(rows: { key: string; nav: NavCheck }[]): Promise<void> {
+  if (rows.length === 0) return;
+  try {
+    await putCachedNav(rows);
+  } catch (error) {
+    console.warn("route.nav write failed — the verdict is used, not stored", error);
+  }
+}
+
+/** One line per resolve, naming the layer that paid for it. */
+function logNav(hit: number, miss: number, layer: "db" | "provider" | "unchecked"): void {
+  console.log(`route.nav hit=${hit} miss=${miss} layer=${layer}`);
 }

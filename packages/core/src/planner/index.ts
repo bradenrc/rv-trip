@@ -14,7 +14,11 @@ import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "
 import { NO_ROUTING_HASH } from "../domain/rig";
 import { estimateRoute, type RouteResult, type RouteNotice } from "../providers/index";
 import { driveLabel, driveMiles, driveMinutes, formatDriveTime } from "../providers/route-format";
-import { buildNavigationHandoff } from "../providers/navigation";
+import {
+  buildNavigationHandoff,
+  type NavCheck,
+  type NavigationVerdict,
+} from "../providers/navigation";
 import { dateRange, monthAbbr, weekdayLetter, addDays } from "./dates";
 
 /**
@@ -255,6 +259,18 @@ export interface RouteLeg {
  */
 export type RouteMap = Record<string, RouteResult>;
 
+/**
+ * The server-resolved corridor checks, keyed exactly as `RouteMap` is
+ * (docs/design/43 §4). Separate from `RouteMap` because the cached row keeps
+ * `result` a verbatim RouteResult — the check lives in its own `nav` column —
+ * and because resolving it is BILLABLE and therefore opt-in per caller: the
+ * trip page asks for it, /map does not.
+ *
+ * A missing key is the normal case (no Google key, an un-checked drive, or a
+ * pair the client just invented by dragging): verdict "plain", no spinner.
+ */
+export type NavMap = Record<string, NavCheck>;
+
 /** One drive, as the connector and the rail both need it. */
 export interface RouteDrive {
   key: string;
@@ -267,17 +283,36 @@ export interface RouteDrive {
   /** Google Maps deep link — origin and destination only, never the corridor.
    * See buildNavigationHandoff: the notices are what carry the RV-safe caveat. */
   navUrl: string;
+  /** HERE WeGo deep link — the corridor's own vendor, the alternative on the
+   * split Navigate control. */
+  navWegoUrl: string;
+  /** Whether Google's own answer for these two endpoints was held against the
+   * HERE corridor and matched it. "plain" whenever we do not know. */
+  navVerdict: NavigationVerdict;
+  /** How far Google's route ran from the corridor, in meters — `null` when the
+   * check never ran. */
+  navDeviationMeters: number | null;
   miles: number;
   minutes: number;
 }
 
-function toDrive(pair: OrderedPair, routes: RouteMap, routingHash: string): RouteDrive {
+function toDrive(
+  pair: OrderedPair,
+  routes: RouteMap,
+  routingHash: string,
+  nav: NavMap,
+): RouteDrive {
   const key = routeCacheKey(pair.from, pair.to, routingHash);
   const result = routes[key] ?? estimateRoute(pair.from, pair.to);
-  // Endpoints only. Google cannot be handed a pass-through waypoint, so the
-  // link is honestly "get me there", and the notices below it are what says
-  // the RV-safe corridor may not be what Google picks.
-  const handoff = buildNavigationHandoff(pair.from, pair.to);
+  // Endpoints only, still: Google cannot be handed a pass-through waypoint, so
+  // the link is honestly "get me there". What #36 adds is the ANSWER about that
+  // link — measured server-side and read here off the NavMap, never computed.
+  // This runs inside a client useMemo; it must not pay O(n·m) haversines.
+  // A deviation exists only where a corridor did — the check needs a HERE
+  // polyline to measure against — so the number alone carries the verdict.
+  const handoff = buildNavigationHandoff(pair.from, pair.to, {
+    deviationMeters: nav[key]?.deviationMeters ?? null,
+  });
   return {
     key,
     label: driveLabel(result),
@@ -285,9 +320,84 @@ function toDrive(pair: OrderedPair, routes: RouteMap, routingHash: string): Rout
     primaryRoad: result.primaryRoad,
     notices: result.notices,
     navUrl: handoff.url,
+    navWegoUrl: handoff.wegoUrl,
+    navVerdict: handoff.verdict,
+    navDeviationMeters: handoff.deviationMeters,
     miles: driveMiles(result),
     minutes: driveMinutes(result),
   };
+}
+
+/**
+ * One option on the split Navigate control (docs/design/43 §4). Two, always,
+ * in the order the verdict earns: Google leads when its own route WAS the
+ * corridor, HERE WeGo leads when it was not — because a worse route wearing the
+ * RV-safe label is worse than an honest plain one.
+ *
+ * The copy lives here, not in the component, for the same reason the HERE
+ * notice messages are server-composed: one place, and a place a test runner
+ * can actually reach.
+ */
+export interface NavigationOption {
+  id: "google" | "wego";
+  title: string;
+  caption: string;
+  url: string;
+  /** True on the first item — the one the button BODY takes. */
+  primary: boolean;
+}
+
+export function navigationOptions(drive: RouteDrive): NavigationOption[] {
+  const google: NavigationOption =
+    drive.navVerdict === "checked"
+      ? {
+          id: "google",
+          title: "Google Maps · RV-checked",
+          caption: `within ${deviation(drive)} m of your corridor`,
+          url: drive.navUrl,
+          primary: true,
+        }
+      : {
+          id: "google",
+          title: "Google Maps · plain",
+          caption: "endpoints only — not the checked corridor",
+          url: drive.navUrl,
+          primary: false,
+        };
+  // The WeGo caption is the design's state-③ string in BOTH states. Its
+  // state-① wording ("honours 12′6″ · 8′6″ · 36′ · 26,000 lb natively") is a
+  // promise about a third-party URL that carries no dimensions at all — see
+  // providers/navigation.ts's wegoUrl, and the vet's FLAG on §4.
+  const wego: NavigationOption = {
+    id: "wego",
+    title: "HERE WeGo · truck profile",
+    caption: "the only one of the two that knows your rig",
+    url: drive.navWegoUrl,
+    primary: drive.navVerdict !== "checked",
+  };
+  return drive.navVerdict === "checked" ? [google, wego] : [wego, google];
+}
+
+/** The caption under the button: green when the claim is true, amber when it
+ * is not. The amber string is the shipped one, character for character. */
+export interface NavigationCaption {
+  tone: NavigationVerdict;
+  text: string;
+}
+
+export function navigationCaption(drive: RouteDrive): NavigationCaption {
+  if (drive.navVerdict === "checked") {
+    return {
+      tone: "checked",
+      text: `Checked against the RV-safe corridor — within ${deviation(drive)} m.`,
+    };
+  }
+  return { tone: "plain", text: "Navigation may not follow the RV-safe route — check notices." };
+}
+
+/** Whole meters. A corridor is not measured in centimetres. */
+function deviation(drive: RouteDrive): number {
+  return Math.round(drive.navDeviationMeters ?? 0);
 }
 
 /**
@@ -295,14 +405,14 @@ function toDrive(pair: OrderedPair, routes: RouteMap, routingHash: string): Rout
  * needs it. The rail and the connectors read the SAME list, which is what makes
  * the rail exactly the sum of the drives you can see.
  */
-function resolveDrives(trip: Trip, routes: RouteMap, routingHash: string) {
+function resolveDrives(trip: Trip, routes: RouteMap, routingHash: string, nav: NavMap) {
   const byFromStop = new Map<string, RouteDrive>();
   // Keyed by the leg the drive leaves, but it carries the leg it ARRIVES in:
   // an emptied leg in between means the crossing is not always i → i + 1.
   const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
   const all: RouteDrive[] = [];
   for (const pair of orderedPairs(trip)) {
-    const drive = toDrive(pair, routes, routingHash);
+    const drive = toDrive(pair, routes, routingHash, nav);
     all.push(drive);
     if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
     else byFromStop.set(pair.fromStopId, drive);
@@ -314,8 +424,9 @@ export function routeModel(
   trip: Trip,
   routes: RouteMap = {},
   routingHash: string = NO_ROUTING_HASH,
+  nav: NavMap = {},
 ): RouteLeg[] {
-  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, routingHash);
+  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, routingHash, nav);
   const legs = [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder);
   const legNumber = new Map(legs.map((l, i) => [l.id, i + 1]));
 
@@ -399,7 +510,9 @@ export function routeSummary(
   // The SAME drives the connectors render — including the leg-boundary drive
   // and the floating one. The rail used to sum trip-wide scheduled pairs while
   // the screen drew per-leg ones, so the two had never agreed (G1/G2).
-  const { all } = resolveDrives(trip, routes, routingHash);
+  // The rail sums miles and minutes; the corridor verdict has no total, so the
+  // summary never needs (or pays for) a NavMap.
+  const { all } = resolveDrives(trip, routes, routingHash, {});
   const driveMilesTotal = all.reduce((a, d) => a + d.miles, 0);
   const driveMins = all.reduce((a, d) => a + d.minutes, 0);
 

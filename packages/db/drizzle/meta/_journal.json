@@ -15,6 +15,13 @@
       "when": 1789099041064,
       "tag": "0001_route_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789102252407,
+      "tag": "0002_route_nav",
+      "breakpoints": true
     }
   ]
 }

@@ -14,7 +14,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
-import type { RouteResult } from "@rv-trip/core";
+import type { NavCheck, RouteResult } from "@rv-trip/core";
 
 /**
  * Relational schema for the trip grammar. Mirrors @rv-trip/core/domain.
@@ -232,6 +232,19 @@ export const routes = pgTable(
     /** `routeCacheKey(from, to, routingHash)` — core owns the format. */
     key: text("key").primaryKey(),
     result: jsonb("result").$type<RouteResult>().notNull(),
+    /**
+     * The (billable) Google corridor check for the SAME key — nullable, because
+     * most rows have never been checked and a row is written by the route
+     * fetch, not the check (docs/design/43 §4). Its own column rather than a
+     * field inside `result`, so #29's contract — "the row IS a RouteResult,
+     * verbatim" — stays literally true and RouteMap does not change shape. It
+     * shares the row's `fetched_at`, hence the same 30-day TTL: a stale route
+     * and a stale verdict expire together.
+     *
+     * Only ever set where `source = 'here'` — the validator needs a HERE
+     * polyline to measure against.
+     */
+    nav: jsonb("nav").$type<NavCheck>(),
     source: routeSource("source").notNull(),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
   },
