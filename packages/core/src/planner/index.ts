@@ -32,6 +32,9 @@ import { dateRange, monthAbbr, weekdayLetter, addDays } from "./dates";
  */
 
 export * from "./dates";
+/** The map's drive arcs — one model, two renderers (#44 i3). `RouteMap` is
+ * declared below and imported there as a type, so nothing loads twice. */
+export * from "./map-arcs";
 
 export function allStops(trip: Trip): Stop[] {
   return trip.legs.flatMap((l) => l.stops);

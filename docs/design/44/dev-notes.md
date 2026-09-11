@@ -324,3 +324,148 @@ because the helper components are *defined* below the render. It now compares
 - That keeping the deprecated `@clerk/clerk-expo` (finding 1) was the right call
   under "implement the vetted design only". If qa reads the contract the other
   way, the swap to `@clerk/expo` is four import lines.
+
+---
+
+# Issue 44 · item 3 of 4 — lift the map's shared pure parts into core
+
+Scope: `packages/core` (the overlay palette, the arc model, their tests) plus the
+two web files that consumed them. **No web pixel changes** — this item is a move
+plus a re-export. Item 4 (the phone's Map lens, which is the consumer) is a
+separate dispatch.
+
+## What changed
+
+**The palette moved, whole, to core**
+
+- `packages/core/src/theme/map-palette.ts` (new, 211 lines) — the vendor-free
+  overlay table, moved verbatim from `apps/web/src/components/map/palette.ts`:
+  `STYLE_MODES` (:57), `StyleMode` (:59), `DEFAULT_STYLE_MODE` (:63),
+  `isStyleMode` (:67), `OverlayPalette` (:71), `NIGHT` (:114), `DAY` (:156),
+  `SAT` (:197, still `...NIGHT` + three values), `MAP_PALETTE` (:204),
+  `ARC_CASING_WIDTH` (:211). **Every value byte-identical** — the only code edit
+  is the one type dependency the design named: `category: Record<RvCategory,
+  string>` (:74) reading core's own `RvCategory` (`theme/tokens.ts:52`) instead
+  of `CategoryLabel` from `@rv-trip/ui`, so core imports no DS and no vendor.
+  The docstring gained a "Why this file lives in core" section (:6-14) and its
+  `nightfall.ts` / `MapView` references are now repo-absolute; nothing else in
+  the prose moved.
+- `apps/web/src/components/map/palette.ts` (212 → 48 lines) — now a re-export
+  (`:19-26`, from `@rv-trip/core`) plus `markerShadow` (`:34`), which did **not**
+  move: it composes a CSS `box-shadow` (`var(--shadow-rv-*)` + `color-mix()`)
+  for a DOM marker's inline style, which React Native has no equivalent for.
+  `MapView.tsx:10-16`, `MapMount.tsx:7` and `MapOverview.tsx` are **untouched** —
+  that is the point of the re-export (the shape `@/lib/trip-logic` took in #31's
+  C0).
+- `packages/core/src/index.ts:5` — `export * from "./theme/map-palette"`.
+
+**The arc model moved into core, the web keeps its own words**
+
+- `packages/core/src/planner/map-arcs.ts` (new) — `TripArc` (:31) and
+  `tripArcs(trip, routes = {}, routingHash = NO_ROUTING_HASH)` (:52), exactly the
+  derivation the design's snippet draws: one entry per `orderedPairs` pair,
+  `routeCacheKey` → `routes[key] ?? estimateRoute` → `driveMiles` +
+  `routeToGeoJSON(result, pair.from, pair.to).coordinates`. It returns
+  `primaryRoad` raw (:66) and composes **no label** — the label copy is the
+  web's, because the phone's masthead words it differently.
+- `packages/core/src/planner/index.ts:37` — `export * from "./map-arcs"`. The
+  `RouteMap` import inside `map-arcs.ts` is `import type` from `./index`, so the
+  cycle is erased at compile time and nothing loads twice.
+- `apps/web/src/components/map/pins.ts:3` — the import list collapses from seven
+  names to `{ NO_ROUTING_HASH, hasCoords, isScheduled, tripArcs }`; `:246` the
+  arc loop is now `for (const arc of tripArcs(trip, routes, routingHash))` and
+  keeps only the two things that are genuinely the web's: the `layer` its chips
+  filter by, and the `label` copy ("136 mi · US-101" / "~108 mi · est."). The
+  `been`-trip skip (`:235`) and `DriveArc`'s shape are unchanged.
+
+## Tests
+
+TDD, red → green. Both test files went in first and failed to collect
+(`Failed to load url ./map-arcs` / `./map-palette`), then passed once the two
+modules landed.
+
+- `packages/core/src/planner/map-arcs.test.ts` (new, 8 cases) — the acceptance,
+  executing against the real function on the seeded Pacific Northwest fixture
+  (the same shape `pins.test.ts` uses, deliberately, so the two are comparable):
+  one arc per `orderedPairs` pair with the floating Bend → Crater Lake drive
+  included and the pair's endpoints preserved; a **routed** pair gets the decoded
+  four-vertex HERE corridor (`8.69821, 50.10228` — HERE's published test vector)
+  plus `136 mi` / `US-101`; an **estimate** pair gets exactly its two-point chord
+  and `primaryRoad: null`; a **stale `routingHash`** makes every arc `estimate`
+  with a two-point path; no road when the vendor named none; the one-argument
+  default; a coordless stop yields no pair on either side; and a stub `estimate`
+  result carrying a real polyline still decodes to the chord rather than being
+  special-cased.
+- `packages/core/src/theme/map-palette.test.ts` rewritten (163 lines changed) —
+  it now **imports** `MAP_PALETTE` / `STYLE_MODES` / `DEFAULT_STYLE_MODE` /
+  `isStyleMode` / `ARC_CASING_WIDTH` (`:5-12`) instead of scraping source text.
+  Night is still asserted against `packages/ui/styles/entry.css`'s dark half
+  (role → `rv-*` token, resolved), day is still literal-for-literal, and sat is
+  now a **real** structural claim — `expect(MAP_PALETTE.sat).toEqual({
+  ...MAP_PALETTE.night, arcOpacity: 1, arcCasing: …, halo: "#ffffff" })` — which
+  is strictly stronger than the old text match, because a fourth hand-forked role
+  now reds. Two new cases: `isStyleMode` actually narrowing (`""`, `"Night"`,
+  `"terrain"`, `"sat "` all false), and "the web's palette.ts is a re-export with
+  no value of its own" (no hex, no `rgba(`, no `const NIGHT|DAY|SAT|MAP_PALETTE`,
+  but it does keep `markerShadow`). Three claims still read source text on
+  purpose: the provenance comments (a comment is text), the vendor-free import
+  list, and that `MAP_STYLES` stayed on the vendor seam (`MapView.tsx`).
+- `apps/web/src/components/map/pins.test.ts` is **untouched** (`git status` shows
+  no modification) and its 9 cases pass — the behavioural proof the design asked
+  for.
+
+One mid-flight test correction, for honesty: the "no colour `var(--…)`" and "no
+`markerShadow` in core" checks first read the whole file and failed on the new
+*docstring*, which legitimately names both. They now read a comment-stripped
+`CODE` copy (`map-palette.test.ts:51-53`); the assertions are unchanged, the
+granularity was the defect.
+
+## Vet findings addressed in this item
+
+- **NOTE · "verified and holding"** — re-confirmed by the move itself:
+  `routeToGeoJSON`'s 3-arg signature, the `pins.ts:245-262` loop lifting cleanly,
+  and that every name it uses is exported from `@rv-trip/core`. `tripArcs` is now
+  that loop with the label copy left behind.
+- The HIGH findings on the phone's map (`boundsFor` over `[lng, lat]` tuples, the
+  casing `lineOpacity` third term + `line-cap`, the mini-map label claim) and the
+  MEDs on the stop ordinal, the `Segmented` metrics, the Route-lens notice
+  sentence and the three `MapFrame` states are **item 4** — this item ships no
+  renderer. Noted here so i4 does not have to re-derive them: they are all in the
+  vet block, and none of them touch `tripArcs` or the palette table.
+
+## Flagged / defaulted
+
+- `TripArc` deliberately does **not** carry `layer` or `label`. The design says
+  `pins.ts` "keeps only its own layer scoping and label copy", and the phone's
+  masthead words the same drive differently, so the copy stays at the renderer.
+  `DriveArc` (`pins.ts:120-140`) therefore remains the web's own type — core's
+  `TripArc` plus `layer` + `label` — rather than extending it; a structural
+  `extends` would have to `Omit<TripArc, "primaryRoad">` to keep `DriveArc`'s
+  surface unchanged, which reads worse than the six explicit fields.
+- `tripArcs` takes ONE trip, not a list. `buildMapModel` still owns the
+  per-trip loop and the `been` skip, because "which trips get arcs at all" is a
+  layer question and layers are the web's.
+- The `import type { RouteMap } from "./index"` inside `map-arcs.ts` is a
+  deliberate type-only cycle (`RouteMap` is declared at `planner/index.ts:260`
+  and I did not move it — moving it is scope this item does not have). If a
+  future bundler objects, the fix is to relocate `RouteMap` beside
+  `RouteResult`, not to duplicate it.
+- Nothing here is operator-owned: no `gh`, no board, no push, no schema and no
+  migration. No Zod grammar, `pgEnum` or date column is touched — this item adds
+  no field and no enum value.
+
+## Claims for qa
+
+- That the palette move is **value-identical**. The strongest evidence is the
+  rewritten test asserting the real object against `entry.css` and the vetted day
+  table, but the cheap check is the one I ran:
+  `git show HEAD:apps/web/src/components/map/palette.ts | sed -n '44,198p'`
+  diffed against `sed -n '57,211p' packages/core/src/theme/map-palette.ts` — the
+  only difference the two blocks have is `Record<CategoryLabel, string>` →
+  `Record<RvCategory, string>`.
+- That `pins.test.ts` passing **unmodified** is the behavioural proof the web's
+  arcs did not move. It exercises the routed corridor, the chord, the labels, the
+  hash miss, the `been` skip and the coordless skip through `buildMapModel`, all
+  of which now run through `tripArcs`.
+- That leaving `markerShadow` in the web file (rather than moving it and
+  returning a string the phone cannot use) is the right cut of "vendor-free".
