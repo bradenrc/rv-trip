@@ -39,8 +39,9 @@ Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
 (Drizzle Studio), `pnpm db:down`, `pnpm backfill:places` (geocode every
 coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
 is the Locate button beside the map's "N unmapped" count). Phone:
-`pnpm --filter @rv-trip/mobile ios` (Expo Go on the iOS Simulator, against the
-running web app).
+`pnpm --filter @rv-trip/mobile ios` (a native dev client on the iOS
+Simulator, against the running web app — the first build is a ~4–8 min Xcode
+build; one-time Xcode + CocoaPods setup in `apps/mobile/README.md`).
 
 ### Schema changes
 

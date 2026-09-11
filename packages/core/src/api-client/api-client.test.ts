@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ZodError } from "zod";
-import { createApiClient, ApiError } from "./index";
+import { createApiClient, ApiError, bearerAuthHeader } from "./index";
 
 /** A fetch double that records the call and replies with a canned response. */
 function fakeFetch(status: number, body: unknown = null) {
@@ -135,5 +135,52 @@ describe("createApiClient", () => {
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
     await api.ideas.patch("a/b", { status: "done" });
     expect(f.calls[0]!.url).toBe("http://x/api/ideas/a%2Fb");
+  });
+});
+
+describe("bearerAuthHeader", () => {
+  it("resolves null when there is no token getter at all — the keyless build", async () => {
+    expect(await bearerAuthHeader(null)()).toBeNull();
+    expect(await bearerAuthHeader(undefined)()).toBeNull();
+  });
+
+  it("builds no Authorization header through the client when it resolves null", async () => {
+    const f = fakeFetch(200, null);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn, getAuthHeader: bearerAuthHeader(null) });
+    await api.rig.get();
+    expect(f.calls[0]!.init.headers as Record<string, string>).not.toHaveProperty("authorization");
+  });
+
+  it("prefixes the token with Bearer", async () => {
+    expect(await bearerAuthHeader(() => "jwt")()).toBe("Bearer jwt");
+    expect(await bearerAuthHeader(async () => "jwt")()).toBe("Bearer jwt");
+  });
+
+  it("resolves null for every empty token a session can hand back", async () => {
+    expect(await bearerAuthHeader(() => null)()).toBeNull();
+    expect(await bearerAuthHeader(() => undefined)()).toBeNull();
+    expect(await bearerAuthHeader(async () => "")()).toBeNull();
+  });
+
+  it("asks for the token on every request, so a rotated session is picked up", async () => {
+    let n = 0;
+    const f = fakeFetch(200, null);
+    const api = createApiClient({
+      baseUrl: "http://x",
+      fetch: f.fn,
+      getAuthHeader: bearerAuthHeader(() => `t${++n}`),
+    });
+    await api.rig.get();
+    await api.rig.get();
+    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer t1");
+    expect((f.calls[1]!.init.headers as Record<string, string>).authorization).toBe("Bearer t2");
+  });
+
+  it("survives a getter that throws — an offline token refresh must not break the read", async () => {
+    await expect(
+      bearerAuthHeader(() => {
+        throw new Error("network down");
+      })(),
+    ).resolves.toBeNull();
   });
 });

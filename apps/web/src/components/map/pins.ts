@@ -1,15 +1,6 @@
 import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
-import {
-  NO_ROUTING_HASH,
-  driveMiles,
-  estimateRoute,
-  hasCoords,
-  isScheduled,
-  orderedPairs,
-  routeCacheKey,
-  routeToGeoJSON,
-} from "@rv-trip/core";
+import { NO_ROUTING_HASH, hasCoords, isScheduled, tripArcs } from "@rv-trip/core";
 import type {
   LocateRow,
   ReservationType,
@@ -26,11 +17,12 @@ import { dateRange } from "@/lib/trip-ui";
  * coordless rows the map can't take, and the estimated-drive arcs.
  *
  * Nothing here styles anything — `MapView` reads `layer` / `kind` / `floating`
- * / `source` and applies the pin grammar. A drive's numbers come from the
- * routed `RouteMap` the server resolved, keyed by `routeCacheKey`, and fall
- * back to core's `estimateRoute()` — the one surviving haversine, which the
- * Route rail falls back to through the SAME key — so the map and the rail can
- * never print different numbers.
+ * / `source` and applies the pin grammar. A drive's numbers come from core's
+ * `tripArcs()` (#44 i3): the routed `RouteMap` the server resolved, keyed by
+ * `routeCacheKey`, falling back to `estimateRoute()` — the one surviving
+ * haversine, which the Route rail falls back to through the SAME key — so the
+ * map and the rail can never print different numbers, and neither can the web
+ * and the phone, which draws the same arcs from the same call.
  */
 
 /** The four layers, in the order their chips read — labelled verbatim from the
@@ -121,6 +113,11 @@ export function locateRowOf(row: UnmappedRow): LocateRow {
  * (`orderedPairs`) — floating stops included, which is why this is no longer
  * "the dashed estimate": a routed drive carries the HERE corridor and draws
  * solid, an un-routed one keeps exactly the dash it has always had.
+ *
+ * Core's `TripArc` is the shared half (id / from / to / source / miles /
+ * primaryRoad / path); the web adds the two things only the web has — the
+ * `layer` its chips filter by, and the rendered `label`. The phone words its
+ * own label, which is exactly why the copy did not move.
  */
 export interface DriveArc {
   id: string;
@@ -237,27 +234,28 @@ export function buildMapModel(
     // Arcs are drawn only for the trips AHEAD of you — a traveled trip's drive
     // already happened, and a dashed estimate over a real past route is a lie.
     if (layer === "been") continue;
-    // `orderedPairs`, not the scheduled-only sequence: it is the pair set the
+    // `tripArcs` is the shared derivation (packages/core/src/planner/map-arcs.ts):
+    // `orderedPairs`, not the scheduled-only sequence — it is the pair set the
     // Route rail, the dashboard card and the `routes` table all key on, so a
-    // corridor resolved by the server can actually be looked up here. It also
+    // corridor resolved by the server can actually be looked up there. It also
     // already drops any pair touching a coordless stop — coordinates, not
     // dates, are the precondition (route-order.ts:49-57).
-    for (const pair of orderedPairs(trip)) {
-      const key = routeCacheKey(pair.from, pair.to, routingHash);
-      const result = routes[key] ?? estimateRoute(pair.from, pair.to);
-      const miles = driveMiles(result);
+    //
+    // What stays here is what is genuinely the web's: the layer this trip
+    // paints on, and the label copy.
+    for (const arc of tripArcs(trip, routes, routingHash)) {
       arcs.push({
-        id: `${pair.fromStopId}->${pair.toStopId}`,
+        id: arc.id,
         layer,
-        from: pair.from,
-        to: pair.to,
-        miles,
+        from: arc.from,
+        to: arc.to,
+        miles: arc.miles,
         label:
-          result.source === "here"
-            ? [`${miles} mi`, result.primaryRoad].filter(Boolean).join(" · ")
-            : `~${miles} mi · est.`,
-        source: result.source,
-        path: routeToGeoJSON(result, pair.from, pair.to).coordinates,
+          arc.source === "here"
+            ? [`${arc.miles} mi`, arc.primaryRoad].filter(Boolean).join(" · ")
+            : `~${arc.miles} mi · est.`,
+        source: arc.source,
+        path: arc.path,
       });
     }
   }

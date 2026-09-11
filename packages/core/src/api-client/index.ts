@@ -35,6 +35,37 @@ export interface ApiClientOptions {
   getAuthHeader?: () => Promise<string | null> | string | null;
 }
 
+/**
+ * A session token source — Clerk's `getToken()` on the phone, or anything that
+ * can answer with a JWT. `null` / `undefined` / `""` all mean "no session".
+ */
+export type TokenGetter = () => Promise<string | null | undefined> | string | null | undefined;
+
+/**
+ * Builds the `getAuthHeader` seam out of a token getter (issue #44).
+ *
+ * The keyless promise lives here: with no getter — or a getter with nothing to
+ * hand back — this resolves `null`, `request()` sets no `Authorization` header
+ * at all, and the API serves the local `dev-user`. With a session it is
+ * `Bearer <jwt>`, the contract `apps/web/src/proxy.ts` documents for the
+ * native client.
+ *
+ * The getter is asked on every request, never cached, so a rotated session
+ * token is picked up without rebuilding the client. A getter that throws (an
+ * offline token refresh) degrades to `null` rather than failing the read — the
+ * server's 401 is the loud signal, not a thrown refresh.
+ */
+export function bearerAuthHeader(getToken: TokenGetter | null | undefined): () => Promise<string | null> {
+  return async () => {
+    try {
+      const token = await getToken?.();
+      return token ? `Bearer ${token}` : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 /** A non-2xx response. `body` is the parsed JSON when there was any. */
 export class ApiError extends Error {
   constructor(
