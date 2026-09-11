@@ -119,6 +119,7 @@ const DAY_COLORS: Record<string, string> = {
   selStroke: "#c14d20",
   selInk: "#ffffff",
   arcLine: "#c14d20",
+  corridorCasing: "rgba(255, 255, 255, 0.9)",
   labelScrim: "rgba(255, 255, 255, 0.9)",
   labelInk: "#0a1520",
   labelInkSelected: "#c14d20",
@@ -196,6 +197,22 @@ describe("Map overlay palette — the three-mode contract", () => {
     expect(block("DAY")).toMatch(/arcOpacity: 0\.92,/);
     const sat = PALETTE.slice(PALETTE.indexOf("const SAT: OverlayPalette = {"));
     expect(sat).toMatch(/arcOpacity: 1,/);
+  });
+
+  it("casings the solid corridor in all three modes (docs/design/43 §2)", () => {
+    // A routed corridor is SOLID, so it needs a casing everywhere — unlike the
+    // estimate dash, whose casing is sat-only (`arcCasing`, asserted below).
+    // Both values already existed in the file: 0.8 is sat's arcCasing, 0.9
+    // white is day's two scrims. No new colour and no new rv-* token.
+    expect(colors(block("NIGHT")).corridorCasing).toBe("rgba(2, 6, 23, 0.8)");
+    expect(colors(block("DAY")).corridorCasing).toBe("rgba(255, 255, 255, 0.9)");
+    const sat = PALETTE.slice(
+      PALETTE.indexOf("const SAT: OverlayPalette = {"),
+      PALETTE.indexOf("\n};", PALETTE.indexOf("const SAT: OverlayPalette = {")),
+    );
+    // Sat inherits it from the ...NIGHT spread — never re-stated by hand.
+    expect(colors(sat)).not.toHaveProperty("corridorCasing");
+    expect(sat).toContain("...NIGHT");
   });
 
   it("gives night and day no halo and no arc casing", () => {

@@ -1,7 +1,24 @@
 import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
-import { driveMiles, estimateRoute, hasCoords, isScheduled } from "@rv-trip/core";
-import type { LocateRow, ReservationType, SavedPlace, Stop, Trip } from "@rv-trip/core";
+import {
+  NO_ROUTING_HASH,
+  driveMiles,
+  estimateRoute,
+  hasCoords,
+  isScheduled,
+  orderedPairs,
+  routeCacheKey,
+  routeToGeoJSON,
+} from "@rv-trip/core";
+import type {
+  LocateRow,
+  ReservationType,
+  RouteMap,
+  RouteSource,
+  SavedPlace,
+  Stop,
+  Trip,
+} from "@rv-trip/core";
 import { dateRange } from "@/lib/trip-ui";
 
 /**
@@ -9,9 +26,11 @@ import { dateRange } from "@/lib/trip-ui";
  * coordless rows the map can't take, and the estimated-drive arcs.
  *
  * Nothing here styles anything — `MapView` reads `layer` / `kind` / `floating`
- * and applies the pin grammar. The miles come from core's `estimateRoute()` —
- * the one surviving haversine, which the Route rail also falls back to — so the
- * map and the rail can never print different numbers.
+ * / `source` and applies the pin grammar. A drive's numbers come from the
+ * routed `RouteMap` the server resolved, keyed by `routeCacheKey`, and fall
+ * back to core's `estimateRoute()` — the one surviving haversine, which the
+ * Route rail falls back to through the SAME key — so the map and the rail can
+ * never print different numbers.
  */
 
 /** The four layers, in the order their chips read — labelled verbatim from the
@@ -97,15 +116,28 @@ export function locateRowOf(row: UnmappedRow): LocateRow {
   return { kind: row.layer === "saved" ? "place" : "stop", id: row.id };
 }
 
-/** One leg of the dashed estimate between consecutive scheduled stops. */
+/**
+ * One drive between consecutive stops in the trip's ONE ordered sequence
+ * (`orderedPairs`) — floating stops included, which is why this is no longer
+ * "the dashed estimate": a routed drive carries the HERE corridor and draws
+ * solid, an un-routed one keeps exactly the dash it has always had.
+ */
 export interface DriveArc {
   id: string;
   layer: Exclude<MapLayer, "saved" | "been">;
+  /** The pair's endpoints — still the chord, for the estimate label's midpoint. */
   from: { lat: number; lng: number };
   to: { lat: number; lng: number };
   miles: number;
-  /** "~108 mi · est." — a map label answers "how far", not "how long". */
+  /** "136 mi · US-101" routed, "~108 mi · est." otherwise — a map label answers
+   * "how far", not "how long". */
   label: string;
+  /** Which line grammar the Mapbox layer paints: solid corridor, or dash. */
+  source: RouteSource;
+  /** The drawn path as `[lng, lat]` positions: the decoded HERE corridor when
+   * routed, the two endpoints otherwise (so an estimate is unchanged by
+   * construction, never by a branch). */
+  path: [number, number][];
 }
 
 export interface MapModel {
@@ -153,8 +185,17 @@ function reservationsOf(stop: Stop): PinReservation[] {
  * Fold every trip tree and the saved-place shelf into the one model each of the
  * three map modes reads. Coordless points are split out here, once — no pin path
  * downstream has to re-check for nulls.
+ *
+ * `routes` + `routingHash` are the server's resolved drives (map/page.tsx), and
+ * they default to "none, no rig" so the Places map lens — which hands in no
+ * trips at all (PlacesLibrary.tsx:82) — keeps calling this with two arguments.
  */
-export function buildMapModel(trips: Trip[], places: SavedPlace[]): MapModel {
+export function buildMapModel(
+  trips: Trip[],
+  places: SavedPlace[],
+  routes: RouteMap = {},
+  routingHash: string = NO_ROUTING_HASH,
+): MapModel {
   const pins: MapPin[] = [];
   const unmapped: UnmappedRow[] = [];
   const arcs: DriveArc[] = [];
@@ -196,18 +237,27 @@ export function buildMapModel(trips: Trip[], places: SavedPlace[]): MapModel {
     // Arcs are drawn only for the trips AHEAD of you — a traveled trip's drive
     // already happened, and a dashed estimate over a real past route is a lie.
     if (layer === "been") continue;
-    for (let i = 0; i < sequence.length - 1; i++) {
-      const a = sequence[i]!.place;
-      const b = sequence[i + 1]!.place;
-      if (!hasCoords(a) || !hasCoords(b)) continue;
-      const miles = driveMiles(estimateRoute(a, b));
+    // `orderedPairs`, not the scheduled-only sequence: it is the pair set the
+    // Route rail, the dashboard card and the `routes` table all key on, so a
+    // corridor resolved by the server can actually be looked up here. It also
+    // already drops any pair touching a coordless stop — coordinates, not
+    // dates, are the precondition (route-order.ts:49-57).
+    for (const pair of orderedPairs(trip)) {
+      const key = routeCacheKey(pair.from, pair.to, routingHash);
+      const result = routes[key] ?? estimateRoute(pair.from, pair.to);
+      const miles = driveMiles(result);
       arcs.push({
-        id: `${sequence[i]!.id}->${sequence[i + 1]!.id}`,
+        id: `${pair.fromStopId}->${pair.toStopId}`,
         layer,
-        from: { lat: a.lat, lng: a.lng },
-        to: { lat: b.lat, lng: b.lng },
+        from: pair.from,
+        to: pair.to,
         miles,
-        label: `~${miles} mi · est.`,
+        label:
+          result.source === "here"
+            ? [`${miles} mi`, result.primaryRoad].filter(Boolean).join(" · ")
+            : `~${miles} mi · est.`,
+        source: result.source,
+        path: routeToGeoJSON(result, pair.from, pair.to).coordinates,
       });
     }
   }

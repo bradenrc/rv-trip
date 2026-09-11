@@ -1,15 +1,14 @@
-import type { LatLng } from "./index";
+import type { LatLng, RouteResult } from "./index";
 
 /**
  * HERE's "flexible polyline" codec — the encoding `RouteResult.polyline`
  * carries. `encode` is live: StubRoutingProvider encodes its two-point straight
  * line so local dev produces the same shape with no network and no keys.
  *
- * `decode` has NO consumer today. It is the seam, kept deliberately: the
- * Navigate handoff is now endpoints-only (Google has no pass-through waypoint),
- * and the corridor-faithful fast-follow — server-side Google Routes API
- * intermediates validated against the HERE geometry, and drawing the corridor
- * on the Mapbox layer — is what reads the polyline back.
+ * `decode` has ONE consumer: `routeToGeoJSON` below, the corridor the Mapbox
+ * layer draws (docs/design/43 §2). The other half of the fast-follow —
+ * server-side Google Routes intermediates validated against the HERE geometry
+ * — reads the same decode and is still ahead of us.
  *
  * Format: a version varint, a header varint carrying the coordinate precision,
  * then zig-zag-encoded signed varint deltas over base-64url-ish characters with
@@ -73,6 +72,40 @@ export function decodeFlexiblePolyline(encoded: string): LatLng[] {
     // throwing. Never a crash on a vendor's encoding.
     return [];
   }
+}
+
+/**
+ * A GeoJSON LineString, declared here rather than taken from the `GeoJSON`
+ * global: `@types/geojson` is not a dependency of this package and its
+ * tsconfig pins `types` to node + vitest/globals, so no such namespace exists.
+ * The shape is exactly the object `MapView.tsx` used to build inline.
+ */
+export interface RouteLineString {
+  type: "LineString";
+  /** `[lng, lat]` — GeoJSON's order, the reverse of `LatLng`'s. */
+  coordinates: [number, number][];
+}
+
+/**
+ * The drawable geometry of a routed drive: the HERE corridor when the vendor
+ * gave us one, the two endpoints otherwise.
+ *
+ * `from`/`to` are parameters because a `RouteResult` carries no endpoints — it
+ * is a measurement of a pair, not the pair. They are the fallback for the two
+ * cases where there is no corridor to draw: a result with `polyline: null`
+ * (a vendor answer that carried none), and a polyline we cannot read
+ * (`decodeFlexiblePolyline` degrades garbage to `[]`).
+ *
+ * An `estimate` needs no branch: `estimateRoute` encodes its own two endpoints,
+ * so it decodes to the same two-point straight segment the map already drew.
+ */
+export function routeToGeoJSON(result: RouteResult, from: LatLng, to: LatLng): RouteLineString {
+  const decoded = result.polyline ? decodeFlexiblePolyline(result.polyline) : [];
+  const points = decoded.length >= 2 ? decoded : [from, to];
+  return {
+    type: "LineString",
+    coordinates: points.map((p) => [p.lng, p.lat] as [number, number]),
+  };
 }
 
 function encodeUnsigned(value: number, out: string[]): void {
