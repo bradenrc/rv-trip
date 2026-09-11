@@ -23,9 +23,14 @@ import { describe, it, expect } from "vitest";
  *      already-installed dev client).
  *   2. The README instructs **no Expo Go path**: no command that launches it,
  *      and every remaining mention of the name says it is gone.
- *   3. The README names what a fresh machine has to do once — Xcode,
- *      CocoaPods, and the `sk.*` Mapbox download token in `~/.netrc` — and
- *      carries a placeholder there, never a real token.
+ *   3. The README names what a fresh machine has to do once — Xcode and
+ *      CocoaPods — and carries no Mapbox credential of any kind. Item 1 wrote
+ *      the `sk.*` / `~/.netrc` `DOWNLOADS:READ` token here as "needed from #32
+ *      onward"; #32 landed in item 4 and it is **not**: `@rnmapbox/maps@10.3.5`
+ *      pulls MapboxMaps iOS `~> 11.23.1` from the public CocoaPods registry and
+ *      its own podspec calls `$RNMapboxMapsDownloadToken` deprecated ("download
+ *      token is no longer required"). So the claim this guards is the corrected
+ *      one, and the secret-leak guard now covers both token families.
  *   4. The cache guidance names what is actually shared between worktrees (the
  *      CocoaPods caches, Xcode's shared module cache) and what is not
  *      (`apps/mobile/ios/`, which `.gitignore` regenerates per tree). That last
@@ -122,14 +127,18 @@ describe("the README names the one-time machine setup", () => {
     expect(readme).toMatch(/pod install/);
   });
 
-  it("the Mapbox download token lives in ~/.netrc, as a placeholder only", () => {
-    expect(readme).toContain("~/.netrc");
-    expect(readme).toMatch(/sk\./);
-    expect(readme).toMatch(/DOWNLOADS:READ/);
-    // A real Mapbox secret token is a JWT: `sk.eyJ…`. The documented one has to
-    // stay an obvious SHOUTING placeholder.
+  it("says plainly that no Mapbox download token is needed", () => {
+    expect(readme).toMatch(/no Mapbox download token/i);
+    // …and names where it WOULD come from if a future SDK bump brings it back:
+    // an environment variable, never app.json (which the plugin would copy into
+    // the generated Podfile).
+    expect(readme).toContain("RNMAPBOX_MAPS_DOWNLOAD_TOKEN");
+  });
+
+  it("carries no real Mapbox token of either family", () => {
+    // Both are JWTs: `sk.eyJ…` secret, `pk.eyJ…` public. Placeholders only.
     expect(readme).not.toMatch(/sk\.ey[A-Za-z0-9_-]/);
-    expect(readme).toMatch(/password sk\.[A-Z_]+\s*$/m);
+    expect(readme).not.toMatch(/pk\.ey[A-Za-z0-9_-]/);
   });
 });
 

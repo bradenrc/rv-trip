@@ -469,3 +469,321 @@ granularity was the defect.
   of which now run through `tripArcs`.
 - That leaving `markerShadow` in the web file (rather than moving it and
   returning a string the phone cannot use) is the right cut of "vendor-free".
+
+---
+
+# Issue 44 · item 4 of 4 — the mobile map: the Route ⇄ Map lens, corridors, mini-map
+
+Scope: `apps/mobile` (two deps, `app.json`, new `src/map.tsx`, `src/ui.tsx`'s
+`Segmented`, the trip screen, the stop screen, `README.md`) plus the pure half in
+`packages/core`. **No `apps/web` source file is touched** — `git status` shows
+none; the new core test only *reads* four web files so a drift there reds here.
+
+## What changed
+
+**The pure half, in core — the part that actually executes under test**
+
+- `packages/core/src/planner/map-pins.ts` (new, 145 lines) — the pin + camera
+  half of the model `map-arcs.ts` started (i3).
+  - `:38` `scheduledOrder(trip)` → `{ ordinals: Map<stopId, 1-based>, total }`.
+    Trip-wide by `arriveDate`, legs do not reset the count. This is the named
+    answer to the vet's "where does the ordinal come from" (see below).
+  - `:68` `tripStopPins(trip)` → `{ id, name, lat, lng, ordinal, floating }[]`,
+    leg-then-stop order, a coordless stop **dropped** (the same precondition
+    `orderedPairs` applies to arcs) but still counted in `scheduledOrder`, so the
+    map's numbers and the rail's numbers are one sequence with one missing rather
+    than all of them shifted.
+  - `:107` `arcFeatureCollection(arcs)` → the ONE `FeatureCollection` both
+    renderers' line layers read; `properties: { id, source }`, geometry already
+    decoded.
+  - `:127` `arcVertices(arcs)` and `:140` `mapBounds(arcs, pins)` — the camera
+    box over corridor vertices **plus** pins.
+- `packages/core/src/planner/index.ts:37-39` — re-exported.
+
+**The phone's map**
+
+- `apps/mobile/src/map.tsx` (new, 516 lines) — the native wrapper.
+  - `:45` `MAPBOX_TOKEN` from `EXPO_PUBLIC_MAPBOX_TOKEN`, read in exactly one
+    place in the app (asserted).
+  - `:53` `MAP_STYLES` — the phone's own vendor seam. Day/Sat identical to the
+    web's (`MapView.tsx:38-42`); **Night is stock `dark-v11`**, because
+    `applyNightfall` repaints through `mapbox-gl`'s `setPaintProperty`, which
+    `@rnmapbox/maps` does not expose the same way. The overlay palette — what
+    actually carries the product over the tiles — is the same `MAP_PALETTE`.
+  - `:75` `loadMapbox()` / `:89` `mapAvailable()` — the lazy `require` inside a
+    `try`, resolved once, with `setAccessToken` called once. No token ⇒ false
+    **without even requiring** the module. Only a `import type` of the package
+    exists at module scope, so nothing native is pulled in by the import graph.
+  - `:99` `STYLE_PREF_KEY = "rv-map-style"` (the web's key, `MapMount.tsx:41`) ·
+    `:115` `useStyleMode()` — AsyncStorage, per device, `null` until it answers,
+    and **every** read narrowed by core's `isStyleMode` with
+    `DEFAULT_STYLE_MODE` as the fallback (including on a read that throws).
+  - `:163` `MapFrame` — the three states as RN views, copy verbatim from
+    `packages/ui/src/MapFrame.tsx` (`:33-37`, `:49-55`, `:75-76`).
+  - `:215-240` the grammar constants: `SOURCE_ID "rv-drive-arcs"`, `ROUTED`,
+    `ESTIMATE_ONLY`, `CORRIDOR_WIDTH 2.6`, `ESTIMATE_DASH [2.2, 1.8]`,
+    `FIT_PADDING 56` / `FIT_MAX_ZOOM 11` / `FIT_DURATION 600` — each verbatim
+    from `MapView.tsx` at the line named in the comment.
+  - `:252` `arcLayerStyles(palette)` — the three layer paints, `lineCap: "round"`
+    on all three, and the casing's **three-term** case (see vet findings).
+  - `:290` `arcLabel` · `:301` `labelAt` · `:308` `cameraBounds`.
+  - `:356` `TripMap` — one `ShapeSource`, three `LineLayer`s, `MarkerView` discs
+    and labels, the over-canvas pill. `:456` `StopDisc` — 27pt / 2pt border /
+    mono 12 bold, planning green, the floating stop hollow + **dashed** + `◇`.
+- `apps/mobile/src/ui.tsx:111-176` `SegmentedOption` + `Segmented`, `:219-241`
+  its styles. Label-only.
+- `apps/mobile/app.json:28-31` — `"@rnmapbox/maps"` in `plugins`, **no props**.
+- `apps/mobile/package.json:8-9` — `@rnmapbox/maps@^10.3.5`,
+  `@react-native-async-storage/async-storage@2.2.0` (the version Expo SDK 57's
+  `bundledNativeModules.json` pins, i.e. what `expo install` would pick).
+
+**The two screens**
+
+- `apps/mobile/app/trips/[id]/index.tsx` — `:45-50` the `Lens` type + `LENSES`,
+  `:56-57` the lens + style state, `:75-79` `tripArcs` / `tripStopPins` from the
+  bundle already in hand, `:111-129` the masthead **above both lenses** with the
+  `Segmented` control, `:131-143` the Map lens as a `flex:1` View **outside** the
+  `ScrollView`, `:322-328` the new styles. Every element of the Route lens, its
+  order and its copy are unchanged (asserted fragment by fragment).
+- `apps/mobile/app/trips/[id]/stops/[stopId].tsx` — `:25`
+  `MINI_MAP_HEIGHT = 150` (the web's `STOP_MINI_MAP_HEIGHT`), `:44-49` the
+  ordinal kicker from `scheduledOrder`, `:51-57` the one pin (memoised), `:100-115`
+  the mini-map: **no arcs** (the prop is omitted), **no labels**
+  (`showLabels={false}`), **no pill** (no `onModeChange` exists to change
+  anything with), `:223-228` the framing style.
+- `apps/mobile/README.md:27-44` the corrected Mapbox-SDK setup + the New-Arch
+  requirement, `:126-168` the new **The map** section, `:170-177` "What's here".
+
+## Tests
+
+`pnpm turbo run lint typecheck test` — **9/9 tasks, 659 core tests (34 files),
+70 web tests (20 files)**.
+
+- `packages/core/src/planner/map-pins.test.ts` (new, **17 cases, real TDD**):
+  written first, verified red (`Failed to load url ./map-pins` — "Tests: no
+  tests"), then green. It executes the real functions on the wireframe's own
+  Pacific-NW fixture: the trip-wide numbering including the cross-leg case, the
+  floating stop's `null` ordinal, the coordless drop that does **not** shift the
+  other numbers, one `LineString` per arc with the decoded corridor untouched,
+  the `[lng,lat] → {lat,lng}` flip asserted by *latitude range* (a flipped tuple
+  puts Oregon in the Southern Ocean), a corridor vertex at `-124.9` widening the
+  box past the four pins, the single-pin `MIN_BOUNDS_SPAN` pad, and `null` for
+  nothing to fit.
+- `packages/core/src/mobile-map.test.ts` (new, **39 cases**) — the renderer's
+  contract as source text, the same technique i1/i2 used and for the same reason
+  (`apps/mobile` has no test runner; every file here needs a native runtime).
+  **Honest about its kind:** it was written *after* `map.tsx`, not before — you
+  cannot write a failing test first for a native renderer you cannot mount. To
+  show it has teeth I mutated the three numbers the vet caught the wireframe
+  getting wrong (dropped the casing's third case term, changed the dash to
+  `[2,2]`, removed one `lineCap`) and **3 of 39 reded**; restored, 39/39.
+  It checks numbers against the *real* exported values (`ARC_CASING_WIDTH`,
+  `MAP_PALETTE.*.arcWidth`, `MAP_PALETTE.sat.arcCasing !== null`,
+  `DEFAULT_STYLE_MODE`, `isStyleMode`) and every "same as the web" claim against
+  the web file itself, so a change on either side reds. Claims are read from a
+  **comment-stripped** copy of each source, so a docstring that merely mentions
+  "Google" or "lucide" cannot satisfy a claim about code.
+- `packages/core/src/mobile-dev-loop.test.ts:27-34, 125-139` — i1's `~/.netrc` /
+  `sk.*` / `DOWNLOADS:READ` assertions **replaced**, because the claim they
+  guarded is false (see the first vet note below). The secret-leak guard is
+  now stronger: no `sk.ey…` **and** no `pk.ey…` anywhere in the README.
+- `apps/web/src/components/map/pins.test.ts` and the other 19 web files are
+  untouched and pass — the proof no web behaviour moved.
+
+One flake, for the record: the first full-gate run failed `@rv-trip/web:lint`
+with `ENOENT … apps/web/vitest.config.mts.timestamp-…mjs` — eslint globbing while
+vitest's temp config existed, a pre-existing race between two turbo tasks in the
+same package. Re-ran at `--concurrency=1` (green) and again with `--force` at
+default concurrency (green). Not caused by anything in this item, but worth a
+`.eslintignore`-style fix someday.
+
+## Vet findings addressed in this item
+
+- **HIGH · "reuse claim fails: … the web's mini-map DOES render the pin's name
+  label"** — confirmed and resolved by taking the DRAWN intent. `StopMiniMap.tsx`
+  passes no `showLabels`, `MapMount.tsx:96` forwards `undefined`,
+  `MapView.tsx:80` defaults it `true` — so the web labels its one pin and the
+  design's "the same props the web's stop sheet passes" was wrong. The phone's
+  mini-map draws **no** label, per S4, and the citation is gone. Structurally:
+  `showLabels` on `TripMap` is **required with no default** (`map.tsx:352`), so
+  neither call site can inherit anything; the trip screen passes it, the stop
+  screen passes `false`. Asserted both ways, including that
+  `MapView.tsx`'s `showLabels = true` still exists (if the web ever drops its
+  default, this test tells you the divergence is gone).
+- **HIGH · "contract snippet does not compile: `boundsFor(arcs.flatMap(a =>
+  a.path).concat(pinPoints))`"** — correct, and fixed by making the conversion a
+  named, tested function rather than a line in a screen: `arcVertices` /
+  `mapBounds` (`map-pins.ts:127, 140`). The renderer is asserted **not** to
+  contain any `flatMap(… a.path …)` of its own. The `-124.9` case is the test
+  that would have caught the bug.
+- **HIGH · "the casing layer … the dropped term is exactly what puts a casing
+  under a DASHED estimate in Sat mode … also omits `line-cap`"** — both fixed and
+  both locked down. `map.tsx:258` is
+  `lineOpacity: ["case", ROUTED, 1, palette.arcCasing ? 1 : 0]`, byte-for-byte
+  the web's third term, and all three layers set `lineCap: "round"`. The test
+  asserts the term, asserts the same string in `MapView.tsx`, and asserts
+  `arcCasing` really is non-null for sat only — so the *reason* the term exists is
+  guarded, not just the term.
+- **MED · "undeclared scope on the stop screen … name where the ordinal comes
+  from, or drop it"** — named: core's `scheduledOrder` (`map-pins.ts:38`), a new
+  export, which is also what numbers the map's discs. Both numbers in "Oregon
+  Coast · stop 2 of 3" come from it and cannot disagree with the discs. A
+  floating stop keeps the bare leg name rather than printing "stop null of 3".
+  The numbered disc `2` in S4 comes from the same call through `tripStopPins`.
+- **MED · "the Segmented primitive's metrics are named twice, differently, and
+  drawn a third way"** — **one source, stated: `@rv-trip/ui`'s
+  `SegmentedControl` (`packages/ui/src/Places.tsx:130, 142-143`)**, because that
+  is what `plan.json`'s i4 scope names and it is the DS component the
+  wireframe's own CSS comment says the RN control mirrors. Resolved: container
+  `p-[3px]` → `padding: 3`; segment `px-3.5 py-1.5 text-[13px] font-bold` →
+  `14 / 6 / 13 / "700"`; mono `px-2.5 py-[5px] font-mono text-[11px]` →
+  `10 / 5 / 11`. The page's own drawn `5px 14px · 12px` and the masthead's
+  `ToggleTab` (`px-[15px] py-[7px]`) are **not** used, and the test asserts the
+  DS still carries the classes it claims to mirror.
+- **MED · "the Route lens renders a notice sentence the server cannot
+  compose"** — correct, and nothing in this item composes notice copy: the phone
+  still prints `⚠ {n.message}` whole, from the server, exactly as it did
+  (asserted, along with the absence of `splitNoticeMessage`). The drawn sentence
+  and the `primaryRoad` beside it are a wireframe error in the illustrative data,
+  not an instruction; no code follows it.
+- **MED · "the dev-loop cache guidance is not achievable as written"** — already
+  corrected by i1; untouched here.
+- **MED · "two of the 'three MapFrame states as native views' are
+  unspecified"** — all three land, and I answer the question asked. Copy for all
+  three is verbatim from `MapFrame.tsx` (the only source). Two things cannot
+  cross: lucide icons (this kit ships glyphs) → `⚠` / `◌` / `▦` at the DS's
+  colours, and the loading frame's CSS `linear-gradient` 32px grid, which would
+  need a gradient dependency → the `▦` glyph carries that motif on the frame's
+  flat `rv-surface-alt`. **And yes, `loading` exists on the phone**: not for a
+  lazy chunk (a native map has none) but for the one render before AsyncStorage
+  answers with the style preference — the same render `MapMount.tsx:87-88`
+  covers. Both screens ask for it by name.
+- **MED · "the sign-in screen pins no failure copy"** — i2's; untouched.
+- **MED · "`EXPO_PUBLIC_MAPBOX_TOKEN` does not exist anywhere in the repo today …
+  the README line 'restricted to `com.bradenrc.rvtriphub`' asserts a scoping
+  mechanism I could not verify"** — the var exists now (`map.tsx:45`, documented
+  `README.md:132-145`), and **the restriction claim is not written**. The README
+  says the opposite, explicitly: Mapbox's URL restrictions are a browser
+  `Referer` mechanism and do not apply to a native app, so there is no
+  bundle-id scoping to set; the controls are the token's read-only scopes,
+  rotation, and the usage dashboard. The vet's other half also holds and is
+  documented: with no token the default state on a fresh machine and in CI **is**
+  the "Map unavailable" frame.
+- **MED · "i1 claims 'No source or app.json change', but the API base URL is
+  discovered from `Constants.expoConfig?.hostUri`"** — `src/api.ts` is untouched
+  by this item too; still a walk-time fact (i1's note stands).
+- **FLAG · "render-required at walk: @rnmapbox/maps …"** and **FLAG · "the Clerk
+  Expo gate"** — both accepted, unchanged. Neither is certifiable here; see
+  "Flagged" below for the exact list.
+- **NOTE · "verified and holding"** — used as given. `bundle.rigHash` is passed
+  to `tripArcs` as the routing hash (trip screen `:75-78`); `orderedPairs`
+  includes floating stops so the Bend → Crater Lake estimate arc is
+  representable; `CORRIDOR_WIDTH 2.6` / dash `[2.2, 1.8]` / the `ROUTED`
+  predicate / `STYLE_PREF_KEY` / the `unavailable` copy are all taken verbatim
+  and re-asserted against their sources.
+
+## Deviations from the drawn/written design — read these
+
+1. **`app.json` gets the plugin with NO props, and the `~/.netrc` `sk.*` token is
+   gone from the README.** The plan says "`RNMapboxMapsDownloadToken` read from
+   the environment"; `app.json` is static JSON and can read nothing, and at the
+   version that actually installs (`@rnmapbox/maps@10.3.5`) the prop is
+   **deprecated**: its own podspec says "download token is no longer required"
+   (`rnmapbox-maps.podspec:15`) and the plugin warns that setting it writes the
+   secret into the generated `Podfile`
+   (`plugin/src/withMapbox.ts:108-117`). It pulls **MapboxMaps iOS `~> 11.23.1`**
+   from the public CocoaPods registry. So: no props, nothing in `~/.netrc`, and
+   the README says why and names `RNMAPBOX_MAPS_DOWNLOAD_TOKEN` as where it would
+   come from if a future SDK bump brings the requirement back. I read this out of
+   the installed package, not from memory. **Claim for qa** — this is the one
+   factual correction in the item, and it contradicts i1's own README text, which
+   is why i1's test changed with it.
+2. **`@rnmapbox/maps` 10.3+ refuses to build on the old architecture**
+   (`rnmapbox-maps.podspec:39-42`). `app.json` already has
+   `newArchEnabled: true`, so nothing to do — documented and asserted so it
+   cannot be switched off quietly.
+3. **The masthead moved out of the `ScrollView`.** This is the one *visible*
+   change to the Route lens and it is the design's own instruction: "the lens
+   control sits in the masthead above both", which is what lets the Map lens be a
+   `flex:1` View outside the scroll. Consequence: on the Route lens the kicker /
+   title / date / open-days block is now **pinned** instead of scrolling away.
+   Every element, its order, its copy and its styles are unchanged — only the
+   scroll boundary moved. If Braden wants the masthead to scroll again, the lens
+   control has to move with it and the Map lens needs its own second masthead.
+   **Flagged for the walk as the one Route-lens delta.**
+4. **The masthead's `h1` does NOT shrink on the Map lens.** S2 draws it 17px
+   against S1's 20px, but the HTML frames are stand-ins and the app's real `h1`
+   is 30px, so there is no honest mapping for a 15% shrink. What the drawing
+   *says* substantively — the open-days line drops and the date line becomes
+   "… · 4 stops · 3 drives" — is implemented exactly (`:120-127`, and the counts
+   are `summary!.stops` and `arcs.length`, which are 4 and 3 on the seed).
+5. **Two drawn sentences are NOT rendered**, deliberately: the canvas pill
+   "fit to corridor + pins" (drawn in the page's `.canvas .fit` *annotation*
+   style) and, on S4, "No corridors here — the sheet names the stop, the frame
+   places it." plus S3's "Route lens is one tap away." All three describe the
+   design to a reviewer rather than telling the reader anything the screen does
+   not already show. Rendering design rationale as product copy seemed the worse
+   error; say the word and they are one `<Text>` each.
+6. **The arc label copy is a deliberate second copy.** i3 left the label at the
+   renderers on the premise that "the phone words the same drive differently" —
+   the signed wireframe words it identically ("118 mi · US-101" / "~98 mi ·
+   est."). So `map.tsx:290` repeats `pins.ts:253-256`'s two format strings rather
+   than inventing a difference, and the test asserts **both** files still contain
+   both forms, so they cannot drift silently. The clean fix is `arcLabel` on
+   core's `TripArc`; that is a web-touching change and belongs to whoever
+   revisits i3's decision, not to this item.
+7. **`scheduledOrder` duplicates `pins.ts`'s private `scheduledSequence`**
+   (`pins.ts:153-158, 203`) rather than replacing it. Same derivation, same
+   ordering. Replacing it is an 8-line web edit guarded by an unmodified
+   `pins.test.ts` and I nearly did it — I did not, because i4's scope names no
+   web file and the walk gate renders the web. **Recommended follow-up**, one
+   commit, zero behaviour change.
+8. **The trip map's "empty" frame passes no `unmappedCount`.** The web counts the
+   coordless rows it dropped; the phone has no such count on this screen, so the
+   copy degrades to the count-free sentence ("None of these places has
+   coordinates."), which is the DS's own alternative. The stop screen does pass
+   `count={1}`, because there it is exactly one.
+9. **No selected-disc state.** `MapView.tsx`'s `StopDisc` has a third rendering
+   for selection; the phone's map has no tap-to-select interaction to express it
+   and the wireframe draws none — including on the mini-map, where the web
+   *does* pass `selectedId` and so draws the accent disc. S4 draws the ordinary
+   green disc, so that is what ships.
+
+## Flagged for the walk — nothing below is certifiable here
+
+The walk gate boots `pnpm dev` in `apps/web` only (`scripts/mc-walk-env.sh:229`),
+and this dispatch is barred from `expo run:ios` / `prebuild` / `pod install`. So
+these need the simulator:
+
+1. The config plugin and the prebuild — that `expo prebuild` + `pod install`
+   resolve MapboxMaps 11.23.1 **with no download token** (deviation 1 is the
+   claim most worth seeing fail or hold), and that the first native build is the
+   documented 4–8 minutes.
+2. Every data-driven expression: `["case", ROUTED, …]` for `lineWidth` and
+   `lineOpacity`, `lineDasharray: [2.2, 1.8]`, and the `ESTIMATE_ONLY` filter.
+   `@rnmapbox/maps` accepts them at the type level (`Value<T> = T | Expression`);
+   whether the native style layer honours them is a runtime fact.
+3. The gesture question the design's own layout exists to answer: the map's pan
+   inside a `flex:1` View while the Route lens's `ScrollView` is unmounted.
+4. `MarkerView` performance and overlap with `allowOverlap` — four discs plus
+   four name labels plus three arc labels is eleven view annotations on one
+   canvas; Mapbox's own guidance is "up to ~100", so it should be fine, but the
+   labels are the first thing to drop if it stutters.
+5. That a build with **no** `EXPO_PUBLIC_MAPBOX_TOKEN` really renders the
+   "Map unavailable" frame rather than throwing — i.e. that `mapAvailable()`
+   returning false is the whole story and no native module initialises at import.
+6. The `Camera` fit: `defaultSettings.bounds` on mount then `bounds` on change,
+   at padding 56 / maxZoom 11 / 600ms. Whether 56pt of padding reads right on a
+   390pt-wide phone is a taste call only visible on the device (it is the web's
+   number, chosen for a much larger canvas).
+7. Everything i1 and i2 already flagged (the dev client's `hostUri`, the Clerk
+   keyed path, `expo-secure-store` on the Simulator).
+
+## Operator-owned
+
+Nothing. No `gh`, no board, no push, no PR, no `STATE.md`. No schema change and
+no migration: this item adds no field and no enum value, touches no Zod grammar,
+no `pgEnum` and no date column, and adds no endpoint — the map's whole input is
+the bundle the trip screen already fetches. The only environment action is
+Braden putting a `pk.*` in `apps/mobile/.env.local` when he wants tiles; without
+it the app runs and shows the frame, which is the CI/walk default on purpose.

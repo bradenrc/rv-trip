@@ -24,22 +24,24 @@ there is no second loop to keep working.
   run `sudo xcode-select -s /Applications/Xcode.app`.
 - **CocoaPods** — `brew install cocoapods`, then `pod --version` should answer.
   The native build runs `pod install` for you; it just needs the tool.
-- **The Mapbox SDK download token** — needed from #32 onward, when
-  `@rnmapbox/maps` joins the build: the Mapbox iOS SDK is fetched from a
-  private registry with a **secret** token (`sk.*`, scope `DOWNLOADS:READ`).
-  It lives in `~/.netrc` on your machine and never in the repo, in `.env`, or
-  in `app.json`:
-
-  ```
-  machine api.mapbox.com
-    login mapbox
-    password sk.YOUR_SECRET_DOWNLOAD_TOKEN
-  ```
-
-  then `chmod 600 ~/.netrc`. That token is read at **build** time only; the
-  runtime map key is a separate public `pk.*` token and arrives with #32.
+- **No Mapbox download token.** Earlier Mapbox iOS SDKs came from a private
+  registry behind a secret `sk.*` / `DOWNLOADS:READ` token in `~/.netrc`. That
+  is no longer true for the SDK we build against: `@rnmapbox/maps@10.3.5` pulls
+  **MapboxMaps iOS `~> 11.23.1`** from the public CocoaPods registry, and its own
+  podspec says so — `$RNMapboxMapsDownloadToken` is *deprecated, download token
+  is no longer required* (`rnmapbox-maps.podspec:15`), and passing it through the
+  config plugin would only write the secret into the generated `Podfile`
+  (`plugin/src/withMapbox.ts:108-117`). So the plugin is registered with **no
+  props**, nothing goes in `~/.netrc`, and the only Mapbox credential this repo
+  needs is the public runtime key in [The map](#the-map) below. If a future SDK
+  bump reintroduces the requirement it is read from the
+  `RNMAPBOX_MAPS_DOWNLOAD_TOKEN` environment variable — never from `app.json`.
 
 No Apple Developer account and no provisioning are needed for the Simulator.
+
+`@rnmapbox/maps` 10.3+ **requires** React Native's New Architecture and refuses
+to build without it (`rnmapbox-maps.podspec:39-42`). `app.json` already has
+`newArchEnabled: true`, so there is nothing to do — just don't turn it off.
 
 ### Every day
 
@@ -121,13 +123,58 @@ different tenant on the phone than in the browser and see no trips. It is a
 your name plus **Sign out** with a session, and the web's dashed `dev-user` pill
 without one.
 
+## The map
+
+The in-app map is `@rnmapbox/maps` (issue #32), registered as an Expo config
+plugin in `app.json` — which is why a map change is a **native** change and
+needs `pnpm --filter @rv-trip/mobile ios`, not `start`.
+
+One env var, and it is public:
+
+```
+EXPO_PUBLIC_MAPBOX_TOKEN=pk.YOUR_PUBLIC_TOKEN   # apps/mobile/.env.local
+```
+
+Scope it `styles:read` + `fonts:read` + `tiles:read` and nothing else. Note what
+a public token on a **native** app can and cannot be protected by: Mapbox's URL
+restrictions are a browser mechanism (an HTTP `Referer` check) and do **not**
+apply to an app, so there is no equivalent of "restricted to
+`com.bradenrc.rvtriphub`" to set. Rotate it if it leaks, and watch the usage
+dashboard; that is the whole control surface. The web's key
+(`NEXT_PUBLIC_MAPBOX_TOKEN`) is a separate token for the same reason — one
+client's leak should not cost the other.
+
+**Without the token** — a fresh clone, CI, an mc-dev walk worktree — every map
+surface draws the "Map unavailable" frame and everything else on the screen keeps
+working. `mapAvailable()` (`src/map.tsx`) is the guard: a lazy `require` of the
+native module plus the token check. It is graceful degradation only — not a
+second supported loop, and **no screen offers a Google Maps fallback in its
+place**. (Navigate still opens Google Maps, as it always has; that is a drive's
+turn-by-turn hand-off, not a map fallback.)
+
+Two things to know about what you see:
+
+- **Night is the stock `dark-v11` basemap on the phone.** The web repaints night
+  layer by layer through `mapbox-gl`'s `setPaintProperty`
+  (`apps/web/src/components/map/nightfall.ts`), an API `@rnmapbox/maps` does not
+  expose the same way. What carries the product's identity over the tiles — the
+  *overlay* palette: discs, corridors, labels — is identical on both clients
+  (`@rv-trip/core`'s `MAP_PALETTE`). The app opens on **Day**, which is stock on
+  both, so the default path is pixel-comparable.
+- **The Night / Day / Sat choice is per device**, stored by AsyncStorage under
+  `"rv-map-style"` — the same key the web writes to `localStorage`
+  (`apps/web/src/components/map/MapMount.tsx:41`). Every read is narrowed by
+  core's `isStyleMode`, so a value from a future release cannot hand the
+  renderer a palette column that does not exist.
+
 ## What's here (v1)
 
 - `app/index.tsx` — Trips (planning / upcoming / traveled)
-- `app/trips/[id]/index.tsx` — the trip: day strip + route list with drives and Navigate
-- `app/trips/[id]/stops/[stopId].tsx` — stop detail: reservations, ideas (tap to cycle), rating + notes (persist)
+- `app/trips/[id]/index.tsx` — the trip, under a **Route ⇄ Map** lens: the day
+  strip + route list with drives and Navigate, or the same drives as corridors
+- `app/trips/[id]/stops/[stopId].tsx` — stop detail: the mini-map, reservations, ideas (tap to cycle), rating + notes (persist)
 - `app/rig.tsx` — you (the Account card) and the rig, read-only
 - `app/sign-in.tsx` — email → 6-digit code, rendered only when Clerk is keyed
-- `src/api.ts` · `src/auth.ts` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
+- `src/api.ts` · `src/auth.ts` · `src/map.tsx` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
 
-Not in v1: creating anything, in-app maps (#32).
+Not in v1: creating anything.

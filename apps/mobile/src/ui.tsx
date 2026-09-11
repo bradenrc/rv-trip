@@ -108,6 +108,68 @@ export function Button({
   );
 }
 
+export interface SegmentedOption<T extends string> {
+  value: T;
+  label: string;
+}
+
+/**
+ * The RN mirror of @rv-trip/ui's `SegmentedControl`
+ * (packages/ui/src/Places.tsx:114-153) — the trip masthead's Route ⇄ Map lens,
+ * and the over-canvas Night/Day/Sat pill in its `mono` variant.
+ *
+ * Label-only, deliberately: the web's variant takes a `LucideIcon` and this kit
+ * ships no icon set (its marks are glyphs — `CategoryTile`'s two letters, the
+ * idea bullets). Every metric is `SegmentedControl`'s, resolved from Tailwind:
+ * container `gap-0.5 rounded-rv-pill border border-rv-border bg-rv-surface-alt
+ * p-[3px]` (:130), segment `px-3.5 py-1.5 text-[13px] font-bold` (:142) and the
+ * mono variant `px-2.5 py-[5px] font-mono text-[11px]` (:142), active
+ * `bg-rv-surface text-rv-ink shadow-rv-sm` / inactive `text-rv-ink-faded`
+ * (:143). That is the one source for these numbers: the trip masthead's own
+ * `ToggleTab` (TripPlanner.tsx:1433-1453) is a different control at a different
+ * size and is NOT what this mirrors.
+ */
+export function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  mono = false,
+}: {
+  value: T;
+  options: SegmentedOption<T>[];
+  onChange: (v: T) => void;
+  /** The compact mono variant: mono type one step down, tighter padding. For a
+   * pill that sits *over* a surface rather than in a control row. */
+  mono?: boolean;
+}) {
+  return (
+    <View style={styles.segmented}>
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <Pressable
+            key={o.value}
+            onPress={() => onChange(o.value)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: on }}
+            style={[styles.segment, mono && styles.segmentMono, on && styles.segmentOn]}
+          >
+            <Text
+              style={[
+                styles.segmentText,
+                mono && styles.segmentTextMono,
+                { color: on ? C.ink : C.inkFaded },
+              ]}
+            >
+              {o.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export function Centered({ children }: { children: ReactNode }) {
   return <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}>{children}</View>;
 }
@@ -154,4 +216,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: { fontSize: 13, fontWeight: "700" },
+  segmented: {
+    flexDirection: "row",
+    alignSelf: "flex-start",
+    gap: 2,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surfaceAlt,
+    borderRadius: R.pill,
+    padding: 3,
+  },
+  segment: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: R.pill },
+  segmentMono: { paddingHorizontal: 10, paddingVertical: 5 },
+  segmentOn: {
+    backgroundColor: C.surface,
+    // shadow-rv-sm: 0 1px 2px rgba(0,0,0,.28) (packages/ui/styles/entry.css)
+    shadowColor: "#000000",
+    shadowOpacity: 0.28,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  segmentText: { fontSize: 13, fontWeight: "700" },
+  segmentTextMono: { fontFamily: F.mono, fontSize: 11 },
 });

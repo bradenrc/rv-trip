@@ -11,15 +11,50 @@ import {
   View,
 } from "react-native";
 import type { RouteDrive, RouteRow as RouteRowModel } from "@rv-trip/core";
-import { dayKindColor, fullRange, routeModel, routeSummary, timelineModel } from "@rv-trip/core";
+import {
+  dayKindColor,
+  fullRange,
+  routeModel,
+  routeSummary,
+  timelineModel,
+  tripArcs,
+  tripStopPins,
+} from "@rv-trip/core";
+import { MapFrame, TripMap, useStyleMode } from "../../../src/map";
 import { useBundle } from "../../../src/store";
 import { C, F, R } from "../../../src/theme";
-import { Button, Card, Centered, EstimateChip, FloatingTag, Kicker, Muted, Stars } from "../../../src/ui";
+import {
+  Button,
+  Card,
+  Centered,
+  EstimateChip,
+  FloatingTag,
+  Kicker,
+  Muted,
+  Segmented,
+  Stars,
+  type SegmentedOption,
+} from "../../../src/ui";
+
+/**
+ * The two lenses on one trip (#44 · q1 A): the Route rail as it has always
+ * been, and the map of the same drives. The control sits in the masthead ABOVE
+ * both, which is what lets the Map lens render OUTSIDE the ScrollView — a map's
+ * pan gesture and a vertical scroll cannot share a box.
+ */
+type Lens = "route" | "map";
+
+const LENSES: SegmentedOption<Lens>[] = [
+  { value: "route", label: "Route" },
+  { value: "map", label: "Map" },
+];
 
 export default function TripScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { bundle, error, reload } = useBundle(id);
   const [refreshing, setRefreshing] = useState(false);
+  const [lens, setLens] = useState<Lens>("route");
+  const [mode, setMode] = useStyleMode();
   const router = useRouter();
 
   // The same two models the web planner renders — from @rv-trip/core/planner.
@@ -32,6 +67,16 @@ export default function TripScreen() {
     () => (bundle ? routeSummary(bundle.trip, bundle.routes, bundle.rigHash) : null),
     [bundle],
   );
+
+  // The map's whole input, from the bundle the screen already holds — two pure
+  // calls, no new endpoint and no second derivation. `rigHash` is the routing
+  // hash on the wire (apps/web/src/app/api/trips/[id]/route.ts:24), which is
+  // what makes a server-resolved corridor findable in `routes`.
+  const arcs = useMemo(
+    () => (bundle ? tripArcs(bundle.trip, bundle.routes, bundle.rigHash) : []),
+    [bundle],
+  );
+  const pins = useMemo(() => (bundle ? tripStopPins(bundle.trip) : []), [bundle]);
 
   if (!bundle) {
     return (
@@ -59,103 +104,134 @@ export default function TripScreen() {
   return (
     <>
       <Stack.Screen options={{ title: trip.title }} />
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
-      >
-        {/* Masthead */}
-        <Kicker color={C.accent}>Trip planner</Kicker>
-        <Text style={styles.h1}>{trip.title}</Text>
-        <Text style={styles.mono}>
-          {fullRange(trip.startDate, trip.endDate)} · {timeline!.rhythm.length} days
-          {trip.homeBase ? ` · from ${trip.homeBase}` : ""}
-        </Text>
-        <Text style={[styles.mono, { color: C.warning }]}>{timeline!.openLabel}</Text>
+      <View style={styles.screen}>
+        {/* Masthead — above BOTH lenses, so the map can own the scroll-free
+            half of the screen. On the map the date line shortens to the two
+            counts: there is no scroll below it to carry the rest. */}
+        <View style={styles.masthead}>
+          <Kicker color={C.accent}>Trip planner</Kicker>
+          <Text style={styles.h1}>{trip.title}</Text>
+          {lens === "route" ? (
+            <>
+              <Text style={styles.mono}>
+                {fullRange(trip.startDate, trip.endDate)} · {timeline!.rhythm.length} days
+                {trip.homeBase ? ` · from ${trip.homeBase}` : ""}
+              </Text>
+              <Text style={[styles.mono, { color: C.warning }]}>{timeline!.openLabel}</Text>
+            </>
+          ) : (
+            <Text style={styles.mono}>
+              {fullRange(trip.startDate, trip.endDate)} · {summary!.stops} stops · {arcs.length}{" "}
+              drive{arcs.length === 1 ? "" : "s"}
+            </Text>
+          )}
+          <Segmented value={lens} options={LENSES} onChange={setLens} />
+        </View>
 
-        {/* Day strip — the rhythm of the trip, one cell per day */}
-        <Card style={{ padding: 10, gap: 6 }}>
-          <Kicker>Rhythm</Kicker>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ flexDirection: "row", gap: 2 }}>
-              {timeline!.rhythm.map((cell, i) => {
-                const label = timeline!.ruler[i]!;
-                return (
-                  <View key={i} style={{ alignItems: "center", gap: 3, width: 16 }}>
-                    <View
-                      style={{
-                        width: 16,
-                        height: 18,
-                        borderRadius: 3,
-                        backgroundColor: dayKindColor(cell.kind),
-                        borderWidth: cell.kind === "drive" ? 1 : 0,
-                        borderColor: C.borderHi,
-                      }}
-                    />
-                    <Text style={{ fontFamily: F.mono, fontSize: 8, color: label.weekStart ? C.ink : C.inkSubtle }}>
-                      {label.letter}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          </ScrollView>
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <Legend color={C.green} label="Stay" />
-            <Legend color={C.navy} label="Drive" outlined />
-            <Legend color={C.navySoft} label="Open" />
-          </View>
-        </Card>
-
-        {/* Route — legs → stops, drives between */}
-        {legs.map((leg) => (
-          <View key={leg.id} style={{ gap: 8, marginTop: 6 }}>
-            <Kicker>{leg.kicker}</Kicker>
-            <Text style={styles.h2}>{leg.name}</Text>
-            {leg.rows.map((row) => (
-              <View key={row.stop.id} style={{ gap: 8 }}>
-                <StopRow row={row} onPress={() => router.push(`/trips/${trip.id}/stops/${row.stop.id}`)} />
-                {row.drive && <Drive drive={row.drive} />}
+        {lens === "map" ? (
+          // Outside the ScrollView, deliberately: a flex:1 View, or the map's
+          // pan gesture fights the scroll. `mode === null` is the one render
+          // before the device's style preference has been read.
+          <View style={styles.mapLens}>
+            {mode === null ? (
+              <View style={styles.mapFrameBox}>
+                <MapFrame state="loading" />
               </View>
-            ))}
-            {leg.outboundDrive && (
-              <View style={{ gap: 6 }}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 12 }}>
-                  <Kicker>{leg.outboundSeam}</Kicker>
-                  <View style={{ flex: 1, height: 1, backgroundColor: C.borderSoft }} />
-                </View>
-                <Drive drive={leg.outboundDrive} />
-              </View>
+            ) : (
+              <TripMap pins={pins} arcs={arcs} mode={mode} onModeChange={setMode} showLabels />
             )}
           </View>
-        ))}
+        ) : (
+          <ScrollView
+            contentContainerStyle={styles.content}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
+          >
+            {/* Day strip — the rhythm of the trip, one cell per day */}
+            <Card style={{ padding: 10, gap: 6 }}>
+              <Kicker>Rhythm</Kicker>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={{ flexDirection: "row", gap: 2 }}>
+                  {timeline!.rhythm.map((cell, i) => {
+                    const label = timeline!.ruler[i]!;
+                    return (
+                      <View key={i} style={{ alignItems: "center", gap: 3, width: 16 }}>
+                        <View
+                          style={{
+                            width: 16,
+                            height: 18,
+                            borderRadius: 3,
+                            backgroundColor: dayKindColor(cell.kind),
+                            borderWidth: cell.kind === "drive" ? 1 : 0,
+                            borderColor: C.borderHi,
+                          }}
+                        />
+                        <Text style={{ fontFamily: F.mono, fontSize: 8, color: label.weekStart ? C.ink : C.inkSubtle }}>
+                          {label.letter}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+              <View style={{ flexDirection: "row", gap: 12 }}>
+                <Legend color={C.green} label="Stay" />
+                <Legend color={C.navy} label="Drive" outlined />
+                <Legend color={C.navySoft} label="Open" />
+              </View>
+            </Card>
 
-        {/* Floating stops that have no leg row yet are already in the route list; the rail: */}
-        <Card style={{ gap: 10, marginTop: 8 }}>
-          <Kicker>On the road</Kicker>
-          <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
-            <Text style={styles.hero}>{summary!.driveMiles || "—"}</Text>
-            {summary!.driveMiles > 0 && <Text style={[styles.mono, { fontSize: 14 }]}>mi</Text>}
-          </View>
-          <Text style={styles.mono}>
-            {summary!.driveMiles > 0 ? `${summary!.driveTime} behind the wheel` : "add stops with places to estimate driving"}
-          </Text>
-          {summary!.restrictionCount > 0 && (
-            <Text style={[styles.mono, { color: C.warning }]}>
-              ⚠ {summary!.restrictionCount} restriction{summary!.restrictionCount === 1 ? "" : "s"} on this route
-            </Text>
-          )}
-          {!bundle.hasRig && summary!.driveMiles > 0 && (
-            <Text style={{ color: C.inkMuted, fontSize: 12.5 }}>
-              Drive times are straight-line estimates until you set up your rig on the web.
-            </Text>
-          )}
-          <View style={{ height: 1, backgroundColor: C.borderSoft }} />
-          <Text style={styles.mono}>
-            {summary!.stops} stops · {summary!.scheduled} set / {summary!.floating} floating · {summary!.openCount} open
-            day{summary!.openCount === 1 ? "" : "s"} in {summary!.gapCount} gap{summary!.gapCount === 1 ? "" : "s"}
-          </Text>
-        </Card>
-      </ScrollView>
+            {/* Route — legs → stops, drives between */}
+            {legs.map((leg) => (
+              <View key={leg.id} style={{ gap: 8, marginTop: 6 }}>
+                <Kicker>{leg.kicker}</Kicker>
+                <Text style={styles.h2}>{leg.name}</Text>
+                {leg.rows.map((row) => (
+                  <View key={row.stop.id} style={{ gap: 8 }}>
+                    <StopRow row={row} onPress={() => router.push(`/trips/${trip.id}/stops/${row.stop.id}`)} />
+                    {row.drive && <Drive drive={row.drive} />}
+                  </View>
+                ))}
+                {leg.outboundDrive && (
+                  <View style={{ gap: 6 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 12 }}>
+                      <Kicker>{leg.outboundSeam}</Kicker>
+                      <View style={{ flex: 1, height: 1, backgroundColor: C.borderSoft }} />
+                    </View>
+                    <Drive drive={leg.outboundDrive} />
+                  </View>
+                )}
+              </View>
+            ))}
+
+            {/* Floating stops that have no leg row yet are already in the route list; the rail: */}
+            <Card style={{ gap: 10, marginTop: 8 }}>
+              <Kicker>On the road</Kicker>
+              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
+                <Text style={styles.hero}>{summary!.driveMiles || "—"}</Text>
+                {summary!.driveMiles > 0 && <Text style={[styles.mono, { fontSize: 14 }]}>mi</Text>}
+              </View>
+              <Text style={styles.mono}>
+                {summary!.driveMiles > 0 ? `${summary!.driveTime} behind the wheel` : "add stops with places to estimate driving"}
+              </Text>
+              {summary!.restrictionCount > 0 && (
+                <Text style={[styles.mono, { color: C.warning }]}>
+                  ⚠ {summary!.restrictionCount} restriction{summary!.restrictionCount === 1 ? "" : "s"} on this route
+                </Text>
+              )}
+              {!bundle.hasRig && summary!.driveMiles > 0 && (
+                <Text style={{ color: C.inkMuted, fontSize: 12.5 }}>
+                  Drive times are straight-line estimates until you set up your rig on the web.
+                </Text>
+              )}
+              <View style={{ height: 1, backgroundColor: C.borderSoft }} />
+              <Text style={styles.mono}>
+                {summary!.stops} stops · {summary!.scheduled} set / {summary!.floating} floating · {summary!.openCount} open
+                day{summary!.openCount === 1 ? "" : "s"} in {summary!.gapCount} gap{summary!.gapCount === 1 ? "" : "s"}
+              </Text>
+            </Card>
+          </ScrollView>
+        )}
+      </View>
     </>
   );
 }
@@ -243,7 +319,13 @@ function Legend({ color, label, outlined }: { color: string; label: string; outl
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 20, gap: 10, paddingBottom: 56 },
+  screen: { flex: 1 },
+  masthead: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, gap: 10 },
+  /** Full-bleed: the map takes every point below the lens control. */
+  mapLens: { flex: 1 },
+  /** …except a frame, which keeps the body's own gutter. */
+  mapFrameBox: { flex: 1, paddingHorizontal: 20, paddingBottom: 20 },
+  content: { paddingHorizontal: 20, paddingBottom: 56, gap: 10 },
   h1: { color: C.ink, fontSize: 30, fontWeight: "800", letterSpacing: -0.6, marginTop: -4 },
   h2: { color: C.ink, fontSize: 19, fontWeight: "800", marginTop: -4 },
   hero: { fontFamily: F.mono, color: C.ink, fontSize: 30, fontWeight: "700" },

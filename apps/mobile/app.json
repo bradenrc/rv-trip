@@ -26,7 +26,8 @@
     "scheme": "rvtrip",
     "newArchEnabled": true,
     "plugins": [
-      "expo-router"
+      "expo-router",
+      "@rnmapbox/maps"
     ],
     "experiments": {
       "typedRoutes": true
