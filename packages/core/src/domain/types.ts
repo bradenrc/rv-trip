@@ -382,6 +382,11 @@ export const tripSummary = z.object({
   stops: z.number().int(),
   legs: z.number().int(),
   miles: z.number(),
+  /** At least one drive on the trip fell back to a straight-line estimate, so
+   * `miles` is not (yet) a road distance. The card renders the neutral
+   * `EstimateChip` beside the number — the same honesty rule the route rail
+   * already follows, never an amber warning. */
+  milesEstimated: z.boolean(),
   open: z.number().int(),
 });
 export type TripSummary = z.infer<typeof tripSummary>;

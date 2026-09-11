@@ -139,14 +139,27 @@ export const RIG_PRESETS: RigPreset[] = [
 export const NO_RIG_HASH = "no-rig";
 
 /**
- * sha256 of the seven fields. A route changes only when a stop or the rig does,
- * so this is the rig half of the route cache key: edit the rig and every drive
- * on every trip re-routes on next open.
+ * No rig yet, on the ROUTING half of the key. Deliberately the same string as
+ * NO_RIG_HASH: the sentinel is already persisted in every cached key and every
+ * client that echoed one, so the rename must not change a single stored key.
+ */
+export const NO_ROUTING_HASH = "no-rig";
+
+/** Web Crypto (browser + Node 20+), so this file stays dependency-free and
+ * behaves identically on both sides of the RSC boundary. */
+async function sha256Hex(canonical: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * sha256 of the seven fields — RIG IDENTITY, not the route key. Renaming the
+ * rig is a real edit to the rig, so it moves this hash; it is not an input to
+ * any route, so it must not move `routingHash`.
  *
  * Async because it uses Web Crypto (present in the browser and in Node 20+),
  * which keeps this dependency-free and identical on both sides of the RSC
- * boundary. It is computed ONCE on the server and handed to the client as a
- * string, so no client render path ever awaits it.
+ * boundary.
  */
 export async function rigHash(
   rig: Pick<
@@ -161,15 +174,54 @@ export async function rigHash(
   > | null,
 ): Promise<string> {
   if (!rig) return NO_RIG_HASH;
-  const canonical = JSON.stringify([
-    rig.name,
-    rig.type,
-    rig.heightMeters,
-    rig.widthMeters,
-    rig.lengthMeters,
-    rig.grossWeightKg,
-    rig.propaneOnBoard,
-  ]);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return sha256Hex(
+    JSON.stringify([
+      rig.name,
+      rig.type,
+      rig.heightMeters,
+      rig.widthMeters,
+      rig.lengthMeters,
+      rig.grossWeightKg,
+      rig.propaneOnBoard,
+    ]),
+  );
+}
+
+/**
+ * sha256 of the SIX routing fields — the one thing that keys a route, on both
+ * sides of the RSC boundary and in the `routes` table's primary key.
+ *
+ * `rig.name` is absent on purpose (docs/design/43 §1, Q1 = B): a route between
+ * two coordinates under a given rig is the same route whatever the rig is
+ * called, so renaming "Sunseeker" must not re-bill every drive on every open
+ * trip. Everything that DOES reach the vendor is here, plus `type` — HERE is
+ * told a constant `transportMode: "truck"` today (providers/here.ts:181-197),
+ * but a trailer is a different routing subject the moment the provider learns
+ * the difference, and the alternative is a silent wrong-profile cache hit.
+ *
+ * Computed ONCE on the server and handed to the client as a string, so no
+ * client render path ever awaits it.
+ */
+export async function routingHash(
+  rig: Pick<
+    RigProfileInput,
+    | "type"
+    | "heightMeters"
+    | "widthMeters"
+    | "lengthMeters"
+    | "grossWeightKg"
+    | "propaneOnBoard"
+  > | null,
+): Promise<string> {
+  if (!rig) return NO_ROUTING_HASH;
+  return sha256Hex(
+    JSON.stringify([
+      rig.type,
+      rig.heightMeters,
+      rig.widthMeters,
+      rig.lengthMeters,
+      rig.grossWeightKg,
+      rig.propaneOnBoard,
+    ]),
+  );
 }

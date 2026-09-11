@@ -42,9 +42,9 @@ export const tripSummaryListSchema = z.array(tripSummary);
 export const savedPlaceListSchema = z.array(savedPlace);
 export const rigResponseSchema = rigProfile.nullable();
 
-/** `POST /api/routes` — echoes the rig hash it keyed with. */
+/** `POST /api/routes` — echoes the routing hash it keyed with. */
 export const routePairsResponseSchema = z.object({
-  rigHash: z.string(),
+  routingHash: z.string(),
   routes: z.record(z.string(), routeResultSchema),
 });
 

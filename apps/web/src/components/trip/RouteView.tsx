@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Caravan,
   Navigation,
+  ChevronDown,
   TriangleAlert,
   Plus,
   CirclePlus,
@@ -22,6 +23,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  EstimateChip,
   FloatingTag,
   Stars,
   ReservationLineItem,
@@ -29,14 +31,18 @@ import {
   RouteNotice,
   money,
 } from "@rv-trip/ui";
+import { navigationCaption, navigationOptions } from "@/lib/trip-logic";
 import type { RouteDrive, RouteLeg, RouteSummary } from "@/lib/trip-logic";
 import { InlineText } from "@/components/ui/inline-text";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   MenuHint,
@@ -375,7 +381,10 @@ export function RouteView({
  * connector at all — it never reaches here.
  *
  * Navigate is the same plain Google link in all three: origin and destination,
- * never the corridor. In state 2 it carries an amber caption saying so.
+ * never the corridor. What changed in #36 is the ANSWER about that link — the
+ * control is a split button whose caret offers HERE WeGo, and in state 2 the
+ * caption is green when the corridor check passed and the shipped amber string
+ * when it did not.
  */
 function Drive({ drive }: { drive: RouteDrive }) {
   if (drive.notices.length === 0) {
@@ -390,7 +399,7 @@ function Drive({ drive }: { drive: RouteDrive }) {
           </>
         )}
         {drive.estimate && <EstimateChip />}
-        <NavigateButton href={drive.navUrl} className="ml-2" />
+        <NavigateButton drive={drive} className="ml-2" />
       </div>
     );
   }
@@ -405,16 +414,16 @@ function Drive({ drive }: { drive: RouteDrive }) {
             <span className="font-mono text-[12px] text-rv-ink-faded">· {drive.primaryRoad}</span>
           )}
           {drive.estimate && <EstimateChip />}
-          <NavigateButton href={drive.navUrl} className="ml-auto" />
+          <NavigateButton drive={drive} className="ml-auto" />
         </div>
-        {/* The caveat belongs ON the action. The handoff is origin and
-            destination only — Google's URL scheme has no pass-through waypoint,
-            so the link is not the corridor HERE cleared for the rig. Amber
-            because it is a real restriction, but plain text rather than a
-            bordered row: a caption on a button, not a second error. */}
-        <div className="mt-[7px] text-right text-[11.5px] text-rv-warning">
-          Navigation may not follow the RV-safe route — check notices.
-        </div>
+        {/* The caveat belongs ON the action. The handoff is still origin and
+            destination only — Google's URL scheme has no pass-through waypoint
+            — so this line says whether that link was HELD AGAINST the corridor
+            HERE cleared for the rig. Green when it was and matched, and
+            otherwise the shipped amber string, character for character. Plain
+            text rather than a bordered row either way: a caption on a button,
+            not a second error. */}
+        <DriveCaption drive={drive} />
         {/* One row per notice, unbounded — no truncation. The notices do NOT
             dismiss on handoff — they are the thing you can still read at the
             next fuel stop, and the only place your clearance is written down. */}
@@ -428,32 +437,90 @@ function Drive({ drive }: { drive: RouteDrive }) {
   );
 }
 
-/** An un-routed number is an unfinished measurement, not a warning. */
-function EstimateChip() {
+/**
+ * The caption under a restricted drive's Navigate. Both strings and the tone
+ * come from `navigationCaption` in @rv-trip/core — the only place a test runner
+ * in this repo can reach them (apps/web's vitest has no DOM).
+ */
+function DriveCaption({ drive }: { drive: RouteDrive }) {
+  const caption = navigationCaption(drive);
   return (
-    <span className="rounded-rv-pill border border-rv-border-hi px-2 py-px font-mono text-[9px] uppercase tracking-[0.08em] text-rv-ink-faded">
-      estimate
-    </span>
+    <div
+      className={`mt-[7px] text-right text-[11.5px] ${
+        caption.tone === "checked" ? "text-rv-green" : "text-rv-warning"
+      }`}
+    >
+      {caption.text}
+    </div>
   );
 }
+
+/** The pill both halves of the split control sit in. Its accent fill and its
+ * ink are on ONE source line, because nightfall-tokens.test.ts sweeps that pair
+ * per call site. */
+const NAV_PILL =
+  "inline-flex min-h-8 items-center whitespace-nowrap rounded-rv-md bg-rv-accent-deep text-rv-accent-ink shadow-rv-sm";
 
 /**
  * The slice's primary action, and one you press at a fuel stop with the engine
  * running — so it carries a 32px floor (`min-h-8`) on top of the design's
- * padding. Type, colour and padding are the wireframe's; the floor only stops
- * the box shrinking under the touch target.
+ * padding, on the pill, the body AND the caret. Type, colour and padding are
+ * the wireframe's; the floor only stops the box shrinking under the touch
+ * target.
+ *
+ * ONE control, split: the body takes the verdict's primary handoff and the
+ * caret opens the two, on the shipped `dropdown-menu` primitive and the shipped
+ * menu classes (`MENU_SURFACE` / `MENU_ITEM` from ./row-menu — the row menu's
+ * own surface, so the four menus in this app stay one object). The active row
+ * carries the wireframe's `.mi.on` tint.
  */
-function NavigateButton({ href, className }: { href: string; className: string }) {
+function NavigateButton({ drive, className }: { drive: RouteDrive; className: string }) {
+  const options = navigationOptions(drive);
+  const [primary] = options;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className={`inline-flex min-h-8 items-center gap-1.5 whitespace-nowrap rounded-rv-md bg-rv-accent-deep px-3 py-[5px] text-[13px] font-bold text-rv-accent-ink no-underline shadow-rv-sm ${className}`}
-    >
-      <Navigation className="size-3.5" />
-      Navigate
-    </a>
+    <div className={`${NAV_PILL} ${className}`}>
+      <a
+        href={primary!.url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex min-h-8 items-center gap-1.5 px-3 py-[5px] text-[13px] font-bold no-underline"
+      >
+        <Navigation className="size-3.5" />
+        Navigate
+      </a>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label="Choose a navigation app"
+          className="inline-flex min-h-8 cursor-pointer items-center border-l border-l-rv-accent-ink pl-2 pr-2.5 opacity-55"
+        >
+          <ChevronDown className="size-3" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className={MENU_SURFACE}>
+          {options.map((option) => (
+            <DropdownMenuItem
+              key={option.id}
+              asChild
+              className={`${MENU_ITEM} items-start ${
+                option.primary ? "bg-rv-green-soft" : ""
+              }`}
+            >
+              <a href={option.url} target="_blank" rel="noreferrer" className="no-underline">
+                <span className="flex flex-col gap-0.5">
+                  <span
+                    className={`font-bold ${option.primary ? "text-rv-green-ink" : "text-rv-ink"}`}
+                  >
+                    {option.title}
+                  </span>
+                  <span className="whitespace-normal font-mono text-[9.5px] text-rv-ink-faded">
+                    {option.caption}
+                  </span>
+                </span>
+              </a>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
 

@@ -16,8 +16,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const trip = await getTripById(owner, id);
   if (!trip) return NextResponse.json({ error: "trip not found" }, { status: 404 });
   const rig = await getRigByOwner(owner);
-  const { routes, rigHash } = await routeTrip(trip, rig);
-  return NextResponse.json({ trip, routes, rigHash, hasRig: rig !== null });
+  const { routes, routingHash } = await routeTrip(trip, rig);
+  // The wire field stays `rigHash`: apps/mobile parses this bundle through
+  // tripBundleSchema and ships on its own Expo cadence, so renaming it here
+  // would break every installed build. It carries the ROUTING hash either way —
+  // the field is just the key the client re-keys on (docs/design/43 §1).
+  return NextResponse.json({ trip, routes, rigHash: routingHash, hasRig: rig !== null });
 }
 
 /**

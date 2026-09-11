@@ -9,6 +9,7 @@
     "./providers": "./src/providers/index.ts",
     "./providers/here": "./src/providers/here.ts",
     "./providers/google-places": "./src/providers/google-places.ts",
+    "./providers/google-routes": "./src/providers/google-routes.ts",
     "./planner": "./src/planner/index.ts",
     "./api-client": "./src/api-client/index.ts"
   },

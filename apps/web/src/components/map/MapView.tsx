@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import MapGL, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
 import type { MapEvent } from "react-map-gl/mapbox";
+import type { ExpressionSpecification } from "mapbox-gl";
 import { boundsFor, spiderfy, type SpiderPoint } from "@rv-trip/core";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { applyNightfall } from "./nightfall";
@@ -40,9 +41,23 @@ export const MAP_STYLES: Record<StyleMode, string> = {
   sat: "mapbox://styles/mapbox/satellite-streets-v12",
 };
 
+/**
+ * The one predicate the whole drive-arc grammar is painted by: did HERE answer
+ * for this pair? Solid corridor when it did, the shipped dash when it did not
+ * (docs/design/43 §2). It is a data-driven expression rather than two sources
+ * so a drive rendered twice is unrepresentable.
+ */
+const ROUTED: ExpressionSpecification = ["==", ["get", "source"], "here"];
+
+/** A routed corridor is drawn heavier than the estimate chord it replaces —
+ * it is a road, not a guess. The estimate keeps `palette.arcWidth`. */
+const CORRIDOR_WIDTH = 2.6;
+
 export interface MapViewProps {
   pins: MapPin[];
-  /** Estimated-drive arcs. Overview only; the mini-map and the lens draw none. */
+  /** Drive arcs: a solid HERE corridor where one was resolved, the dashed
+   * straight-line estimate where it was not. Overview only; the mini-map and
+   * the lens draw none. */
   arcs?: DriveArc[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
@@ -82,7 +97,18 @@ export function MapView({
     return new Map(spiderfy(input).map((s) => [s.id, s]));
   }, [pins]);
 
-  const bounds = useMemo(() => boundsFor(pins), [pins]);
+  // The camera holds the corridor, not only the pins: US-101 runs west of both
+  // Astoria and Newport, so a routed drive's box is wider than its endpoints'.
+  // An estimate contributes exactly its two endpoints, so nothing moves on a
+  // map with no routed drive on it.
+  const bounds = useMemo(
+    () =>
+      boundsFor([
+        ...pins,
+        ...arcs.flatMap((a) => a.path.map(([lng, lat]) => ({ lat, lng }))),
+      ]),
+    [pins, arcs],
+  );
   // Re-fit whenever the visible set changes — toggling a layer chip re-fits.
   const boundsKey = bounds ? `${bounds.west},${bounds.south},${bounds.east},${bounds.north}` : "";
 
@@ -139,13 +165,13 @@ export function MapView({
       type: "FeatureCollection" as const,
       features: arcs.map((a) => ({
         type: "Feature" as const,
-        properties: { id: a.id },
+        // `source` is what every layer below filters or cases on. The geometry
+        // is already decoded (pins.ts) — N corridor vertices, or the two
+        // endpoints of a chord.
+        properties: { id: a.id, source: a.source },
         geometry: {
           type: "LineString" as const,
-          coordinates: [
-            [a.from.lng, a.from.lat],
-            [a.to.lng, a.to.lat],
-          ],
+          coordinates: a.path,
         },
       })),
     }),
@@ -164,23 +190,41 @@ export function MapView({
     >
       {arcs.length > 0 && (
         <Source id="rv-drive-arcs" type="geojson" data={arcGeoJson}>
-          {/* Beneath the dashes, and only where the ground is imagery: a solid
-              dark casing is what keeps a thin dashed estimate readable over
-              satellite tiles. */}
-          {palette.arcCasing && (
-            <Layer
-              id="rv-drive-arcs-casing"
-              type="line"
-              layout={{ "line-cap": "round" }}
-              paint={{
-                "line-color": palette.arcCasing,
-                "line-width": ARC_CASING_WIDTH,
-              }}
-            />
-          )}
+          {/* One casing, under a SOLID corridor in every mode — a continuous
+              line needs separating from the roads it runs along. An estimate
+              keeps exactly the casing its mode already gave it: sat only,
+              where `arcCasing` is the same rv-navy-at-80% value this is, and
+              none at all in night or day. */}
+          <Layer
+            id="rv-drive-arcs-casing"
+            type="line"
+            layout={{ "line-cap": "round" }}
+            paint={{
+              "line-color": palette.corridorCasing,
+              "line-width": ARC_CASING_WIDTH,
+              "line-opacity": ["case", ROUTED, 1, palette.arcCasing ? 1 : 0],
+            }}
+          />
+          {/* The corridor itself. An estimate draws nothing here — its visible
+              path is the dash layer below, at the paint it has always had. */}
           <Layer
             id="rv-drive-arcs-line"
             type="line"
+            layout={{ "line-cap": "round" }}
+            paint={{
+              "line-color": palette.arcLine,
+              "line-width": ["case", ROUTED, CORRIDOR_WIDTH, palette.arcWidth],
+              "line-opacity": ["case", ROUTED, 1, 0],
+            }}
+          />
+          {/* `line-dasharray` is not data-driven in mapbox-gl 3.30, so the dash
+              is its own filtered layer rather than a case on the one above —
+              the single place this grammar is 1 source / 2 line layers. The
+              paint is the shipped estimate's, unchanged. */}
+          <Layer
+            id="rv-drive-arcs-dash"
+            type="line"
+            filter={["==", ["get", "source"], "estimate"]}
             layout={{ "line-cap": "round" }}
             paint={{
               "line-color": palette.arcLine,
@@ -192,24 +236,23 @@ export function MapView({
         </Source>
       )}
 
-      {arcs.map((a) => (
-        <Marker
-          key={`label-${a.id}`}
-          longitude={(a.from.lng + a.to.lng) / 2}
-          latitude={(a.from.lat + a.to.lat) / 2}
-        >
-          <span
-            className="whitespace-nowrap rounded-rv-pill border px-1.5 py-0.5 font-mono text-[9.5px]"
-            style={{
-              background: palette.arcLabelScrim,
-              borderColor: palette.arcLabelBorder,
-              color: palette.arcLabelInk,
-            }}
-          >
-            {a.label}
-          </span>
-        </Marker>
-      ))}
+      {arcs.map((a) => {
+        const [lng, lat] = labelAt(a);
+        return (
+          <Marker key={`label-${a.id}`} longitude={lng} latitude={lat}>
+            <span
+              className="whitespace-nowrap rounded-rv-pill border px-1.5 py-0.5 font-mono text-[9.5px]"
+              style={{
+                background: palette.arcLabelScrim,
+                borderColor: palette.arcLabelBorder,
+                color: palette.arcLabelInk,
+              }}
+            >
+              {a.label}
+            </span>
+          </Marker>
+        );
+      })}
 
       {pins.map((pin) => {
         const at = placements.get(pin.id);
@@ -249,6 +292,21 @@ export function MapView({
       })}
     </MapGL>
   );
+}
+
+/**
+ * Where a drive's mileage label sits, as `[lng, lat]`.
+ *
+ * A routed drive labels its corridor's MIDDLE VERTEX — on the road, where the
+ * line actually runs. An estimate labels the chord midpoint, exactly as it
+ * always has: its path is two points, so the vertex and the midpoint are not
+ * the same thing and the chord is the honest one.
+ */
+function labelAt(a: DriveArc): [number, number] {
+  if (a.source === "here" && a.path.length > 2) {
+    return a.path[Math.floor(a.path.length / 2)]!;
+  }
+  return [(a.from.lng + a.to.lng) / 2, (a.from.lat + a.to.lat) / 2];
 }
 
 /** 1px dashed leader from a nudged pin back to its true coordinate. */

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { rigHash } from "@rv-trip/core";
+import { routingHash } from "@rv-trip/core";
 import { getRigByOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { routePairs } from "@/lib/routing";
@@ -15,10 +15,11 @@ import { routePairs } from "@/lib/routing";
  * never from the request body — a rig is a routing input, not a parameter a
  * client gets to choose.
  *
- * The response ECHOES the hash it keyed with. The caller keyed its lookup on
- * the rig as it was when the page rendered; if the rig has been edited since,
- * these keys are for a different rig and the caller must not merge them — it
- * would be a silent no-op that re-requests the same pairs on every reorder.
+ * The response ECHOES the routing hash it keyed with. The caller keyed its
+ * lookup on the rig as it was when the page rendered; if a ROUTING field has
+ * been edited since, these keys are for a different rig and the caller must not
+ * merge them — it would be a silent no-op that re-requests the same pairs on
+ * every reorder. (Renaming the rig no longer moves the hash: docs/design/43 §1.)
  */
 const point = z.object({
   lat: z.number().min(-90).max(90),
@@ -36,6 +37,9 @@ export async function POST(req: Request) {
   }
   const owner = await getOwner();
   const rig = await getRigByOwner(owner);
-  const hash = await rigHash(rig);
-  return NextResponse.json({ rigHash: hash, routes: await routePairs(parsed.data.pairs, rig, hash) });
+  const hash = await routingHash(rig);
+  return NextResponse.json({
+    routingHash: hash,
+    routes: await routePairs(parsed.data.pairs, rig, hash),
+  });
 }

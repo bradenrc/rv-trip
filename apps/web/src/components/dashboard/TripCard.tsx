@@ -16,7 +16,7 @@ import {
   Mountain,
   type LucideIcon,
 } from "lucide-react";
-import { Stars } from "@rv-trip/ui";
+import { EstimateChip, Stars } from "@rv-trip/ui";
 import type { TripSummary } from "@rv-trip/db";
 import { fullRange } from "@/lib/trip-ui";
 
@@ -127,7 +127,13 @@ export function TripCard({ trip, feature = false }: { trip: TripSummary; feature
           <Chip Icon={CalendarDays}>{trip.days} days</Chip>
           <Chip Icon={MapPin}>{trip.stops} stops</Chip>
           <Chip Icon={Flag}>{trip.legs} legs</Chip>
-          <Chip Icon={Caravan}>{trip.miles} mi</Chip>
+          {/* The miles number is the route rail's own — so when a drive fell
+              back to a straight line, the card says so beside it rather than
+              presenting a chord as a road distance. */}
+          <Chip Icon={Caravan}>
+            {trip.miles} mi
+            {trip.milesEstimated && <EstimateChip />}
+          </Chip>
           {!complete && trip.open > 0 && (
             <span className="inline-flex items-center gap-[5px] font-mono text-[12px] text-rv-warning">
               <CircleAlert className="size-[13px]" />

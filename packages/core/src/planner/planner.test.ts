@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import type { Idea, Leg, Reservation, Trip, Stop } from "../domain/types";
-import { orderedLegStops, routeCacheKey } from "../domain/route-order";
-import type { RouteResult } from "../providers/index";
+import { orderedLegStops, orderedPairs, routeCacheKey } from "../domain/route-order";
+import { estimateRoute, type RouteResult } from "../providers/index";
+import { driveMiles } from "../providers/route-format";
 import {
   timelineModel,
   routeModel,
@@ -31,6 +32,9 @@ import {
   dateRange,
   fullRange,
   addDays,
+  navigationCaption,
+  navigationOptions,
+  type NavMap,
   type RouteMap,
 } from "./index";
 
@@ -305,6 +309,173 @@ describe("routeModel", () => {
     const d = routeModel(fixture())[0]!.rows[0]!.drive!;
     expect(d.navUrl).toMatch(/^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&origin=46\.18/);
   });
+
+  /**
+   * The corridor verdict (docs/design/43 §4). `toDrive` no longer decides
+   * anything about it — it READS the server-resolved NavMap, keyed by the same
+   * routeCacheKey `routes` is, and defaults to "plain" when the key is absent.
+   * Absent is the normal case: no Google key, a drive nobody checked, or a pair
+   * the client just invented by dragging a floating stop.
+   */
+  describe("the Navigate verdict, read off the NavMap", () => {
+    const HASH = "rig-x";
+    const FROM = { lat: 46.18, lng: -123.83 };
+    const TO = { lat: 44.63, lng: -124.05 };
+    const KEY = routeCacheKey(FROM, TO, HASH);
+
+    const routed: RouteResult = {
+      durationSeconds: 3 * 3600 + 12 * 60,
+      distanceMeters: 218_866,
+      polyline: null,
+      primaryRoad: "US-101",
+      source: "here",
+      notices: [],
+    };
+    const routes: RouteMap = { [KEY]: routed };
+    const first = (nav: NavMap) => routeModel(fixture(), routes, HASH, nav)[0]!.rows[0]!.drive!;
+
+    it("is 'plain' with no NavMap at all — every shipped call site's answer", () => {
+      const d = first({});
+      expect(d.navVerdict).toBe("plain");
+      expect(d.navDeviationMeters).toBeNull();
+      // routeModel's third-arity call (apps/mobile) must keep working.
+      expect(routeModel(fixture(), routes, HASH)[0]!.rows[0]!.drive!.navVerdict).toBe("plain");
+    });
+
+    it("is 'checked' when the cached check came back inside the tolerance", () => {
+      const d = first({ [KEY]: { deviationMeters: 180, intermediates: [] } });
+      expect(d.navVerdict).toBe("checked");
+      expect(d.navDeviationMeters).toBe(180);
+    });
+
+    it("is 'plain' when the cached check came back outside it", () => {
+      const d = first({ [KEY]: { deviationMeters: 1340, intermediates: [] } });
+      expect(d.navVerdict).toBe("plain");
+      expect(d.navDeviationMeters).toBe(1340);
+    });
+
+    it("is 'plain' when the check ran and could not conclude", () => {
+      const d = first({ [KEY]: { deviationMeters: null, intermediates: [] } });
+      expect(d.navVerdict).toBe("plain");
+      expect(d.navDeviationMeters).toBeNull();
+    });
+
+    it("keeps today's Google url and adds a WeGo one, in every verdict", () => {
+      for (const nav of [{}, { [KEY]: { deviationMeters: 180, intermediates: [] } }]) {
+        const d = first(nav);
+        expect(d.navUrl).toBe(
+          "https://www.google.com/maps/dir/?api=1&origin=46.1800,-123.8300&destination=44.6300,-124.0500&travelmode=driving",
+        );
+        expect(d.navWegoUrl).toBe(
+          "https://wego.here.com/directions/drive/46.1800,-123.8300/44.6300,-124.0500",
+        );
+      }
+    });
+
+    it("cannot be fooled by a NavMap keyed on another rig", () => {
+      const stale: NavMap = {
+        [routeCacheKey(FROM, TO, "some-other-rig")]: { deviationMeters: 10, intermediates: [] },
+      };
+      expect(first(stale).navVerdict).toBe("plain");
+    });
+  });
+
+  /**
+   * The split control's copy and order, as pure functions of the drive — the
+   * only way this epic's acceptance can actually EXECUTE. apps/web's vitest is
+   * `environment: "node"`, collects only `.test.ts` files, and the workspace
+   * ships no jsdom / testing-library (the vet's HIGH against i4's render
+   * test) — so RouteView renders these strings and asserts nothing about them.
+   * They are asserted here instead.
+   */
+  describe("navigationOptions / navigationCaption", () => {
+    const HASH = "rig-x";
+    const FROM = { lat: 46.18, lng: -123.83 };
+    const TO = { lat: 44.63, lng: -124.05 };
+    const KEY = routeCacheKey(FROM, TO, HASH);
+    const routed: RouteResult = {
+      durationSeconds: 11_520,
+      distanceMeters: 218_866,
+      polyline: null,
+      primaryRoad: "US-101",
+      source: "here",
+      notices: [],
+    };
+    const drive = (nav: NavMap) =>
+      routeModel(fixture(), { [KEY]: routed }, HASH, nav)[0]!.rows[0]!.drive!;
+    const checked = drive({ [KEY]: { deviationMeters: 180, intermediates: [] } });
+    const plain = drive({});
+
+    it("leads with Google when the corridor was checked", () => {
+      const [primary, alternate] = navigationOptions(checked);
+      expect(primary).toMatchObject({
+        id: "google",
+        title: "Google Maps · RV-checked",
+        caption: "within 180 m of your corridor",
+        url: checked.navUrl,
+        primary: true,
+      });
+      expect(alternate).toMatchObject({
+        id: "wego",
+        title: "HERE WeGo · truck profile",
+        url: checked.navWegoUrl,
+        primary: false,
+      });
+    });
+
+    it("leads with HERE WeGo when it did not — a worse route must not wear the label", () => {
+      const [primary, alternate] = navigationOptions(plain);
+      expect(primary).toMatchObject({ id: "wego", title: "HERE WeGo · truck profile" });
+      expect(alternate).toMatchObject({
+        id: "google",
+        title: "Google Maps · plain",
+        caption: "endpoints only — not the checked corridor",
+      });
+    });
+
+    it("puts WeGo first EXACTLY when the verdict is plain", () => {
+      for (const nav of [
+        {},
+        { [KEY]: { deviationMeters: null, intermediates: [] } },
+        { [KEY]: { deviationMeters: 401, intermediates: [] } },
+      ]) {
+        expect(navigationOptions(drive(nav))[0]!.id).toBe("wego");
+      }
+      for (const nav of [
+        { [KEY]: { deviationMeters: 0, intermediates: [] } },
+        { [KEY]: { deviationMeters: 400, intermediates: [] } },
+      ]) {
+        expect(navigationOptions(drive(nav))[0]!.id).toBe("google");
+      }
+    });
+
+    it("marks exactly one option primary, and it is the first", () => {
+      for (const d of [checked, plain]) {
+        const options = navigationOptions(d);
+        expect(options.filter((o) => o.primary)).toHaveLength(1);
+        expect(options[0]!.primary).toBe(true);
+        expect(options.map((o) => o.id).sort()).toEqual(["google", "wego"]);
+      }
+    });
+
+    it("captions a checked drive green, naming the measured deviation", () => {
+      expect(navigationCaption(checked)).toEqual({
+        tone: "checked",
+        text: "Checked against the RV-safe corridor — within 180 m.",
+      });
+      // The number is rounded to whole meters; a corridor is not measured in cm.
+      expect(
+        navigationCaption(drive({ [KEY]: { deviationMeters: 180.4, intermediates: [] } })).text,
+      ).toBe("Checked against the RV-safe corridor — within 180 m.");
+    });
+
+    it("captions a plain drive with the shipped amber string, character for character", () => {
+      expect(navigationCaption(plain)).toEqual({
+        tone: "plain",
+        text: "Navigation may not follow the RV-safe route — check notices.",
+      });
+    });
+  });
 });
 
 describe("routeSummary", () => {
@@ -318,6 +489,92 @@ describe("routeSummary", () => {
     const s = routeSummary(trip);
     expect(visible).toHaveLength(3);
     expect(s.driveMiles).toBe(visible.reduce((a, d) => a + d.miles, 0));
+  });
+
+  /**
+   * The dashboard card's number (`summarize` in packages/db/src/queries.ts) is
+   * now THIS expression — `routeSummary(trip, routes, hash).driveMiles` — over
+   * the same `orderedPairs` the rail walks. The card used to sum a haversine
+   * over adjacent SCHEDULED stops only, so it disagreed with the rail twice:
+   * the metric (chord, not road) and the pair set (it never counted the drive
+   * to a floating stop). Both gaps are asserted here, on the seed-shaped trip
+   * the design is written against (docs/design/43 §3).
+   */
+  describe("the dashboard card's miles, over a Pacific-NW-Loop-shaped trip", () => {
+    const HASH = "rig-x";
+    const key = (p: { from: { lat: number; lng: number }; to: { lat: number; lng: number } }) =>
+      routeCacheKey(p.from, p.to, HASH);
+
+    /** 136 mi of US-101, in HERE's units. */
+    const routed = (meters: number, road: string): RouteResult => ({
+      durationSeconds: 3 * 3600,
+      distanceMeters: meters,
+      polyline: null,
+      primaryRoad: road,
+      source: "here",
+      notices: [],
+    });
+
+    it("counts every orderedPairs pair, INCLUDING the drive to the floating stop", () => {
+      const trip = seedTrip();
+      const pairs = orderedPairs(trip);
+      // Astoria→Newport, Newport→Bend (the leg crossing) and Bend→Crater Lake
+      // (floating, at the end of ITS leg) — the pair the card never had.
+      expect(pairs.map((p) => [p.fromStopId, p.toStopId])).toEqual([
+        ["astoria", "newport"],
+        ["newport", "bend"],
+        ["bend", "crater"],
+      ]);
+      const s = routeSummary(trip, {}, HASH);
+      expect(s.driveMiles).toBe(
+        pairs.reduce((a, p) => a + driveMiles(estimateRoute(p.from, p.to)), 0),
+      );
+      // The floating pair is not free — dropping it changes the total.
+      const withoutFloating = pairs
+        .slice(0, 2)
+        .reduce((a, p) => a + driveMiles(estimateRoute(p.from, p.to)), 0);
+      expect(s.driveMiles).toBeGreaterThan(withoutFloating);
+    });
+
+    it("takes the routed distance for a hit and estimateRoute for a miss", () => {
+      const trip = seedTrip();
+      const [coast, crossing, floating] = orderedPairs(trip);
+      // Partially populated, exactly as a cold-ish cache answers: one hit.
+      const routes: RouteMap = { [key(coast!)]: routed(218_866, "US-101") };
+      const s = routeSummary(trip, routes, HASH);
+      expect(driveMiles(routes[key(coast!)]!)).toBe(136);
+      expect(s.driveMiles).toBe(
+        136 +
+          driveMiles(estimateRoute(crossing!.from, crossing!.to)) +
+          driveMiles(estimateRoute(floating!.from, floating!.to)),
+      );
+      // And the flag the card reads off the SAME RouteMap: two keys missed.
+      expect(orderedPairs(trip).filter((p) => !routes[key(p)])).toHaveLength(2);
+      expect(orderedPairs(trip).some((p) => !routes[key(p)])).toBe(true);
+    });
+
+    it("is not estimating once every pair is cached", () => {
+      const trip = seedTrip();
+      const pairs = orderedPairs(trip);
+      const routes: RouteMap = Object.fromEntries(
+        pairs.map((p, i) => [key(p), routed(100_000 * (i + 1), "US-20")]),
+      );
+      expect(routeSummary(trip, routes, HASH).driveMiles).toBe(62 + 124 + 186);
+      expect(pairs.some((p) => !routes[key(p)])).toBe(false);
+    });
+
+    it("a routingHash mismatch is a clean miss, not a wrong number", () => {
+      const trip = seedTrip();
+      const routes: RouteMap = Object.fromEntries(
+        orderedPairs(trip).map((p) => [
+          routeCacheKey(p.from, p.to, "other-rig"),
+          routed(999_999, "US-101"),
+        ]),
+      );
+      expect(routeSummary(trip, routes, HASH).driveMiles).toBe(
+        routeSummary(trip, {}, HASH).driveMiles,
+      );
+    });
   });
 
   it("counts stops, days, gaps and cost", () => {

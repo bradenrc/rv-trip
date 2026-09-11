@@ -124,13 +124,16 @@ export const tripApi = {
 
   /**
    * Route pairs the server never saw — the post-reorder upgrade. The reply
-   * echoes the rig hash it keyed with, so the caller can tell "these are keyed
-   * for your rig" from "the rig changed under you".
+   * echoes the routing hash it keyed with, so the caller can tell "these are
+   * keyed for your rig" from "the rig changed under you".
    */
   routePairs: (
     pairs: { from: LatLng; to: LatLng }[],
-  ): Promise<{ rigHash: string; routes: RouteMap }> =>
-    req(`/api/routes`, "POST", { pairs }) as Promise<{ rigHash: string; routes: RouteMap }>,
+  ): Promise<{ routingHash: string; routes: RouteMap }> =>
+    req(`/api/routes`, "POST", { pairs }) as Promise<{
+      routingHash: string;
+      routes: RouteMap;
+    }>,
 
   /**
    * The Places library's writes (docs/design/41 §3). They go through `req` like

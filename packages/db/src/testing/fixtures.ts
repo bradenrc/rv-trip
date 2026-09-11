@@ -1,6 +1,6 @@
-import { asc, count, eq } from "drizzle-orm";
+import { asc, count, eq, sql } from "drizzle-orm";
 import { db } from "../index";
-import { ideas, legs, reservations, rigs, savedPlaces, stops, trips } from "../schema";
+import { ideas, legs, reservations, rigs, routes, savedPlaces, stops, trips } from "../schema";
 
 /**
  * Typed fixture factories over the real schema — the rows the API integration
@@ -29,6 +29,7 @@ export type IdeaRow = typeof ideas.$inferSelect;
 export type ReservationRow = typeof reservations.$inferSelect;
 export type SavedPlaceRow = typeof savedPlaces.$inferSelect;
 export type RigRow = typeof rigs.$inferSelect;
+export type RouteRow = typeof routes.$inferSelect;
 
 /** A stop the route helpers accept: `routeCacheKey`/`estimateRoute` want
  * non-nullable lat/lng, and `stops.lat`/`lng` are nullable columns. */
@@ -331,8 +332,22 @@ async function pacificNorthwestLoop(owner: string = DEV_OWNER): Promise<LoopFixt
   return { trip, legCoast, legMountains, astoria, newport, bend, reservation, idea };
 }
 
+/**
+ * Push a cached route's `fetched_at` into the past. The TTL is a SQL
+ * comparison against `now()` (queries.ts `getCachedRoutes`), so ageing has to
+ * happen on the DATABASE clock — apps/web's suite freezes the JS one.
+ */
+async function ageCachedRoute(key: string, days: number): Promise<void> {
+  await db
+    .update(routes)
+    .set({ fetchedAt: sql`now() - ${`${days} days`}::interval` })
+    .where(eq(routes.key, key));
+}
+
 export const fx = {
   trip: insertTrip,
+  /** Backdate a cached route, so the 30-day TTL can be read from both sides. */
+  ageCachedRoute,
   leg: insertLeg,
   stop: insertStop,
   idea: insertIdea,
@@ -374,6 +389,14 @@ export const read = {
   },
   /** The ROW, not the payload: `RigProfile` carries no timestamp (C3), so the
    * upsert's touch can only be asserted here. */
+  async routeRow(key: string): Promise<RouteRow | null> {
+    const [row] = await db.select().from(routes).where(eq(routes.key, key));
+    return row ?? null;
+  },
+  async countRoutes(): Promise<number> {
+    const [row] = await db.select({ n: count() }).from(routes);
+    return Number(row!.n);
+  },
   async rigRow(owner: string): Promise<RigRow | null> {
     const [row] = await db.select().from(rigs).where(eq(rigs.ownerId, owner));
     return row ?? null;

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { CircleDashed, LocateFixed } from "lucide-react";
 import { toast } from "sonner";
 import { LOCATE_MAX_ROWS, locateToastMessage } from "@rv-trip/core";
-import type { ReservationType, SavedPlace, Trip } from "@rv-trip/core";
+import type { ReservationType, RouteMap, SavedPlace, Trip } from "@rv-trip/core";
 import {
   CategoryTile,
   FilterChip,
@@ -50,8 +50,23 @@ const CAT_CHIPS: { cat: CategoryLabel; type: ReservationType }[] = [
 
 type CatFilter = "All" | CategoryLabel;
 
-export function MapOverview({ trips, places }: { trips: Trip[]; places: SavedPlace[] }) {
-  const model = useMemo(() => buildMapModel(trips, places), [trips, places]);
+export function MapOverview({
+  trips,
+  places,
+  routes,
+  routingHash,
+}: {
+  trips: Trip[];
+  places: SavedPlace[];
+  /** Every drive the server resolved, keyed by `routeCacheKey` — props only,
+   * because this island cannot await a vendor. */
+  routes: RouteMap;
+  routingHash: string;
+}) {
+  const model = useMemo(
+    () => buildMapModel(trips, places, routes, routingHash),
+    [trips, places, routes, routingHash],
+  );
   const [layers, setLayers] = useState<Set<MapLayer>>(() => new Set(LAYER_ORDER));
   const [cat, setCat] = useState<CatFilter>("All");
   const [pickedId, setPickedId] = useState<string | null>(null);

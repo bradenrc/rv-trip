@@ -1,9 +1,9 @@
 import { sql } from "drizzle-orm";
 import { db } from "../index";
-import { ideas, legs, reservations, rigs, savedPlaces, stops, trips } from "../schema";
+import { ideas, legs, reservations, rigs, routes, savedPlaces, stops, trips } from "../schema";
 
 /**
- * The reset between tests: all seven tables, ONE statement, identity reset.
+ * The reset between tests: every table, ONE statement, identity reset.
  *
  * This module — unlike ./lifecycle.ts — DOES use the shipped `db` handle, which
  * is why it is a file of its own. `../index` builds its pool at module scope
@@ -20,6 +20,6 @@ import { ideas, legs, reservations, rigs, savedPlaces, stops, trips } from "../s
  */
 export async function truncateAll(): Promise<void> {
   await db.execute(
-    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs} restart identity cascade`,
+    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs}, ${routes} restart identity cascade`,
   );
 }

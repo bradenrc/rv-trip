@@ -81,6 +81,10 @@ export interface OverlayPalette {
   /** A wide dark line *under* the arc, so a dashed estimate survives satellite
    * imagery. Null where the basemap is flat enough not to need one. */
   arcCasing: string | null;
+  /** The casing under a SOLID routed corridor (docs/design/43 §2). Unlike
+   * `arcCasing` this is never null: a corridor is a continuous line and needs
+   * separation from the roads it runs along in all three modes. */
+  corridorCasing: string;
   labelScrim: string;
   labelInk: string;
   labelInkSelected: string;
@@ -115,6 +119,7 @@ const NIGHT: OverlayPalette = {
   arcWidth: 1.6,
   arcOpacity: 0.75,
   arcCasing: null,
+  corridorCasing: "rgba(2, 6, 23, 0.8)", // rv-navy at 80%
   labelScrim: "rgba(15, 23, 42, 0.84)", // rv-navy-deep at 84%
   labelInk: "#cbd5e1", // --color-rv-ink-muted
   labelInkSelected: "#7dd3fc", // --color-rv-accent-bright
@@ -156,6 +161,7 @@ const DAY: OverlayPalette = {
   arcWidth: 1.8,
   arcOpacity: 0.92,
   arcCasing: null,
+  corridorCasing: "rgba(255, 255, 255, 0.9)",
   labelScrim: "rgba(255, 255, 255, 0.9)",
   labelInk: "#0a1520",
   labelInkSelected: "#c14d20",
@@ -172,6 +178,8 @@ const DAY: OverlayPalette = {
  * underneath, so there is nothing to tune per tile. What imagery *does* need
  * is separation: a white halo outside every marker, and a dark casing under
  * every arc. Built as a spread of night so the two can never fork by hand.
+ * `corridorCasing` is inherited rather than overridden — night's value is
+ * already the rv-navy-at-80% casing sat wants.
  */
 const SAT: OverlayPalette = {
   ...NIGHT,
