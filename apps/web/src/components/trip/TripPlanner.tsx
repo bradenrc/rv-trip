@@ -143,13 +143,13 @@ type AddForm = ReservationDraft;
 export function TripPlanner({
   trip: initialTrip,
   routes: initialRoutes,
-  rigHash,
+  routingHash,
   hasRig,
 }: {
   trip: Trip;
-  /** Server-resolved drives, keyed `from|to|rigHash`. */
+  /** Server-resolved drives, keyed `from|to|routingHash`. */
   routes: RouteMap;
-  rigHash: string;
+  routingHash: string;
   hasRig: boolean;
 }) {
   const router = useRouter();
@@ -217,8 +217,11 @@ export function TripPlanner({
   };
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
-  const route = useMemo(() => routeModel(trip, routes, rigHash), [trip, routes, rigHash]);
-  const summary = useMemo(() => routeSummary(trip, routes, rigHash), [trip, routes, rigHash]);
+  const route = useMemo(() => routeModel(trip, routes, routingHash), [trip, routes, routingHash]);
+  const summary = useMemo(
+    () => routeSummary(trip, routes, routingHash),
+    [trip, routes, routingHash],
+  );
   const byId = useMemo(() => stopMap(trip), [trip]);
   // Trip-wide scheduled sequence — the same ordering routeSummary() and /map use.
   const scheduledOrdinal = useMemo(
@@ -658,18 +661,18 @@ export function TripPlanner({
    */
   const upgradeRoutes = (next: Trip) => {
     const missing = orderedPairs(next).filter(
-      (p) => !routes[routeCacheKey(p.from, p.to, rigHash)],
+      (p) => !routes[routeCacheKey(p.from, p.to, routingHash)],
     );
     if (missing.length === 0) return;
     tripApi
       .routePairs(missing.map((p) => ({ from: p.from, to: p.to })))
       // Merge ONLY when the reply was keyed with the rig this page rendered
-      // against. Edit the rig in another tab and the server keys with the new
-      // hash — merging those would add keys nothing ever looks up, so every
-      // later reorder would re-request the same pairs forever. A mismatch
+      // against. Edit a ROUTING field in another tab and the server keys with
+      // the new hash — merging those would add keys nothing ever looks up, so
+      // every later reorder would re-request the same pairs forever. A mismatch
       // means the page is stale: the estimate stands until reload.
       .then((fresh) => {
-        if (fresh.rigHash !== rigHash) return;
+        if (fresh.routingHash !== routingHash) return;
         setRoutes((prev) => ({ ...prev, ...fresh.routes }));
       })
       .catch(() => {});

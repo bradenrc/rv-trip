@@ -11,7 +11,7 @@ import {
   type ReservationType,
 } from "../domain/types";
 import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "../domain/route-order";
-import { NO_RIG_HASH } from "../domain/rig";
+import { NO_ROUTING_HASH } from "../domain/rig";
 import { estimateRoute, type RouteResult, type RouteNotice } from "../providers/index";
 import { driveLabel, driveMiles, driveMinutes, formatDriveTime } from "../providers/route-format";
 import { buildNavigationHandoff } from "../providers/navigation";
@@ -247,7 +247,7 @@ export interface RouteLeg {
 }
 
 /**
- * The server-resolved routes, keyed by `from|to|rigHash` — a map, never a
+ * The server-resolved routes, keyed by `from|to|routingHash` — a map, never a
  * positional array, so it crosses the RSC boundary and survives client-side
  * reordering. A key MISS (you dragged a floating stop and invented a pair the
  * server never routed) falls straight to the synchronous estimate: no spinner,
@@ -271,8 +271,8 @@ export interface RouteDrive {
   minutes: number;
 }
 
-function toDrive(pair: OrderedPair, routes: RouteMap, rigHash: string): RouteDrive {
-  const key = routeCacheKey(pair.from, pair.to, rigHash);
+function toDrive(pair: OrderedPair, routes: RouteMap, routingHash: string): RouteDrive {
+  const key = routeCacheKey(pair.from, pair.to, routingHash);
   const result = routes[key] ?? estimateRoute(pair.from, pair.to);
   // Endpoints only. Google cannot be handed a pass-through waypoint, so the
   // link is honestly "get me there", and the notices below it are what says
@@ -295,14 +295,14 @@ function toDrive(pair: OrderedPair, routes: RouteMap, rigHash: string): RouteDri
  * needs it. The rail and the connectors read the SAME list, which is what makes
  * the rail exactly the sum of the drives you can see.
  */
-function resolveDrives(trip: Trip, routes: RouteMap, rigHash: string) {
+function resolveDrives(trip: Trip, routes: RouteMap, routingHash: string) {
   const byFromStop = new Map<string, RouteDrive>();
   // Keyed by the leg the drive leaves, but it carries the leg it ARRIVES in:
   // an emptied leg in between means the crossing is not always i → i + 1.
   const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
   const all: RouteDrive[] = [];
   for (const pair of orderedPairs(trip)) {
-    const drive = toDrive(pair, routes, rigHash);
+    const drive = toDrive(pair, routes, routingHash);
     all.push(drive);
     if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
     else byFromStop.set(pair.fromStopId, drive);
@@ -313,9 +313,9 @@ function resolveDrives(trip: Trip, routes: RouteMap, rigHash: string) {
 export function routeModel(
   trip: Trip,
   routes: RouteMap = {},
-  rigHash: string = NO_RIG_HASH,
+  routingHash: string = NO_ROUTING_HASH,
 ): RouteLeg[] {
-  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, rigHash);
+  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, routingHash);
   const legs = [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder);
   const legNumber = new Map(legs.map((l, i) => [l.id, i + 1]));
 
@@ -385,7 +385,7 @@ export interface RouteSummary {
 export function routeSummary(
   trip: Trip,
   routes: RouteMap = {},
-  rigHash: string = NO_RIG_HASH,
+  routingHash: string = NO_ROUTING_HASH,
 ): RouteSummary {
   const stops = allStops(trip);
   const stopCost = (s: Stop) => s.reservations.reduce((x, r) => x + (r.cost ?? 0), 0);
@@ -399,7 +399,7 @@ export function routeSummary(
   // The SAME drives the connectors render — including the leg-boundary drive
   // and the floating one. The rail used to sum trip-wide scheduled pairs while
   // the screen drew per-leg ones, so the two had never agreed (G1/G2).
-  const { all } = resolveDrives(trip, routes, rigHash);
+  const { all } = resolveDrives(trip, routes, routingHash);
   const driveMilesTotal = all.reduce((a, d) => a + d.miles, 0);
   const driveMins = all.reduce((a, d) => a + d.minutes, 0);
 

@@ -98,7 +98,9 @@ export interface ApiClient {
     reorder(legId: string, order: string[]): Promise<void>;
   };
   routes: {
-    pairs(pairs: { from: LatLng; to: LatLng }[]): Promise<{ rigHash: string; routes: Record<string, RouteResult> }>;
+    pairs(
+      pairs: { from: LatLng; to: LatLng }[],
+    ): Promise<{ routingHash: string; routes: Record<string, RouteResult> }>;
   };
 }
 

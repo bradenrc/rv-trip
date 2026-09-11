@@ -1,4 +1,4 @@
-import { eq, and, asc, desc } from "drizzle-orm";
+import { eq, and, asc, desc, gt, inArray, sql } from "drizzle-orm";
 import {
   deriveDays,
   deriveTripStatus,
@@ -7,7 +7,7 @@ import {
   todayIso,
 } from "@rv-trip/core";
 import { db } from "./index";
-import { trips, legs, stops, savedPlaces, rigs } from "./schema";
+import { trips, legs, stops, savedPlaces, rigs, routes } from "./schema";
 import type {
   IsoDate,
   Trip,
@@ -19,6 +19,7 @@ import type {
   SavedPlace,
   PlaceSuggestion,
   RigProfile,
+  RouteResult,
   TripSummary,
 } from "@rv-trip/core";
 
@@ -415,4 +416,38 @@ export function mapRigRow(row: {
     grossWeightKg: Number(row.grossWeightKg),
     propaneOnBoard: row.propaneOnBoard,
   };
+}
+
+// ── the route cache ────────────────────────────────────────────────────────
+/**
+ * How long a cached route stands. Expressed as a READ filter, not a sweeper:
+ * a stale row is simply re-fetched and upserted over (docs/design/43 §1), and
+ * routes_fetched_at_idx is what makes the eventual cron a follow-up rather
+ * than a migration.
+ */
+export const ROUTE_CACHE_TTL_DAYS = 30;
+
+/**
+ * The keys that are still fresh, as a RouteMap-shaped record. A miss and an
+ * expired row are the same answer — absent — so the caller has exactly one
+ * fall-through path to the vendor.
+ *
+ * Not owner-scoped, on purpose: the row has no owner. A route between two
+ * coordinates under a given ROUTING hash is the same route for everyone, which
+ * is only true now that the rig's NAME is out of the hash.
+ */
+export async function getCachedRoutes(keys: string[]): Promise<Record<string, RouteResult>> {
+  if (keys.length === 0) return {};
+  const rows = await db
+    .select({ key: routes.key, result: routes.result })
+    .from(routes)
+    .where(
+      and(
+        inArray(routes.key, keys),
+        gt(routes.fetchedAt, sql`now() - ${`${ROUTE_CACHE_TTL_DAYS} days`}::interval`),
+      ),
+    );
+  const map: Record<string, RouteResult> = {};
+  for (const row of rows) map[row.key] = row.result;
+  return map;
 }

@@ -10,9 +10,11 @@ import {
   doublePrecision,
   numeric,
   timestamp,
+  jsonb,
   index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import type { RouteResult } from "@rv-trip/core";
 
 /**
  * Relational schema for the trip grammar. Mirrors @rv-trip/core/domain.
@@ -46,6 +48,11 @@ export const savedPlaceStatus = pgEnum("saved_place_status", ["want", "been"]);
 // preset in @rv-trip/core (RIG_PRESETS) — they fill these fields and are not
 // stored. See docs/design/9 §4 G5.
 export const rigType = pgEnum("rig_type", ["motorhome", "trailer"]);
+
+// What a CACHED route came from. One value on purpose: an "estimate" is an
+// unfinished measurement (no rig, no credentials, or a failed vendor call), and
+// caching one would poison the key for 30 days. See docs/design/43 §1 ④.
+export const routeSource = pgEnum("route_source", ["here"]);
 
 export const trips = pgTable(
   "trips",
@@ -201,6 +208,34 @@ export const rigs = pgTable(
   // it is the only way this table is ever read. A second one is write cost for
   // nothing — the other tables index owner_id because theirs is NOT unique.
   () => [],
+);
+
+/**
+ * The route cache (docs/design/43 §1). Today's cache is a module-scope Map in
+ * apps/web/src/lib/routing.ts: per-instance on Vercel Functions and gone on
+ * every cold start, so a deploy re-bills HERE for every drive on every open
+ * trip. This table is the layer between that Map and the vendor.
+ *
+ * NO owner_id, on purpose: a route between two coordinates under a given
+ * ROUTING hash is the same route for everyone — which is only true now that the
+ * rig's name is out of the hash (core's `routingHash`, not `rigHash`).
+ *
+ * `result` is a RouteResult, verbatim, so RouteMap and the client contract are
+ * untouched. TTL is a READ filter (fetched_at > now() - 30 days) and a stale
+ * row is simply re-fetched and upserted — there is no sweeper in this epic;
+ * routes_fetched_at_idx is here so the eventual cron or lazy delete is an
+ * index-only follow-up rather than a migration.
+ */
+export const routes = pgTable(
+  "routes",
+  {
+    /** `routeCacheKey(from, to, routingHash)` — core owns the format. */
+    key: text("key").primaryKey(),
+    result: jsonb("result").$type<RouteResult>().notNull(),
+    source: routeSource("source").notNull(),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("routes_fetched_at_idx").on(t.fetchedAt)],
 );
 
 export const tripsRelations = relations(trips, ({ many }) => ({

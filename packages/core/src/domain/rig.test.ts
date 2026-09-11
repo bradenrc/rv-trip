@@ -9,6 +9,8 @@ import {
   kilogramsToVendorKg,
   rigProfileInput,
   rigHash,
+  routingHash,
+  NO_ROUTING_HASH,
   type RigProfileInput,
 } from "./rig";
 
@@ -180,5 +182,73 @@ describe("rigHash", () => {
 
   it("has a distinct value for 'no rig yet'", async () => {
     expect(await rigHash(null)).toBe("no-rig");
+  });
+});
+
+/**
+ * The ROUTE key's rig half (docs/design/43 §1). rigHash above is rig IDENTITY
+ * and keeps its seven-field sweep; this one keys every cached route, so the two
+ * sweeps must disagree about exactly one field: `name`.
+ */
+describe("routingHash", () => {
+  /** The six that key a route… */
+  const routing = {
+    type: "motorhome" as const,
+    heightMeters: 3.5052,
+    widthMeters: 2.54,
+    lengthMeters: 7.9248,
+    grossWeightKg: 6577.09,
+    propaneOnBoard: true,
+  };
+  /** …and the seventh, which does not. */
+  const rig = { name: "Sunseeker 2450", ...routing };
+
+  it("is stable for the same rig", async () => {
+    expect(await routingHash(routing)).toBe(await routingHash({ ...routing }));
+  });
+
+  /**
+   * The whole point of Q1 = B: renaming the rig re-bills nothing. A route
+   * between two coordinates under these six numbers is the same route whatever
+   * the rig is called — so the name is not read, present or not.
+   */
+  it("is unchanged when only the rig's name changes", async () => {
+    const renamed = { ...rig, name: "Sunseeker 2500" };
+    expect(await routingHash(renamed)).toBe(await routingHash(rig));
+    expect(await routingHash(rig)).toBe(await routingHash(routing));
+  });
+
+  /**
+   * The SIX routing fields, one case each — exhaustive by construction, like
+   * rigHash's sweep. A hole here is a SAFETY miss, not a cache miss: correct
+   * your rig's width and a stale, non-RV-safe route would survive the
+   * correction because nothing re-keyed.
+   */
+  const edits: { [K in keyof typeof routing]: RigProfileInput[K] } = {
+    type: "trailer",
+    heightMeters: 3.5,
+    widthMeters: 2.4384,
+    lengthMeters: 8.2296,
+    grossWeightKg: 6577.1,
+    propaneOnBoard: false,
+  };
+
+  it.each(Object.keys(edits) as (keyof typeof routing)[])(
+    "changes when %s changes",
+    async (field) => {
+      expect(await routingHash({ ...routing, [field]: edits[field] })).not.toBe(
+        await routingHash(routing),
+      );
+    },
+  );
+
+  it("has a distinct value for 'no rig yet', and it is the shipped sentinel", async () => {
+    expect(await routingHash(null)).toBe(NO_ROUTING_HASH);
+    expect(NO_ROUTING_HASH).toBe("no-rig");
+  });
+
+  /** Two different questions about one rig, so never the same answer. */
+  it("is not rigHash", async () => {
+    expect(await routingHash(rig)).not.toBe(await rigHash(rig));
   });
 });

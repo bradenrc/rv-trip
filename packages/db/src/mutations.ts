@@ -1,6 +1,6 @@
-import { eq, and, inArray, max } from "drizzle-orm";
+import { eq, and, inArray, max, sql } from "drizzle-orm";
 import { db } from "./index";
-import { legs, stops, ideas, reservations, trips, rigs, savedPlaces } from "./schema";
+import { legs, stops, ideas, reservations, trips, rigs, routes, savedPlaces } from "./schema";
 import type {
   Idea,
   Leg,
@@ -12,6 +12,7 @@ import type {
   IsoDate,
   RigProfile,
   RigProfileInput,
+  RouteResult,
   SavedPlace,
   SavedPlaceCreate,
   SavedPlacePatch,
@@ -619,4 +620,41 @@ export async function deleteSavedPlace(owner: string, placeId: string): Promise<
     .where(and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner)))
     .returning({ id: savedPlaces.id });
   return rows.length > 0;
+}
+
+// ── the route cache ────────────────────────────────────────────────────────
+/** One cacheable drive: the key core built, and the vendor's answer verbatim. */
+export interface CachedRoute {
+  /** `routeCacheKey(from, to, routingHash)`. */
+  key: string;
+  result: RouteResult;
+}
+
+/**
+ * Write through, upserting on the key so a stale row is refreshed in place
+ * (docs/design/43 §1 — the TTL is a read filter, there is no sweeper).
+ *
+ * ONLY `here` results are stored, and the filter is here as well as at the
+ * caller: `routes.source` is a one-value enum, so writing an "estimate" would
+ * both lie about the row and poison the key for the whole TTL. A failed vendor
+ * call must cost the next open nothing more than another attempt.
+ *
+ * Not owner-scoped — the row has no owner; see getCachedRoutes.
+ */
+export async function putCachedRoutes(rows: CachedRoute[]): Promise<void> {
+  const cacheable = rows.filter((r) => r.result.source === "here");
+  if (cacheable.length === 0) return;
+  await db
+    .insert(routes)
+    .values(
+      cacheable.map((r) => ({ key: r.key, result: r.result, source: "here" as const })),
+    )
+    // fetched_at comes from the DATABASE clock on both paths (the column
+    // default on insert, `now()` here), because the TTL is read back as
+    // `fetched_at > now() - interval`. A JS timestamp on one side of that
+    // comparison and a SQL one on the other is a skew waiting to happen.
+    .onConflictDoUpdate({
+      target: routes.key,
+      set: { result: sql`excluded.result`, fetchedAt: sql`now()` },
+    });
 }

@@ -18,7 +18,9 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // `rig` itself stays on the server — the client only needs to know whether
   // one exists, so it can show the nudge.
   const rig = await getRigByOwner(owner);
-  const { routes, rigHash } = await routeTrip(trip, rig);
+  const { routes, routingHash } = await routeTrip(trip, rig);
 
-  return <TripPlanner trip={trip} routes={routes} rigHash={rigHash} hasRig={rig !== null} />;
+  return (
+    <TripPlanner trip={trip} routes={routes} routingHash={routingHash} hasRig={rig !== null} />
+  );
 }

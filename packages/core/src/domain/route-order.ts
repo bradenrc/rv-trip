@@ -83,10 +83,11 @@ function point(stop: Stop): PairPoint | null {
 }
 
 /**
- * The route cache key. A route changes only when a stop or the rig does, so a
- * keyed map (never a positional array) crosses the RSC boundary and survives
- * client-side reordering.
+ * The route cache key, and the `routes` table's primary key. A route changes
+ * only when a stop or a ROUTING field of the rig does, so a keyed map (never a
+ * positional array) crosses the RSC boundary and survives client-side
+ * reordering. The third part is `routingHash`, never `rigHash`.
  */
-export function routeCacheKey(from: PairPoint, to: PairPoint, rigHash: string): string {
-  return `${from.lat},${from.lng}|${to.lat},${to.lng}|${rigHash}`;
+export function routeCacheKey(from: PairPoint, to: PairPoint, routingHash: string): string {
+  return `${from.lat},${from.lng}|${to.lat},${to.lng}|${routingHash}`;
 }
