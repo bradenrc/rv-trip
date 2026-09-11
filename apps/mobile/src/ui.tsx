@@ -82,19 +82,25 @@ export function Button({
   children,
   onPress,
   tone = "accent",
+  disabled = false,
 }: {
   children: ReactNode;
   onPress: () => void;
   tone?: "accent" | "ghost";
+  /** Dims and deadens the button — an in-flight submit, or an incomplete field. */
+  disabled?: boolean;
 }) {
   const accent = tone === "accent";
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.button,
         accent ? { backgroundColor: pressed ? C.accentBright : C.accent } : { borderWidth: 1, borderColor: C.borderHi },
+        disabled && { opacity: 0.5 },
       ]}
     >
       <Text style={[styles.buttonText, { color: accent ? C.navy : C.ink }]}>{children}</Text>

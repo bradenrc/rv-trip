@@ -91,12 +91,43 @@ explicitly in `apps/mobile/.env.local`:
 EXPO_PUBLIC_API_URL=http://192.168.x.y:3000
 ```
 
+### Sign-in, and why a fresh clone needs no keys
+
+Auth is Clerk, behind the same keyless gate the web keeps
+(`apps/web/src/lib/owner.ts`). One env var decides which half you get, and
+`src/auth.ts` is the only file that reads it:
+
+```
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_YOUR_KEY   # apps/mobile/.env.local
+```
+
+**With the key** `app/_layout.tsx` mounts `<ClerkProvider>` and the navigator
+lives inside `<SignedIn>`, so nothing but `app/sign-in.tsx` renders until there
+is a session: email → a 6-digit code → in. The session token is cached in the
+Keychain (`expo-secure-store`), so that is once per device, not once per launch.
+Every API call then carries `Authorization: Bearer <session jwt>`, which is what
+the web app's proxy already verifies.
+
+**Without it** — a fresh clone, CI, an mc-dev walk worktree — the provider never
+mounts, no sign-in screen renders at all, no `Authorization` header is built, and
+the app runs against the seeded `dev-user` exactly as it did before. That is the
+default, on purpose: the pipeline must never need a provider key.
+
+Use the same instance as the web app (the same `pk_test_…`) or you will be a
+different tenant on the phone than in the browser and see no trips. It is a
+*publishable* key: it belongs in `.env.local`, never the secret one.
+
+`app/rig.tsx` shows which half you are in — the Account card above the rig is
+your name plus **Sign out** with a session, and the web's dashed `dev-user` pill
+without one.
+
 ## What's here (v1)
 
 - `app/index.tsx` — Trips (planning / upcoming / traveled)
 - `app/trips/[id]/index.tsx` — the trip: day strip + route list with drives and Navigate
 - `app/trips/[id]/stops/[stopId].tsx` — stop detail: reservations, ideas (tap to cycle), rating + notes (persist)
-- `app/rig.tsx` — the rig, read-only
-- `src/api.ts` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
+- `app/rig.tsx` — you (the Account card) and the rig, read-only
+- `app/sign-in.tsx` — email → 6-digit code, rendered only when Clerk is keyed
+- `src/api.ts` · `src/auth.ts` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
 
-Not in v1: creating anything, in-app maps (#32), sign-in (#33).
+Not in v1: creating anything, in-app maps (#32).
