@@ -23,8 +23,8 @@ UI cannot see:
   no pixels.
 - `packages/db/**` — the Drizzle schema, queries, mutations, seed.
 - **Server-side code in `apps/web`** — the Next route handlers at
-  `apps/web/src/app/api/**/route.ts` (six today: reservations, reservations/[id],
-  stops/[id], ideas/[id], ideas/[id]/promote, legs/[id]/reorder), the server
+  `apps/web/src/app/api/**/route.ts` (enumerate the set from the tree at run
+  time — it grows every phase; a written count here would already be stale), the server
   components that query the DB directly (`app/page.tsx`, `app/places/page.tsx`,
   `app/trips/[id]/page.tsx`), and the tenant seam `apps/web/src/lib/owner.ts`.
   There are **no server actions** in the tree today (`"use server"` → zero
@@ -70,11 +70,12 @@ In priority order:
    - **Fixture-orphan scrutiny.** A fixture set to `null` / `""` / `[]` to
      satisfy a type can silently drop out of a join and stop exercising its
      assertion while the test keeps passing. Check every such fixture.
-   - **Know where tests can even live.** Only `packages/core` has a test
-     runner today (`vitest`, via its `test` script); `apps/web` and
-     `packages/db` have `lint` + `typecheck` only. So `pnpm turbo run test`
-     runs core's suite and nothing else. If a slice changed db or route-handler
-     behavior and claims coverage, verify the assertion actually executes —
+   - **Know where tests can even live — by checking package.json `test`
+     scripts, not by memory.** Today BOTH `packages/core` and `apps/web` run
+     vitest (`apps/web` holds the route-handler integration suite against real
+     Postgres). So `pnpm turbo run test` exercises both. If a slice changed db
+     or route-handler behavior and claims coverage, verify the assertion
+     actually executes —
      either the logic was pushed down into `packages/core` (the right move) or
      a runner was wired. "Tested" with no runner in that package is a finding.
 

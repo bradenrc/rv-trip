@@ -130,6 +130,14 @@ textarea** — **no `<input>`, no radios, no option cards, no survey questions.*
 the deciding; you are drawing the decided thing (the textarea is the re-work channel, not a
 question).
 
+**A NON-NULL survey answer is BINDING.** The human picked it; you build it — even when your
+own read prefers the ★recommended option, and even when the pick costs more. Substituting
+the ★ for a non-null answer is a contract violation (it shipped the wrong Q5 on #60). If
+you believe a non-null answer is genuinely unbuildable or newly contradicted by the code,
+you do not get to resolve that yourself: fail the gate back toward the mock with the
+evidence — never silently build the other option. Your report's answer set must equal the
+brief's feedback block, value for value.
+
 If a material answer came through NULL or ambiguous in your feedback, resolve it to that
 question's ★recommended default and render a **plain, NON-interactive** note —
 "⚠ defaulted — confirm at sign-off: `<question> → <default>`" — as static text, _not_ a
