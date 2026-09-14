@@ -3,6 +3,7 @@ import { Plus, PlusCircle } from "lucide-react";
 import { listTripsForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { TripCard } from "@/components/dashboard/TripCard";
+import { PageShell } from "@/components/nav/PageShell";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +37,7 @@ export default async function Home() {
   const empty = trips.length === 0;
 
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       {/* Header */}
       <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
         <div>
@@ -99,6 +100,6 @@ export default async function Home() {
           )}
         </>
       )}
-    </main>
+    </PageShell>
   );
 }

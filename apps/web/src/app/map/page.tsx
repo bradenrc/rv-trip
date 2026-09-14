@@ -3,6 +3,7 @@ import { getRigByOwner, listSavedPlacesForOwner, listTripsWithStopsForOwner } fr
 import { getOwner } from "@/lib/owner";
 import { routeTrip } from "@/lib/routing";
 import { MapOverview } from "@/components/map/MapOverview";
+import { PageShell } from "@/components/nav/PageShell";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,7 @@ export default async function MapPage() {
   const routingHash = routed[0]?.routingHash ?? NO_ROUTING_HASH;
 
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
         Overview
       </div>
@@ -44,6 +45,6 @@ export default async function MapPage() {
         routes={routes}
         routingHash={routingHash}
       />
-    </main>
+    </PageShell>
   );
 }

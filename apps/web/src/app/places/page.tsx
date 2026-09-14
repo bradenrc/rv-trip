@@ -4,6 +4,7 @@ import {
   listTripsForOwner,
 } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
+import { PageShell } from "@/components/nav/PageShell";
 import { PlacesWorkspace } from "@/components/places/PlacesWorkspace";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export default async function PlacesPage() {
   // The header copy stays on the server; the island owns only the button beside
   // it, both sheets and the ⋯ menu.
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <PlacesWorkspace places={places} trips={visitedOn} suggestions={suggestions}>
         <div>
           <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
@@ -44,6 +45,6 @@ export default async function PlacesPage() {
           </p>
         </div>
       </PlacesWorkspace>
-    </main>
+    </PageShell>
   );
 }

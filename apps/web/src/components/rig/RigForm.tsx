@@ -15,6 +15,7 @@ import {
   type RigType,
 } from "@rv-trip/core";
 import { FieldLabel, SegmentedControl } from "@rv-trip/ui";
+import { PageShell } from "@/components/nav/PageShell";
 import { Input } from "@/components/ui/input";
 import { tripApi } from "@/lib/trip-api";
 
@@ -114,7 +115,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <div className="max-w-[760px]">
         <div className="mb-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
           Profile
@@ -236,7 +237,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
           </div>
         </div>
       </div>
-    </main>
+    </PageShell>
   );
 }
 
