@@ -157,13 +157,23 @@ export function ViewSwitch<T extends string>({
   value,
   options,
   onChange,
+  fill = false,
 }: {
   value: T;
   options: { value: T; Icon: LucideIcon; label: string }[];
   onChange: (v: T) => void;
+  /** Below `md`, stretch to the full row and show each option's label beside
+   * its icon — two 34px icons stranded at the end of a phone row are not a
+   * tab pair. At `md` and up this is the icon-only pill it has always been.
+   * Composition, not a restyle from the call site. */
+  fill?: boolean;
 }) {
   return (
-    <div className="inline-flex gap-0.5 rounded-rv-md border border-rv-border bg-rv-surface-alt p-[3px]">
+    <div
+      className={`gap-0.5 rounded-rv-md border border-rv-border bg-rv-surface-alt p-[3px] ${
+        fill ? "flex w-full md:inline-flex md:w-auto" : "inline-flex"
+      }`}
+    >
       {options.map((o) => {
         const on = o.value === value;
         return (
@@ -175,10 +185,17 @@ export function ViewSwitch<T extends string>({
             aria-label={o.label}
             aria-pressed={on}
             className={`inline-flex h-[30px] w-[34px] cursor-pointer items-center justify-center rounded-rv-sm border-none ${
-              on ? "bg-rv-surface shadow-rv-sm" : "bg-transparent"
-            }`}
+              fill ? "flex-1 gap-1.5 md:flex-none" : ""
+            } ${on ? "bg-rv-surface shadow-rv-sm" : "bg-transparent"}`}
           >
             <o.Icon className={`size-4 ${on ? "text-rv-green" : "text-rv-ink-subtle"}`} />
+            {fill && (
+              <span
+                className={`text-[13px] font-bold md:hidden ${on ? "text-rv-ink" : "text-rv-ink-faded"}`}
+              >
+                {o.label}
+              </span>
+            )}
           </button>
         );
       })}

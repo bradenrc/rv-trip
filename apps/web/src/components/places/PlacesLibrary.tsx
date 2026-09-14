@@ -118,6 +118,7 @@ export function PlacesLibrary({
         <ViewSwitch
           value={view}
           onChange={setView}
+          fill
           options={[
             { value: "grid", Icon: LayoutGrid, label: "Grid" },
             { value: "map", Icon: MapIcon, label: "Map" },
@@ -146,7 +147,7 @@ export function PlacesLibrary({
 
       {view === "map" ? (
         <>
-          <div className="grid items-stretch gap-4" style={{ gridTemplateColumns: "1fr 360px" }}>
+          <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-[1fr_360px]">
             <div className="min-h-[420px]">
               <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} />
             </div>
@@ -162,7 +163,7 @@ export function PlacesLibrary({
           )}
         </>
       ) : list.length > 0 || leading ? (
-        <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
           {leading}
           {cards}
         </div>

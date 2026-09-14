@@ -697,7 +697,7 @@ export function TripPlanner({
 
   return (
     <div className="min-h-screen bg-rv-surface-alt font-sans text-rv-ink">
-      <div className="mx-auto max-w-[1240px] px-6 py-8">
+      <div className="mx-auto max-w-[1240px] px-4 py-6 md:px-6 md:py-8">
         {/* Masthead */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
           <div className="min-w-0">
@@ -705,12 +705,12 @@ export function TripPlanner({
               <Compass className="size-3.5" />
               <span>RV Trip Hub · Trip Planner</span>
             </div>
-            <h1 className="m-0 mb-2.5 text-[44px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
+            <h1 className="m-0 mb-2.5 text-[28px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink md:text-[44px]">
               <InlineText
                 value={trip.title}
                 onSave={renameTrip}
                 label="Rename trip"
-                className="text-[44px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink"
+                className="text-[28px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink md:text-[44px]"
               />
             </h1>
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[15px] text-rv-ink-muted">
@@ -745,8 +745,8 @@ export function TripPlanner({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="inline-flex rounded-rv-pill border border-rv-border bg-rv-surface p-[3px]">
+          <div className="flex w-full flex-wrap items-center gap-3 md:w-auto">
+            <div className="inline-flex flex-1 rounded-rv-pill border border-rv-border bg-rv-surface p-[3px] md:flex-none">
               <ToggleTab active={lens === "route"} onClick={() => setLens("route")}>
                 <Route className="size-4" />
                 Route
@@ -767,7 +767,7 @@ export function TripPlanner({
                 if (legId) void addStop(legId);
               }}
               disabled={trip.legs.length === 0}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
+              className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
             >
               <Plus className="size-4" />
               Add stop

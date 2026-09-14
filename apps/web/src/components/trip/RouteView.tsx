@@ -548,7 +548,7 @@ function RouteRail({
   hasRig: boolean;
 }) {
   return (
-    <aside className="w-[260px] flex-none">
+    <aside className="w-full md:w-[260px] md:flex-none">
       <div className="sticky top-6 flex flex-col gap-[18px] rounded-rv-card border border-rv-border bg-rv-surface p-[18px] shadow-rv-sm">
         {/* Driving hero */}
         <div>

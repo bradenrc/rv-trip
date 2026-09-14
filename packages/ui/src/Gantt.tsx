@@ -6,7 +6,17 @@ import { Star, Tent, Lightbulb } from "lucide-react";
  * derived from the data length so a trip of any duration lays out correctly.
  */
 
-const gutter = "w-[120px] flex-none";
+/** The leg column. It is `sticky left-0` inside the timeline's own
+ * `overflow-x-auto`, so the month scrolls and the label you are reading stays
+ * put. The opaque `bg-rv-surface` (the gantt card's own surface) is
+ * load-bearing — without it the bars slide visibly beneath the labels — and so
+ * is `self-stretch`: the rows align `center`/`end`, which would otherwise size
+ * this to its ~30px of text and leave an unpainted band above and below it in
+ * a 78px lane. For the same reason the rows carry no `gap` between the gutter
+ * and the lane: a gap cannot be painted, and bars would scroll through it. */
+const gutter =
+  "sticky left-0 z-10 flex w-[92px] flex-none flex-col justify-center self-stretch " +
+  "border-r border-rv-border-soft bg-rv-surface pr-2 md:w-[120px]";
 const kicker = "mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-rv-ink-faded";
 
 function cols(n: number) {
@@ -16,7 +26,7 @@ function cols(n: number) {
 /** The one-line colored day-kind bar — the whole trip's rhythm at a glance. */
 export function RhythmStrip({ cells }: { cells: { color: string; title: string }[] }) {
   return (
-    <div className="mb-1.5 flex items-center gap-4">
+    <div className="mb-1.5 flex items-center">
       <div className={`${gutter} font-mono text-[12px] uppercase tracking-[0.1em] text-rv-ink-faded`}>
         Rhythm
       </div>
@@ -35,7 +45,7 @@ export function RhythmStrip({ cells }: { cells: { color: string; title: string }
 /** Day-number ruler; week starts (and the first day) are bolder with a divider. */
 export function Ruler({ cells }: { cells: { letter: string; label: string; weekStart: boolean }[] }) {
   return (
-    <div className="mb-2.5 flex items-end gap-4">
+    <div className="mb-2.5 flex items-end">
       <div className={gutter} />
       <div className="grid flex-1" style={{ gridTemplateColumns: cols(cells.length) }}>
         {cells.map((t, i) => (
@@ -78,7 +88,7 @@ export function SwimLane({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mb-2.5 flex items-center gap-4">
+    <div className="mb-2.5 flex items-center">
       <div className={gutter}>
         <div className={kicker}>{k}</div>
         <div className="text-[13px] font-bold leading-tight text-rv-ink">{name}</div>
@@ -199,7 +209,7 @@ export function OpenSpan({
 /** The unplanned-days lane wrapper (label gutter + grid). */
 export function OpenLane({ columns, children }: { columns: number; children: React.ReactNode }) {
   return (
-    <div className="mt-0.5 flex items-center gap-4">
+    <div className="mt-0.5 flex items-center">
       <div className={gutter}>
         <div className={kicker}>Unplanned</div>
         <div className="text-[13px] font-bold text-rv-ink-faded">Open days</div>

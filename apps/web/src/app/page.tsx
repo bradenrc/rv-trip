@@ -76,7 +76,7 @@ export default async function Home() {
 
           <section className="mb-10">
             <SectionHead kicker="Ahead" title="Upcoming" count={upcoming.length} />
-            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))" }}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
               {upcoming.map((t) => (
                 <TripCard key={t.id} trip={t} />
               ))}
@@ -91,7 +91,7 @@ export default async function Home() {
                 What you loved and the notes worth keeping — the seed for the next trip. Reopen any to
                 revisit.
               </p>
-              <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
                 {traveled.map((t) => (
                   <TripCard key={t.id} trip={t} />
                 ))}

@@ -188,7 +188,7 @@ export function MapOverview({
       </div>
 
       <div className="overflow-hidden rounded-rv-card border border-rv-border-hi bg-rv-surface-alt">
-        <div className="grid items-stretch max-[980px]:grid-cols-1" style={{ gridTemplateColumns: "1fr 360px" }}>
+        <div className="grid grid-cols-1 items-stretch md:grid-cols-[1fr_360px]">
           <div className="h-[560px]">
             <MapMount
               pins={visible}
