@@ -25,6 +25,7 @@ import {
 const KOA_ID = "11111111-1111-4111-8111-111111111111";
 const PULLOUT_ID = "22222222-2222-4222-8222-222222222222";
 const FOREIGN_ID = "33333333-3333-4333-8333-333333333333";
+const FLOAT_ID = "44444444-4444-4444-8444-444444444444";
 
 const KOA: PlaceSummary = {
   googlePlaceId: "ChIJkoa",
@@ -115,10 +116,16 @@ describe("locateRequestSchema", () => {
     expect(locateRequestSchema.safeParse({ rows: [] }).success).toBe(false);
   });
 
+  it("takes the THIRD kind — an idea is a locatable row as of #69", () => {
+    const parsed = locateRequestSchema.safeParse({ rows: [{ kind: "idea", id: FLOAT_ID }] });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.rows[0]).toEqual({ kind: "idea", id: FLOAT_ID });
+  });
+
   it("rejects an unknown kind and a non-uuid id", () => {
-    expect(locateRequestSchema.safeParse({ rows: [{ kind: "idea", id: KOA_ID }] }).success).toBe(
-      false,
-    );
+    expect(
+      locateRequestSchema.safeParse({ rows: [{ kind: "reservation", id: KOA_ID }] }).success,
+    ).toBe(false);
     expect(locateRequestSchema.safeParse({ rows: [{ kind: "stop", id: "nope" }] }).success).toBe(
       false,
     );
@@ -156,6 +163,12 @@ describe("dedupeLocateRows", () => {
   it("treats the same id on two kinds as two rows", () => {
     const asStop: LocateRow = { kind: "stop", id: KOA_ID };
     expect(dedupeLocateRows([koaRow, asStop])).toEqual([koaRow, asStop]);
+  });
+
+  it("spans all THREE kinds — `rowKey` is `${kind}:${id}`, so nothing collapses", () => {
+    const asIdea: LocateRow = { kind: "idea", id: KOA_ID };
+    const asStop: LocateRow = { kind: "stop", id: KOA_ID };
+    expect(dedupeLocateRows([koaRow, asStop, asIdea, asIdea])).toEqual([koaRow, asStop, asIdea]);
   });
 });
 

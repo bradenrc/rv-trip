@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  type Idea,
   encodeFlexiblePolyline,
   orderedPairs,
   routeCacheKey,
@@ -8,7 +9,7 @@ import {
   type Stop,
   type Trip,
 } from "@rv-trip/core";
-import { buildMapModel } from "./pins";
+import { buildMapModel, layerCounts, locateRowOf, type IdeaPin, type UnmappedRow } from "./pins";
 
 /**
  * The map's drive arcs (docs/design/43 §2).
@@ -222,5 +223,160 @@ describe("buildMapModel — drive arcs over the one ordered pair set", () => {
     const { arcs } = buildMapModel([trip], [], routes, HASH);
     expect(arcs[0]!.source).toBe("estimate");
     expect(arcs[0]!.path).toHaveLength(2);
+  });
+});
+
+/**
+ * Ideas on the map (#69, Q1/Q2/Q4 = A).
+ *
+ * An idea is the grammar's *maybe*, and `ideas` has carried place_name / lat /
+ * lng / google_place_id since day one — nothing ever drew them. Three
+ * behaviours are load-bearing: a located idea becomes a third pin kind, a
+ * coordless one becomes an `UnmappedRow` at ANY status (Q4 = A), and the
+ * row's `kind` is carried EXPLICITLY rather than derived from the layer.
+ */
+function mkIdea(over: Partial<Idea> & { id: string }): Idea {
+  return {
+    id: over.id,
+    stopId: over.stopId ?? "bend",
+    title: over.title ?? "Deschutes River float",
+    status: over.status ?? "idea",
+    place: over.place ?? null,
+    rating: over.rating ?? null,
+    notes: over.notes ?? null,
+    sortOrder: over.sortOrder ?? 0,
+  };
+}
+
+/** The seed trip with ideas hung under Bend. */
+function tripWithIdeas(ideas: Idea[]): Trip {
+  const trip = seedTrip();
+  trip.legs[1]!.stops[0]!.ideas = ideas;
+  return trip;
+}
+
+describe("buildMapModel — the third pin kind", () => {
+  it("draws a located idea as an IdeaPin carrying its stop, trip and status", () => {
+    const trip = tripWithIdeas([
+      mkIdea({
+        id: "tumalo",
+        title: "Tumalo Falls trailhead",
+        status: "planned",
+        place: {
+          name: "Tumalo Falls Trailhead",
+          lat: 44.0317,
+          lng: -121.5678,
+          googlePlaceId: "ChIJtumalo",
+        },
+      }),
+    ]);
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    const idea = pins.find((p) => p.kind === "idea") as IdeaPin;
+    expect(idea).toMatchObject({
+      kind: "idea",
+      id: "tumalo",
+      lat: 44.0317,
+      lng: -121.5678,
+      layer: "planning",
+      name: "Tumalo Falls trailhead",
+      status: "planned",
+      stopName: "Bend, OR",
+      tripId: "t1",
+      tripTitle: "Pacific Northwest Loop",
+    });
+    expect(unmapped).toEqual([]);
+  });
+
+  it("names the IDEA's title on the pin, not the place it resolved to", () => {
+    // The rail row and the sheet row have to read as the same object.
+    const trip = tripWithIdeas([
+      mkIdea({
+        id: "aquarium",
+        title: "Oregon Coast Aquarium",
+        place: { name: "Oregon Coast Aquarium, Newport", lat: 44.617, lng: -124.048, googlePlaceId: null },
+      }),
+    ]);
+    const { pins } = buildMapModel([trip], [], {}, HASH);
+    expect(pins.find((p) => p.kind === "idea")!.name).toBe("Oregon Coast Aquarium");
+  });
+
+  it("keeps a coordless idea as an unmapped row at EVERY status (Q4 = A)", () => {
+    const trip = tripWithIdeas([
+      mkIdea({ id: "float", title: "Deschutes River float", status: "idea" }),
+      mkIdea({ id: "rim", title: "Rim Drive scenic loop", status: "planned" }),
+      mkIdea({ id: "done", title: "Pilot Butte at sunset", status: "done" }),
+    ]);
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    expect(pins.some((p) => p.kind === "idea")).toBe(false);
+    expect(unmapped.map((u) => u.id)).toEqual(["float", "rim", "done"]);
+  });
+
+  it("treats a NAMED but coordless idea as unmapped — the picker's escape row", () => {
+    // `mapIdea` returns a non-null `place` the moment place_name is set, with
+    // lat/lng still null. Half a place is not a pin.
+    const trip = tripWithIdeas([
+      mkIdea({
+        id: "float",
+        place: { name: "Deschutes River", lat: null, lng: null, googlePlaceId: null },
+      }),
+    ]);
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    expect(pins.some((p) => p.kind === "idea")).toBe(false);
+    expect(unmapped.map((u) => [u.id, u.kind])).toEqual([["float", "idea"]]);
+  });
+
+  it("carries `kind` on every unmapped row — the derivation would have lied about an idea", () => {
+    const trip = tripWithIdeas([mkIdea({ id: "float" })]);
+    trip.legs[0]!.stops[0]!.place = { name: "Astoria, OR", lat: null, lng: null, googlePlaceId: null };
+    const { unmapped } = buildMapModel(
+      [trip],
+      [
+        {
+          id: "bakery",
+          ownerId: "dev-user",
+          place: { name: "Sisters Bakery", lat: null, lng: null, googlePlaceId: null },
+          region: null,
+          type: "dining",
+          status: "want",
+          note: null,
+          source: null,
+          rating: null,
+          tripId: null,
+          tripName: null,
+        },
+      ],
+      {},
+      HASH,
+    );
+    expect(unmapped.map((u) => [u.id, u.kind])).toEqual([
+      ["astoria", "stop"],
+      ["float", "idea"],
+      ["bakery", "place"],
+    ]);
+    // …and `locateRowOf` is now a passthrough of that field.
+    expect(unmapped.map(locateRowOf)).toEqual([
+      { kind: "stop", id: "astoria" },
+      { kind: "idea", id: "float" },
+      { kind: "place", id: "bakery" },
+    ]);
+  });
+
+  it("counts an idea under its trip's layer, mapped or not (G4)", () => {
+    const trip = tripWithIdeas([
+      mkIdea({
+        id: "tumalo",
+        place: { name: "Tumalo Falls Trailhead", lat: 44.0317, lng: -121.5678, googlePlaceId: null },
+      }),
+      mkIdea({ id: "float" }),
+    ]);
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    // Four stops + one idea pin drawn, one idea still unmapped.
+    expect(layerCounts(pins, unmapped).planning).toBe(6);
+  });
+
+  it("never lets an idea reach the `saved` layer — only the shelf lives there", () => {
+    const trip = tripWithIdeas([mkIdea({ id: "float" })]);
+    const rows: UnmappedRow[] = buildMapModel([trip], [], {}, HASH).unmapped;
+    expect(rows.every((u) => u.layer !== "saved")).toBe(true);
   });
 });

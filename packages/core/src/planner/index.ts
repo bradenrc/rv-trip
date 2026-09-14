@@ -668,6 +668,24 @@ export function setIdeaNote(trip: Trip, stopId: string, ideaId: string, notes: s
     ideas: s.ideas.map((it) => (it.id === ideaId ? { ...it, notes } : it)),
   }));
 }
+/**
+ * The row Locate's optimistic half (#69): the place the picker chose, applied
+ * to one idea. It takes the SAME `Place | null` the PATCH body carries, so the
+ * screen and the row cannot disagree about what was sent — and `null` clears
+ * the place here exactly as an explicit `null` clears the four columns.
+ */
+export function setIdeaPlace(
+  trip: Trip,
+  stopId: string,
+  ideaId: string,
+  place: Place | null,
+): Trip {
+  return updateStop(trip, stopId, (s) => ({
+    ...s,
+    ideas: s.ideas.map((it) => (it.id === ideaId ? { ...it, place } : it)),
+  }));
+}
+
 /** Splice the idea `POST /api/ideas` just created onto the stop. */
 export function appendIdea(trip: Trip, stopId: string, i: Idea): Trip {
   return updateStop(trip, stopId, (s) => ({ ...s, ideas: [...s.ideas, i] }));

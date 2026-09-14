@@ -2,7 +2,9 @@ import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
 import { DEFAULT_UNITS, NO_ROUTING_HASH, arcLabel, hasCoords, isScheduled, tripArcs } from "@rv-trip/core";
 import type {
+  IdeaStatus,
   LocateRow,
+  LocateRowKind,
   ReservationType,
   RouteMap,
   RouteSource,
@@ -89,24 +91,57 @@ export interface PlacePin {
   tripName: string | null;
 }
 
-export type MapPin = StopPin | PlacePin;
+/**
+ * An idea (#69): the grammar's *maybe*, hanging under a stop. It draws smaller
+ * than the stop it belongs to and carries no number, because it is not a
+ * commitment and has no position in the drive sequence — it is never an arc
+ * endpoint.
+ *
+ * It carries no `ReservationType`, so it has no category: the chip row's Do
+ * count comes from `categoryCounts(places)`, which walks saved places only, and
+ * letting ideas into that filter would give the chip a set its own number does
+ * not describe (G1).
+ */
+export interface IdeaPin {
+  kind: "idea";
+  id: string;
+  lat: number;
+  lng: number;
+  /** The parent TRIP's layer — an idea is never on the saved shelf. */
+  layer: Exclude<MapLayer, "saved">;
+  /** The idea's TITLE, not the place it resolved to, so the pin, the rail row
+   * and the sheet row are recognisably one object. */
+  name: string;
+  status: IdeaStatus;
+  stopName: string;
+  tripId: string;
+  tripTitle: string;
+}
+
+export type MapPin = StopPin | PlacePin | IdeaPin;
 
 /** A point the map cannot draw — kept so nothing silently disappears. */
 export interface UnmappedRow {
   id: string;
   name: string;
   layer: MapLayer;
+  /** Which TABLE the id names, set at each `unmapped.push` site below. */
+  kind: LocateRowKind;
 }
 
 /**
  * The row as POST /api/places/locate wants it: ids only, plus which table the
- * id names. The `kind` is derivable and is NOT a new field — "saved" is the one
- * layer built from `savedPlaces` (buildMapModel below pushes those with
- * `layer: "saved"`); the other three are all trip stops. Named here, beside the
- * type it reads, so nothing downstream has to re-derive it.
+ * id names — now a passthrough of the field above.
+ *
+ * It used to DERIVE the kind from the layer (`layer === "saved" ? "place" :
+ * "stop"`), which held only while the three trip layers carried stops alone. An
+ * idea on a planning trip derived "stop", so the batch would have asked the
+ * stops table for an idea's id, loaded nothing, and reported the row still
+ * unmapped forever, silently, on every press. The explicit field deletes a
+ * guess about the caller.
  */
 export function locateRowOf(row: UnmappedRow): LocateRow {
-  return { kind: row.layer === "saved" ? "place" : "stop", id: row.id };
+  return { kind: row.kind, id: row.id };
 }
 
 /**
@@ -181,6 +216,47 @@ function reservationsOf(stop: Stop): PinReservation[] {
 }
 
 /**
+ * A stop's ideas, split the same way its own point is: a drawable one becomes
+ * an `IdeaPin`, a coordless one an `UnmappedRow`.
+ *
+ * No new query — `Trip` already carries ideas with a nullable `place`, and
+ * `listTripsWithStopsForOwner` already hydrates them. Q4 = A: EVERY status
+ * counts into the unmapped total, because the dashed chip and the Locate button
+ * beside it have to tell one story, and a "done" idea with no coordinates is
+ * still a row the map cannot draw.
+ */
+function pushIdeas(
+  pins: MapPin[],
+  unmapped: UnmappedRow[],
+  trip: Trip,
+  stop: Stop,
+  layer: Exclude<MapLayer, "saved">,
+): void {
+  for (const idea of stop.ideas) {
+    // `mapIdea` returns a non-null `place` the moment place_name is set, with
+    // lat/lng still null — the normal outcome of the picker's free-text escape
+    // row. Half a place is not a pin, so the same `hasCoords` test the stops
+    // make decides it here too.
+    if (!idea.place || !hasCoords(idea.place)) {
+      unmapped.push({ id: idea.id, name: idea.title, layer, kind: "idea" });
+      continue;
+    }
+    pins.push({
+      kind: "idea",
+      id: idea.id,
+      lat: idea.place.lat,
+      lng: idea.place.lng,
+      layer,
+      name: idea.title,
+      status: idea.status,
+      stopName: stop.place.name,
+      tripId: trip.id,
+      tripTitle: trip.title,
+    });
+  }
+}
+
+/**
  * Fold every trip tree and the saved-place shelf into the one model each of the
  * three map modes reads. Coordless points are split out here, once — no pin path
  * downstream has to re-check for nulls.
@@ -214,7 +290,10 @@ export function buildMapModel(
       for (const stop of leg.stops) {
         const floating = !isScheduled(stop);
         if (!hasCoords(stop.place)) {
-          unmapped.push({ id: stop.id, name: stop.place.name, layer });
+          unmapped.push({ id: stop.id, name: stop.place.name, layer, kind: "stop" });
+          // The stop has no pin, but its ideas still do — an idea's coordinates
+          // are its own, not borrowed from the stop it hangs under.
+          pushIdeas(pins, unmapped, trip, stop, layer);
           continue;
         }
         pins.push({
@@ -236,6 +315,7 @@ export function buildMapModel(
           notes: stop.notes,
           reservations: reservationsOf(stop),
         });
+        pushIdeas(pins, unmapped, trip, stop, layer);
       }
     }
 
@@ -268,7 +348,7 @@ export function buildMapModel(
 
   for (const p of places) {
     if (!hasCoords(p.place)) {
-      unmapped.push({ id: p.id, name: p.place.name, layer: "saved" });
+      unmapped.push({ id: p.id, name: p.place.name, layer: "saved", kind: "place" });
       continue;
     }
     pins.push({

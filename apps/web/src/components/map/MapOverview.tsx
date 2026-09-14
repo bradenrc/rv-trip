@@ -23,6 +23,7 @@ import {
   categoryCounts,
   layerCounts,
   locateRowOf,
+  type IdeaPin,
   type MapLayer,
   type MapPin,
   type PlacePin,
@@ -86,8 +87,13 @@ export function MapOverview({
         (p) =>
           layers.has(p.layer) &&
           // The category filter scopes to saved places — the only pins that
-          // carry a ReservationType. A Stop has no category (types.ts:79-90).
-          (p.kind === "stop" || cat === "All" || p.category === cat),
+          // carry a ReservationType. Neither a Stop (types.ts:79-90) nor an
+          // Idea has a category, so both stay visible under their layer. The
+          // reason is arithmetic, not taste: the Do chip's count comes from
+          // `categoryCounts(places)` (pins.ts), which walks the shelf alone, so
+          // letting ideas into that filter would give the chip a filtered set
+          // its own number does not describe.
+          (p.kind !== "place" || cat === "All" || p.category === cat),
       ),
     [model.pins, layers, cat],
   );
@@ -253,6 +259,12 @@ export function MapOverview({
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full bg-rv-accent" />}>Selected</LegendKey>
           <LegendKey swatch={<TeardropKey />}>Saved · want to go</LegendKey>
           <LegendKey swatch={<TeardropKey hollow />}>Saved · been there</LegendKey>
+          {/* The swatch's colour is a className for the reason the comment on
+              `TeardropKey` gives: an inline `var(--color-rv-*)` read inside this
+              `.dark` bar resolves the DOCUMENT half. */}
+          <LegendKey swatch={<i className="size-[11px] flex-none rounded-full border-2 border-rv-info-ink bg-transparent" />}>
+            Idea — a maybe under a stop
+          </LegendKey>
           <LegendKey swatch={<i className="inline-block w-6 flex-none border-t-2 border-dashed border-rv-accent" />}>
             Estimated drive — straight-line, not a road route
           </LegendKey>
@@ -338,7 +350,13 @@ function TeardropKey({ hollow = false }: { hollow?: boolean }) {
 function SelectedCard({ pin }: { pin: MapPin }) {
   return (
     <div className="rounded-rv-card border border-rv-accent-deep bg-rv-surface px-3.5 py-[13px] shadow-rv-lg">
-      {pin.kind === "stop" ? <SelectedStop pin={pin} /> : <SelectedPlace pin={pin} />}
+      {pin.kind === "stop" ? (
+        <SelectedStop pin={pin} />
+      ) : pin.kind === "place" ? (
+        <SelectedPlace pin={pin} />
+      ) : (
+        <SelectedIdea pin={pin} />
+      )}
     </div>
   );
 }
@@ -406,6 +424,29 @@ function SelectedPlace({ pin }: { pin: PlacePin }) {
   );
 }
 
+/** An idea, in the rail — `SelectedPlace`'s frame with the Do kicker, the
+ * idea's own title, and where it hangs. It has no category and no region: the
+ * only geography an idea has is the stop it belongs to. */
+function SelectedIdea({ pin }: { pin: IdeaPin }) {
+  return (
+    <>
+      <div
+        className="font-mono text-[10px] font-bold uppercase tracking-[0.09em]"
+        style={{ color: categoryMeta("activity").color }}
+      >
+        Idea · {pin.status}
+      </div>
+      <div className="mt-[5px] text-[15.5px] font-bold tracking-[-0.01em] text-rv-ink">
+        {pin.name}
+      </div>
+      <div className="font-mono text-[11.5px] text-rv-ink-faded">
+        {pin.tripTitle} · {pin.stopName}
+      </div>
+      <div className="font-mono text-[11.5px] text-rv-ink-faded">{formatCoords(pin)}</div>
+    </>
+  );
+}
+
 function RailRow({ pin, onClick }: { pin: MapPin; onClick: () => void }) {
   return (
     <button
@@ -423,6 +464,16 @@ function RailRow({ pin, onClick }: { pin: MapPin; onClick: () => void }) {
 }
 
 function RailGlyph({ pin }: { pin: MapPin }) {
+  if (pin.kind === "idea") {
+    // The canvas ring at the rail's 15px glyph size, so a row and its pin are
+    // recognisably the same object.
+    return (
+      <i
+        className="size-[15px] flex-none rounded-full border-2 bg-transparent"
+        style={{ borderColor: categoryMeta("activity").color, margin: "2px 3px 0 3px" }}
+      />
+    );
+  }
   if (pin.kind === "place") {
     const color = categoryMeta(pin.type).color;
     const been = pin.status === "been";
@@ -462,6 +513,9 @@ function RailGlyph({ pin }: { pin: MapPin }) {
 function railMeta(pin: MapPin): string {
   if (pin.kind === "stop") {
     return `${LAYER_LABEL[pin.layer]} · ${pin.dates ?? "floating"}`;
+  }
+  if (pin.kind === "idea") {
+    return `Idea · ${pin.status} · ${pin.stopName}`;
   }
   const shelf = pin.status === "want" ? "want" : "been";
   return ["Saved", shelf, pin.region].filter(Boolean).join(" · ");

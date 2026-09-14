@@ -4,8 +4,8 @@ import type { PlaceSummary, PlacesProvider } from "./index";
 /**
  * Locate — the bounded coordinate backfill of docs/design/41 §6.
  *
- * A stop or a saved place can exist with no `lat/lng` (both columns are
- * nullable). The map keeps those rows as `UnmappedRow`s — visible, listed, and
+ * A stop, a saved place or an IDEA can exist with no `lat/lng` (every one of
+ * those columns is nullable). The map keeps those rows as `UnmappedRow`s — visible, listed, and
  * counted by the dashed "N unmapped" chip — rather than dropping them. Locate
  * is the user-pressed repair: one press, one bounded batch, at most
  * `LOCATE_MAX_ROWS` geocodes, and the count shrinking is the feedback.
@@ -13,8 +13,14 @@ import type { PlaceSummary, PlacesProvider } from "./index";
  * IDS ONLY ON THE WAY IN. The caller sends `{ kind, id }`; the name and region
  * that reach Google are re-read from the database under the owner's scope by
  * the `LocateStore`. A client can therefore never make us geocode — or write —
- * a row it does not own, and never has to widen `UnmappedRow`
- * (apps/web/src/components/map/pins.ts, which carries only id/name/layer).
+ * a row it does not own.
+ *
+ * `UnmappedRow` (apps/web/src/components/map/pins.ts) carries the `kind`
+ * EXPLICITLY as of #69. It used to be derived from the row's map layer, and
+ * that derivation was only ever correct while the three trip layers held stops
+ * alone: an idea on a planning trip derived "stop", and the batch would have
+ * asked the stops table for an idea's id, loaded nothing, and counted the row
+ * still unmapped forever. The field is set at each `unmapped.push` site.
  *
  * Same split as places-search.ts: the whole decision tree is here, pure and
  * covered, and `apps/web/src/app/api/places/locate/route.ts` is the adapter
@@ -30,11 +36,12 @@ import type { PlaceSummary, PlacesProvider } from "./index";
 export const LOCATE_MAX_ROWS = 25;
 
 /**
- * Which table the id names. The client derives this from the row's map layer —
- * `layer === "saved" ? "place" : "stop"` — since the three trip layers are all
- * stops.
+ * Which table the id names. Three of them: the saved-place shelf, a trip stop,
+ * and — since #69 — an idea hanging under a stop. The client NAMES it on the
+ * row rather than deriving it from the map layer, because the layers stopped
+ * being a proxy for the table the moment ideas joined the map.
  */
-export const locateRowKind = z.enum(["place", "stop"]);
+export const locateRowKind = z.enum(["place", "stop", "idea"]);
 export type LocateRowKind = z.infer<typeof locateRowKind>;
 
 export const locateRowSchema = z.object({
@@ -56,8 +63,12 @@ export type LocateRequest = z.infer<typeof locateRequestSchema>;
 
 /** A row as the DATABASE describes it — the only source of the search text. */
 export interface LocateTarget extends LocateRow {
+  /** A stop's place name, a saved place's name — and for an IDEA its `title`,
+   * which is all an un-located idea has. "Tumalo Falls trailhead" resolves;
+   * "Deschutes River float" is an activity and never will. */
   name: string;
-  /** Saved places carry one; a stop has no region column, so it is null. */
+  /** Saved places carry one; neither a stop nor an idea has a region column,
+   * so both are null. */
   region: string | null;
 }
 

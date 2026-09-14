@@ -265,15 +265,23 @@ export function MapView({
             longitude={pin.lng}
             latitude={pin.lat}
             offset={[dx, dy]}
-            style={{ zIndex: selected ? 3 : pin.kind === "stop" ? 2 : 1, cursor: onSelect ? "pointer" : "default" }}
+            // Three tiers under the selection: a stop is a commitment, a saved
+            // place is a want, an idea is a maybe — so an idea can never cover
+            // the stop it belongs to.
+            style={{
+              zIndex: selected ? 4 : pin.kind === "stop" ? 3 : pin.kind === "place" ? 2 : 1,
+              cursor: onSelect ? "pointer" : "default",
+            }}
             onClick={onSelect ? () => onSelect(pin.id) : undefined}
           >
             <div className="relative">
               {at?.spiderfied && <SpiderLeader dx={dx} dy={dy} palette={palette} />}
               {pin.kind === "stop" ? (
                 <StopDisc pin={pin} selected={selected} palette={palette} />
-              ) : (
+              ) : pin.kind === "place" ? (
                 <PlaceDrop pin={pin} selected={selected} palette={palette} />
+              ) : (
+                <IdeaRing selected={selected} palette={palette} />
               )}
               {showLabels && (
                 <span
@@ -428,6 +436,27 @@ function PlaceDrop({
         style={{ background: been ? color : palette.dropDot }}
       />
     </div>
+  );
+}
+
+/**
+ * An idea: an 11px hollow ring in the Do/activity colour — under half the 27px
+ * stop disc, which is the whole point. A maybe reads smaller than a commitment,
+ * carries no number and is never an arc endpoint.
+ *
+ * The colour resolves through `palette.category.Do`, the same key `PlaceDrop`
+ * already reads, so this adds no palette key and no map-palette test churn.
+ */
+function IdeaRing({ selected, palette }: { selected: boolean; palette: OverlayPalette }) {
+  return (
+    <div
+      className="size-[11px] rounded-full border-2"
+      style={{
+        borderColor: palette.category.Do,
+        background: "transparent",
+        boxShadow: markerShadow(selected ? "lg" : "sm", palette, selected),
+      }}
+    />
   );
 }
 
