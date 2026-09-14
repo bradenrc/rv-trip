@@ -225,6 +225,26 @@ standup)
     die "standup $issue: pnpm install failed — see .mc/walk/$issue-install.log"
   (cd "$ROOT" && docker compose up -d >>"$WALK_DIR/$issue-standup.log" 2>&1) || true
 
+  # Migrations BEFORE the server (#65): a walk DB behind on migrations answers 500 on
+  # every page, so the standup dies at the health gate looking like a web bug. Wait for
+  # Postgres, then apply this worktree's migrations to the shared walk DB.
+  for _ in $(seq 1 15); do
+    docker exec rv-trip-db pg_isready -U rvtrip -d rvtrip >/dev/null 2>&1 && break
+    sleep 2
+  done
+  (cd "$wt" && pnpm --filter @rv-trip/db migrate >>"$WALK_DIR/$issue-standup.log" 2>&1) ||
+    die "standup $issue: db migrate failed — see .mc/walk/$issue-standup.log"
+
+  # Reap OUR OWN stale server before choosing a port (#65): a dead-but-listening dev
+  # server from a failed standup both holds its port and, on Next 16, blocks ANY second
+  # dev server for the same dir ("Another next dev server is already running"), so a
+  # port retry can never succeed. Scoped to this issue's pid file — never machine-wide.
+  if [ -f "$WALK_DIR/$issue-web.pid" ]; then
+    kill "$(cat "$WALK_DIR/$issue-web.pid")" >/dev/null 2>&1 || true
+    rm -f "$WALK_DIR/$issue-web.pid"
+    sleep 1
+  fi
+
   port="$(free_port "$issue")"
   (cd "$wt/apps/web" && PORT="$port" nohup pnpm dev >"$WALK_DIR/$issue-web.log" 2>&1 &
     echo $! >"$WALK_DIR/$issue-web.pid")
@@ -242,6 +262,11 @@ standup)
     sleep 2
   done
   if [ "$healthy" != "1" ]; then
+    # Down the dead server before dying (#65) — otherwise it keeps holding the port AND
+    # Next 16's same-dir lock, and every retry fails on "Another next dev server is
+    # already running" instead of the real cause.
+    kill "$pid" >/dev/null 2>&1 || true
+    rm -f "$WALK_DIR/$issue-web.pid"
     die "standup $issue: web on :$port not serving 200 after ~60s — see .mc/walk/$issue-web.log"
   fi
 
