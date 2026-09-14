@@ -4,7 +4,7 @@ import { orderedPairs, routeCacheKey } from "../domain/route-order";
 import type { Stop, Trip } from "../domain/types";
 import type { RouteResult } from "../providers/index";
 import type { RouteMap } from "./index";
-import { tripArcs } from "./map-arcs";
+import { arcLabel, tripArcs } from "./map-arcs";
 
 /**
  * `tripArcs` — the map's drive model, shared by the web's `/map` overview and
@@ -212,5 +212,38 @@ describe("tripArcs — one arc per ordered pair, two renderers", () => {
     const arcs = tripArcs(trip, routes, HASH);
     expect(arcs[0]!.source).toBe("estimate");
     expect(arcs[0]!.path).toHaveLength(2);
+  });
+});
+
+describe("arcLabel — the one wording both map renderers use", () => {
+  const routed = (miles: number, primaryRoad: string | null) => ({
+    id: "a->b",
+    from: { lat: 45, lng: -122 },
+    to: { lat: 44, lng: -121 },
+    source: "here" as const,
+    miles,
+    primaryRoad,
+    path: [] as [number, number][],
+  });
+  const estimated = (miles: number) => ({ ...routed(miles, null), source: "estimate" as const });
+
+  it("words a routed drive as distance · road", () => {
+    expect(arcLabel(routed(136, "US-101"), "imperial")).toBe("136 mi · US-101");
+    expect(arcLabel(routed(136, "US-101"), "metric")).toBe("219 km · US-101");
+  });
+
+  it("drops the road when the vendor named none", () => {
+    expect(arcLabel(routed(136, null), "imperial")).toBe("136 mi");
+    expect(arcLabel(routed(136, null), "metric")).toBe("219 km");
+  });
+
+  it("keeps an estimate's ~ and its est. suffix in both vocabularies", () => {
+    expect(arcLabel(estimated(108), "imperial")).toBe("~108 mi · est.");
+    expect(arcLabel(estimated(108), "metric")).toBe("~174 km · est.");
+  });
+
+  it("defaults to imperial — the phone has no preference in hand yet", () => {
+    expect(arcLabel(routed(136, "US-101"))).toBe("136 mi · US-101");
+    expect(arcLabel(estimated(108))).toBe("~108 mi · est.");
   });
 });

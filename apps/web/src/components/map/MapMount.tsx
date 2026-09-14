@@ -40,7 +40,10 @@ const LazyMapView = dynamic(() => import("./MapView").then((m) => m.MapView), {
  * (TripPlanner.tsx:67). */
 export const STYLE_PREF_KEY = "rv-map-style";
 
-const STYLE_SEGMENTS: SegmentOption<StyleMode>[] = [
+/** The three options every map offers. Exported because Settings' "Default map
+ * style" row is a second front door onto the SAME preference, and a second copy
+ * of the list would be a second vocabulary. */
+export const STYLE_SEGMENTS: SegmentOption<StyleMode>[] = [
   { value: "night", label: "Night", Icon: Moon },
   { value: "day", label: "Day", Icon: Sun },
   { value: "sat", label: "Sat", Icon: Satellite },

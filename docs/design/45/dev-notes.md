@@ -675,3 +675,222 @@ guard, the GET's `getOwner()`) produced `Tests 9 failed | 48 passed`, and the
 | `pnpm exec next build` (apps/web) | build succeeded; route table lists `ƒ /api/prefs` |
 | no-FOUC byte check — extracted `<script>` block vs `git show 71046ce:…/layout.tsx` | `NO-FOUC SCRIPT BYTE-IDENTICAL to 71046ce` (diff empty) |
 | `git diff 5450ab7 -- TripPlanner.tsx MapMount.tsx lib/theme.ts` | empty — no `useBooleanPref`/`useStringPref` call site changed |
+
+---
+
+# Issue #45 · item 5 — The Settings page, units honored, People & groups retired
+
+Epic item **i5 of 5** only (`docs/design/45/plan.json`, read from
+`mc/wireframe/issue-45-v0`). Items 1–4 had already landed on this branch and
+were not redone.
+
+## What changed
+
+### The vocabulary and the two conversions — new `packages/core/src/domain/units.ts`
+
+- `units.ts:18-30` — `UNITS` (`imperial` | `metric`), `DEFAULT_UNITS`, `isUnits`.
+  Core owns the vocabulary so `apps/web/src/lib/units.ts` cannot fork it.
+- `units.ts:38` — `convertMiles(miles, units)`: identity in imperial, whole
+  kilometres in metric.
+- `units.ts:43` — `distanceUnitLabel(units)`: `"mi"` | `"km"`.
+  Two functions, not one string, so `RouteView`'s 34px number and 15px unit stay
+  two separately-styled spans.
+- `packages/core/src/domain/index.ts:12` — exported.
+
+### One arc label for both map renderers — `packages/core/src/planner/map-arcs.ts:87`
+
+The design's i5 scope says `components/map/pins.ts:255-256` takes its label from
+`distanceUnitLabel()`/`convertMiles()`. That is **exactly** what the vet's third
+HIGH said could not be done as scoped: those two lines are asserted as literal
+SOURCE TEXT by `packages/core/src/mobile-map.test.ts:185-199`, and the same two
+format strings are a deliberate second copy in `apps/mobile/src/map.tsx`.
+
+Resolved by consolidating rather than forking: `arcLabel(arc, units)` now lives
+in core beside `TripArc`.
+
+- `map-arcs.ts:87-92` — the one implementation.
+- `apps/web/src/components/map/pins.ts:262` — `label: arcLabel(arc, units)`.
+- `apps/mobile/src/map.tsx:11,282-288,410` — the local `arcLabel` is deleted and the
+  import comes from core. The phone passes no units, so it takes the default and
+  its rendered wording is **byte-identical to today**.
+- `packages/core/src/mobile-map.test.ts:185` — the assertion changes from
+  "both files contain this string" to "both files CALL `arcLabel`, and neither
+  re-declares it", plus the string itself is now *executed* in
+  `map-arcs.test.ts` for both vocabularies. Strictly stronger than what it
+  replaced.
+
+This is the one place I went outside i5's literal file list. It was that or ship
+a fork of the label the test exists to prevent.
+
+### The drive rows — `packages/core/src/providers/route-format.ts:38`
+
+The vet's second HIGH: `driveLabel()` baked `"mi"`, so in metric the rail would
+have read `663 km` with `3h 12m · 136 mi` in every row under it.
+
+`driveLabel(result, units = DEFAULT_UNITS)` now converts at the same edge, and
+`units` is threaded (optional, defaulted, **no type changed**) through
+`planner/index.ts:311` `toDrive` → `:421` `resolveDrives` → `:445` `routeModel`.
+`driveMiles`, `TripArc.miles` and `RouteSummary.driveMiles` are still miles —
+this stayed a display conversion, as the design says.
+
+### The four display sites
+
+| site | file:line | change |
+|---|---|---|
+| dashboard card | `TripCard.tsx:19,145` | `{convertMiles(trip.miles, units)} {distanceUnitLabel(units)}` |
+| Route rail hero | `RouteView.tsx:25,567,571` | number and unit converted in their own spans |
+| map arc labels | `pins.ts:262` | `arcLabel(arc, units)` |
+| rig form | `RigForm.tsx:87,293-352` | metric types **m** and **kg**; imperial unchanged |
+
+`units` is resolved on the SERVER in all four roots and passed as a plain prop:
+`app/page.tsx:38-39`, `app/trips/[id]/page.tsx:29`, `app/map/page.tsx:27`,
+`app/rig/page.tsx:17`. New `apps/web/src/lib/units.ts` holds the key
+(`rv-units`), re-exports the vocabulary, and narrows the row
+(`unitsFromPrefs`). It is deliberately **not** `"use client"` and imports no
+hook, so server components can import it.
+
+`RigForm` metric mode: `Dim` grows an `m` field (`RigForm.tsx:42-46`), `toDim`
+/`dimMeters` branch on units, and `poundsValue` becomes
+`weightKilograms`/`weightField` (`:75-90`). Metric converts nothing — it shows
+the stored metres verbatim (`String(meters)`, not `toFixed`) so 3.5052 m does
+not drift on the next save — and the vendor boundary (whole cm/kg, always UP) is
+untouched in both modes.
+
+### The Settings page
+
+- `apps/web/src/app/settings/page.tsx` — rewritten. Server component,
+  `force-dynamic`, `getPrefsByOwner(await getOwner())`, renders
+  `<SettingsForm prefs={prefs} />` inside `PageShell`. No `StubPage` import.
+- New `apps/web/src/components/settings/SettingsForm.tsx` — `"use client"`.
+  Three `GroupKicker`s (Appearance · Maps &amp; planning · Account), four rows,
+  the design's helper copy verbatim. Theme / Units / Default map style are the
+  DS `SegmentedControl`; Track costs is the lifted switch.
+  - Tokens only, no raw hex (asserted). Row metrics are the wireframe's:
+    `.group-k` → `font-mono text-[10px] tracking-[0.12em] text-rv-accent`,
+    `.srow` → `border-b border-rv-border-soft py-[13px] last:border-b-0`,
+    `.lbl` → `text-[14px] font-bold`, `.hlp` → `text-[12px] text-rv-ink-faded`,
+    `.ctl` → `mt-[9px]`.
+  - Map-style options come from `MapMount`'s own `STYLE_SEGMENTS`
+    (`MapMount.tsx:46`, newly `export`ed) — not a second copy of the list.
+- New `apps/web/src/components/ui/pref-switch.tsx` — `CostSwitch` lifted at its
+  shipped metrics (38×22, 18px knob at `left: 18 / 2`, `bg-rv-green` on,
+  `bg-rv-border-hi` off). `TripPlanner.tsx:98,766` imports it and keeps **no**
+  private copy (`function CostSwitch` is gone).
+- `packages/ui/src/Places.tsx:113` — `SegmentOption.Icon` is now **optional**
+  and `:148` renders it conditionally, which is what makes the label-only Units
+  segments composable at all (the vet's fourth HIGH). Additive: every shipped
+  call site still passes an icon and no existing pill changes.
+- `apps/web/src/app/settings/people/page.tsx` deleted;
+  `apps/web/next.config.ts:18-20` adds `redirects()` sending
+  `/settings/people → /settings`, permanent.
+
+### Tests
+
+- **TDD, executed code:** `packages/core/src/domain/units.test.ts` (10 tests) —
+  written first, run RED (`Failed to load url ./units`), then green. Both
+  vocabularies for both functions, plus the three numbers from the design's own
+  blast-radius table (1284 mi → 2066 km, 412 → 663, 136 → 219).
+- `packages/core/src/planner/map-arcs.test.ts` — `arcLabel` in both vocabularies
+  (RED first: `arcLabel is not a function`).
+- `packages/core/src/providers/route-format.test.ts` — `driveLabel` in both
+  vocabularies (RED first: `expected '3h 12m · 136 mi' to be '3h 12m · 219 km'`).
+- **Source-text, the repo's shipped convention for `apps/web`:** new
+  `packages/core/src/settings-page.test.ts` (30 tests), same `REPO`/`read`/
+  `code`/`flat` helpers as `web-shell.test.ts` and `prefs-account.test.ts`. It
+  covers i5's acceptance clause by clause, including a directory walk proving no
+  hard-coded `mi` label survives anywhere under `apps/web/src` (the regex was
+  sanity-checked against the four pre-change forms — all four match, the two
+  post-change forms do not). These 30 were written after the wiring, not before:
+  `apps/web` has no DOM environment, so there was nothing to run red.
+
+## Decisions, and the vet findings addressed
+
+- **HIGH · Units blast radius incomplete (`driveLabel`).** Taken. See above —
+  `driveLabel` is units-aware and `units` threads through `routeModel`. No
+  planner type changed; every new parameter is optional and defaulted.
+- **HIGH · i5's gate unachievable (`pins.ts` asserted as source text).** Taken,
+  by moving the label into core and making the cross-renderer assertion an
+  assertion about the CALL. `apps/mobile/src/map.tsx` is touched — one import,
+  one deleted function — and its rendered output is unchanged. Flagged as the
+  one out-of-scope file.
+- **HIGH · `SegmentedControl` cannot compose a label-only segment.** Taken:
+  `Icon?` is optional. The wireframe names no glyph for imperial/metric and I
+  did not invent one.
+- **MED · `CostSwitch` hard-codes its own text.** Taken: `PrefSwitch` gains an
+  optional `label`. With it the planner's control is byte-for-byte the shipped
+  one; without it the Settings row gets a bare switch and supplies `ariaLabel`.
+- **MED · nothing said how the four trees pick up a units change.** Decided:
+  the Units control calls `router.refresh()` (`SettingsForm.tsx:68-72`), which
+  invalidates the router cache so the server-rendered trees re-render with the
+  new prop. The other three preferences are client-read and need no refresh.
+- **MED · `rigs` is not ownerId-as-primary-key.** Noted; i4 had already shipped
+  and nothing in i5 depends on the claim.
+- **MED · the REMOTE round-trip.** Already correct as landed by i4
+  (`toRemotePatch` coerces `"1"/"0"` → boolean); i5 changed nothing there.
+- **`StubPage` is now dead code — deliberately LEFT IN PLACE.** `grep` confirms
+  zero call sites after this item (its only two consumers were the page I
+  rewrote and the page I deleted). I did not delete it: it is not in i5's file
+  list, and removing it would mean editing i1's landed acceptance test
+  (`web-shell.test.ts:71` reads it as one of the six gutter sites). **Recommend
+  a one-line follow-up** that deletes `components/nav/StubPage.tsx` and drops it
+  from `GUTTER_SITES`. Flagging, not pre-empting — same call i1 made.
+- **The Account row is `<Account/>` alone**, inside the "Account" card. The
+  wireframe draws "dev-user" + "Local dev — no Clerk keys" + an avatar on that
+  row, which is precisely what `<Account/>`'s `DevAccount` renders (the second
+  line lives in its `title` tooltip). The design's own caption says the row *is*
+  `<Account/>`, so I rendered that rather than inventing a second label.
+- **Page head is the app's shipped pattern** — 12px mono kicker "Account" +
+  `text-[40px]` h1 "Settings", identical to `map/page.tsx` and to the `StubPage`
+  it replaces. The wireframe's 28px `h4` is its generic phone-mock heading
+  style (`index.html:119`, applied to every phone screen including ones whose
+  real pages ship at 40px), not a spec for this page.
+- **No scope creep otherwise.** i1's Nav/PageShell, i2's grids and gantt gutter,
+  i3's manifest/viewport/icons and i4's `user_prefs`/`/api/prefs` are untouched.
+
+## For qa / the walk
+
+Claims worth checking:
+
+1. `apps/mobile`'s rendered arc wording is unchanged — `arcLabel` with no
+   `units` argument returns exactly the two strings the deleted local function
+   returned (executed in `map-arcs.test.ts`, "defaults to imperial").
+2. `TripPlanner` defines no switch of its own: `grep -n "CostSwitch"` over
+   `apps/web/src` returns nothing.
+3. No hard-coded `mi` under `apps/web/src` (directory walk in
+   `settings-page.test.ts`, plus `grep`).
+4. Every new core parameter is optional and defaulted, so no existing caller
+   changed behaviour: `routeSummary` was NOT given units (it returns numbers;
+   `RouteView` converts its hero).
+
+Render-required, static analysis cannot certify (the walk's job):
+
+- The Settings page at 390px: three cards, four rows, the fifth tab active, and
+  the last card clearing the fixed tab bar.
+- That `/settings/people` actually answers a 308 to `/settings`. A
+  `next.config.ts` redirect is config, not code a unit test can execute.
+- That flipping Units to Metric and navigating to `/`, `/trips/<id>`, `/map` and
+  `/rig` shows km / m / kg on all four — i.e. that `router.refresh()` really
+  does invalidate those cached server trees.
+- The rig form in metric: that typing `3.5052` round-trips through save and
+  reload without drifting, and that the vendor hint reads `sent as 351 cm`.
+- `<Account/>` inside a card rather than the masthead: the Clerk `UserButton`
+  menu opens upward/downward correctly on a phone.
+
+## Checks run
+
+| command | result |
+|---|---|
+| `pnpm install --prefer-offline` | fresh worktree had no `node_modules` — `Done in 9.2s` |
+| `pnpm --filter @rv-trip/core exec vitest run src/domain/units.test.ts` (pre-impl) | RED — `Failed to load url ./units … Does the file exist?` |
+| `pnpm --filter @rv-trip/core exec vitest run src/domain/units.test.ts` | `Test Files 1 passed (1) · Tests 10 passed (10)` |
+| `… vitest run src/planner/map-arcs.test.ts src/providers/route-format.test.ts` (pre-impl) | RED — `Tests 6 failed | 19 passed (25)`; `arcLabel is not a function`, `expected '3h 12m · 136 mi' to be '3h 12m · 219 km'` |
+| `… vitest run src/planner/map-arcs.test.ts src/providers/route-format.test.ts` | `Test Files 2 passed (2) · Tests 25 passed (25)` |
+| `pnpm --filter @rv-trip/core exec vitest run src/mobile-map.test.ts` | `Test Files 1 passed (1) · Tests 39 passed (39)` |
+| `pnpm --filter @rv-trip/core exec vitest run src/settings-page.test.ts` | `Test Files 1 passed (1) · Tests 30 passed (30)` |
+| `pnpm --filter @rv-trip/mobile typecheck` | `tsc --noEmit` — clean, no output |
+| `pnpm turbo run lint typecheck test` | `Tasks: 9 successful, 9 total` — core `Tests 829 passed (829)`, web `Tests 81 passed (81)` |
+| regex sanity check of the "no hard-coded mi" walk (node one-liner) | matched all 4 pre-change forms, neither post-change form |
+
+**Not run (no env):** `pnpm exec next build` was NOT run for this item — SKIPPED
+(not attempted); the redirect and the new page are exercised only by the gate
+above. The DB round-trip for a units write is the walk's.

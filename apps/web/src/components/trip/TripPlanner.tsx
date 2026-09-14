@@ -91,9 +91,11 @@ import {
   type RouteMap,
   type TimelineGap,
 } from "@/lib/trip-logic";
+import type { Units } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { fullRange, monthDay } from "@/lib/trip-ui";
 import { useBooleanPref } from "@/lib/pref";
+import { PrefSwitch } from "@/components/ui/pref-switch";
 import { InlineText } from "@/components/ui/inline-text";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -147,6 +149,7 @@ export function TripPlanner({
   routingHash,
   nav = {},
   hasRig,
+  units,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -163,6 +166,10 @@ export function TripPlanner({
    */
   nav?: NavMap;
   hasRig: boolean;
+  /** The account's display units, resolved on the server (trips/[id]/page.tsx).
+   * It reaches two places: every drive row's label, worded by core's
+   * `driveLabel` inside `routeModel`, and the rail's 34px hero. */
+  units: Units;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
@@ -230,8 +237,8 @@ export function TripPlanner({
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
   const route = useMemo(
-    () => routeModel(trip, routes, routingHash, nav),
-    [trip, routes, routingHash, nav],
+    () => routeModel(trip, routes, routingHash, nav, units),
+    [trip, routes, routingHash, nav, units],
   );
   const summary = useMemo(
     () => routeSummary(trip, routes, routingHash),
@@ -756,7 +763,7 @@ export function TripPlanner({
                 Timeline
               </ToggleTab>
             </div>
-            <CostSwitch checked={costTracking} onChange={changeCostTracking} />
+            <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
             {/* The masthead has no leg in hand, so it appends to the LAST one —
                 the same "goes on the end" rule every create here follows. A
                 trip always has a leg: createTrip seeds "Leg 1". */}
@@ -783,6 +790,7 @@ export function TripPlanner({
             summary={summary}
             costs={costTracking}
             hasRig={hasRig}
+            units={units}
             onOpenStop={openStop}
             routeDrag={routeDrag}
             actions={{
@@ -1402,32 +1410,6 @@ function StopDatesFields({
 
 function Dot() {
   return <span className="size-[3px] rounded-full bg-rv-ink-subtle" />;
-}
-
-function CostSwitch({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="inline-flex cursor-pointer items-center gap-2 border-none bg-transparent p-0"
-    >
-      <span className={`text-[13px] font-semibold ${checked ? "text-rv-ink" : "text-rv-ink-faded"}`}>
-        Track costs
-      </span>
-      <span
-        className={`relative h-[22px] w-[38px] flex-none rounded-full transition-colors ${
-          checked ? "bg-rv-green" : "bg-rv-border-hi"
-        }`}
-      >
-        <span
-          className="absolute top-0.5 size-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.2)] transition-[left]"
-          style={{ left: checked ? 18 : 2 }}
-        />
-      </span>
-    </button>
-  );
 }
 
 function ToggleTab({

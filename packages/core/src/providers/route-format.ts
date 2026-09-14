@@ -1,3 +1,4 @@
+import { convertMiles, distanceUnitLabel, DEFAULT_UNITS, type Units } from "../domain/units";
 import type { RouteResult } from "./index";
 
 /**
@@ -27,8 +28,15 @@ export function formatDriveTime(minutes: number): string {
 /**
  * The connector's one mono line. An estimate keeps the leading `~` — it is an
  * unfinished measurement, and the neutral "estimate" chip beside it says so.
+ *
+ * `units` is a DISPLAY choice applied here, at the last moment: the drive is
+ * still measured and stored in miles (`driveMiles`, above), and every caller
+ * that has no preference in hand gets the product default. It has to be honored
+ * here rather than only at the rail, or the same screen would print "663 km" in
+ * its hero and "136 mi" in every drive row beneath it.
  */
-export function driveLabel(result: RouteResult): string {
+export function driveLabel(result: RouteResult, units: Units = DEFAULT_UNITS): string {
   const prefix = result.source === "estimate" ? "~" : "";
-  return `${prefix}${formatDriveTime(driveMinutes(result))} · ${driveMiles(result)} mi`;
+  const distance = `${convertMiles(driveMiles(result), units)} ${distanceUnitLabel(units)}`;
+  return `${prefix}${formatDriveTime(driveMinutes(result))} · ${distance}`;
 }

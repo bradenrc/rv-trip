@@ -107,7 +107,10 @@ export function PlaceCard({
 export interface SegmentOption<T extends string> {
   value: T;
   label: string;
-  Icon: LucideIcon;
+  /** Optional: a segment whose vocabulary has no honest glyph renders its label
+   * alone. Settings' Units row (Imperial / Metric) is the case — every existing
+   * caller still passes one, so no shipped pill changes. */
+  Icon?: LucideIcon;
   count?: number;
 }
 
@@ -142,7 +145,7 @@ export function SegmentedControl<T extends string>({
               mono ? "px-2.5 py-[5px] font-mono text-[11px]" : "px-3.5 py-1.5 text-[13px]"
             } ${on ? "bg-rv-surface text-rv-ink shadow-rv-sm" : "bg-transparent text-rv-ink-faded"}`}
           >
-            <o.Icon className={`size-3.5 ${on ? activeIcon : "text-rv-ink-subtle"}`} />
+            {o.Icon && <o.Icon className={`size-3.5 ${on ? activeIcon : "text-rv-ink-subtle"}`} />}
             {o.label}
             {o.count != null && <span className="font-mono text-[11px] opacity-70">{o.count}</span>}
           </button>

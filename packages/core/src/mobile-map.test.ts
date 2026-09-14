@@ -182,15 +182,21 @@ describe("one shape source, three line layers, at the web's grammar", () => {
     expect(mapCode).not.toMatch(/flatMap\([^)]*a\.path/);
   });
 
-  it("words a drive's label the same two ways pins.ts does", () => {
-    expect(flat(mapCode)).toContain(
-      '[`${arc.miles} mi`, arc.primaryRoad].filter(Boolean).join(" · ")',
-    );
-    expect(flat(mapCode)).toContain("`~${arc.miles} mi · est.`");
-    expect(flat(webPins)).toContain(
-      '[`${arc.miles} mi`, arc.primaryRoad].filter(Boolean).join(" · ")',
-    );
-    expect(flat(webPins)).toContain("`~${arc.miles} mi · est.`");
+  it("words a drive's label through core's arcLabel — one implementation, not two", () => {
+    // #45: the two copies of these format strings became one. They had to: the
+    // wording now honors a units preference, and a second copy is a second
+    // place for the phone and the laptop to disagree. What is asserted is
+    // therefore the CALL, not the string — the string itself is executed in
+    // `planner/map-arcs.test.ts`, both vocabularies.
+    expect(flat(mapCode)).toContain("arcLabel(arc)");
+    expect(flat(webPins)).toContain("arcLabel(arc, units)");
+    for (const src of [mapCode, webPins]) {
+      expect(flat(src)).not.toContain("`${arc.miles} mi`");
+      expect(flat(src)).not.toContain("`~${arc.miles} mi · est.`");
+    }
+    // Both take it from core, neither re-declares it.
+    expect(flat(mapCode)).not.toMatch(/function arcLabel\(/);
+    expect(flat(webPins)).not.toMatch(/function arcLabel\(/);
   });
 });
 

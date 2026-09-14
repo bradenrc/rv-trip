@@ -22,6 +22,7 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react";
+import { convertMiles, distanceUnitLabel, type Units } from "@rv-trip/core";
 import {
   EstimateChip,
   FloatingTag,
@@ -83,6 +84,7 @@ export function RouteView({
   summary,
   costs,
   hasRig,
+  units,
   onOpenStop,
   routeDrag,
   onRowDragStart,
@@ -93,6 +95,11 @@ export function RouteView({
   legs: RouteLeg[];
   summary: RouteSummary;
   costs: boolean;
+  /** The account's display units, resolved on the server and handed down
+   * through `TripPlanner`. The rail's hero converts here, at the last moment;
+   * each drive row's label was already worded in these units by core's
+   * `driveLabel` — one screen, one vocabulary. */
+  units: Units;
   /** No rig yet = no routing input: every drive falls to a straight-line
    * estimate and the rail carries one dashed nudge. Never a blocking wizard. */
   hasRig: boolean;
@@ -364,7 +371,7 @@ export function RouteView({
         </button>
       </div>
 
-      <RouteRail summary={summary} costs={costs} hasRig={hasRig} />
+      <RouteRail summary={summary} costs={costs} hasRig={hasRig} units={units} />
     </div>
   );
 }
@@ -542,10 +549,12 @@ function RouteRail({
   summary,
   costs,
   hasRig,
+  units,
 }: {
   summary: RouteSummary;
   costs: boolean;
   hasRig: boolean;
+  units: Units;
 }) {
   return (
     <aside className="w-full md:w-[260px] md:flex-none">
@@ -555,10 +564,12 @@ function RouteRail({
           <div className={`${kicker} mb-2`}>On the road</div>
           <div className="flex items-baseline gap-1.5">
             <span className="font-mono text-[34px] font-bold leading-none text-rv-ink">
-              {summary.driveMiles || "—"}
+              {summary.driveMiles > 0 ? convertMiles(summary.driveMiles, units) : "—"}
             </span>
             {summary.driveMiles > 0 && (
-              <span className="font-mono text-[15px] font-semibold text-rv-ink-faded">mi</span>
+              <span className="font-mono text-[15px] font-semibold text-rv-ink-faded">
+                {distanceUnitLabel(units)}
+              </span>
             )}
           </div>
           <div className="mt-1 text-[12px] text-rv-ink-faded">

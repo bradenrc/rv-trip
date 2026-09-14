@@ -4,6 +4,7 @@ import type { Trip } from "../domain/types";
 import { estimateRoute, type RouteSource } from "../providers/index";
 import { routeToGeoJSON } from "../providers/polyline";
 import { driveMiles } from "../providers/route-format";
+import { convertMiles, distanceUnitLabel, DEFAULT_UNITS, type Units } from "../domain/units";
 import type { RouteMap } from "./index";
 
 /**
@@ -18,9 +19,12 @@ import type { RouteMap } from "./index";
  * Lifted out of `apps/web/src/components/map/pins.ts` in #44 so the phone's Map
  * lens and the web's `/map` overview derive their arcs from the same call: two
  * renderers, one model, no second haversine and no second cache key. `pins.ts`
- * keeps what is genuinely its own — the four-layer scoping and its label copy
- * ("136 mi · US-101" / "~108 mi · est."), which the phone's masthead words
- * differently.
+ * keeps what is genuinely its own — the four-layer scoping.
+ *
+ * The label copy joined it here in #45: the two renderers turned out to word it
+ * IDENTICALLY (`apps/mobile/src/map.tsx` said so in its own comment), and once
+ * the label has to honor a units preference a second copy of the format string
+ * is a second place for the two to disagree. See `arcLabel` below.
  *
  * Nothing here styles anything and nothing here is async: the cache-key miss
  * (you dragged a floating stop and invented a pair the server never routed)
@@ -67,4 +71,22 @@ export function tripArcs(
       path: routeToGeoJSON(result, pair.from, pair.to).coordinates,
     };
   });
+}
+
+/**
+ * A drive's map label — "136 mi · US-101" when a vendor routed it, "~108 mi ·
+ * est." when it is a straight line. A map label answers "how far", not "how
+ * long"; the connector's line (`driveLabel`) is the one that answers both.
+ *
+ * One implementation for both renderers: `apps/web/src/components/map/pins.ts`
+ * and `apps/mobile/src/map.tsx` used to hold a verbatim copy each, guarded only
+ * by a source-text assertion that the two strings matched. `units` is why that
+ * stopped being enough — the web resolves the preference on the server and
+ * passes it in, the phone has none yet and takes the default.
+ */
+export function arcLabel(arc: TripArc, units: Units = DEFAULT_UNITS): string {
+  const distance = `${convertMiles(arc.miles, units)} ${distanceUnitLabel(units)}`;
+  return arc.source === "here"
+    ? [distance, arc.primaryRoad].filter(Boolean).join(" · ")
+    : `~${distance} · est.`;
 }

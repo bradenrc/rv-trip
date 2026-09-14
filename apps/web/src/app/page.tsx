@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { Plus, PlusCircle } from "lucide-react";
-import { listTripsForOwner } from "@rv-trip/db";
+import { getPrefsByOwner, listTripsForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { TripCard } from "@/components/dashboard/TripCard";
 import { PageShell } from "@/components/nav/PageShell";
+import { unitsFromPrefs } from "@/lib/units";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,12 @@ function NewTripTile({ label = "Start a new trip" }: { label?: string }) {
 }
 
 export default async function Home() {
-  const trips = await listTripsForOwner(await getOwner());
+  const owner = await getOwner();
+  // The account's display units, read beside the owner the trips are already
+  // scoped by — `TripCard` is a server component, so this is a prop, not a
+  // hook (lib/units.ts).
+  const [trips, prefs] = await Promise.all([listTripsForOwner(owner), getPrefsByOwner(owner)]);
+  const units = unitsFromPrefs(prefs);
   const planning = trips.filter((t) => t.status === "planning");
   const upcoming = trips.filter((t) => t.status === "upcoming");
   const traveled = trips.filter((t) => t.status === "complete");
@@ -68,7 +74,7 @@ export default async function Home() {
               <SectionHead kicker="In progress" title="Planning now" />
               <div className="grid grid-cols-1 gap-4">
                 {planning.map((t) => (
-                  <TripCard key={t.id} trip={t} feature />
+                  <TripCard key={t.id} trip={t} units={units} feature />
                 ))}
               </div>
             </section>
@@ -78,7 +84,7 @@ export default async function Home() {
             <SectionHead kicker="Ahead" title="Upcoming" count={upcoming.length} />
             <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
               {upcoming.map((t) => (
-                <TripCard key={t.id} trip={t} />
+                <TripCard key={t.id} trip={t} units={units} />
               ))}
               <NewTripTile />
             </div>
@@ -93,7 +99,7 @@ export default async function Home() {
               </p>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
                 {traveled.map((t) => (
-                  <TripCard key={t.id} trip={t} />
+                  <TripCard key={t.id} trip={t} units={units} />
                 ))}
               </div>
             </section>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { CircleDashed, LocateFixed } from "lucide-react";
 import { toast } from "sonner";
 import { LOCATE_MAX_ROWS, locateToastMessage } from "@rv-trip/core";
-import type { ReservationType, RouteMap, SavedPlace, Trip } from "@rv-trip/core";
+import type { ReservationType, RouteMap, SavedPlace, Trip, Units } from "@rv-trip/core";
 import {
   CategoryTile,
   FilterChip,
@@ -55,6 +55,7 @@ export function MapOverview({
   places,
   routes,
   routingHash,
+  units,
 }: {
   trips: Trip[];
   places: SavedPlace[];
@@ -62,10 +63,13 @@ export function MapOverview({
    * because this island cannot await a vendor. */
   routes: RouteMap;
   routingHash: string;
+  /** The account's display units, resolved on the server (map/page.tsx). It
+   * reaches exactly one thing: the distance in each arc's label. */
+  units: Units;
 }) {
   const model = useMemo(
-    () => buildMapModel(trips, places, routes, routingHash),
-    [trips, places, routes, routingHash],
+    () => buildMapModel(trips, places, routes, routingHash, units),
+    [trips, places, routes, routingHash, units],
   );
   const [layers, setLayers] = useState<Set<MapLayer>>(() => new Set(LAYER_ORDER));
   const [cat, setCat] = useState<CatFilter>("All");
