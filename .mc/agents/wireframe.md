@@ -81,52 +81,22 @@ gap pass through.
 
 ## Sign-off contract — how your artifact talks to the engine
 
-A **visible overall-comments `<textarea>`** at the very bottom, then the action buttons
-directly under it, POSTing JSON to the **relative** url `answers`. **Read the comment from the
-textarea — NEVER `prompt()`** (the artifact renders in a sandboxed glass iframe, which BLOCKS
-`prompt()`, so the re-work comment would be lost and Braden couldn't respond):
+## No sign-off gate — the wireframe RESOLVES and the pipeline moves (2026-09-15)
 
-The submit is **one-shot** — a double-click must fire exactly ONE verdict: a `submitted` flag
-locks all three buttons the instant any is pressed. (A stray 2nd verdict lands on the NEXT
-gate and bounces the issue backward; the engine drops it, but the sign-off must not fire it
-in the first place.)
-
-```js
-const comment = () => document.getElementById('rework-comment').value || '';
-let submitted = false; // one-shot verdict guard
-const post = (intent, extra) => {
-  if (submitted) return; // debounce: fire ONE verdict
-  submitted = true;
-  signoffBtn.disabled = reworkBtn.disabled = refineBtn.disabled = true; // lock all three
-  return fetch('answers', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ intent, ...extra }),
-  });
-};
-signoffBtn.onclick = () => post('signoff', {}); // approve → vet
-reworkBtn.onclick = () => post('refine', { route: 'mock', notes: { general: comment() } });
-refineBtn.onclick = () => post('refine', { route: 'wireframe', notes: { general: comment() } });
-```
-
-`notes` is a DICT (the engine reads it + threads it back verbatim to the re-work). Refine/Rework
-submit **UNCONDITIONALLY** — a re-work with a comment (or none) always sends.
-
-- **Sign off ✓** → `intent:'signoff'` (no route) — approves.
-- **Review · Refine → two reject choices**, each carrying the `#rework-comment` textarea VERBATIM:
-  - **Rework the direction** → `intent:'refine', route:'mock'` (needs deeper clarification)
-  - **Refine this wireframe** → `intent:'refine', route:'wireframe'` (notes are enough)
-
-> **HARD RULE (non-negotiable).** The artifact's final two elements, in this exact order, are
-> (1) the `#rework-comment` textarea, then (2) the Sign off / Refine buttons — nothing after
-> them. Braden must ALWAYS be able to type a comment and hit Refine/Rework. `prompt()` is
-> forbidden. If he can't respond-to-rework, the wireframe is broken.
+The signoff gate was RETIRED (Braden, 2026-09-15): 176 approvals to 3 rejections — all three
+pre-Aug-10, all three survey-shaped — made it a rubber stamp costing ~375h of parked
+pipeline. Your wireframe is now a PURE STATIC ARTIFACT: no buttons, no textarea, no POST, no
+`<script>` at all. The next gate is VET, which mechanically pressure-tests your wireframe
+against the answered survey — the survey answers ARE the design decision, and you render
+them; you do not re-ask and you do not await a human. Pixel-level operator feedback, when it
+ever comes, arrives as a walk-reject or a `reset_to_gate` — both re-enter this gate with
+notes threaded back to you.
 
 ## No questions — the wireframe RESOLVES, it never asks
 
-The mock already collected every answer. The wireframe renders ONE resolved design; its only
-interactive controls are the Sign off / Refine buttons **and the single `#rework-comment`
-textarea** — **no `<input>`, no radios, no option cards, no survey questions.** You are past
+The mock already collected every answer. The wireframe renders ONE resolved design; it has
+**NO interactive controls at all** — no buttons, no textarea, no `<input>`, no radios, no
+option cards, no survey questions.** You are past
 the deciding; you are drawing the decided thing (the textarea is the re-work channel, not a
 question).
 
