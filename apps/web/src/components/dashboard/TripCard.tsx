@@ -16,6 +16,7 @@ import {
   Mountain,
   type LucideIcon,
 } from "lucide-react";
+import { convertMiles, distanceUnitLabel, type Units } from "@rv-trip/core";
 import { EstimateChip, Stars } from "@rv-trip/ui";
 import type { TripSummary } from "@rv-trip/db";
 import { fullRange } from "@/lib/trip-ui";
@@ -84,7 +85,17 @@ function TripCover({ id, complete, h }: { id: string; complete: boolean; h: numb
   );
 }
 
-export function TripCard({ trip, feature = false }: { trip: TripSummary; feature?: boolean }) {
+export function TripCard({
+  trip,
+  units,
+  feature = false,
+}: {
+  trip: TripSummary;
+  /** The account's display units, resolved on the server (app/page.tsx). The
+   * card is itself a server component, so this is a plain prop, never a hook. */
+  units: Units;
+  feature?: boolean;
+}) {
   const complete = trip.status === "complete";
   return (
     <Link
@@ -131,7 +142,7 @@ export function TripCard({ trip, feature = false }: { trip: TripSummary; feature
               back to a straight line, the card says so beside it rather than
               presenting a chord as a road distance. */}
           <Chip Icon={Caravan}>
-            {trip.miles} mi
+            {convertMiles(trip.miles, units)} {distanceUnitLabel(units)}
             {trip.milesEstimated && <EstimateChip />}
           </Chip>
           {!complete && trip.open > 0 && (

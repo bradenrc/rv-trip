@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import { PageShell } from "./PageShell";
 
 /** Titled empty state for routes scaffolded but not yet designed. */
 export function StubPage({
@@ -13,7 +14,7 @@ export function StubPage({
   Icon: LucideIcon;
 }) {
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
         {kicker}
       </div>
@@ -27,6 +28,6 @@ export function StubPage({
           Coming soon
         </span>
       </div>
-    </main>
+    </PageShell>
   );
 }

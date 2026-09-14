@@ -1,6 +1,16 @@
 import { eq, and, inArray, max, sql } from "drizzle-orm";
 import { db } from "./index";
-import { legs, stops, ideas, reservations, trips, rigs, routes, savedPlaces } from "./schema";
+import {
+  legs,
+  stops,
+  ideas,
+  reservations,
+  trips,
+  rigs,
+  routes,
+  savedPlaces,
+  userPrefs,
+} from "./schema";
 import type {
   Idea,
   Leg,
@@ -18,12 +28,15 @@ import type {
   SavedPlaceCreate,
   SavedPlacePatch,
   TripStatus,
+  UserPrefs,
+  UserPrefsPatch,
 } from "@rv-trip/core";
 import {
   mapIdea,
   mapLeg,
   mapReservation,
   mapStop,
+  mapPrefsRow,
   mapRigRow,
   mapSavedPlaceRow,
 } from "./queries";
@@ -555,6 +568,32 @@ export async function upsertRig(owner: string, input: RigProfileInput): Promise<
     })
     .returning();
   return mapRigRow(row!);
+}
+
+/**
+ * Save the account's preferences — insert on the first choice ever made, update
+ * thereafter. Same single-statement upsert as `upsertRig`; here `owner_id` is
+ * the primary key, so that is what the conflict targets.
+ *
+ * The input is a PARTIAL and is treated as one: only the keys actually present
+ * are written. That matters because every setter PUTs exactly one field — if
+ * the `set` clause listed all four, toggling the theme would write `null` over
+ * a units choice made on another device one round-trip earlier.
+ */
+export async function upsertPrefs(owner: string, patch: UserPrefsPatch): Promise<UserPrefs> {
+  const values: UserPrefsPatch = {};
+  for (const key of ["theme", "units", "mapStyle", "trackCosts"] as const) {
+    if (patch[key] !== undefined) Object.assign(values, { [key]: patch[key] });
+  }
+  const [row] = await db
+    .insert(userPrefs)
+    .values({ ownerId: owner, ...values })
+    .onConflictDoUpdate({
+      target: userPrefs.ownerId,
+      set: { ...values, updatedAt: new Date() },
+    })
+    .returning();
+  return mapPrefsRow(row!);
 }
 
 /**

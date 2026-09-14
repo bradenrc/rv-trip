@@ -10,7 +10,7 @@ import {
   todayIso,
 } from "@rv-trip/core";
 import { db } from "./index";
-import { trips, legs, stops, savedPlaces, rigs, routes } from "./schema";
+import { trips, legs, stops, savedPlaces, rigs, routes, userPrefs } from "./schema";
 import type {
   IsoDate,
   Trip,
@@ -25,6 +25,7 @@ import type {
   RigProfile,
   RouteResult,
   TripSummary,
+  UserPrefs,
 } from "@rv-trip/core";
 
 /**
@@ -435,6 +436,38 @@ export function mapRigRow(row: {
     lengthMeters: Number(row.lengthMeters),
     grossWeightKg: Number(row.grossWeightKg),
     propaneOnBoard: row.propaneOnBoard,
+  };
+}
+
+// ── preferences ────────────────────────────────────────────────────────────
+/**
+ * The account's preference row, or null when nothing has ever been chosen —
+ * the same "null is a real state" shape as `getRigByOwner`. Every caller
+ * already has a product default (dark, imperial, day, costs off), so a null row
+ * and a row of nulls mean the same thing and neither needs a backfill.
+ */
+export async function getPrefsByOwner(ownerId: string): Promise<UserPrefs | null> {
+  const row = await db.query.userPrefs.findFirst({ where: eq(userPrefs.ownerId, ownerId) });
+  return row ? mapPrefsRow(row) : null;
+}
+
+/** `updated_at` is a Date off the driver; the API contract is JSON, so it
+ * leaves here as an ISO string rather than as whatever a serializer guesses. */
+export function mapPrefsRow(row: {
+  ownerId: string;
+  theme: string | null;
+  units: string | null;
+  mapStyle: string | null;
+  trackCosts: boolean | null;
+  updatedAt: Date;
+}): UserPrefs {
+  return {
+    ownerId: row.ownerId,
+    theme: row.theme,
+    units: row.units,
+    mapStyle: row.mapStyle,
+    trackCosts: row.trackCosts,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 

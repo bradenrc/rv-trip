@@ -13,8 +13,10 @@ import {
   kilogramsToPounds,
   type RigProfile,
   type RigType,
+  type Units,
 } from "@rv-trip/core";
 import { FieldLabel, SegmentedControl } from "@rv-trip/ui";
+import { PageShell } from "@/components/nav/PageShell";
 import { Input } from "@/components/ui/input";
 import { tripApi } from "@/lib/trip-api";
 
@@ -26,22 +28,40 @@ import { tripApi } from "@/lib/trip-api";
  * every field stays freely editable: the preset is a head start, never a lock,
  * and the class itself is never stored (G5 — RigProfile.type has two values,
  * the class picker has four). Imperial in, metric stored, centimetres out.
+ *
+ * `units` (issue #45 item 5) changes only what you TYPE. In imperial the fields
+ * are feet + inches and pounds and the form converts on the way in, exactly as
+ * it shipped. In metric they are metres and kilograms — and metric converts
+ * NOTHING, because `rig.ts` already stores metres at millimetre precision and
+ * kilograms outright. The vendor boundary (whole centimetres / kilograms,
+ * always UP) is unchanged in both: it is a safety rule, not a display one.
  */
 
+/** One dimension as typed. `ft`/`inch` are the imperial pair; `m` is the metric
+ * single field. Only one side is ever filled — `units` says which. */
 interface Dim {
   ft: string;
   inch: string;
+  m: string;
 }
 
-const BLANK: Dim = { ft: "", inch: "" };
+const BLANK: Dim = { ft: "", inch: "", m: "" };
 
-function toDim(meters: number | undefined): Dim {
+function toDim(meters: number | undefined, units: Units): Dim {
   if (meters == null) return BLANK;
+  // Metric shows the STORED number, untrimmed: 11'6" is exactly 3.5052 m, and
+  // rounding it to 3.51 for display would drift the value on the next save.
+  if (units === "metric") return { ...BLANK, m: String(meters) };
   const { feet, inches } = metersToFeetInches(meters);
-  return { ft: String(feet), inch: String(inches) };
+  return { ft: String(feet), inch: String(inches), m: "" };
 }
 
-function dimMeters(d: Dim): number | null {
+function dimMeters(d: Dim, units: Units): number | null {
+  if (units === "metric") {
+    if (d.m === "") return null;
+    const m = Number(d.m);
+    return Number.isFinite(m) && m > 0 ? m : null;
+  }
   if (d.ft === "" && d.inch === "") return null;
   const ft = Number(d.ft || 0);
   const inch = Number(d.inch || 0);
@@ -50,21 +70,28 @@ function dimMeters(d: Dim): number | null {
   return meters > 0 ? meters : null;
 }
 
-function poundsValue(lb: string): number | null {
-  if (lb === "") return null;
-  const n = Number(lb.replace(/,/g, ""));
-  return Number.isFinite(n) && n > 0 ? n : null;
+/** The weight field as typed — pounds in imperial, kilograms in metric — as the
+ * kilograms the schema stores. Metric converts nothing. */
+function weightKilograms(value: string, units: Units): number | null {
+  if (value === "") return null;
+  const n = Number(value.replace(/,/g, ""));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return units === "metric" ? n : poundsToKilograms(n);
 }
 
-export function RigForm({ rig }: { rig: RigProfile | null }) {
+/** The inverse, for a stored rig and for a preset. */
+function weightField(kg: number, units: Units): string {
+  return units === "metric" ? String(kg) : String(kilogramsToPounds(kg));
+}
+
+export function RigForm({ rig, units }: { rig: RigProfile | null; units: Units }) {
+  const metric = units === "metric";
   const [name, setName] = useState(rig?.name ?? "");
   const [type, setType] = useState<RigType>(rig?.type ?? "motorhome");
-  const [height, setHeight] = useState<Dim>(toDim(rig?.heightMeters));
-  const [length, setLength] = useState<Dim>(toDim(rig?.lengthMeters));
-  const [width, setWidth] = useState<Dim>(toDim(rig?.widthMeters));
-  const [pounds, setPounds] = useState(
-    rig ? String(kilogramsToPounds(rig.grossWeightKg)) : "",
-  );
+  const [height, setHeight] = useState<Dim>(toDim(rig?.heightMeters, units));
+  const [length, setLength] = useState<Dim>(toDim(rig?.lengthMeters, units));
+  const [width, setWidth] = useState<Dim>(toDim(rig?.widthMeters, units));
+  const [weight, setWeight] = useState(rig ? weightField(rig.grossWeightKg, units) : "");
   const [propane, setPropane] = useState(rig?.propaneOnBoard ?? false);
   const [presetId, setPresetId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -74,23 +101,23 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
     const values = RIG_PRESETS.find((p) => p.id === id)?.values;
     if (!values) return; // "Something else" fills nothing and decides no type.
     setType(values.type);
-    setHeight(toDim(values.heightMeters));
-    setLength(toDim(values.lengthMeters));
-    setWidth(toDim(values.widthMeters));
-    setPounds(String(kilogramsToPounds(values.grossWeightKg)));
+    setHeight(toDim(values.heightMeters, units));
+    setLength(toDim(values.lengthMeters, units));
+    setWidth(toDim(values.widthMeters, units));
+    setWeight(weightField(values.grossWeightKg, units));
     setPropane(values.propaneOnBoard);
   };
 
-  const heightMeters = dimMeters(height);
-  const lengthMeters = dimMeters(length);
-  const widthMeters = dimMeters(width);
-  const lb = poundsValue(pounds);
+  const heightMeters = dimMeters(height, units);
+  const lengthMeters = dimMeters(length, units);
+  const widthMeters = dimMeters(width, units);
+  const grossWeightKg = weightKilograms(weight, units);
   const complete =
     name.trim() !== "" &&
     heightMeters !== null &&
     lengthMeters !== null &&
     widthMeters !== null &&
-    lb !== null;
+    grossWeightKg !== null;
 
   const save = async () => {
     if (!complete || saving) return;
@@ -102,7 +129,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
         heightMeters: heightMeters!,
         widthMeters: widthMeters!,
         lengthMeters: lengthMeters!,
-        grossWeightKg: poundsToKilograms(lb!),
+        grossWeightKg: grossWeightKg!,
         propaneOnBoard: propane,
       });
       toast.success("Rig saved.");
@@ -114,7 +141,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <div className="max-w-[760px]">
         <div className="mb-1.5 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
           Profile
@@ -181,26 +208,49 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
           </div>
 
           <div className="mt-[14px] grid grid-cols-1 gap-[14px] sm:grid-cols-2">
-            <DimField label="Height" value={height} onChange={setHeight} meters={heightMeters} />
-            <DimField label="Length" value={length} onChange={setLength} meters={lengthMeters} />
-            <DimField label="Width" value={width} onChange={setWidth} meters={widthMeters} />
+            <DimField
+              label="Height"
+              value={height}
+              onChange={setHeight}
+              meters={heightMeters}
+              units={units}
+            />
+            <DimField
+              label="Length"
+              value={length}
+              onChange={setLength}
+              meters={lengthMeters}
+              units={units}
+            />
+            <DimField
+              label="Width"
+              value={width}
+              onChange={setWidth}
+              meters={widthMeters}
+              units={units}
+            />
             <div>
               <FieldLabel>Gross weight</FieldLabel>
               <div className="mt-1.5">
                 <NumberBox>
                   <UnitInput
-                    value={pounds}
-                    onChange={setPounds}
+                    value={weight}
+                    onChange={setWeight}
                     width="w-16"
-                    label="Gross weight in pounds"
+                    label={metric ? "Gross weight in kilograms" : "Gross weight in pounds"}
                   />
-                  <span className="text-rv-ink-faded">lb</span>
+                  <span className="text-rv-ink-faded">{metric ? "kg" : "lb"}</span>
                 </NumberBox>
               </div>
-              {lb !== null && (
+              {grossWeightKg !== null && (
                 <Hint>
-                  = {poundsToKilograms(lb).toLocaleString("en-US", { minimumFractionDigits: 2 })} kg
-                  stored · sent as {kilogramsToVendorKg(poundsToKilograms(lb)).toLocaleString("en-US")} kg
+                  {!metric && (
+                    <>
+                      = {grossWeightKg.toLocaleString("en-US", { minimumFractionDigits: 2 })} kg
+                      stored ·{" "}
+                    </>
+                  )}
+                  sent as {kilogramsToVendorKg(grossWeightKg).toLocaleString("en-US")} kg
                 </Hint>
               )}
             </div>
@@ -236,7 +286,7 @@ export function RigForm({ rig }: { rig: RigProfile | null }) {
           </div>
         </div>
       </div>
-    </main>
+    </PageShell>
   );
 }
 
@@ -245,36 +295,57 @@ function DimField({
   value,
   onChange,
   meters,
+  units,
 }: {
   label: string;
   value: Dim;
   onChange: (d: Dim) => void;
   meters: number | null;
+  units: Units;
 }) {
+  const metric = units === "metric";
   return (
     <div>
       <FieldLabel>{label}</FieldLabel>
       <div className="mt-1.5">
         <NumberBox>
-          <UnitInput
-            value={value.ft}
-            onChange={(ft) => onChange({ ...value, ft })}
-            width="w-8"
-            label={`${label} in feet`}
-          />
-          <span className="text-rv-ink-faded">ft</span>
-          <UnitInput
-            value={value.inch}
-            onChange={(inch) => onChange({ ...value, inch })}
-            width="w-8"
-            label={`${label} in inches`}
-          />
-          <span className="text-rv-ink-faded">in</span>
+          {metric ? (
+            <>
+              <UnitInput
+                value={value.m}
+                onChange={(m) => onChange({ ...value, m })}
+                width="w-16"
+                label={`${label} in metres`}
+              />
+              <span className="text-rv-ink-faded">m</span>
+            </>
+          ) : (
+            <>
+              <UnitInput
+                value={value.ft}
+                onChange={(ft) => onChange({ ...value, ft })}
+                width="w-8"
+                label={`${label} in feet`}
+              />
+              <span className="text-rv-ink-faded">ft</span>
+              <UnitInput
+                value={value.inch}
+                onChange={(inch) => onChange({ ...value, inch })}
+                width="w-8"
+                label={`${label} in inches`}
+              />
+              <span className="text-rv-ink-faded">in</span>
+            </>
+          )}
         </NumberBox>
       </div>
       {meters !== null && (
         <Hint>
-          = {meters.toFixed(4)} m stored · sent as {metersToVendorCm(meters)} cm
+          {/* Metric converts nothing — what you typed IS what is stored — so the
+              hint carries only the vendor boundary, which is a safety rule and
+              not a display one. */}
+          {!metric && <>= {meters.toFixed(4)} m stored · </>}
+          sent as {metersToVendorCm(meters)} cm
         </Hint>
       )}
     </div>

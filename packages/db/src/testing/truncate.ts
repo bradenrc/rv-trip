@@ -1,6 +1,16 @@
 import { sql } from "drizzle-orm";
 import { db } from "../index";
-import { ideas, legs, reservations, rigs, routes, savedPlaces, stops, trips } from "../schema";
+import {
+  ideas,
+  legs,
+  reservations,
+  rigs,
+  routes,
+  savedPlaces,
+  stops,
+  trips,
+  userPrefs,
+} from "../schema";
 
 /**
  * The reset between tests: every table, ONE statement, identity reset.
@@ -20,6 +30,6 @@ import { ideas, legs, reservations, rigs, routes, savedPlaces, stops, trips } fr
  */
 export async function truncateAll(): Promise<void> {
   await db.execute(
-    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs}, ${routes} restart identity cascade`,
+    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs}, ${routes}, ${userPrefs} restart identity cascade`,
   );
 }

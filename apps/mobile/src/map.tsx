@@ -8,6 +8,7 @@ import {
   DEFAULT_STYLE_MODE,
   MAP_PALETTE,
   arcFeatureCollection,
+  arcLabel,
   isStyleMode,
   mapBounds,
 } from "@rv-trip/core";
@@ -278,22 +279,13 @@ export function arcLayerStyles(palette: OverlayPalette): {
 }
 
 /**
- * A drive's mileage label — "118 mi · US-101" routed, "~98 mi · est." otherwise.
- * A map label answers "how far", not "how long".
+ * `arcLabel` — "118 mi · US-101" routed, "~98 mi · est." otherwise — is core's
+ * (`planner/map-arcs.ts`), shared verbatim with the web's `/map` overview. It
+ * used to be a deliberate second copy of two format strings here, guarded only
+ * by a source-text assertion in `mobile-map.test.ts`; #45 made the wording
+ * units-aware, and one implementation is the only way the two stay identical.
+ * The phone has no units preference of its own yet, so it takes the default.
  *
- * The same two forms `apps/web/src/components/map/pins.ts:253-256` composes.
- * The copy stayed at the renderers rather than moving into core's `TripArc`
- * (#44 i3) on the premise that the phone would word it differently; the signed
- * wireframe draws it identically, so this is a deliberate second copy of two
- * format strings, flagged in dev-notes rather than quietly forked.
- */
-function arcLabel(arc: TripArc): string {
-  return arc.source === "here"
-    ? [`${arc.miles} mi`, arc.primaryRoad].filter(Boolean).join(" · ")
-    : `~${arc.miles} mi · est.`;
-}
-
-/**
  * Where that label sits, as `[lng, lat]`. A routed drive labels its corridor's
  * MIDDLE VERTEX — on the road, where the line actually runs; an estimate labels
  * the chord midpoint, because its path is two points. MapView.tsx:305-310.

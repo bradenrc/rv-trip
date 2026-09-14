@@ -1,18 +1,30 @@
 import { NO_ROUTING_HASH, type RouteMap } from "@rv-trip/core";
-import { getRigByOwner, listSavedPlacesForOwner, listTripsWithStopsForOwner } from "@rv-trip/db";
+import {
+  getPrefsByOwner,
+  getRigByOwner,
+  listSavedPlacesForOwner,
+  listTripsWithStopsForOwner,
+} from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { routeTrip } from "@/lib/routing";
 import { MapOverview } from "@/components/map/MapOverview";
+import { PageShell } from "@/components/nav/PageShell";
+import { unitsFromPrefs } from "@/lib/units";
 
 export const dynamic = "force-dynamic";
 
 export default async function MapPage() {
   const owner = await getOwner();
-  const [trips, places, rig] = await Promise.all([
+  const [trips, places, rig, prefs] = await Promise.all([
     listTripsWithStopsForOwner(owner),
     listSavedPlacesForOwner(owner),
     getRigByOwner(owner),
+    getPrefsByOwner(owner),
   ]);
+  // The account's display units, read beside the owner it is already scoped by
+  // — so the arc labels render in the right unit with no flash and no island
+  // has to become a preference consumer (lib/units.ts).
+  const units = unitsFromPrefs(prefs);
 
   // The same seam trips/[id]/page.tsx already uses: HERE is server-side only,
   // so every drive is resolved HERE, before render, and handed down as one
@@ -26,7 +38,7 @@ export default async function MapPage() {
   const routingHash = routed[0]?.routingHash ?? NO_ROUTING_HASH;
 
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
         Overview
       </div>
@@ -43,7 +55,8 @@ export default async function MapPage() {
         places={places}
         routes={routes}
         routingHash={routingHash}
+        units={units}
       />
-    </main>
+    </PageShell>
   );
 }

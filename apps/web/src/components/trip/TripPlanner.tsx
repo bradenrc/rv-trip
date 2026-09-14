@@ -91,9 +91,11 @@ import {
   type RouteMap,
   type TimelineGap,
 } from "@/lib/trip-logic";
+import type { Units } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { fullRange, monthDay } from "@/lib/trip-ui";
 import { useBooleanPref } from "@/lib/pref";
+import { PrefSwitch } from "@/components/ui/pref-switch";
 import { InlineText } from "@/components/ui/inline-text";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -147,6 +149,7 @@ export function TripPlanner({
   routingHash,
   nav = {},
   hasRig,
+  units,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -163,6 +166,10 @@ export function TripPlanner({
    */
   nav?: NavMap;
   hasRig: boolean;
+  /** The account's display units, resolved on the server (trips/[id]/page.tsx).
+   * It reaches two places: every drive row's label, worded by core's
+   * `driveLabel` inside `routeModel`, and the rail's 34px hero. */
+  units: Units;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
@@ -230,8 +237,8 @@ export function TripPlanner({
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
   const route = useMemo(
-    () => routeModel(trip, routes, routingHash, nav),
-    [trip, routes, routingHash, nav],
+    () => routeModel(trip, routes, routingHash, nav, units),
+    [trip, routes, routingHash, nav, units],
   );
   const summary = useMemo(
     () => routeSummary(trip, routes, routingHash),
@@ -697,7 +704,7 @@ export function TripPlanner({
 
   return (
     <div className="min-h-screen bg-rv-surface-alt font-sans text-rv-ink">
-      <div className="mx-auto max-w-[1240px] px-6 py-8">
+      <div className="mx-auto max-w-[1240px] px-4 py-6 md:px-6 md:py-8">
         {/* Masthead */}
         <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
           <div className="min-w-0">
@@ -705,12 +712,12 @@ export function TripPlanner({
               <Compass className="size-3.5" />
               <span>RV Trip Hub · Trip Planner</span>
             </div>
-            <h1 className="m-0 mb-2.5 text-[44px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
+            <h1 className="m-0 mb-2.5 text-[28px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink md:text-[44px]">
               <InlineText
                 value={trip.title}
                 onSave={renameTrip}
                 label="Rename trip"
-                className="text-[44px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink"
+                className="text-[28px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink md:text-[44px]"
               />
             </h1>
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[15px] text-rv-ink-muted">
@@ -745,8 +752,8 @@ export function TripPlanner({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="inline-flex rounded-rv-pill border border-rv-border bg-rv-surface p-[3px]">
+          <div className="flex w-full flex-wrap items-center gap-3 md:w-auto">
+            <div className="inline-flex flex-1 rounded-rv-pill border border-rv-border bg-rv-surface p-[3px] md:flex-none">
               <ToggleTab active={lens === "route"} onClick={() => setLens("route")}>
                 <Route className="size-4" />
                 Route
@@ -756,7 +763,7 @@ export function TripPlanner({
                 Timeline
               </ToggleTab>
             </div>
-            <CostSwitch checked={costTracking} onChange={changeCostTracking} />
+            <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
             {/* The masthead has no leg in hand, so it appends to the LAST one —
                 the same "goes on the end" rule every create here follows. A
                 trip always has a leg: createTrip seeds "Leg 1". */}
@@ -767,7 +774,7 @@ export function TripPlanner({
                 if (legId) void addStop(legId);
               }}
               disabled={trip.legs.length === 0}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
+              className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
             >
               <Plus className="size-4" />
               Add stop
@@ -783,6 +790,7 @@ export function TripPlanner({
             summary={summary}
             costs={costTracking}
             hasRig={hasRig}
+            units={units}
             onOpenStop={openStop}
             routeDrag={routeDrag}
             actions={{
@@ -1402,32 +1410,6 @@ function StopDatesFields({
 
 function Dot() {
   return <span className="size-[3px] rounded-full bg-rv-ink-subtle" />;
-}
-
-function CostSwitch({ checked, onChange }: { checked: boolean; onChange: (on: boolean) => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      onClick={() => onChange(!checked)}
-      className="inline-flex cursor-pointer items-center gap-2 border-none bg-transparent p-0"
-    >
-      <span className={`text-[13px] font-semibold ${checked ? "text-rv-ink" : "text-rv-ink-faded"}`}>
-        Track costs
-      </span>
-      <span
-        className={`relative h-[22px] w-[38px] flex-none rounded-full transition-colors ${
-          checked ? "bg-rv-green" : "bg-rv-border-hi"
-        }`}
-      >
-        <span
-          className="absolute top-0.5 size-[18px] rounded-full bg-white shadow-[0_1px_2px_rgba(0,0,0,.2)] transition-[left]"
-          style={{ left: checked ? 18 : 2 }}
-        />
-      </span>
-    </button>
-  );
 }
 
 function ToggleTab({
