@@ -1,6 +1,16 @@
 import { asc, count, eq, sql } from "drizzle-orm";
 import { db } from "../index";
-import { ideas, legs, reservations, rigs, routes, savedPlaces, stops, trips } from "../schema";
+import {
+  ideas,
+  legs,
+  reservations,
+  rigs,
+  routes,
+  savedPlaces,
+  stops,
+  trips,
+  userPrefs,
+} from "../schema";
 
 /**
  * Typed fixture factories over the real schema — the rows the API integration
@@ -30,6 +40,7 @@ export type ReservationRow = typeof reservations.$inferSelect;
 export type SavedPlaceRow = typeof savedPlaces.$inferSelect;
 export type RigRow = typeof rigs.$inferSelect;
 export type RouteRow = typeof routes.$inferSelect;
+export type UserPrefsRow = typeof userPrefs.$inferSelect;
 
 /** A stop the route helpers accept: `routeCacheKey`/`estimateRoute` want
  * non-nullable lat/lng, and `stops.lat`/`lng` are nullable columns. */
@@ -344,8 +355,31 @@ async function ageCachedRoute(key: string, days: number): Promise<void> {
     .where(eq(routes.key, key));
 }
 
+/** A `user_prefs` row. Every preference is optional — omitting one is the
+ * "never chosen" null the product default falls back to. */
+async function insertPrefs(p: {
+  owner?: string;
+  theme?: string | null;
+  units?: string | null;
+  mapStyle?: string | null;
+  trackCosts?: boolean | null;
+}): Promise<UserPrefsRow> {
+  const [row] = await db
+    .insert(userPrefs)
+    .values({
+      ownerId: p.owner ?? DEV_OWNER,
+      theme: p.theme ?? null,
+      units: p.units ?? null,
+      mapStyle: p.mapStyle ?? null,
+      trackCosts: p.trackCosts ?? null,
+    })
+    .returning();
+  return row!;
+}
+
 export const fx = {
   trip: insertTrip,
+  prefs: insertPrefs,
   /** Backdate a cached route, so the 30-day TTL can be read from both sides. */
   ageCachedRoute,
   leg: insertLeg,
@@ -452,6 +486,19 @@ export const read = {
   },
   async countRigs(owner: string): Promise<number> {
     const [row] = await db.select({ n: count() }).from(rigs).where(eq(rigs.ownerId, owner));
+    return Number(row!.n);
+  },
+  /** The ROW, not the payload: only here can a null column be told apart from
+   * a column the mapper simply dropped. */
+  async prefsRow(owner: string): Promise<UserPrefsRow | null> {
+    const [row] = await db.select().from(userPrefs).where(eq(userPrefs.ownerId, owner));
+    return row ?? null;
+  },
+  async countPrefs(owner: string): Promise<number> {
+    const [row] = await db
+      .select({ n: count() })
+      .from(userPrefs)
+      .where(eq(userPrefs.ownerId, owner));
     return Number(row!.n);
   },
 };

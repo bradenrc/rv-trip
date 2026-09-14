@@ -4,6 +4,7 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { Nav } from "@/components/nav/Nav";
+import { PrefSync } from "@/components/nav/PrefSync";
 import { ClerkProvider } from "@clerk/nextjs";
 import { clerkEnabled } from "@/lib/owner";
 
@@ -67,6 +68,10 @@ export default function RootLayout({
         {/* Clerk only when configured (#26): keyless local dev and the mc
             pipeline's walks run as the dev-user stub with no provider at all. */}
         <MaybeClerk>
+          {/* Adopts the account's saved preferences after first paint. Inside
+              MaybeClerk so its GET carries whatever session there is; renders
+              nothing, and never touches the no-FOUC answer above. */}
+          <PrefSync />
           <TooltipProvider>
             <Nav />
             {children}
