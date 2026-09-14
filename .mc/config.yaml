@@ -19,8 +19,11 @@ auto_merge: true # walked + trusted before ship → auto-merge when checks pass 
 poll: false
 # Two projects, one machine: btrip holds channel 8789 + glass 8730. rv-trip claims 8790 + 8731.
 # channel_port must match MC_CHANNEL_PORT in .mcp.json's `mc` server entry; the glass port is
-# given on the CLI (`mc up . --port 8731 --no-poll`).
+# `glass_port` below (mc-dev #135) — `mc up/down/status <DIR>` reads it from here, so no call
+# needs `--port`, and a bare call can no longer address btrip's daemon. If a bare `mc up` ever
+# refuses naming btrip, this line went missing.
 channel_port: 8790
+glass_port: 8731
 # Engine-worktree env provisioning (mc-dev #83/#104): gitignored env files copied 0600
 # into every dispatch + ship worktree behind the engine's check-ignore guard. next dev
 # reads apps/web/.env.local; root .env feeds the drizzle CLIs (issue-3 walk postmortem).

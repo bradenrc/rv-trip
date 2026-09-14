@@ -15,8 +15,9 @@ preflight, an env sync) — decline it; this session has exactly one job.
 it carries `.mc/config.yaml`). `mc` is a global command.
 
 **rv-trip's ports** (btrip holds the defaults): glass **8731**, channel
-**8790**. Every `mc up`/`down`/`status`/`glass` call below MUST carry
-`--port 8731` — a bare call targets 8730 and talks to btrip's daemon.
+**8790**. Both live in config — `glass_port: 8731` in `.mc/config.yaml` — so
+`mc up`/`down`/`status <DIR>` need no `--port` flag (mc-dev #135). If a bare
+`mc up` ever REFUSES naming btrip and rv-trip, that config line is missing.
 
 ## 0 · One-time per machine: register the channel server
 
@@ -61,7 +62,7 @@ that matter most:
 ## 2 · Ensure the daemon (this serves the glass too)
 
 ```bash
-mc status <DIR> --port 8731
+mc status <DIR>
 ```
 
 Not running → bring it up (the glass is served BY the daemon; there is no
@@ -69,13 +70,13 @@ separate glass process). The daemon must run as the **bradenrc** gh identity
 (keyring) — GH_TOKEN=btrip-bot cannot see board bradenrc/projects/6:
 
 ```bash
-env -u GH_TOKEN mc up <DIR> --port 8731 --no-poll
+env -u GH_TOKEN mc up <DIR> --no-poll
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8731/   # expect 200
 ```
 
 If `mc up` reports "already running — attached", it did NOT restart: a code
 change in mc-dev needs `git -C /Users/braden/temp/mc-dev pull` then
-`mc down <DIR> --port 8731 && env -u GH_TOKEN mc up <DIR> --port 8731 --no-poll`.
+`mc down <DIR> && env -u GH_TOKEN mc up <DIR> --no-poll`.
 If port 8731 is held with no tracked pid, inspect
 (`lsof -iTCP:8731 -sTCP:LISTEN`), verify the command line is
 `mc.cli serve <DIR>`, kill it, then `mc up`.
