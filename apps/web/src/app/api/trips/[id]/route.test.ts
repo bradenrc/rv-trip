@@ -11,6 +11,56 @@ import { ctx, describeDb, req } from "@/test/db";
  * DELETE, whose damage is the cascade rather than the row.
  */
 describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
+  /**
+   * #60 Q4 → B, end to end. `homeBasePlace` is one object on the wire and three
+   * nullable columns underneath, and `getTripById` has to read them back — the
+   * half without which `trip.homeBasePlace` is silently always null and the
+   * first stop of a leg gets no search bias at all.
+   */
+  it("round-trips the home-base ANCHOR, not just the name", async () => {
+    const trip = await fx.trip({ owner: DEV_OWNER, homeBase: "Boise, ID" });
+
+    const res = await PATCH(
+      req(
+        {
+          homeBase: "Bend, OR",
+          homeBasePlace: {
+            name: "Bend, OR",
+            lat: 44.0582,
+            lng: -121.3153,
+            googlePlaceId: "ChIJbend",
+          },
+        },
+        "PATCH",
+      ),
+      ctx(trip.id),
+    );
+    expect(res.status).toBe(204);
+
+    const row = (await read.trip(trip.id))!;
+    expect(row.homeBase).toBe("Bend, OR");
+    expect(row.homeBaseLat).toBe(44.0582);
+    expect(row.homeBaseLng).toBe(-121.3153);
+    expect(row.homeBasePlaceId).toBe("ChIJbend");
+
+    const bundle = tripBundleSchema.parse(await (await GET(req(undefined, "GET"), ctx(trip.id))).json());
+    expect(bundle.trip.homeBasePlace).toEqual({
+      name: "Bend, OR",
+      lat: 44.0582,
+      lng: -121.3153,
+      googlePlaceId: "ChIJbend",
+    });
+  });
+
+  /** A pre-#60 row has a name and no anchor: it reads back as a null place
+   * rather than as a place that cannot be drawn. */
+  it("reads a trip with no anchor as homeBasePlace: null", async () => {
+    const trip = await fx.trip({ owner: DEV_OWNER, homeBase: "Boise, ID" });
+    const bundle = tripBundleSchema.parse(await (await GET(req(undefined, "GET"), ctx(trip.id))).json());
+    expect(bundle.trip.homeBase).toBe("Boise, ID");
+    expect(bundle.trip.homeBasePlace).toBeNull();
+  });
+
   it("refuses a PATCH on another owner's trip — 404, and the row is unchanged", async () => {
     const theirs = await fx.trip({ owner: OTHER_OWNER, title: "Someone else's loop" });
 

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { orphanedStopsMessage, stopsOutsideRange, tripPatchInput } from "@rv-trip/core";
+import {
+  homeBaseColumns,
+  orphanedStopsMessage,
+  stopsOutsideRange,
+  tripPatchInput,
+} from "@rv-trip/core";
 import { deleteTrip, getTripById, getRigByOwner, updateTripFields } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { routeTrip } from "@/lib/routing";
@@ -62,7 +67,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     }
   }
 
-  const matched = await updateTripFields(owner, id, patch);
+  // The nested `homeBasePlace` becomes its three columns; an ABSENT key stays
+  // absent, so a patch that never mentions home base leaves the anchor alone.
+  const { homeBasePlace, ...fields } = patch;
+  const columns =
+    homeBasePlace === undefined ? fields : { ...fields, ...homeBaseColumns(homeBasePlace) };
+  const matched = await updateTripFields(owner, id, columns);
   if (!matched) return NextResponse.json({ error: "trip not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }

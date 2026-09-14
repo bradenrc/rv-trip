@@ -8,9 +8,11 @@ import {
   type ReservationPatchInput,
   type Idea,
   type IsoDate,
+  type Place,
   type ReservationType,
 } from "../domain/types";
 import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "../domain/route-order";
+import { hasCoords } from "../domain/bounds";
 import { NO_ROUTING_HASH } from "../domain/rig";
 import { DEFAULT_UNITS, type Units } from "../domain/units";
 import { estimateRoute, type RouteResult, type RouteNotice } from "../providers/index";
@@ -505,6 +507,19 @@ export interface RouteSummary {
   stops: number;
   scheduled: number;
   floating: number;
+  /** How many stops have no coordinates — no pin, no connector, no HERE route
+   * (#60 Q3 → A). Rendered only when > 0, the same rule `restrictionCount`
+   * already follows: a permanent "0 without a place" would train the eye to
+   * skip the slot. */
+  unmapped: number;
+  /**
+   * The coordless stops themselves, in route order. The rail's Locate needs
+   * both halves the count cannot give it — the ids `POST /api/places/locate`
+   * addresses, and the NAMES `locateToastMessage` reports back for the rows
+   * Google could not place. /map gets these from its own `unmappedVisible`;
+   * the planner has no map model, so they come from here.
+   */
+  unmappedStops: { id: string; name: string }[];
   days: number;
   openCount: number;
   gapCount: number;
@@ -530,6 +545,10 @@ export function routeSummary(
   // the screen drew per-leg ones, so the two had never agreed (G1/G2).
   // The rail sums miles and minutes; the corridor verdict has no total, so the
   // summary never needs (or pays for) a NavMap.
+  const unmappedStops = stops
+    .filter((s) => !hasCoords(s.place))
+    .map((s) => ({ id: s.id, name: s.place.name }));
+
   const { all } = resolveDrives(trip, routes, routingHash, {});
   const driveMilesTotal = all.reduce((a, d) => a + d.miles, 0);
   const driveMins = all.reduce((a, d) => a + d.minutes, 0);
@@ -542,6 +561,8 @@ export function routeSummary(
     stops: stops.length,
     scheduled: stops.filter(isScheduled).length,
     floating: stops.filter((s) => !isScheduled(s)).length,
+    unmapped: unmappedStops.length,
+    unmappedStops,
     days: days.length,
     openCount,
     gapCount,
@@ -799,10 +820,36 @@ export function renameLeg(trip: Trip, legId: string, title: string): Trip {
 
 /**
  * The stop row's inline rename. It edits the NAME only — the coordinates and
- * the Google id are what the place picker owns (#23), not a text field.
+ * the Google id are what the place picker owns (#60), not a text field.
  */
 export function renameStop(trip: Trip, stopId: string, name: string): Trip {
   return updateStop(trip, stopId, (s) => ({ ...s, place: { ...s.place, name } }));
+}
+
+/**
+ * The stop directly ABOVE this one in the route list — the picker's search
+ * bias. It reads the same `orderedLegStops` sequence the route lens renders, so
+ * "the stop above" means the row you can see above, not a sortOrder nobody
+ * draws. Null for the first stop of a leg, where home base takes over.
+ */
+export function stopAbove(trip: Trip, stopId: string): Stop | null {
+  for (const leg of trip.legs) {
+    const ordered = orderedLegStops(leg.stops);
+    const i = ordered.findIndex((s) => s.id === stopId);
+    if (i > 0) return ordered[i - 1]!;
+    if (i === 0) return null;
+  }
+  return null;
+}
+
+/**
+ * "Change place…" / "Set place" — the whole place at once, which is the one
+ * thing a rename can never do. It REPLACES the place rather than merging into
+ * it, so re-picking a coordless name honestly clears the old coordinates
+ * instead of leaving a pin at the last spot with the new label.
+ */
+export function setStopPlace(trip: Trip, stopId: string, place: Place): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, place }));
 }
 
 /** Delete a leg. Its stops go with it, the way the FK cascade does server-side. */

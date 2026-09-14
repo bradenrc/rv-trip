@@ -124,6 +124,7 @@ function pnwLoop(status: Trip["status"]): Trip {
     ownerId: "dev-user",
     title: "Pacific Northwest Loop",
     homeBase: "Boise, ID",
+    homeBasePlace: null,
     startDate: "2026-08-01",
     endDate: "2026-08-28",
     status,

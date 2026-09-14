@@ -1,8 +1,11 @@
+import { pickedFromPlace, type PickedPlace } from "../providers/place-picker";
+import { homeBasePatch } from "./place-form";
 import {
   isoDate,
   tripCreateInput,
   type IsoDate,
   type Leg,
+  type Place,
   type Stop,
   type StopPatchInput,
   type Trip,
@@ -32,19 +35,23 @@ export function tripDayCount(start: string, end: string): number | null {
 
 // ── /trips/new ─────────────────────────────────────────────────────────────
 
-/** What the create form holds. Every field is a string; home base is optional. */
+/**
+ * What the create form holds. The dates and the title are strings, the way an
+ * input holds them; home base is the PlacePicker's value (#60 Q4 → B) — the
+ * free-text field is gone, so a home base is either a whole place or nothing.
+ */
 export interface TripDraft {
   title: string;
   startDate: string;
   endDate: string;
-  homeBase: string;
+  homeBasePlace: PickedPlace | null;
 }
 
 export const BLANK_TRIP_DRAFT: TripDraft = {
   title: "",
   startDate: "",
   endDate: "",
-  homeBase: "",
+  homeBasePlace: null,
 };
 
 /**
@@ -53,12 +60,13 @@ export const BLANK_TRIP_DRAFT: TripDraft = {
  */
 export function tripDraftInput(draft: TripDraft): TripCreateInput | null {
   if (tripDayCount(draft.startDate, draft.endDate) === null) return null;
-  const homeBase = draft.homeBase.trim();
   const parsed = tripCreateInput.safeParse({
     title: draft.title.trim(),
     startDate: draft.startDate,
     endDate: draft.endDate,
-    homeBase: homeBase === "" ? null : homeBase,
+    // `homeBase` (the name) and `homeBasePlace` (the anchor) travel together so
+    // the two can never disagree — a cleared picker clears both.
+    ...homeBasePatch(draft.homeBasePlace),
   });
   return parsed.success ? parsed.data : null;
 }
@@ -69,14 +77,31 @@ export function tripDraftInput(draft: TripDraft): TripCreateInput | null {
 export type TripStatusChoice = "auto" | TripStatus;
 
 /** What the settings dialog holds. `rating` is 0 for unrated, the way `Stars`
- * renders it; `homeBase`/`note` are "" for null, the way an input holds it. */
+ * renders it; `note` is "" for null, the way an input holds it; home base is
+ * the PlacePicker's value, seeded from the trip's stored place. */
 export interface TripSettingsDraft {
   startDate: string;
   endDate: string;
-  homeBase: string;
+  homeBasePlace: PickedPlace | null;
   status: TripStatusChoice;
   rating: number;
   note: string;
+}
+
+/** A pre-#60 trip's bare `home_base` string, as a coordless place — so the
+ * picker opens on the name that is there rather than on an empty box. */
+function placeFromName(name: string | null): Place | null {
+  return name === null ? null : { name, lat: null, lng: null, googlePlaceId: null };
+}
+
+function samePlace(a: Place | null, b: Place | null): boolean {
+  if (a === null || b === null) return a === b;
+  return (
+    a.name === b.name &&
+    a.lat === b.lat &&
+    a.lng === b.lng &&
+    a.googlePlaceId === b.googlePlaceId
+  );
 }
 
 /** The trip, as the dialog's opening state. */
@@ -84,7 +109,9 @@ export function tripSettingsDraft(t: Trip): TripSettingsDraft {
   return {
     startDate: t.startDate,
     endDate: t.endDate,
-    homeBase: t.homeBase ?? "",
+    // A pre-#60 trip has a name and no anchor; the picker still opens on the
+    // name it has, so re-picking is the way it gains coordinates.
+    homeBasePlace: pickedFromPlace(t.homeBasePlace ?? placeFromName(t.homeBase)),
     status: t.statusAuto ? "auto" : t.status,
     rating: t.rating ?? 0,
     note: t.note ?? "",
@@ -110,8 +137,17 @@ export function tripSettingsPatch(t: Trip, d: TripSettingsDraft): TripPatchInput
     if (d.endDate !== t.endDate) patch.endDate = d.endDate;
   }
 
-  const homeBase = d.homeBase.trim() === "" ? null : d.homeBase.trim();
-  if (homeBase !== t.homeBase) patch.homeBase = homeBase;
+  // Home base is one decision, sent as the pair it is stored as: an unchanged
+  // name AND an unchanged anchor is the only "nothing moved".
+  const home = homeBasePatch(d.homeBasePlace);
+  // Compared against the same value the dialog OPENED on — a pre-#60 trip with
+  // a name and no anchor must not read as "changed" the moment the dialog
+  // renders, and re-picking that same name WITH coordinates must.
+  const current = t.homeBasePlace ?? placeFromName(t.homeBase);
+  if (home.homeBase !== t.homeBase || !samePlace(home.homeBasePlace ?? null, current)) {
+    patch.homeBase = home.homeBase;
+    patch.homeBasePlace = home.homeBasePlace;
+  }
 
   const note = d.note.trim() === "" ? null : d.note;
   if (note !== t.note) patch.note = note;

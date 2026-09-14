@@ -10,7 +10,7 @@ import { tripCreateInput, tripPatchInput } from "./types";
  */
 
 describe("tripCreateInput", () => {
-  it("defaults homeBase to null when the create form leaves it blank", () => {
+  it("defaults homeBase and its anchor to null when the create form leaves it blank", () => {
     expect(
       tripCreateInput.parse({
         title: "Redwoods Run",
@@ -22,7 +22,25 @@ describe("tripCreateInput", () => {
       startDate: "2026-09-20",
       endDate: "2026-10-04",
       homeBase: null,
+      homeBasePlace: null,
     });
+  });
+
+  /** The #60 vet's HIGH: `.pick()` is a closed list, so a key that is not named
+   * is a key `safeParse` DROPS. If this ever stops passing, the home-base
+   * migration is a no-op on the wire. */
+  it("carries the home-base ANCHOR, not just the name", () => {
+    const place = { name: "Boise, ID", lat: 43.615, lng: -116.2023, googlePlaceId: "ChIJnbRH" };
+    expect(
+      tripCreateInput.parse({
+        title: "Redwoods Run",
+        startDate: "2026-09-20",
+        endDate: "2026-10-04",
+        homeBase: "Boise, ID",
+        homeBasePlace: place,
+      }).homeBasePlace,
+    ).toEqual(place);
+    expect(tripPatchInput.parse({ homeBasePlace: place }).homeBasePlace).toEqual(place);
   });
 
   it("refuses a blank title and a non-ISO date", () => {

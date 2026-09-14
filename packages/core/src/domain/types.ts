@@ -108,6 +108,16 @@ export const trip = z.object({
   ownerId: z.string(),
   title: z.string().min(1),
   homeBase: z.string().nullable().default(null),
+  /**
+   * Home base as a real PLACE — name, coordinates and place id together (#60
+   * Q4 → B). `homeBase` above stays the NAME column so every shipped read path
+   * (`tripSummary`, the dashboard card, the phone) is untouched; this is the
+   * anchor the planner's first-stop search biases to when there is no previous
+   * stop above it. One object on the wire, three nullable columns underneath —
+   * the same shape the stop write uses, and for the same reason
+   * (`pickedCoordLabel`: half a coordinate is no coordinate).
+   */
+  homeBasePlace: place.nullable().default(null),
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus.default("planning"),
@@ -133,6 +143,10 @@ export const tripCreateInput = trip.pick({
   startDate: true,
   endDate: true,
   homeBase: true,
+  // Explicit, not inherited: `.pick()` is a closed list, so a key omitted here
+  // is a key `safeParse` DROPS silently at the handler — the whole home-base
+  // migration would be a no-op on the wire.
+  homeBasePlace: true,
 });
 export type TripCreateInput = z.infer<typeof tripCreateInput>;
 
@@ -144,6 +158,7 @@ export const tripPatchInput = trip
   .pick({
     title: true,
     homeBase: true,
+    homeBasePlace: true,
     startDate: true,
     endDate: true,
     status: true,
@@ -205,7 +220,23 @@ export const stopPatchInput = stop
     rating: true,
     notes: true,
   })
-  .extend({ placeName: place.shape.name, legId: z.string().uuid() })
+  .extend({
+    placeName: place.shape.name,
+    /**
+     * The whole place — name, coordinates and place id together (#60). One key
+     * rather than three, because `pickedCoordLabel` already refuses half a
+     * coordinate: a lone latitude cannot be drawn, and a patch that could send
+     * one would be a way to manufacture exactly that.
+     *
+     * There is no `place` COLUMN — `updateStopFields` spreads its patch into
+     * drizzle's `.set()` — so the handler flattens this through
+     * `stopPatchColumns` (place-form.ts) before the mutation sees it. When a
+     * body carries both keys the whole place wins; `placeName` is the cheap
+     * rename and cannot outrank the thing that carries coordinates.
+     */
+    place,
+    legId: z.string().uuid(),
+  })
   .partial();
 export type StopPatchInput = z.infer<typeof stopPatchInput>;
 

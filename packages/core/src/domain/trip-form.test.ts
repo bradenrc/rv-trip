@@ -18,6 +18,16 @@ import {
 } from "./trip-form";
 import { tripPatchInput, type Leg, type Stop, type Trip } from "./types";
 
+/** What the picker hands back for "Boise, ID" — a mapped pick. */
+const BOISE = {
+  name: "Boise, ID",
+  lat: 43.615,
+  lng: -116.2023,
+  googlePlaceId: "ChIJnbRH",
+  address: "Boise, ID, USA",
+  rating: null,
+};
+
 /** The trip the settings dialog opens over — the seed trip, unpinned. */
 function fixture(over: Partial<Trip> = {}): Trip {
   return {
@@ -25,6 +35,7 @@ function fixture(over: Partial<Trip> = {}): Trip {
     ownerId: "dev-user",
     title: "Pacific Northwest Loop",
     homeBase: "Boise, ID",
+    homeBasePlace: null,
     startDate: "2026-08-01",
     endDate: "2026-08-28",
     status: "planning",
@@ -60,29 +71,31 @@ describe("tripDraftInput — /trips/new", () => {
         title: "Redwoods Run",
         startDate: "2026-09-20",
         endDate: "2026-10-04",
-        homeBase: "Boise, ID",
+        homeBasePlace: BOISE,
       }),
     ).toEqual({
       title: "Redwoods Run",
       startDate: "2026-09-20",
       endDate: "2026-10-04",
       homeBase: "Boise, ID",
+      homeBasePlace: { name: "Boise, ID", lat: 43.615, lng: -116.2023, googlePlaceId: "ChIJnbRH" },
     });
   });
 
-  it("trims, and an empty home base is null — the field is optional", () => {
+  it("trims, and no picked place is a null home base — the field is optional", () => {
     expect(
       tripDraftInput({
         title: "  Redwoods Run  ",
         startDate: "2026-09-20",
         endDate: "2026-10-04",
-        homeBase: "   ",
+        homeBasePlace: null,
       }),
     ).toEqual({
       title: "Redwoods Run",
       startDate: "2026-09-20",
       endDate: "2026-10-04",
       homeBase: null,
+      homeBasePlace: null,
     });
   });
 
@@ -92,7 +105,12 @@ describe("tripDraftInput — /trips/new", () => {
       tripDraftInput({ ...BLANK_TRIP_DRAFT, startDate: "2026-09-20", endDate: "2026-10-04" }),
     ).toBeNull(); // no title
     expect(
-      tripDraftInput({ title: "Redwoods Run", startDate: "2026-09-20", endDate: "", homeBase: "" }),
+      tripDraftInput({
+        title: "Redwoods Run",
+        startDate: "2026-09-20",
+        endDate: "",
+        homeBasePlace: null,
+      }),
     ).toBeNull(); // no end date
   });
 
@@ -102,7 +120,7 @@ describe("tripDraftInput — /trips/new", () => {
         title: "Redwoods Run",
         startDate: "2026-10-04",
         endDate: "2026-09-20",
-        homeBase: "",
+        homeBasePlace: null,
       }),
     ).toBeNull();
   });
@@ -113,7 +131,15 @@ describe("tripSettingsDraft", () => {
     expect(tripSettingsDraft(fixture())).toEqual({
       startDate: "2026-08-01",
       endDate: "2026-08-28",
-      homeBase: "Boise, ID",
+      // A pre-#60 trip has a name and no anchor: the picker opens on the name.
+      homeBasePlace: {
+        name: "Boise, ID",
+        lat: null,
+        lng: null,
+        googlePlaceId: null,
+        address: null,
+        rating: null,
+      },
       status: "auto",
       rating: 0,
       note: "",
@@ -147,8 +173,9 @@ describe("tripSettingsPatch — only what changed", () => {
 
   it("clears home base and note to null, not to an empty string", () => {
     const t = fixture({ note: "Coast run" });
-    expect(tripSettingsPatch(t, draftOf(t, { homeBase: "  ", note: "" }))).toEqual({
+    expect(tripSettingsPatch(t, draftOf(t, { homeBasePlace: null, note: "" }))).toEqual({
       homeBase: null,
+      homeBasePlace: null,
       note: null,
     });
   });
@@ -183,8 +210,16 @@ describe("tripSettingsPatch — only what changed", () => {
 
   it("the patch it builds parses as a PATCH /api/trips/:id body", () => {
     const t = fixture();
-    const patch = tripSettingsPatch(t, draftOf(t, { homeBase: "Bend, OR", rating: 3, note: "Good" }));
-    expect(patch).toEqual({ homeBase: "Bend, OR", rating: 3, note: "Good" });
+    const patch = tripSettingsPatch(
+      t,
+      draftOf(t, { homeBasePlace: BOISE, rating: 3, note: "Good" }),
+    );
+    expect(patch).toEqual({
+      homeBase: "Boise, ID",
+      homeBasePlace: { name: "Boise, ID", lat: 43.615, lng: -116.2023, googlePlaceId: "ChIJnbRH" },
+      rating: 3,
+      note: "Good",
+    });
     const parsed = tripPatchInput.safeParse(patch);
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data).toEqual(patch);

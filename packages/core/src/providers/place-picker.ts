@@ -212,3 +212,58 @@ export function pickerView(input: PickerViewInput): PickerView {
     degradedMessage: envelope.degraded ? PICKER_DEGRADED_MESSAGE : null,
   };
 }
+
+/**
+ * A stored `Place` as the picker's controlled VALUE — how "Change place…" and
+ * the home-base fields open on what is already there (§4 state 6/7). Google's
+ * `address` and `rating` are search-time display only and are never persisted,
+ * so a row read back has neither; the inverse of `pickedFromSummary`.
+ */
+export function pickedFromPlace(place: {
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+} | null): PickedPlace | null {
+  if (!place) return null;
+  return {
+    name: place.name,
+    lat: place.lat,
+    lng: place.lng,
+    googlePlaceId: place.googlePlaceId,
+    address: null,
+    rating: null,
+  };
+}
+
+/** A search bias with the name that earned it, so the picker can say where it
+ * is looking rather than silently ranking. */
+export interface NearPlace {
+  name: string;
+  lat: number;
+  lng: number;
+}
+
+/**
+ * The search bias a picker mounted on a stop row gets: the stop above it in the
+ * leg, then the trip's home base when there is nothing above it. Null when
+ * neither has a FULL pair — half a coordinate is no coordinate here either, and
+ * the search still runs, just unranked.
+ */
+export function nearOf(
+  ...candidates: ({ name: string; lat: number | null; lng: number | null } | null | undefined)[]
+): NearPlace | null {
+  for (const c of candidates) {
+    if (c && c.lat !== null && c.lng !== null) return { name: c.name, lat: c.lat, lng: c.lng };
+  }
+  return null;
+}
+
+/**
+ * `near · Newport, OR · 44.6083, −124.0640` — the ONE new user-facing string
+ * the inline mount adds. The `near` prop has always existed and has never been
+ * visible; this is it, in the picker's own coordinate typography (U+2212).
+ */
+export function nearLabel(near: NearPlace): string {
+  return `near · ${near.name} · ${coord(near.lat)}, ${coord(near.lng)}`;
+}
