@@ -276,3 +276,171 @@ New test file: `packages/core/src/responsive-sweep.test.ts` (25 tests). Like
 strings with no executable logic and no DOM in `packages/core`, so the contract
 is asserted against the **source text** of the real files. **That is the honest
 limit of this coverage: it proves the classes are written, not that they paint.**
+
+---
+
+# Issue #45 · item 3 — PWA: manifest, viewport, icons; no service worker
+
+Epic item **i3 of 5** only (`docs/design/45/plan.json` + the wireframe's
+§"Spec · Q7 + Q8" block, `index.html:915-970`, both read from
+`mc/wireframe/issue-45-v0`). i1 and i2 are already on this branch and were not
+touched; i4 (prefs) and i5 (Settings/units) are separate dispatches.
+
+Nothing in this item is a redesign: it is four new files, one new export, and
+zero changes to any rendered component.
+
+## What changed
+
+### `apps/web/src/app/manifest.ts` (new, 36 lines)
+
+Next's typed `MetadataRoute.Manifest`, verbatim from the wireframe's source block:
+`name` "RV Trip Hub" (`:23`), `short_name` "RV Trip" (`:24`), `start_url` "/"
+(`:25`), `display` "standalone" (`:26`), `background_color` (`:27`) and
+`theme_color` (`:28`) both `#020617`, `icons` (`:31`, `:33`) listing
+`/icon.svg` (`sizes "any"`, `image/svg+xml`, `purpose "any"`) and
+`/icon-maskable.svg` (`purpose "maskable"`).
+
+The hex is written with its provenance in a comment on both lines, because a
+manifest is JSON and cannot carry a token. **Provenance correction:** the
+wireframe cites `packages/ui/styles/entry.css:84`. The real declarations are
+**`:85` (light) and `:131` (dark)** — `--rv-navy: #020617` in both, which is the
+premise the static `theme_color` rests on. The comment cites the true lines and
+the test parses the value out of `entry.css` rather than repeating it.
+
+### `apps/web/src/app/layout.tsx:1`, `:25-40`
+
+`:1` — the type import becomes `import type { Metadata, Viewport } from "next"`.
+`:35-40` — the new export beside the existing `metadata`:
+
+```ts
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#020617", // --rv-navy, verbatim
+};
+```
+
+Nothing else in `layout.tsx` moved — in particular the removal-only no-FOUC
+script is byte-identical (`git diff` shows two hunks, the import line and the
+inserted export).
+
+### The mark — three files, one geometry
+
+- **`apps/web/src/app/icon.svg`** (new) — `viewBox="0 0 32 32"`, so it *is*
+  `Nav.tsx:24-27`'s tile at its own numbers: `:7` a `rx="6"` (`--radius-rv-md`,
+  `entry.css:25`) `#020617` square; `:9` lucide's Compass at
+  `translate(6.5 6.5) scale(0.79166667)` — i.e. 19/24 scale centred in 32, which
+  is `size-[19px]` inside `size-8` — in `#34d399` (`--rv-green-on-dark`) with
+  `fill`, `stroke` and `stroke-width="1.5"` exactly as `Nav.tsx:26` passes them.
+  Next serves it at `/icon.svg` and wires the favicon (verified below).
+- **`apps/web/public/icon-maskable.svg`** (new) — same mark, `:5` the navy bleeds
+  to every edge (no `rx`: Android's adaptive mask supplies the shape), `:7` the
+  Compass at `scale(0.63333333)` = exactly 0.8 × the icon's scale, the 80% safe
+  zone.
+- **`apps/web/src/app/apple-icon.tsx`** (new) — `:17` `size = { width: 180,
+  height: 180 }`, `:18` `contentType = "image/png"`, `:25` `new ImageResponse(…)`
+  from `next/og` (`:1`). `:22` derives the glyph size from the same 19/32
+  proportion rather than hard-coding 107. iOS Add-to-Home-Screen reads
+  `apple-touch-icon`, not the manifest, and will not take an SVG — so this is the
+  one raster, and generating it keeps a binary out of git.
+
+The lucide path `d` is inlined identically in all three files and is asserted
+equal to the `d` in the installed `lucide-react` (`dist/esm/icons/compass.mjs`),
+so a lucide bump that changes the Compass cannot silently fork the app icon.
+
+### Test — new `packages/core/src/pwa.test.ts` (21 tests, 239 lines)
+
+Unlike i1/i2 this item is mostly **data**, so most of it is *executed*, not
+grepped: the test dynamically imports the real `apps/web/src/app/manifest.ts`
+and asserts the returned object field-for-field, with `background_color` /
+`theme_color` compared against the navy **parsed out of `entry.css`** (asserting
+against a repeated literal would only prove the test agrees with itself). It
+also resolves every manifest icon `src` against the filesystem, walks
+`apps/web` to prove `app/manifest.ts` is the only manifest and that nothing
+registers a background cache, parses `apps/web/package.json` for PWA deps, and
+checks the maskable scale is 0.8× the icon's.
+
+TDD honesty: the SVGs and `apple-icon.tsx` were written **before** the test,
+because I had to prove `ImageResponse` renders at all (probe below) before
+committing to a shape. The test was then written against the acceptance, and
+its teeth were verified by **mutation** rather than by claiming a red run I did
+not do: flipping `theme_color` to `#0f172a`, `viewportFit` to `"auto"`, and the
+maskable scale to the un-inset value produced `Tests 4 failed | 17 passed`, and
+the mutations were reverted (see Checks). The first honest red was real, too —
+the run below caught my own doc comments in `manifest.ts` using the words
+"service worker" and `rel="manifest"`, which the no-SW guard rejects; the prose
+was reworded, not the guard.
+
+## Findings the walk / qa should decide on
+
+**1 · HIGH — the mark renders as a featureless green disc, and so does the
+masthead.** `Nav.tsx:26` passes `fill="currentColor"` to lucide's `<Compass/>`.
+lucide's `Icon.mjs` spreads `...rest` *after* `defaultAttributes`, so that
+`fill` overrides lucide's `fill: "none"` on the **root `<svg>`** — the circle
+child inherits it and fills solid, and the needle path is filled in the *same*
+green, so it disappears into the disc. I rendered it: the generated 180×180
+apple-icon is a plain `#34d399` circle on `#020617`, no compass visible.
+
+I shipped it that way **deliberately**, because the design says the icon is
+"exactly what `Nav.tsx:25-27` draws", and the alternative — adding `fill="none"`
+to the circle — would make the app icon *differ* from the shipped masthead mark
+it exists to mirror, which is an unvetted redesign of the brand mark, not an i3
+change. It is a one-line fix in three files (`fill="none"` on each `<circle>`)
+**plus** `Nav.tsx` if the intended mark is the outlined compass the wireframe
+draws as `◎`. **This needs a human call; I did not make it.**
+
+**2 · MED — the vet's Q7 objection is real, and i3 ships the design anyway.**
+The vet is correct that the masthead paints `bg-rv-surface`, which inside the
+`dark` island is `#1e293b` (`entry.css:135`), **not** `#020617`. So "the OS
+status bar is continuous with the masthead" is not literally true of the colour
+pinned here — the status bar will be one step darker than the bar beneath it.
+The item's acceptance freezes `#020617` byte-for-byte, so that is what shipped.
+If continuity is the goal the value should be `--rv-surface`'s dark half
+(`#1e293b`); that is a two-line change (manifest + viewport) and a test constant.
+**Flagged, not decided.**
+
+**3 · LOW — `/apple-icon` has no file extension.** The build routes it at
+`/apple-icon` (see the route table in Checks) and the emitted link is
+`href="/apple-icon?832f5f2d432a6f99"`. `proxy.ts:31`'s matcher excludes static
+paths *by extension*, so unlike `/icon.svg`, `/icon-maskable.svg` and
+`/manifest.webmanifest` (all excluded, the last explicitly by `webmanifest`),
+**middleware runs on `/apple-icon`**. With Clerk configured, a *signed-out*
+fetch of it would get the sign-in redirect. In practice Add-to-Home-Screen
+happens in a signed-in Safari tab that sends the session cookie, so this is not
+expected to bite — but it is a real asymmetry and the fix (adding `apple-icon`
+to the matcher's exclusion) touches the #26 auth boundary, which is out of i3's
+scope. **Flagged, not changed.**
+
+**4 · Note — `app/favicon.ico` still exists and still wins in some browsers.**
+The design says `icon.svg` "wires the favicon"; it does, but Next emits *both*
+links (verified below). Removing the shipped `.ico` was not in the item, so it
+stayed.
+
+## Render-required — the walk's job, not assertable here
+
+- iOS Add-to-Home-Screen actually picking up the generated `apple-touch-icon`,
+  and the install prompt/splash using `background_color`.
+- Android's adaptive mask leaving the 80% inset mark uncut.
+- `viewportFit: "cover"` resolving `env(safe-area-inset-bottom)` to a **non-zero**
+  inset on a notched device — which is what i1's tab bar and `PageShell` gutter
+  were written against. The `<meta>` is confirmed emitted; the inset is not.
+- Whether the disc-vs-compass call above looks right at 32px in a tab strip.
+
+## Checks run
+
+| command | result |
+|---|---|
+| `pnpm install --frozen-lockfile` | fresh worktree had no `node_modules` — `Done in 9.2s` |
+| `node` probe of `next/og` `ImageResponse` (both an `<img>` data-URI SVG and an inline `<svg>`) | `bytes 2631 png? true dims 180 180` — identical output; inline `<svg>` shipped |
+| `pnpm --filter @rv-trip/core exec vitest run src/pwa.test.ts` (first run) | RED — `Tests 2 failed \| 19 passed (21)`: my own comments tripped the no-SW / no-`rel="manifest"` guards |
+| `pnpm --filter @rv-trip/core exec vitest run src/pwa.test.ts` | `Test Files 1 passed (1) · Tests 21 passed (21)` (verbose: all 21 ran, none skipped) |
+| mutation check (`theme_color`→`#0f172a`, `viewportFit`→`"auto"`, maskable scale→icon scale), then reverted | `Tests 4 failed \| 17 passed (21)`; `git diff --stat` after revert showed only `layout.tsx` |
+| `pnpm --filter @rv-trip/core test` | `Test Files 37 passed (37) · Tests 724 passed (724)` (703 + the 21 new) |
+| `pnpm turbo run lint typecheck test` | `Tasks: 9 successful, 9 total` |
+| `pnpm exec next build` (apps/web) | build succeeded; route table lists `○ /apple-icon`, `○ /icon.svg`, `○ /manifest.webmanifest` |
+| `next start` + `curl /settings` head | `<link rel="manifest" href="/manifest.webmanifest"/>`, `<link rel="icon" href="/icon.svg?…" sizes="any" type="image/svg+xml"/>`, `<link rel="apple-touch-icon" href="/apple-icon?…" type="image/png" sizes="180x180"/>`, `<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>`, `<meta name="theme-color" content="#020617"/>` |
+| `curl` each asset | `manifest 200 application/manifest+json` · `icon.svg 200 image/svg+xml` · `apple-icon 200 image/png 2631b` (`png dims 180 180`) · `maskable 200 image/svg+xml` |
+| `grep -ri serviceworker apps/web/src` | no matches (exit 1) |
+| `git status --short` | only the four new files + `layout.tsx`; `apps/web/.next` is ignored (`apps/web/.gitignore:17`) |
+| `git diff apps/web/package.json` | empty — no PWA/service-worker dependency added |
