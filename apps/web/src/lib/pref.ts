@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import {
+  PREF_REMOTE,
+  isRemotePrefKey,
+  toLocalEntries,
+  toRemotePatch,
+  type UserPrefs,
+} from "@rv-trip/core";
 
 /**
  * Preferences persisted in localStorage. localStorage is an external store, so
@@ -8,6 +15,13 @@ import { useCallback, useSyncExternalStore } from "react";
  * setState — no cascading render, and the server snapshot is the default.
  *
  * Keys are flat and dash-cased: `rv-track-costs`, `rv-map-style`.
+ *
+ * Four of those keys also have a column behind them (`user_prefs`, issue #38),
+ * so the choice follows the account to another device. That mirroring lives
+ * ENTIRELY in this file: every consumer already goes through `useBooleanPref` /
+ * `useStringPref`, so not one call site changes. Local write first, then
+ * `notify()`, then a fire-and-forget PUT — a failed sync costs the sync, never
+ * the interaction.
  */
 const listeners = new Set<() => void>();
 
@@ -24,6 +38,62 @@ function notify() {
   for (const l of listeners) l();
 }
 
+/**
+ * localStorage key → `user_prefs` column. Defined in `@rv-trip/core` (with the
+ * value coercion that goes with it, which is not the identity — see
+ * `toRemotePatch`) so the mapping is unit-tested as executed code rather than
+ * asserted as source text; re-exported here because this module is where the
+ * seam reads from.
+ */
+export const REMOTE = PREF_REMOTE;
+
+/**
+ * Mirror one local write to the account row. Fire-and-forget on purpose: the
+ * preference has already taken effect locally, and a dead network must not turn
+ * a toggle into an error. Unmapped keys (anything local-only) are a no-op.
+ */
+function pushRemote(key: string, stored: string): void {
+  if (!isRemotePrefKey(key)) return;
+  try {
+    void fetch("/api/prefs", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(toRemotePatch(key, stored)),
+      keepalive: true,
+    }).catch(() => {});
+  } catch {
+    // No fetch (a very old embed), or a blocked origin. The local write stands.
+  }
+}
+
+/**
+ * Adopt the account's saved preferences — called once, after mount, by
+ * `<PrefSync/>` with whatever `/api/prefs` answered.
+ *
+ * Null columns are skipped, not written: null means "never chosen", so an
+ * account that has only ever set a theme leaves this device's other three
+ * choices exactly as it found them. One `notify()` at the end, and only if
+ * something actually changed, so an unchanged row costs zero re-renders.
+ *
+ * This is deliberately NOT the theme's first-paint answer: `layout.tsx`'s
+ * removal-only inline script already read localStorage before anything painted,
+ * and the theme is never a fetch's conclusion.
+ */
+export function hydrate(row: UserPrefs | null | undefined): void {
+  let changed = false;
+  for (const [key, value] of toLocalEntries(row)) {
+    try {
+      if (localStorage.getItem(key) === value) continue;
+      localStorage.setItem(key, value);
+      changed = true;
+    } catch {
+      // Private mode or a blocked origin: the row simply does not stick here.
+      return;
+    }
+  }
+  if (changed) notify();
+}
+
 export function useBooleanPref(key: string): [boolean, (on: boolean) => void] {
   const value = useSyncExternalStore(
     subscribe,
@@ -32,8 +102,10 @@ export function useBooleanPref(key: string): [boolean, (on: boolean) => void] {
   );
   const set = useCallback(
     (on: boolean) => {
-      localStorage.setItem(key, on ? "1" : "0");
+      const stored = on ? "1" : "0";
+      localStorage.setItem(key, stored);
       notify();
+      pushRemote(key, stored);
     },
     [key],
   );
@@ -84,6 +156,7 @@ export function useStringPref<T extends string>(
         // The preference doesn't stick this session; the map still switches.
       }
       notify();
+      pushRemote(key, v);
     },
     [key],
   );

@@ -251,6 +251,32 @@ export const routes = pgTable(
   (t) => [index("routes_fetched_at_idx").on(t.fetchedAt)],
 );
 
+/**
+ * Preferences that follow the account (docs/design/45 §Q6, issue #38).
+ *
+ * ONE row per account and `owner_id` IS the primary key — the same
+ * singleton-per-account shape `rigs` has (rigs.ownerId is a surrogate-keyed
+ * table with `.unique()` on owner_id; here there is nothing else to key by, so
+ * the owner is the key outright and the upsert conflicts on it directly).
+ *
+ * EVERY preference column is nullable on purpose: null means "never chosen", so
+ * the product default still wins and no existing account needs a backfill row.
+ * That is also why these are `text` rather than `pgEnum` — a preference is a
+ * display choice each reader already narrows with a fallback, and a new map
+ * style should not need an ALTER TYPE before the UI can offer it.
+ *
+ * No `created_at`: a preference row has no interesting birthday, only a last
+ * word.
+ */
+export const userPrefs = pgTable("user_prefs", {
+  ownerId: text("owner_id").primaryKey(),
+  theme: text("theme"), // 'dark' | 'light'
+  units: text("units"), // 'imperial' | 'metric'
+  mapStyle: text("map_style"), // 'night' | 'day' | 'sat'
+  trackCosts: boolean("track_costs"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const tripsRelations = relations(trips, ({ many }) => ({
   legs: many(legs),
   savedPlaces: many(savedPlaces),

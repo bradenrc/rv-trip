@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
-import { getTripById, getRigByOwner } from "@rv-trip/db";
+import { getTripById, getRigByOwner, getPrefsByOwner } from "@rv-trip/db";
 import { TripPlanner } from "@/components/trip/TripPlanner";
 import { getOwner } from "@/lib/owner";
+import { unitsFromPrefs } from "@/lib/units";
 import { routeTrip } from "@/lib/routing";
 
 // Hits the DB on every request; don't statically prerender.
@@ -22,6 +23,10 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // (docs/design/43 §4).
   const rig = await getRigByOwner(owner);
   const { routes, routingHash, nav } = await routeTrip(trip, rig, { nav: true });
+  // The account's display units, read on the SAME seam as the routes: the rail
+  // and every drive row render in the right unit with no flash, and no display
+  // component has to become a preference consumer (lib/units.ts).
+  const units = unitsFromPrefs(await getPrefsByOwner(owner));
 
   return (
     <TripPlanner
@@ -30,6 +35,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       routingHash={routingHash}
       nav={nav}
       hasRig={rig !== null}
+      units={units}
     />
   );
 }

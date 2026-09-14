@@ -1,6 +1,6 @@
 import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
-import { NO_ROUTING_HASH, hasCoords, isScheduled, tripArcs } from "@rv-trip/core";
+import { DEFAULT_UNITS, NO_ROUTING_HASH, arcLabel, hasCoords, isScheduled, tripArcs } from "@rv-trip/core";
 import type {
   LocateRow,
   ReservationType,
@@ -9,6 +9,7 @@ import type {
   SavedPlace,
   Stop,
   Trip,
+  Units,
 } from "@rv-trip/core";
 import { dateRange } from "@/lib/trip-ui";
 
@@ -115,9 +116,10 @@ export function locateRowOf(row: UnmappedRow): LocateRow {
  * solid, an un-routed one keeps exactly the dash it has always had.
  *
  * Core's `TripArc` is the shared half (id / from / to / source / miles /
- * primaryRoad / path); the web adds the two things only the web has — the
- * `layer` its chips filter by, and the rendered `label`. The phone words its
- * own label, which is exactly why the copy did not move.
+ * primaryRoad / path); the web adds the one thing only the web has — the
+ * `layer` its chips filter by. The `label` is core's `arcLabel` as of #45: the
+ * phone words it identically, and once the wording honors a units preference a
+ * second copy of the format string is a second place for the two to disagree.
  */
 export interface DriveArc {
   id: string;
@@ -126,8 +128,8 @@ export interface DriveArc {
   from: { lat: number; lng: number };
   to: { lat: number; lng: number };
   miles: number;
-  /** "136 mi · US-101" routed, "~108 mi · est." otherwise — a map label answers
-   * "how far", not "how long". */
+  /** "136 mi · US-101" routed, "~108 mi · est." otherwise (or the same two
+   * forms in kilometres) — a map label answers "how far", not "how long". */
   label: string;
   /** Which line grammar the Mapbox layer paints: solid corridor, or dash. */
   source: RouteSource;
@@ -186,12 +188,18 @@ function reservationsOf(stop: Stop): PinReservation[] {
  * `routes` + `routingHash` are the server's resolved drives (map/page.tsx), and
  * they default to "none, no rig" so the Places map lens — which hands in no
  * trips at all (PlacesLibrary.tsx:82) — keeps calling this with two arguments.
+ *
+ * `units` is the account's display preference, resolved on the server and
+ * passed down (lib/units.ts). It reaches exactly one thing here — the arc
+ * label's distance — and it defaults, so the lens that draws no arc at all does
+ * not have to name it.
  */
 export function buildMapModel(
   trips: Trip[],
   places: SavedPlace[],
   routes: RouteMap = {},
   routingHash: string = NO_ROUTING_HASH,
+  units: Units = DEFAULT_UNITS,
 ): MapModel {
   const pins: MapPin[] = [];
   const unmapped: UnmappedRow[] = [];
@@ -242,7 +250,8 @@ export function buildMapModel(
     // dates, are the precondition (route-order.ts:49-57).
     //
     // What stays here is what is genuinely the web's: the layer this trip
-    // paints on, and the label copy.
+    // paints on. The label wording is core's `arcLabel` — shared with the
+    // phone's Map lens, and units-aware as of #45.
     for (const arc of tripArcs(trip, routes, routingHash)) {
       arcs.push({
         id: arc.id,
@@ -250,10 +259,7 @@ export function buildMapModel(
         from: arc.from,
         to: arc.to,
         miles: arc.miles,
-        label:
-          arc.source === "here"
-            ? [`${arc.miles} mi`, arc.primaryRoad].filter(Boolean).join(" · ")
-            : `~${arc.miles} mi · est.`,
+        label: arcLabel(arc, units),
         source: arc.source,
         path: arc.path,
       });

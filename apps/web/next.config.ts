@@ -11,6 +11,13 @@ const nextConfig: NextConfig = {
   // inference is not stable — a `pnpm install` for apps/mobile crashed the
   // running dev server with "couldn't find next/package.json" (issue #31).
   turbopack: { root: path.join(__dirname, "../..") },
+  // /settings/people was a scaffolded stub for a feature that is not being
+  // built (issue #45 item 5). The page is deleted; the route redirects so an
+  // old bookmark lands somewhere useful. A config redirect answers before any
+  // React tree renders — permanent, because the route is not coming back.
+  async redirects() {
+    return [{ source: "/settings/people", destination: "/settings", permanent: true }];
+  },
 };
 
 export default nextConfig;

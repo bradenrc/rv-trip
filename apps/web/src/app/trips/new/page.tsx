@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { BLANK_TRIP_DRAFT, tripDayCount, tripDraftInput, type TripDraft } from "@rv-trip/core";
 import { FieldLabel } from "@rv-trip/ui";
+import { PageShell } from "@/components/nav/PageShell";
 import { Input } from "@/components/ui/input";
 import { tripApi } from "@/lib/trip-api";
 
@@ -39,7 +40,7 @@ export default function NewTripPage() {
   };
 
   return (
-    <main className="mx-auto w-full max-w-[1120px] px-7 pb-[72px] pt-9">
+    <PageShell>
       <div className="max-w-[520px]">
         <div className="mb-0.5 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
           New trip
@@ -121,6 +122,6 @@ export default function NewTripPage() {
           </div>
         </div>
       </div>
-    </main>
+    </PageShell>
   );
 }

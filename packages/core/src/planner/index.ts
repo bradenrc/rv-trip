@@ -12,6 +12,7 @@ import {
 } from "../domain/types";
 import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "../domain/route-order";
 import { NO_ROUTING_HASH } from "../domain/rig";
+import { DEFAULT_UNITS, type Units } from "../domain/units";
 import { estimateRoute, type RouteResult, type RouteNotice } from "../providers/index";
 import { driveLabel, driveMiles, driveMinutes, formatDriveTime } from "../providers/route-format";
 import {
@@ -307,6 +308,7 @@ function toDrive(
   routes: RouteMap,
   routingHash: string,
   nav: NavMap,
+  units: Units,
 ): RouteDrive {
   const key = routeCacheKey(pair.from, pair.to, routingHash);
   const result = routes[key] ?? estimateRoute(pair.from, pair.to);
@@ -321,7 +323,7 @@ function toDrive(
   });
   return {
     key,
-    label: driveLabel(result),
+    label: driveLabel(result, units),
     estimate: result.source === "estimate",
     primaryRoad: result.primaryRoad,
     notices: result.notices,
@@ -411,14 +413,20 @@ function deviation(drive: RouteDrive): number {
  * needs it. The rail and the connectors read the SAME list, which is what makes
  * the rail exactly the sum of the drives you can see.
  */
-function resolveDrives(trip: Trip, routes: RouteMap, routingHash: string, nav: NavMap) {
+function resolveDrives(
+  trip: Trip,
+  routes: RouteMap,
+  routingHash: string,
+  nav: NavMap,
+  units: Units = DEFAULT_UNITS,
+) {
   const byFromStop = new Map<string, RouteDrive>();
   // Keyed by the leg the drive leaves, but it carries the leg it ARRIVES in:
   // an emptied leg in between means the crossing is not always i → i + 1.
   const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
   const all: RouteDrive[] = [];
   for (const pair of orderedPairs(trip)) {
-    const drive = toDrive(pair, routes, routingHash, nav);
+    const drive = toDrive(pair, routes, routingHash, nav, units);
     all.push(drive);
     if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
     else byFromStop.set(pair.fromStopId, drive);
@@ -431,8 +439,12 @@ export function routeModel(
   routes: RouteMap = {},
   routingHash: string = NO_ROUTING_HASH,
   nav: NavMap = {},
+  /** Display only — every drive is still measured in miles. Defaulted so a
+   * caller with no preference in hand (a test, the seed) keeps the product
+   * default rather than having to state it. */
+  units: Units = DEFAULT_UNITS,
 ): RouteLeg[] {
-  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, routingHash, nav);
+  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, routingHash, nav, units);
   const legs = [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder);
   const legNumber = new Map(legs.map((l, i) => [l.id, i + 1]));
 

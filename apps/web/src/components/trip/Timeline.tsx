@@ -81,6 +81,11 @@ export function Timeline({
               </OpenLane>
             </div>
           </div>
+          {/* A horizontal scroll nobody notices is a view that looks truncated.
+              Phone-only: at md the whole month fits without scrolling. */}
+          <div className="mt-2 font-mono text-[10px] text-rv-ink-faded md:hidden">
+            ← swipe the calendar · the leg column stays put →
+          </div>
           <GanttLegend />
         </div>
       </div>

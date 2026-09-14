@@ -74,3 +74,35 @@ describe("driveLabel", () => {
     ).toBe("3h 12m · 136 mi");
   });
 });
+
+describe("driveLabel — the chosen vocabulary", () => {
+  const ROUTED = {
+    durationSeconds: 11_520,
+    distanceMeters: 218_866,
+    polyline: null,
+    primaryRoad: "US-101",
+    source: "here" as const,
+    notices: [],
+  };
+
+  it("defaults to imperial — every caller that has no preference in hand", () => {
+    expect(driveLabel(ROUTED)).toBe(driveLabel(ROUTED, "imperial"));
+  });
+
+  it("prints kilometres in metric, so the rail's hero and the rows agree", () => {
+    expect(driveLabel(ROUTED, "imperial")).toBe("3h 12m · 136 mi");
+    expect(driveLabel(ROUTED, "metric")).toBe("3h 12m · 219 km");
+  });
+
+  it("keeps the estimate's ~ in both vocabularies", () => {
+    const est = estimateRoute(ASTORIA, NEWPORT);
+    expect(driveLabel(est, "imperial")).toBe("~2h 19m · 108 mi");
+    expect(driveLabel(est, "metric")).toBe("~2h 19m · 174 km");
+  });
+
+  it("never converts the TIME — only the distance", () => {
+    for (const u of ["imperial", "metric"] as const) {
+      expect(driveLabel(ROUTED, u).startsWith("3h 12m · ")).toBe(true);
+    }
+  });
+});
