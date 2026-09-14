@@ -4,6 +4,7 @@ import {
   isoDate,
   type Idea,
   type IdeaCreateInput,
+  type IdeaPatchInput,
   type IsoDate,
   type Reservation,
   type ReservationCreateInput,
@@ -211,6 +212,43 @@ export function ideaDraftInput(
  * is. */
 export function ideaPlace(picked: PickedPlace | null): Place | null {
   return picked && picked.name.trim() !== "" ? placeOf(picked) : null;
+}
+
+/** The idea's place columns, as `updateIdeaFields` names them. Nullable all
+ * the way down: an idea is the grammar's *maybe*, so a coordless name is a
+ * legal row and so is no place at all. */
+export interface IdeaPlaceColumns {
+  placeName: string | null;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+}
+
+/**
+ * The idea PATCH's flattening — the mirror of `stopPatchColumns`. `ideas` has
+ * no `place` column and `updateIdeaFields` spreads its patch straight into
+ * `db.update(ideas).set()`, so the route calls this between the two or the
+ * PATCH is a SQL error on the field this issue exists to write.
+ *
+ * ABSENT IS NOT NULL, and that distinction is the whole function. Zod's
+ * `.optional()` leaves an unsent key absent, so `patch.place === undefined` is
+ * "the caller said nothing about the place — leave all four columns alone".
+ * Only an EXPLICIT `null` clears them. Mapping unconditionally would erase a
+ * located idea's coordinates on every status cycle, rating and note save,
+ * because each of those is a single-field patch.
+ */
+export function ideaPatchColumns(
+  patch: IdeaPatchInput,
+): Omit<IdeaPatchInput, "place"> & Partial<IdeaPlaceColumns> {
+  const { place: picked, ...rest } = patch;
+  if (picked === undefined) return rest;
+  return {
+    ...rest,
+    placeName: picked?.name ?? null,
+    lat: picked?.lat ?? null,
+    lng: picked?.lng ?? null,
+    googlePlaceId: picked?.googlePlaceId ?? null,
+  };
 }
 
 /** What "Undo" re-POSTs after an idea delete — the whole row, so a promoted-to

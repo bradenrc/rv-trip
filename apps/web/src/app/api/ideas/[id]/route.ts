@@ -1,21 +1,25 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
+import { ideaPatchColumns, ideaPatchInput } from "@rv-trip/core";
 import { deleteIdea, updateIdeaFields } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 
-const patchSchema = z.object({
-  status: z.enum(["idea", "planned", "done"]).optional(),
-  rating: z.number().int().min(1).max(5).nullable().optional(),
-  notes: z.string().nullable().optional(),
-});
-
+/**
+ * The idea PATCH. The schema is core's `ideaPatchInput` — the same grammar the
+ * card reads — rather than a second hand-rolled copy that could drift from it.
+ *
+ * `ideaPatchColumns` sits between the parse and the mutation because `ideas`
+ * has no `place` column: it flattens the wire's nested place onto place_name /
+ * lat / lng / google_place_id, and — the part that matters — it does that ONLY
+ * when the body actually carried a `place` key. A status cycle, a rating and a
+ * note save each send one field, and none of them may erase a located idea.
+ */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const parsed = patchSchema.safeParse(await req.json());
+  const parsed = ideaPatchInput.safeParse(await req.json());
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  await updateIdeaFields(await getOwner(), id, parsed.data);
+  await updateIdeaFields(await getOwner(), id, ideaPatchColumns(parsed.data));
   return new NextResponse(null, { status: 204 });
 }
 

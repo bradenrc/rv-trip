@@ -3,6 +3,7 @@ import {
   BLANK_RESERVATION_DRAFT,
   UNDO_WINDOW_MS,
   ideaDraftInput,
+  ideaPatchColumns,
   ideaRestoreInput,
   reservationCost,
   reservationDraft,
@@ -235,5 +236,87 @@ describe("ideaDraftInput / ideaRestoreInput", () => {
 describe("UNDO_WINDOW_MS", () => {
   it("is the design's six-second window", () => {
     expect(UNDO_WINDOW_MS).toBe(6000);
+  });
+});
+
+/**
+ * The idea PATCH's flattening (#69). `ideas` has no `place` column and
+ * `updateIdeaFields` spreads its patch straight into drizzle's `.set()`, so the
+ * route calls this between the two — the same seam `stopPatchColumns` is for
+ * the stop write.
+ *
+ * The rule the whole thing turns on: ABSENT is not NULL. Every shipped idea
+ * write is a single-field patch ({status} / {rating} / {notes}), so mapping the
+ * four place columns unconditionally would wipe a located idea's coordinates on
+ * every status cycle.
+ */
+describe("ideaPatchColumns", () => {
+  it("leaves the four place columns ALONE when the patch carries no place", () => {
+    expect(ideaPatchColumns({ status: "planned" })).toEqual({ status: "planned" });
+    expect(ideaPatchColumns({ rating: 4 })).toEqual({ rating: 4 });
+    expect(ideaPatchColumns({ notes: "Ask about the tour." })).toEqual({
+      notes: "Ask about the tour.",
+    });
+    expect(ideaPatchColumns({})).toEqual({});
+  });
+
+  it("flattens a picked place onto the four columns createIdea already writes", () => {
+    expect(
+      ideaPatchColumns({
+        place: {
+          name: "Tumalo Falls Trailhead",
+          lat: 44.0317,
+          lng: -121.5678,
+          googlePlaceId: "ChIJtumalo",
+        },
+      }),
+    ).toEqual({
+      placeName: "Tumalo Falls Trailhead",
+      lat: 44.0317,
+      lng: -121.5678,
+      googlePlaceId: "ChIJtumalo",
+    });
+  });
+
+  it("writes a coordless name — the picker's escape row, which mapIdea still reads as a place", () => {
+    expect(
+      ideaPatchColumns({
+        place: { name: "Deschutes River float", lat: null, lng: null, googlePlaceId: null },
+      }),
+    ).toEqual({
+      placeName: "Deschutes River float",
+      lat: null,
+      lng: null,
+      googlePlaceId: null,
+    });
+  });
+
+  it("clears all four on an EXPLICIT null — absent leaves alone, null erases", () => {
+    expect(ideaPatchColumns({ place: null })).toEqual({
+      placeName: null,
+      lat: null,
+      lng: null,
+      googlePlaceId: null,
+    });
+  });
+
+  it("carries the rest of the patch through beside the place", () => {
+    expect(
+      ideaPatchColumns({
+        status: "planned",
+        place: { name: "Rim Drive", lat: 42.9, lng: -122.1, googlePlaceId: null },
+      }),
+    ).toEqual({
+      status: "planned",
+      placeName: "Rim Drive",
+      lat: 42.9,
+      lng: -122.1,
+      googlePlaceId: null,
+    });
+  });
+
+  it("never hands `place` to `.set()` — there is no such column", () => {
+    expect(ideaPatchColumns({ place: { name: "X", lat: null, lng: null, googlePlaceId: null } }))
+      .not.toHaveProperty("place");
   });
 });

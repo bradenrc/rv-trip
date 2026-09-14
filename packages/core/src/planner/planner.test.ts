@@ -28,6 +28,7 @@ import {
   setReservationFields,
   appendIdea,
   removeIdea,
+  setIdeaPlace,
   applyPromotion,
   dateRange,
   fullRange,
@@ -945,6 +946,29 @@ describe("reservation and idea tree mutations", () => {
     expect(removeIdea(added, "S1", "i1").legs[0]!.stops[0]!.ideas.map((i) => i.id)).toEqual(["i2"]);
   });
 
+  it("setIdeaPlace is the row Locate's optimistic half — the same place the PATCH sends", () => {
+    const picked = {
+      name: "Tumalo Falls Trailhead",
+      lat: 44.0317,
+      lng: -121.5678,
+      googlePlaceId: "ChIJtumalo",
+    };
+    const next = setIdeaPlace(leafTrip(), "S1", "i1", picked);
+    expect(next.legs[0]!.stops[0]!.ideas[0]!.place).toEqual(picked);
+    // Only that idea, and nothing else on the row.
+    expect(next.legs[0]!.stops[0]!.ideas[0]!.status).toBe("planned");
+  });
+
+  it("setIdeaPlace(null) clears the place — the same explicit null the PATCH carries", () => {
+    const placed = setIdeaPlace(leafTrip(), "S1", "i1", {
+      name: "Rim Drive",
+      lat: 42.9,
+      lng: -122.1,
+      googlePlaceId: null,
+    });
+    expect(setIdeaPlace(placed, "S1", "i1", null).legs[0]!.stops[0]!.ideas[0]!.place).toBeNull();
+  });
+
   it("applyPromotion swaps the idea for the reservation the server minted", () => {
     // The chosen type is the SERVER's answer, not a client guess — this used to
     // hardcode "activity".
@@ -965,6 +989,7 @@ describe("reservation and idea tree mutations", () => {
     setReservationFields(t, "S1", "r1", { name: "x" });
     appendIdea(t, "S1", ideaRow({ id: "i2" }));
     removeIdea(t, "S1", "i1");
+    setIdeaPlace(t, "S1", "i1", { name: "X", lat: null, lng: null, googlePlaceId: null });
     applyPromotion(t, "S1", "i1", res({ id: "r5" }));
     expect(JSON.stringify(t)).toBe(before);
   });

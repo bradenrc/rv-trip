@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { ideaCreateInput, ideaPromoteInput, reservationCreateInput, reservationPatchInput } from "./types";
+import {
+  ideaCreateInput,
+  ideaPatchInput,
+  ideaPromoteInput,
+  reservationCreateInput,
+  reservationPatchInput,
+} from "./types";
 
 /**
  * The reservation and idea handlers parse their bodies from these schemas, so
@@ -90,6 +96,47 @@ describe("ideaCreateInput", () => {
     expect(ideaCreateInput.parse({ stopId: STOP, title: "X", sortOrder: 99 })).not.toHaveProperty(
       "sortOrder",
     );
+  });
+});
+
+describe("ideaPatchInput", () => {
+  it("accepts an empty patch without inventing defaults", () => {
+    expect(ideaPatchInput.parse({})).toEqual({});
+  });
+
+  it("leaves `place` ABSENT when the body does not carry it — the status cycle", () => {
+    // The whole reason the flattening below tests for `undefined`: every
+    // shipped idea write is a single-field patch, and a phantom `place: null`
+    // here would wipe place_name/lat/lng/google_place_id on every one of them.
+    const patch = ideaPatchInput.parse({ status: "planned" });
+    expect(patch).toEqual({ status: "planned" });
+    expect("place" in patch).toBe(false);
+  });
+
+  it("carries the whole place the row's picker chose", () => {
+    expect(
+      ideaPatchInput.parse({
+        place: { name: "Tumalo Falls Trailhead", lat: 44.0317, lng: -121.5678, googlePlaceId: "ChIJtumalo" },
+      }),
+    ).toEqual({
+      place: { name: "Tumalo Falls Trailhead", lat: 44.0317, lng: -121.5678, googlePlaceId: "ChIJtumalo" },
+    });
+  });
+
+  it("takes a coordless place — the picker's free-text escape row is a legal pick", () => {
+    expect(ideaPatchInput.parse({ place: { name: "Deschutes River float" } })).toEqual({
+      place: { name: "Deschutes River float", lat: null, lng: null, googlePlaceId: null },
+    });
+  });
+
+  it("clears the place with an explicit null, and strips what is not editable", () => {
+    expect(ideaPatchInput.parse({ place: null, id: "i1", stopId: STOP, sortOrder: 9 })).toEqual({
+      place: null,
+    });
+  });
+
+  it("refuses a place with no name", () => {
+    expect(ideaPatchInput.safeParse({ place: { name: "" } }).success).toBe(false);
   });
 });
 

@@ -21,6 +21,7 @@ import {
   UNDO_WINDOW_MS,
   cascadeLossSentence,
   ideaDraftInput,
+  ideaPlace,
   ideaRestoreInput,
   isScheduled,
   LOCATE_MAX_ROWS,
@@ -91,6 +92,7 @@ import {
   setReservationNote,
   setReservationFields,
   cycleIdeaStatus,
+  setIdeaPlace,
   setIdeaRating,
   setIdeaNote,
   scheduleFloating,
@@ -959,6 +961,20 @@ export function TripPlanner({
             onIdeaDraftChange: setIdeaDraft,
             onSubmitIdea: () => void submitIdea(),
             onDeleteIdea: doDeleteIdea,
+            onLocateIdea: (ideaId, picked) => {
+              // The row's Locate does not geocode — the human already chose, so
+              // the picked place is written straight through the idea PATCH.
+              // `ideaPlace` is the same PickedPlace → Place mapper the Add-idea
+              // form uses, so the two entrances write identical rows.
+              const undo = trip;
+              const place = ideaPlace(picked);
+              setTrip(setIdeaPlace(trip, selectedStop.id, ideaId, place));
+              persist(
+                tripApi.updateIdea(ideaId, { place }),
+                undo,
+                "Couldn't save that place — put back the way it was.",
+              );
+            },
             promotingId,
             promoteType,
             onStartPromote: (ideaId) => {

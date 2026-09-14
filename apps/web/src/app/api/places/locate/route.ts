@@ -11,8 +11,13 @@ import { placesProvider } from "@/lib/places";
  * The body is IDS ONLY: `{ rows: [{ kind, id }] }`, at most 25 per call. The
  * name and region that reach Google are re-read from the database under
  * `getOwner()` by `dbLocateStore`, so the client never sends a name and can
- * never make us geocode a row it does not own — which is also why
- * `UnmappedRow` (components/map/pins.ts) never had to widen.
+ * never make us geocode a row it does not own.
+ *
+ * `kind` has three members as of #69 — "place", "stop" and "idea" — and
+ * `UnmappedRow` (components/map/pins.ts) now carries it as a FIELD. It used to
+ * be derived from the map layer, which only worked while the trip layers held
+ * stops alone. Nothing in this handler changed for it: the enum widened and the
+ * store grew a third loader and a third save arm.
  *
  * An oversized batch is a 400, not a silent truncation: the button slices to
  * the cap itself, and "located 25 of 40" over a batch that only looked at 25

@@ -291,6 +291,25 @@ export const ideaCreateInput = idea
 export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
 
 /**
+ * `PATCH /api/ideas/:id` — the status pill, the stars, the note, and (#69) the
+ * place the row's Locate picker chose.
+ *
+ * Every key optional, because every shipped caller sends exactly one: the pill
+ * sends `{status}`, the stars `{rating}`, the note `{notes}`. That is why an
+ * ABSENT key must stay absent — `updateIdeaFields` spreads the patch into
+ * drizzle's `.set()`, so a phantom `place: null` on a status cycle would wipe
+ * place_name/lat/lng/google_place_id off a located idea.
+ *
+ * There is no `place` COLUMN — the handler flattens this through
+ * `ideaPatchColumns` (leaf-form.ts) before the mutation sees it, exactly as the
+ * stop write flattens through `stopPatchColumns`.
+ */
+export const ideaPatchInput = idea
+  .pick({ status: true, rating: true, notes: true, place: true })
+  .partial();
+export type IdeaPatchInput = z.infer<typeof ideaPatchInput>;
+
+/**
  * `POST /api/ideas/:id/promote` — the type the promoted reservation lands as.
  *
  * Optional, defaulting to the `"activity"` the mutation used to hardcode, so a

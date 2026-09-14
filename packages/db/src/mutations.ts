@@ -484,11 +484,32 @@ export async function createIdea(
   });
 }
 
+/**
+ * The idea PATCH. The patch is spread STRAIGHT into `.set()`, so every key on
+ * it must be a real column — the wire's nested `place` is flattened to the four
+ * columns below by `ideaPatchColumns` (core's leaf-form.ts) before it gets
+ * here, exactly as `stopPatchColumns` flattens the stop write.
+ *
+ * A key the caller left out is a column left alone: the status pill, the stars
+ * and the note each send one field, and none of them may disturb the place an
+ * idea has been given.
+ */
 export async function updateIdeaFields(
   owner: string,
   ideaId: string,
-  patch: { status?: IdeaStatus; rating?: number | null; notes?: string | null },
+  patch: {
+    status?: IdeaStatus;
+    rating?: number | null;
+    notes?: string | null;
+    placeName?: string | null;
+    lat?: number | null;
+    lng?: number | null;
+    googlePlaceId?: string | null;
+  },
 ): Promise<void> {
+  // An empty patch is a legal "nothing changed" on the wire, and drizzle throws
+  // on `.set({})` — so the no-op is answered here rather than by a SQL error.
+  if (Object.keys(patch).length === 0) return;
   await db
     .update(ideas)
     .set(patch)

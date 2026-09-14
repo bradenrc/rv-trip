@@ -1,7 +1,7 @@
 import type {
   Idea,
   IdeaCreateInput,
-  IdeaStatus,
+  IdeaPatchInput,
   LatLng,
   Leg,
   LegCreateInput,
@@ -103,10 +103,10 @@ export const tripApi = {
   createIdea: (input: IdeaCreateInput): Promise<Idea> =>
     req(`/api/ideas`, "POST", input) as Promise<Idea>,
 
-  updateIdea: (
-    id: string,
-    patch: { status?: IdeaStatus; rating?: number | null; notes?: string | null },
-  ) => req(`/api/ideas/${id}`, "PATCH", patch),
+  /** The status pill, the stars, the note — and (#69) the place the row's
+   * Locate picker chose. Core's own patch grammar, so the client cannot send a
+   * key the handler would strip. */
+  updateIdea: (id: string, patch: IdeaPatchInput) => req(`/api/ideas/${id}`, "PATCH", patch),
 
   /** The other leaf. */
   deleteIdea: (id: string) => req(`/api/ideas/${id}`, "DELETE"),

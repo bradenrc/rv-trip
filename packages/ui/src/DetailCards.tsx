@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
-import { Map as MapIcon, CornerRightUp, SquarePen } from "lucide-react";
+import {
+  Check,
+  CircleDashed,
+  CornerRightUp,
+  LocateFixed,
+  Map as MapIcon,
+  MapPin,
+  SquarePen,
+} from "lucide-react";
+import { PICKED_COORDLESS_LABEL, hasCoords } from "@rv-trip/core";
 import type { Reservation, Idea } from "@rv-trip/core";
 import { categoryMeta } from "./category";
 import { CategoryTile } from "./CategoryTile";
@@ -100,29 +109,38 @@ export function ReservationCard({
  * done, and a toggleable note.
  *
  * `actions` is the same composition slot the reservation card carries — the row
- * menu the app hangs at the end of the header line.
+ * menu the app hangs at the end of the header line. `picker` is the second one
+ * (#69): the app mounts its `PlacePicker` into it and owns the open/closed
+ * state, so the kit stays free of app state and of the search wire.
  */
 export function IdeaCard({
   idea,
   noteVisible,
   actions,
+  picker,
   onCycle,
   onRating,
   onNote,
   onCommitNote,
   onToggleNote,
   onPromote,
+  onLocate,
 }: {
   idea: Idea;
   noteVisible: boolean;
   /** optional row-menu slot, pinned to the end of the header line */
   actions?: ReactNode;
+  /** the open place picker, mounted under the place line (#69) */
+  picker?: ReactNode;
   onCycle: () => void;
   onRating: (n: number) => void;
   onNote: (v: string) => void;
   onCommitNote: () => void;
   onToggleNote: () => void;
   onPromote: () => void;
+  /** Opens the app's picker. Without it the place line renders READ-ONLY, and
+   * with neither a place nor a handler the card renders nothing new at all. */
+  onLocate?: () => void;
 }) {
   const cm = categoryMeta("activity");
   const isDone = idea.status === "done";
@@ -155,6 +173,8 @@ export function IdeaCard({
         </button>
         {actions}
       </div>
+      <IdeaPlaceLine idea={idea} onLocate={onLocate} />
+      {picker}
       {noteVisible && (
         <textarea
           value={idea.notes ?? ""}
@@ -163,6 +183,63 @@ export function IdeaCard({
           placeholder="Add a note — call ahead, what to remember…"
           className="min-h-[38px] w-full resize-y rounded-rv-md border border-rv-border-soft bg-rv-surface-alt px-2.5 py-[7px] text-[13px] leading-relaxed text-rv-ink-muted"
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The place line under an idea's title (#69). THREE states, because the data
+ * has three — `mapIdea` returns a non-null `place` the moment place_name is
+ * set, with lat/lng still null, which is the normal outcome of the picker's
+ * free-text escape row:
+ *
+ *   1. no place at all      → "No place yet" + Locate
+ *   2. a name, no coords    → the name + why it is not on the map + Locate
+ *   3. a name with coords   → the name + "On the map", and nothing to press
+ *
+ * The coordless copy is the picker's own shipped line (`PICKED_COORDLESS_LABEL`)
+ * rather than a fourth wording for the same fact. The line renders nothing at
+ * all when the card has neither a place nor a way to set one.
+ */
+function IdeaPlaceLine({ idea, onLocate }: { idea: Idea; onLocate?: () => void }) {
+  if (!idea.place && !onLocate) return null;
+  const located = idea.place !== null && hasCoords(idea.place);
+  return (
+    <div className="flex flex-wrap items-center gap-[9px] border-t border-dashed border-rv-border pt-2">
+      <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-rv-ink-faded">
+        {idea.place ? (
+          <MapPin className="size-3.5 flex-none text-rv-ink-faded" />
+        ) : (
+          <CircleDashed className="size-3.5 flex-none text-rv-ink-subtle" />
+        )}
+        {idea.place ? (
+          <span className="font-semibold text-rv-ink-muted">{idea.place.name}</span>
+        ) : (
+          "No place yet"
+        )}
+      </span>
+      {!located && idea.place && (
+        <span className="font-mono text-[10.5px] text-rv-ink-faded">
+          {PICKED_COORDLESS_LABEL}
+        </span>
+      )}
+      {located ? (
+        <span className="ml-auto inline-flex items-center gap-[5px] font-mono text-[10.5px] text-rv-green-ink">
+          <Check className="size-3.5" />
+          On the map
+        </span>
+      ) : (
+        onLocate && (
+          <button
+            type="button"
+            onClick={onLocate}
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-3 py-1 font-mono text-[11px] font-bold text-rv-green"
+          >
+            <LocateFixed className="size-3.5" />
+            Locate
+          </button>
+        )
       )}
     </div>
   );

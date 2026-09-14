@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { LocateRow, LocateStore, LocateTarget, PlaceSummary } from "@rv-trip/core";
 import { db } from "./index";
-import { legs, savedPlaces, stops, trips } from "./schema";
+import { ideas, legs, savedPlaces, stops, trips } from "./schema";
 
 /**
  * The database half of Locate (docs/design/41 §6). The decision tree — the cap,
@@ -12,9 +12,10 @@ import { legs, savedPlaces, stops, trips } from "./schema";
  * Two guarantees live here and nowhere else:
  *
  * 1. **Only this owner's rows.** Stops scope through leg → trip exactly as
- *    mutations.ts scopes every stop write; saved places scope on `owner_id`
- *    directly. Another tenant's id simply does not come back, so it is never
- *    geocoded and never written.
+ *    mutations.ts scopes every stop write; ideas take the same walk one level
+ *    deeper (idea → stop → leg → trip → owner); saved places scope on
+ *    `owner_id` directly. Another tenant's id simply does not come back, so it
+ *    is never geocoded and never written.
  * 2. **Only coordless rows.** A row that already has a pin is not re-read and
  *    not re-billed, and a coordinate the user placed by hand can never be
  *    moved by pressing Locate.
@@ -28,6 +29,7 @@ import { legs, savedPlaces, stops, trips } from "./schema";
  * `hasCoords` makes in the domain. */
 const coordlessStop = or(isNull(stops.lat), isNull(stops.lng));
 const coordlessPlace = or(isNull(savedPlaces.lat), isNull(savedPlaces.lng));
+const coordlessIdea = or(isNull(ideas.lat), isNull(ideas.lng));
 
 /** The leg-through-trip owner scope, mirrored from mutations.ts (which keeps
  * its copy private to the write path). */
@@ -37,6 +39,12 @@ const ownedLegIds = (owner: string) =>
     .from(legs)
     .innerJoin(trips, eq(legs.tripId, trips.id))
     .where(eq(trips.ownerId, owner));
+
+/** One level deeper, mirrored the same way — `mutations.ts` keeps its copy
+ * private to the write path, so this is the second copy by the same rule the
+ * comment above names, not an omission. */
+const ownedStopIds = (owner: string) =>
+  db.select({ id: stops.id }).from(stops).where(inArray(stops.legId, ownedLegIds(owner)));
 
 async function loadStops(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
@@ -61,12 +69,32 @@ async function loadPlaces(owner: string, ids: string[]): Promise<LocateTarget[]>
 }
 
 /**
- * Every coordless row this owner has, both kinds — what `pnpm backfill:places`
+ * An idea's search text is its TITLE. A stop searches on `stops.place_name`; an
+ * idea's `place_name` is null until something locates it, and the title is all
+ * the row has — so "Tumalo Falls trailhead" resolves and "Deschutes River
+ * float" never will, which is a fact about that idea rather than a failure.
+ * `region` is null for the same reason a stop's is: the trip's geography is not
+ * a fact about this idea.
+ */
+async function loadIdeas(owner: string, ids: string[]): Promise<LocateTarget[]> {
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({ id: ideas.id, name: ideas.title })
+    .from(ideas)
+    .innerJoin(stops, eq(ideas.stopId, stops.id))
+    .innerJoin(legs, eq(stops.legId, legs.id))
+    .innerJoin(trips, eq(legs.tripId, trips.id))
+    .where(and(eq(trips.ownerId, owner), inArray(ideas.id, ids), coordlessIdea));
+  return rows.map((r) => ({ kind: "idea" as const, id: r.id, name: r.name, region: null }));
+}
+
+/**
+ * Every coordless row this owner has, all three kinds — what `pnpm backfill:places`
  * walks. The page never calls this: the map already knows its unmapped rows and
  * sends the ids it is showing.
  */
 export async function listLocateTargetsForOwner(owner: string): Promise<LocateTarget[]> {
-  const [stopRows, placeRows] = await Promise.all([
+  const [stopRows, placeRows, ideaRows] = await Promise.all([
     db
       .select({ id: stops.id, name: stops.placeName })
       .from(stops)
@@ -77,6 +105,13 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
       .select({ id: savedPlaces.id, name: savedPlaces.name, region: savedPlaces.region })
       .from(savedPlaces)
       .where(and(eq(savedPlaces.ownerId, owner), coordlessPlace)),
+    db
+      .select({ id: ideas.id, name: ideas.title })
+      .from(ideas)
+      .innerJoin(stops, eq(ideas.stopId, stops.id))
+      .innerJoin(legs, eq(stops.legId, legs.id))
+      .innerJoin(trips, eq(legs.tripId, trips.id))
+      .where(and(eq(trips.ownerId, owner), coordlessIdea)),
   ]);
   return [
     ...stopRows.map((r) => ({ kind: "stop" as const, id: r.id, name: r.name, region: null })),
@@ -86,6 +121,7 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
       name: r.name,
       region: r.region,
     })),
+    ...ideaRows.map((r) => ({ kind: "idea" as const, id: r.id, name: r.name, region: null })),
   ];
 }
 
@@ -126,6 +162,35 @@ async function setSavedPlaceCoords(
   return rows.length > 0;
 }
 
+/**
+ * Write the pin Google found onto an idea. The one asymmetry with the two
+ * writers above: an idea must also end up with a `place_name`, because
+ * `mapIdea` (queries.ts:395) keys the whole nested `place` off that column —
+ * write only lat/lng and the coordinates would be invisible to every reader.
+ *
+ * `coalesce`, not an overwrite: the picker's free-text escape row means an idea
+ * can already carry a name the HUMAN typed, and pressing a batch button must
+ * not replace it with Google's. Google's name fills the column only when it is
+ * empty, which is the case the batch exists for.
+ */
+async function writeIdeaPin(
+  owner: string,
+  ideaId: string,
+  found: PlaceSummary,
+): Promise<boolean> {
+  const rows = await db
+    .update(ideas)
+    .set({
+      lat: found.location!.lat,
+      lng: found.location!.lng,
+      googlePlaceId: found.googlePlaceId,
+      placeName: sql`coalesce(${ideas.placeName}, ${found.name})`,
+    })
+    .where(and(eq(ideas.id, ideaId), inArray(ideas.stopId, ownedStopIds(owner))))
+    .returning({ id: ideas.id });
+  return rows.length > 0;
+}
+
 /** The `LocateStore` @rv-trip/core's `locatePlaces` runs against, bound to one
  * owner. The route and `pnpm backfill:places` both build it this way. */
 export function dbLocateStore(owner: string): LocateStore {
@@ -136,12 +201,13 @@ export function dbLocateStore(owner: string): LocateStore {
       return Promise.all([
         loadStops(owner, ids("stop")),
         loadPlaces(owner, ids("place")),
-      ]).then(([s, p]) => [...s, ...p]);
+        loadIdeas(owner, ids("idea")),
+      ]).then(([s, p, i]) => [...s, ...p, ...i]);
     },
     saveCoords(target: LocateTarget, found: PlaceSummary) {
-      return target.kind === "stop"
-        ? setStopCoords(owner, target.id, found)
-        : setSavedPlaceCoords(owner, target.id, found);
+      if (target.kind === "stop") return setStopCoords(owner, target.id, found);
+      if (target.kind === "idea") return writeIdeaPin(owner, target.id, found);
+      return setSavedPlaceCoords(owner, target.id, found);
     },
   };
 }

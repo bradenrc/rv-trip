@@ -12,10 +12,18 @@ import {
   Trash2,
   CornerRightUp,
 } from "lucide-react";
-import type { NearPlace, PickedPlace, ReservationDraft, ReservationType, Stop } from "@rv-trip/core";
+import type {
+  Idea,
+  NearPlace,
+  PickedPlace,
+  ReservationDraft,
+  ReservationType,
+  Stop,
+} from "@rv-trip/core";
 import {
   isScheduled,
   nearLabel,
+  nearOf,
   pickedFromPlace,
   reservationCost,
   reservationDraftInput,
@@ -89,6 +97,11 @@ export interface StopLeafActions {
   onSubmitIdea: () => void;
   onDeleteIdea: (ideaId: string) => void;
 
+  /** #69 · the row's Locate. Unlike the map's batch — which geocodes a title
+   * server-side — this one lets the human choose, so the picked place is
+   * written straight through the idea PATCH. `null` clears it. */
+  onLocateIdea: (ideaId: string, picked: PickedPlace | null) => void;
+
   /** "Book" opens the type picker rather than promoting straight away — the
    * type is the whole point of the gesture. */
   promotingId: string | null;
@@ -157,6 +170,17 @@ export function StopDetailSheet({
 }) {
   const scheduled = isScheduled(stop);
   const dates = scheduled ? dateRange(stop.arriveDate, stop.departDate) : "Floating";
+  /** Which idea row has its picker open — one at a time, the sheet's own
+   * state. The DS card renders the slot; it never knows about it. */
+  const [locatingIdeaId, setLocatingIdeaId] = useState<string | null>(null);
+  /**
+   * An idea's search bias is THIS stop, not the one above it. `placeNear` is
+   * `stopAbove(...)` — right for "where is the next stop", wrong for a thing
+   * that happens here — so this stop's own place leads, and `placeNear` (the
+   * previous stop, else home base) is the fallback for a stop with no
+   * coordinates of its own.
+   */
+  const ideaNear = nearOf(stop.place, placeNear);
   const costTotal = stop.reservations.reduce((a, r) => a + (r.cost ?? 0), 0);
 
   const editing =
@@ -464,6 +488,20 @@ export function StopDetailSheet({
                       onCommitNote={() => onCommitIdeaNote(it.id)}
                       onToggleNote={() => onIdeaToggleNote(it.id)}
                       onPromote={() => leaves.onStartPromote(it.id)}
+                      onLocate={() => setLocatingIdeaId(it.id)}
+                      picker={
+                        locatingIdeaId === it.id ? (
+                          <IdeaPlacePicker
+                            idea={it}
+                            near={ideaNear}
+                            onPick={(picked) => {
+                              leaves.onLocateIdea(it.id, picked);
+                              setLocatingIdeaId(null);
+                            }}
+                            onCancel={() => setLocatingIdeaId(null)}
+                          />
+                        ) : undefined
+                      }
                       actions={
                         <RowMenu label={`Actions for ${it.title}`}>
                           <DropdownMenuItem
@@ -566,6 +604,55 @@ function typeLabel(t: ReservationType): string {
  * from the row would snap back on the next render. Same reason `PlaceEditor` in
  * RouteView holds its own.
  */
+/**
+ * The row's Locate picker (#69) — `PlacePicker` as it ships, mounted inline in
+ * the scrolling sheet with the `near` line the change-place mount already
+ * draws. It starts EMPTY rather than seeded from the idea: the row has a place
+ * line showing what it has, and this is the gesture that replaces it.
+ */
+function IdeaPlacePicker({
+  idea,
+  near,
+  onPick,
+  onCancel,
+}: {
+  idea: Idea;
+  near: NearPlace | null;
+  onPick: (picked: PickedPlace | null) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState<PickedPlace | null>(null);
+  return (
+    <div className="rounded-rv-md border border-rv-border bg-rv-surface px-2.5 py-[9px]">
+      {near && (
+        <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-rv-ink-faded">
+          {nearLabel(near)}
+        </div>
+      )}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <PlacePicker
+            value={value}
+            onChange={(picked) => {
+              setValue(picked);
+              if (picked) onPick(picked);
+            }}
+            near={near}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label={`Stop setting a place for ${idea.title}`}
+          className="mt-[3px] inline-flex flex-none cursor-pointer items-center justify-center rounded-rv-sm border border-rv-border bg-transparent p-1 text-rv-ink-faded"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SheetPlacePicker({
   stop,
   near,
