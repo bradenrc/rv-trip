@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   X,
   CalendarDays,
@@ -11,9 +12,11 @@ import {
   Trash2,
   CornerRightUp,
 } from "lucide-react";
-import type { ReservationDraft, ReservationType, Stop } from "@rv-trip/core";
+import type { NearPlace, PickedPlace, ReservationDraft, ReservationType, Stop } from "@rv-trip/core";
 import {
   isScheduled,
+  nearLabel,
+  pickedFromPlace,
   reservationCost,
   reservationDraftInput,
   reservationDraftPatch,
@@ -29,6 +32,7 @@ import {
 import { dateRange } from "@/lib/trip-ui";
 import { resDates } from "@/lib/trip-logic";
 import { StopMiniMap } from "@/components/map/StopMiniMap";
+import { PlacePicker } from "@/components/places/PlacePicker";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { MenuHint, RowMenu, MENU_ITEM, MENU_ITEM_WARN } from "./row-menu";
 
@@ -75,6 +79,11 @@ export interface StopLeafActions {
 
   ideaAddOpen: boolean;
   ideaDraft: string;
+  /** The idea form's OPTIONAL place (#60 Q5 → A). An idea can still be just a
+   * title — that is what an idea is — so Save is disabled on an empty title
+   * only, and `ideaCreateInput` already carried `place`, so this is UI only. */
+  ideaPicked: PickedPlace | null;
+  onIdeaPickedChange: (p: PickedPlace | null) => void;
   onToggleIdeaAdd: () => void;
   onIdeaDraftChange: (v: string) => void;
   onSubmitIdea: () => void;
@@ -110,6 +119,11 @@ export function StopDetailSheet({
   onIdeaNote,
   onCommitIdeaNote,
   onIdeaToggleNote,
+  placing,
+  placeNear,
+  onStartChangePlace,
+  onChangePlace,
+  onCancelChangePlace,
 }: {
   stop: Stop;
   legName: string;
@@ -132,6 +146,14 @@ export function StopDetailSheet({
   onIdeaNote: (ideaId: string, v: string) => void;
   onCommitIdeaNote: (ideaId: string) => void;
   onIdeaToggleNote: (ideaId: string) => void;
+
+  // ── #60 · Mount B · the same inline editor the row menu opens ────────────
+  placing: boolean;
+  /** The search bias — the stop above this one in the leg, else home base. */
+  placeNear: NearPlace | null;
+  onStartChangePlace: () => void;
+  onChangePlace: (picked: PickedPlace) => void;
+  onCancelChangePlace: () => void;
 }) {
   const scheduled = isScheduled(stop);
   const dates = scheduled ? dateRange(stop.arriveDate, stop.departDate) : "Floating";
@@ -199,7 +221,40 @@ export function StopDetailSheet({
         </div>
 
         <div className="flex flex-col gap-6 p-6">
-          <StopMiniMap stop={stop} legName={legName} ordinal={stopOrdinal} />
+          <div className="flex flex-col gap-2.5">
+            <StopMiniMap
+              stop={stop}
+              legName={legName}
+              ordinal={stopOrdinal}
+              onChangePlace={placing ? undefined : onStartChangePlace}
+            />
+            {placing && (
+              <div>
+                {placeNear && (
+                  <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-rv-ink-faded">
+                    {nearLabel(placeNear)}
+                  </div>
+                )}
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <SheetPlacePicker
+                      stop={stop}
+                      near={placeNear}
+                      onChangePlace={onChangePlace}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onCancelChangePlace}
+                    aria-label={`Stop changing the place for ${stop.place.name}`}
+                    className="mt-[3px] inline-flex flex-none cursor-pointer items-center justify-center rounded-rv-sm border border-rv-border bg-transparent p-1 text-rv-ink-faded"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Reservations */}
           <div>
@@ -371,6 +426,19 @@ export function StopDetailSheet({
                     className={SHEET_FIELD}
                   />
                 </label>
+                <div className="flex flex-col gap-1">
+                  <FieldLabel>
+                    Place{" "}
+                    <span className="font-sans font-normal normal-case tracking-normal text-rv-ink-faded">
+                      optional
+                    </span>
+                  </FieldLabel>
+                  <PlacePicker
+                    value={leaves.ideaPicked}
+                    onChange={leaves.onIdeaPickedChange}
+                    near={placeNear}
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={leaves.onSubmitIdea}
@@ -490,4 +558,32 @@ export function StopDetailSheet({
  * eight-value type the row actually stores. */
 function typeLabel(t: ReservationType): string {
   return `${categoryMeta(t).cat} · ${t[0]!.toUpperCase()}${t.slice(1)}`;
+}
+
+/**
+ * Mount B's editor. The value is held here, not read off the stop, so clearing
+ * the chip (✕) really does drop back to the search box — a value read straight
+ * from the row would snap back on the next render. Same reason `PlaceEditor` in
+ * RouteView holds its own.
+ */
+function SheetPlacePicker({
+  stop,
+  near,
+  onChangePlace,
+}: {
+  stop: Stop;
+  near: NearPlace | null;
+  onChangePlace: (picked: PickedPlace) => void;
+}) {
+  const [value, setValue] = useState<PickedPlace | null>(() => pickedFromPlace(stop.place));
+  return (
+    <PlacePicker
+      value={value}
+      onChange={(picked) => {
+        setValue(picked);
+        if (picked) onChangePlace(picked);
+      }}
+      near={near}
+    />
+  );
 }

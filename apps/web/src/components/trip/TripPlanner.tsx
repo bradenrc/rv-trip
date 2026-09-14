@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import type {
   CascadeCounts,
   Idea,
+  PickedPlace,
   Reservation,
   ReservationDraft,
   ReservationType,
@@ -22,6 +23,9 @@ import {
   ideaDraftInput,
   ideaRestoreInput,
   isScheduled,
+  LOCATE_MAX_ROWS,
+  nearOf,
+  locateToastMessage,
   legCascadeCounts,
   nextLegTitle,
   orderedPairs,
@@ -37,6 +41,8 @@ import {
   stopDatesHelp,
   stopDatesPatch,
   stopOutsideTripMessage,
+  stopPlaceCreate,
+  stopPlacePatch,
   stopsOutsideRange,
   tripCascadeCounts,
   tripDayCount,
@@ -73,6 +79,8 @@ import {
   renameLeg,
   renameStop,
   setStopDates,
+  setStopPlace,
+  stopAbove,
   timelineModel,
   routeModel,
   routeSummary,
@@ -124,15 +132,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Timeline } from "./Timeline";
+import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
 
-/**
- * The name a just-created stop carries until you type over it. "Add stop" opens
- * that rename focused, so the placeholder is what you see for one keystroke —
- * not a name anyone has to live with. The place picker (#23) replaces this.
- */
-const NEW_STOP_NAME = "New stop";
 
 /**
  * The reservation form's state, and the shape the two write helpers in
@@ -185,6 +188,16 @@ export function TripPlanner({
    * "Rename" and by a create, so a new row lands ready to be named. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [datesStopId, setDatesStopId] = useState<string | null>(null);
+  /** The leg whose "Add stop" DRAFT row is open. The draft is not a stop — the
+   * pick is the create — so dismissing it writes nothing, which is how this
+   * screen stops manufacturing the coordless rows #60 exists to repair. */
+  const [draftLegId, setDraftLegId] = useState<string | null>(null);
+  /** The stop whose place editor is open. One editor, three entry points: the
+   * row menu, the row's amber coordless chip, and the stop sheet's mini-map. */
+  const [placingStopId, setPlacingStopId] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+  /** The optional place on the stop sheet's "Add idea" form. */
+  const [ideaPicked, setIdeaPicked] = useState<PickedPlace | null>(null);
   const [deleteLegId, setDeleteLegId] = useState<string | null>(null);
   const [deleteStopId, setDeleteStopId] = useState<string | null>(null);
   const [form, setForm] = useState<AddForm>(BLANK_RESERVATION_DRAFT);
@@ -273,6 +286,7 @@ export function TripPlanner({
     setFormTarget(null);
     setIdeaAddOpen(false);
     setIdeaDraft("");
+    setIdeaPicked(null);
     setPromotingId(null);
   };
   const openStop = (id: string) => {
@@ -281,6 +295,9 @@ export function TripPlanner({
   };
   const closeStop = () => {
     setSelectedId(null);
+    // Mount B's editor cannot outlive the sheet it was opened from — it would
+    // reappear, still open, on the row behind it.
+    setPlacingStopId(null);
     resetLeafForms();
   };
   const toggleIdeaNote = (ideaId: string) =>
@@ -399,22 +416,81 @@ export function TripPlanner({
 
   // ── stops ────────────────────────────────────────────────────────────────
 
-  /** Born floating and unnamed, with its inline rename already open — the
-   * place picker (#23) is what will eventually fill the name in for you. */
-  const addStop = async (legId: string) => {
+  /**
+   * "Add stop" no longer creates anything: it appends a DRAFT row to the leg
+   * and opens the picker inside it, biased to the stop above. Nothing is
+   * written until a place is chosen — which is the whole of #60's headline fix,
+   * because the old path posted a literal "New stop" with three null columns
+   * that no patch could ever repair.
+   */
+  const openDraftStop = (legId: string) => {
+    setLens("route");
+    setPlacingStopId(null);
+    setDraftLegId(legId);
+  };
+
+  /** The pick IS the create: name, coordinates and place id in one write, so
+   * the stop is born mapped and its connector resolves immediately. */
+  const createStopFromPick = async (legId: string, picked: PickedPlace) => {
+    const body = stopPlaceCreate(legId, picked);
+    if (!body) return;
+    setDraftLegId(null);
     try {
-      const created = await tripApi.createStop({
-        legId,
-        place: { name: NEW_STOP_NAME, lat: null, lng: null, googlePlaceId: null },
-        arriveDate: null,
-        departDate: null,
-      });
-      setTrip((t) => appendStop(t, created));
-      setLens("route");
-      setRenamingId(created.id);
+      const created = await tripApi.createStop(body);
+      const next = appendStop(trip, created);
+      setTrip(next);
+      upgradeRoutes(next);
     } catch {
       toast.error("Couldn't add a stop — nothing was created.");
     }
+  };
+
+  /**
+   * "Change place…" / "Set place" — the whole place at once, which is the one
+   * thing the rename can never do. The place REPLACES the old one, so a
+   * re-picked free-text name honestly clears the coordinates rather than
+   * leaving a pin at the last spot under a new label.
+   */
+  const doChangeStopPlace = (stopId: string, picked: PickedPlace) => {
+    const patch = stopPlacePatch(picked);
+    if (!patch?.place) return;
+    setPlacingStopId(null);
+    const undo = trip;
+    const was = byId.get(stopId)?.place.name ?? "that stop";
+    const next = setStopPlace(trip, stopId, patch.place);
+    setTrip(next);
+    upgradeRoutes(next);
+    persist(
+      tripApi.updateStop(stopId, patch),
+      undo,
+      `Couldn't change the place for ${was} — the old one is back.`,
+    );
+  };
+
+  /**
+   * The rail's Locate — the same bounded batch /map already ships, pointed at
+   * the planner's coordless STOPS (`locateRowKind` has always been
+   * `["place","stop"]`).
+   *
+   * It refreshes rather than echoing: `LocateResponse` returns only id/lat/lng,
+   * not the `googlePlaceId` the server also wrote, so a local echo would leave
+   * the client's place id permanently stale — and the drives have to be
+   * re-resolved server-side anyway.
+   */
+  const locateUnmapped = () => {
+    const batch = summary.unmappedStops.slice(0, LOCATE_MAX_ROWS);
+    if (batch.length === 0) return;
+    setLocating(true);
+    tripApi
+      .locatePlaces(batch.map((row) => ({ kind: "stop" as const, id: row.id })))
+      .then(({ located, results }) => {
+        const found = new Set(results.map((r) => r.id));
+        const stuck = batch.filter((row) => !found.has(row.id)).map((row) => row.name);
+        toast.success(locateToastMessage(located, stuck));
+        router.refresh();
+      })
+      .catch(() => toast.error("Locate didn't run — check your connection."))
+      .finally(() => setLocating(false));
   };
 
   const doRenameStop = (stopId: string, name: string) => {
@@ -621,13 +697,16 @@ export function TripPlanner({
 
   const submitIdea = async () => {
     if (!selectedId) return;
-    const body = ideaDraftInput(selectedId, ideaDraft);
+    // The place is optional and the title is not: a place without a title is
+    // not an idea, which is exactly what `ideaDraftInput` refuses.
+    const body = ideaDraftInput(selectedId, ideaDraft, ideaPicked);
     if (!body) return;
     const stopId = selectedId;
     try {
       const created = await tripApi.createIdea(body);
       setTrip((t) => appendIdea(t, stopId, created));
       setIdeaDraft("");
+      setIdeaPicked(null);
       setIdeaAddOpen(false);
     } catch {
       toast.error("Couldn't save that idea.");
@@ -771,7 +850,7 @@ export function TripPlanner({
               type="button"
               onClick={() => {
                 const legId = legOrder(trip).at(-1);
-                if (legId) void addStop(legId);
+                if (legId) openDraftStop(legId);
               }}
               disabled={trip.legs.length === 0}
               className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
@@ -788,6 +867,7 @@ export function TripPlanner({
           <RouteView
             legs={route}
             summary={summary}
+            homeBasePlace={trip.homeBasePlace}
             costs={costTracking}
             hasRig={hasRig}
             units={units}
@@ -795,10 +875,15 @@ export function TripPlanner({
             routeDrag={routeDrag}
             actions={{
               renamingId,
-              onStartRename: setRenamingId,
+              // Renaming and changing the place are two editors for one row;
+              // opening either closes the other.
+              onStartRename: (id) => {
+                setPlacingStopId(null);
+                setRenamingId(id);
+              },
               onRenameDone: () => setRenamingId(null),
               onRenameLeg: doRenameLeg,
-              onAddStop: (legId) => void addStop(legId),
+              onAddStop: openDraftStop,
               onAddLeg: () => void addLeg(),
               onMoveLeg: doMoveLeg,
               canMoveLeg: (legId, delta) => canMoveLeg(trip, legId, delta),
@@ -808,6 +893,19 @@ export function TripPlanner({
               onUnscheduleStop: doUnschedule,
               onMoveStopToLeg: doMoveStopToLeg,
               onDeleteStop: setDeleteStopId,
+              draftLegId,
+              onPickDraftStop: (legId, picked) => void createStopFromPick(legId, picked),
+              onCancelDraftStop: () => setDraftLegId(null),
+              placingStopId,
+              onStartChangePlace: (stopId) => {
+                setDraftLegId(null);
+                setRenamingId(null);
+                setPlacingStopId(stopId);
+              },
+              onChangeStopPlace: doChangeStopPlace,
+              onCancelChangePlace: () => setPlacingStopId(null),
+              locating,
+              onLocate: locateUnmapped,
             }}
             onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
             onRowDragEnd={() => setRouteDrag(null)}
@@ -852,7 +950,12 @@ export function TripPlanner({
             onDeleteReservation: doDeleteReservation,
             ideaAddOpen,
             ideaDraft,
-            onToggleIdeaAdd: () => setIdeaAddOpen((v) => !v),
+            ideaPicked,
+            onIdeaPickedChange: setIdeaPicked,
+            onToggleIdeaAdd: () => {
+              setIdeaPicked(null);
+              setIdeaAddOpen((v) => !v);
+            },
             onIdeaDraftChange: setIdeaDraft,
             onSubmitIdea: () => void submitIdea(),
             onDeleteIdea: doDeleteIdea,
@@ -867,6 +970,11 @@ export function TripPlanner({
             onConfirmPromote: () => void confirmPromote(),
           }}
           ideaNoteOpen={ideaNoteOpen}
+          placing={placingStopId === selectedStop.id}
+          placeNear={nearOf(stopAbove(trip, selectedStop.id)?.place, trip.homeBasePlace)}
+          onStartChangePlace={() => setPlacingStopId(selectedStop.id)}
+          onChangePlace={(picked) => doChangeStopPlace(selectedStop.id, picked)}
+          onCancelChangePlace={() => setPlacingStopId(null)}
           onClose={closeStop}
           onSchedule={() => doSchedule(selectedStop.id)}
           onSetRating={(n) => {
@@ -1021,12 +1129,9 @@ export function TripPlanner({
   );
 }
 
-/** The stop the row menu's "Edit dates…" is open over. */
-
-
-/** A dialog field's chrome — the app's one input skin, in the dialog's palette. */
-const FIELD =
-  "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] text-[13px] text-rv-ink md:text-[13px]";
+/** A dialog field's chrome — the app's one input skin, in the dialog's palette.
+ * Only the mono (date) variant survives #60: home base is the picker now, and
+ * the picker brings its own. */
 const FIELD_MONO =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] font-mono text-[12px] text-rv-ink md:text-[12px]";
 
@@ -1125,11 +1230,11 @@ function TripSettingsFields({
 
         <div className="flex flex-col gap-1">
           <FieldLabel>Home base</FieldLabel>
-          <Input
-            value={draft.homeBase}
-            onChange={(e) => set({ homeBase: e.target.value })}
-            placeholder="Boise, ID"
-            className={FIELD}
+          {/* The same picker, unstyled by this dialog: the rv-* names re-resolve
+              under the dialog's own `.dark`, exactly as its Inputs already do. */}
+          <PlacePicker
+            value={draft.homeBasePlace}
+            onChange={(homeBasePlace) => set({ homeBasePlace })}
           />
         </div>
 

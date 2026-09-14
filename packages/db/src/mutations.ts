@@ -72,6 +72,11 @@ export async function createTrip(
     startDate: IsoDate;
     endDate: IsoDate;
     homeBase: string | null;
+    // The home-base ANCHOR (#60) — flattened from the wire's nested
+    // `homeBasePlace` by the route, because there is no such column.
+    homeBaseLat?: number | null;
+    homeBaseLng?: number | null;
+    homeBasePlaceId?: string | null;
   },
 ) {
   // One empty leg in the SAME transaction: RouteView renders per leg, so a trip
@@ -85,6 +90,9 @@ export async function createTrip(
         startDate: input.startDate,
         endDate: input.endDate,
         homeBase: input.homeBase,
+        homeBaseLat: input.homeBaseLat ?? null,
+        homeBaseLng: input.homeBaseLng ?? null,
+        homeBasePlaceId: input.homeBasePlaceId ?? null,
       })
       .returning();
     await tx.insert(legs).values({ tripId: row!.id, title: "Leg 1", sortOrder: 0 });
@@ -98,6 +106,9 @@ export async function updateTripFields(
   patch: {
     title?: string;
     homeBase?: string | null;
+    homeBaseLat?: number | null;
+    homeBaseLng?: number | null;
+    homeBasePlaceId?: string | null;
     startDate?: IsoDate;
     endDate?: IsoDate;
     status?: TripStatus;
@@ -293,6 +304,12 @@ export async function updateStopFields(
   stopId: string,
   patch: {
     placeName?: string;
+    // The three place columns "Change place…" writes (#60). They arrive
+    // flattened from the wire's nested `place` by `stopPatchColumns`, because
+    // this spreads its patch straight into drizzle's `.set()`.
+    lat?: number | null;
+    lng?: number | null;
+    googlePlaceId?: string | null;
     legId?: string;
     sortOrder?: number;
     rating?: number | null;

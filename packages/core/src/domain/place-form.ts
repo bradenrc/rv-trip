@@ -1,10 +1,15 @@
 import type { PickedPlace } from "../providers/place-picker";
 import type {
+  IsoDate,
+  Place,
   ReservationType,
   SavedPlace,
   SavedPlaceCreate,
   SavedPlacePatch,
   SavedPlaceStatus,
+  StopCreateInput,
+  StopPatchInput,
+  TripPatchInput,
 } from "./types";
 
 /**
@@ -242,5 +247,131 @@ export function savedPlaceToCreate(p: SavedPlace): SavedPlaceCreate {
     source: p.source,
     rating: p.rating,
     tripId: p.tripId,
+  };
+}
+
+// ── #60 · the picked place → the trip tree ─────────────────────────────────
+//
+// The picker is drawn in `apps/web/src/components/`, which has no test runner,
+// so every decision the four new mounts make lives here: what a pick posts,
+// what it patches, which key wins when a body carries two, and how the nested
+// `place` on the wire becomes the flat columns drizzle's `.set()` wants. Same
+// split as the save/edit sheet above.
+
+/** A picked place as the grammar's `Place` — the four persisted fields, and
+ * nothing of Google's display-only address/rating. */
+export function placeOf(picked: PickedPlace): Place {
+  return {
+    name: picked.name.trim(),
+    lat: picked.lat,
+    lng: picked.lng,
+    googlePlaceId: picked.googlePlaceId,
+  };
+}
+
+/**
+ * `POST /api/stops` — "Add stop" is the pick, so a stop is born with its name,
+ * its coordinates and its place id in ONE write rather than as a coordless
+ * `"New stop"` a later patch has to repair.
+ */
+export function stopPlaceCreate(
+  legId: string,
+  picked: PickedPlace,
+  dates: { arriveDate: IsoDate | null; departDate: IsoDate | null } = {
+    arriveDate: null,
+    departDate: null,
+  },
+): StopCreateInput | null {
+  if (picked.name.trim() === "") return null;
+  return { legId, place: placeOf(picked), ...dates };
+}
+
+/** `PATCH /api/stops/:id` — "Change place…" / "Set place". The whole place as
+ * one key, never three: half a coordinate is no coordinate. */
+export function stopPlacePatch(picked: PickedPlace): StopPatchInput | null {
+  if (picked.name.trim() === "") return null;
+  return { place: placeOf(picked) };
+}
+
+/** The stop's place columns, as `updateStopFields` names them. */
+export interface StopPlaceColumns {
+  placeName: string;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+}
+
+/**
+ * The handler's flattening: `stopPatchInput` puts a NESTED `place` on the wire,
+ * `updateStopFields` spreads its patch straight into `db.update(stops).set()`
+ * and there is no `place` column — so the route calls this between the two or
+ * the PATCH is a SQL error on the issue's central verb.
+ *
+ * Precedence is pinned here rather than left to key order: when a body carries
+ * BOTH `placeName` and `place`, the whole place wins. `placeName` is the cheap
+ * rename and must not be able to outrank the key that also carries coordinates.
+ */
+export function stopPatchColumns(
+  patch: StopPatchInput,
+): Omit<StopPatchInput, "place" | "placeName"> & Partial<StopPlaceColumns> {
+  const { place: picked, placeName, ...rest } = patch;
+  if (picked) {
+    return {
+      ...rest,
+      placeName: picked.name,
+      lat: picked.lat,
+      lng: picked.lng,
+      googlePlaceId: picked.googlePlaceId,
+    };
+  }
+  return placeName === undefined ? rest : { ...rest, placeName };
+}
+
+/**
+ * Home base, from the picker. `homeBase` stays the NAME the dashboard card and
+ * the phone already read; `homeBasePlace` is the anchor the first stop of a leg
+ * biases its search to. They travel together so the two can never disagree —
+ * clearing the picker clears both.
+ */
+export function homeBasePatch(picked: PickedPlace | null): TripPatchInput {
+  if (!picked || picked.name.trim() === "") return { homeBase: null, homeBasePlace: null };
+  const place = placeOf(picked);
+  return { homeBase: place.name, homeBasePlace: place };
+}
+
+/** The trip's home-base columns, as `createTrip`/`updateTripFields` name them. */
+export interface HomeBaseColumns {
+  homeBaseLat: number | null;
+  homeBaseLng: number | null;
+  homeBasePlaceId: string | null;
+}
+
+/** The trip write's flattening — the mirror of `stopPatchColumns`. `trips` has
+ * three nullable columns and no `home_base_place` one. */
+export function homeBaseColumns(place: Place | null): HomeBaseColumns {
+  return {
+    homeBaseLat: place?.lat ?? null,
+    homeBaseLng: place?.lng ?? null,
+    homeBasePlaceId: place?.googlePlaceId ?? null,
+  };
+}
+
+/** The three columns read back as one object — null when the trip has no
+ * anchor, so `trip.homeBasePlace` is either a whole place or nothing. */
+export function homeBasePlaceOf(row: {
+  homeBase: string | null;
+  homeBaseLat: number | null;
+  homeBaseLng: number | null;
+  homeBasePlaceId: string | null;
+}): Place | null {
+  if (row.homeBase === null) return null;
+  if (row.homeBaseLat === null && row.homeBaseLng === null && row.homeBasePlaceId === null) {
+    return null;
+  }
+  return {
+    name: row.homeBase,
+    lat: row.homeBaseLat,
+    lng: row.homeBaseLng,
+    googlePlaceId: row.homeBasePlaceId,
   };
 }

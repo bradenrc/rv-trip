@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import {
   Pin,
@@ -20,9 +21,25 @@ import {
   ArrowLeftRight,
   Undo2,
   Trash2,
+  CircleDot,
+  LocateFixed,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { convertMiles, distanceUnitLabel, type Units } from "@rv-trip/core";
+import {
+  LOCATE_MAX_ROWS,
+  PICKED_COORDLESS_LABEL,
+  convertMiles,
+  distanceUnitLabel,
+  hasCoords,
+  nearLabel,
+  nearOf,
+  pickedFromPlace,
+  type NearPlace,
+  type PickedPlace,
+  type Place,
+  type Units,
+} from "@rv-trip/core";
 import {
   EstimateChip,
   FloatingTag,
@@ -35,6 +52,7 @@ import {
 import { navigationCaption, navigationOptions } from "@/lib/trip-logic";
 import type { RouteDrive, RouteLeg, RouteSummary } from "@/lib/trip-logic";
 import { InlineText } from "@/components/ui/inline-text";
+import { PlacePicker } from "@/components/places/PlacePicker";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -77,11 +95,32 @@ export interface RouteViewActions {
   onUnscheduleStop: (stopId: string) => void;
   onMoveStopToLeg: (stopId: string, legId: string) => void;
   onDeleteStop: (stopId: string) => void;
+
+  // ── #60 · the picker, mounted in the row ─────────────────────────────────
+
+  /** The leg whose "Add stop" draft row is open, or null. The draft row is NOT
+   * a stop: nothing is written until a place is chosen, so dismissing it
+   * persists nothing — which is the only way this screen stops manufacturing
+   * the coordless rows it exists to repair. */
+  draftLegId: string | null;
+  onPickDraftStop: (legId: string, picked: PickedPlace) => void;
+  onCancelDraftStop: () => void;
+  /** The stop whose place editor is open. One editor, three entry points: the
+   * row menu's "Change place…", the coordless chip's "Set place", and the stop
+   * sheet's mini-map button. */
+  placingStopId: string | null;
+  onStartChangePlace: (stopId: string) => void;
+  onChangeStopPlace: (stopId: string, picked: PickedPlace) => void;
+  onCancelChangePlace: () => void;
+  /** The rail's Locate — one bounded batch over `summary.unmappedStops`. */
+  locating: boolean;
+  onLocate: () => void;
 }
 
 export function RouteView({
   legs,
   summary,
+  homeBasePlace,
   costs,
   hasRig,
   units,
@@ -94,6 +133,9 @@ export function RouteView({
 }: {
   legs: RouteLeg[];
   summary: RouteSummary;
+  /** The trip's home base as a real place (#60 Q4 → B). It is the search bias
+   * for the FIRST stop of a leg — the one row with nothing above it. */
+  homeBasePlace: Place | null;
   costs: boolean;
   /** The account's display units, resolved on the server and handed down
    * through `TripPlanner`. The rail's hero converts here, at the last moment;
@@ -185,14 +227,28 @@ export function RouteView({
               </div>
             </div>
 
-            {leg.rows.map((row) => (
+            {leg.rows.map((row, i) => {
+              // The picker's bias: the stop ABOVE this one in the leg, and the
+              // trip's home base when there is nothing above it.
+              const near = nearOf(leg.rows[i - 1]?.stop.place, homeBasePlace);
+              const placing = actions.placingStopId === row.stop.id;
+              const mapped = hasCoords(row.stop.place);
+              return (
               <div key={row.stop.id}>
                 <div
-                  draggable={row.floating}
-                  onDragStart={row.floating ? () => onRowDragStart(leg.id, row.stop.id) : undefined}
-                  onDragEnd={row.floating ? onRowDragEnd : undefined}
-                  onDragOver={row.floating ? (e) => e.preventDefault() : undefined}
-                  onDrop={row.floating ? () => onRowDrop(leg.id, row.stop.id) : undefined}
+                  // Dragging and the picker cannot share a row: a draggable
+                  // ancestor swallows the text selection an input needs.
+                  draggable={row.floating && !placing}
+                  onDragStart={
+                    row.floating && !placing
+                      ? () => onRowDragStart(leg.id, row.stop.id)
+                      : undefined
+                  }
+                  onDragEnd={row.floating && !placing ? onRowDragEnd : undefined}
+                  onDragOver={row.floating && !placing ? (e) => e.preventDefault() : undefined}
+                  onDrop={
+                    row.floating && !placing ? () => onRowDrop(leg.id, row.stop.id) : undefined
+                  }
                   className={`relative flex items-start gap-3 rounded-rv-card border bg-rv-surface p-4 shadow-rv-sm ${
                     routeDrag?.stopId === row.stop.id ? "border-rv-green" : "border-rv-border"
                   }`}
@@ -216,28 +272,53 @@ export function RouteView({
                       and the inline rename and the ⋯ menu are both buttons).
                       Content is pointer-transparent; only the controls take
                       the pointer back. */}
-                  <button
-                    type="button"
-                    onClick={() => onOpenStop(row.stop.id)}
-                    aria-label={`Open ${row.stop.place.name}`}
-                    className="absolute inset-0 cursor-pointer rounded-rv-card border-0 bg-transparent p-0"
-                  />
-                  <div className="pointer-events-none relative flex min-w-0 flex-1 flex-col gap-1.5 text-left">
+                  {/* While the place editor is open the row is not a link: the
+                      stretched overlay would sit over the picker's input and
+                      its dropdown, and "open the sheet" is not what a click in
+                      a search box means. */}
+                  {!placing && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenStop(row.stop.id)}
+                      aria-label={`Open ${row.stop.place.name}`}
+                      className="absolute inset-0 cursor-pointer rounded-rv-card border-0 bg-transparent p-0"
+                    />
+                  )}
+                  <div
+                    className={`relative flex min-w-0 flex-1 flex-col gap-1.5 text-left ${
+                      placing ? "" : "pointer-events-none"
+                    }`}
+                  >
                     <div className="flex flex-wrap items-center gap-2.5 pl-10">
-                      {/* inline-block so the open editor has a block box to be
-                          100% of — the masthead's <h1> gives it one for free,
-                          a flex-wrap title line does not. */}
-                      <span className="pointer-events-auto inline-block max-w-full">
-                        <InlineText
-                          key={actions.renamingId === row.stop.id ? "editing" : "idle"}
-                          autoEdit={actions.renamingId === row.stop.id}
-                          onEditEnd={actions.onRenameDone}
-                          value={row.stop.place.name}
-                          onSave={(name) => actions.onRenameStop(row.stop.id, name)}
-                          label="Rename stop"
-                          className="text-[17px] font-bold text-rv-ink"
-                        />
-                      </span>
+                      {/* The place editor REPLACES the name: changing a place is
+                          not renaming it, and the two must never be open at
+                          once on one row. */}
+                      {placing ? (
+                        <span className="min-w-0 flex-[1_1_260px]">
+                          <PlaceEditor
+                            initial={pickedFromPlace(row.stop.place)}
+                            near={near}
+                            onPick={(p) => actions.onChangeStopPlace(row.stop.id, p)}
+                            onCancel={actions.onCancelChangePlace}
+                            cancelLabel={`Stop changing the place for ${row.stop.place.name}`}
+                          />
+                        </span>
+                      ) : (
+                        /* inline-block so the open editor has a block box to be
+                           100% of — the masthead's <h1> gives it one for free,
+                           a flex-wrap title line does not. */
+                        <span className="pointer-events-auto inline-block max-w-full">
+                          <InlineText
+                            key={actions.renamingId === row.stop.id ? "editing" : "idle"}
+                            autoEdit={actions.renamingId === row.stop.id}
+                            onEditEnd={actions.onRenameDone}
+                            value={row.stop.place.name}
+                            onSave={(name) => actions.onRenameStop(row.stop.id, name)}
+                            label="Rename stop"
+                            className="text-[17px] font-bold text-rv-ink"
+                          />
+                        </span>
+                      )}
                       {row.floating && <FloatingTag />}
                       {row.dates && (
                         <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-rv-ink-faded">
@@ -254,6 +335,16 @@ export function RouteView({
                           >
                             <Pencil />
                             Rename
+                            <MenuHint>inline</MenuHint>
+                          </DropdownMenuItem>
+                          {/* The same word Rename uses, because it does the same
+                              thing: it opens an editor IN the row, not a dialog. */}
+                          <DropdownMenuItem
+                            className={MENU_ITEM}
+                            onSelect={() => actions.onStartChangePlace(row.stop.id)}
+                          >
+                            <CircleDot />
+                            Change place…
                             <MenuHint>inline</MenuHint>
                           </DropdownMenuItem>
                           <DropdownMenuItem
@@ -305,6 +396,27 @@ export function RouteView({
                       </span>
                     </div>
 
+                    {/* A coordless stop is a LEGAL row — the escape hatch is the
+                        point. What it must not be is silent: no pin, no
+                        connector, no HERE route. The sentence is the picker's
+                        own `PICKED_COORDLESS_LABEL`, so the row and the picker
+                        can never disagree. */}
+                    {!mapped && !placing && (
+                      <div className="pointer-events-auto pl-10">
+                        <span className="inline-flex items-center gap-[7px] rounded-rv-md border border-rv-warning bg-rv-warning-soft px-2.5 py-1 text-[12px] text-rv-warning">
+                          <TriangleAlert className="size-3.5 flex-none" />
+                          {PICKED_COORDLESS_LABEL}
+                          <button
+                            type="button"
+                            onClick={() => actions.onStartChangePlace(row.stop.id)}
+                            className="cursor-pointer border-none bg-transparent p-0 font-bold text-rv-warning underline"
+                          >
+                            Set place
+                          </button>
+                        </span>
+                      </div>
+                    )}
+
                     {row.note && (
                       <p className="m-0 max-w-full truncate pl-10 text-[13px] italic text-rv-ink-muted">
                         {row.note}
@@ -345,7 +457,29 @@ export function RouteView({
 
                 {row.drive && <Drive drive={row.drive} />}
               </div>
-            ))}
+              );
+            })}
+
+            {/* "Add stop" appends this row and opens the picker inside it. It is
+                a DRAFT, not a stop: the pick is the create, so dismissing it
+                writes nothing at all. */}
+            {actions.draftLegId === leg.id && (
+              <div className="flex items-start gap-3 rounded-rv-card border border-dashed border-rv-border-hi bg-rv-surface p-4 shadow-rv-sm">
+                <GripVertical
+                  className="mt-[3px] size-[18px] shrink-0 text-rv-ink-subtle"
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <PlaceEditor
+                    initial={null}
+                    near={nearOf(leg.rows.at(-1)?.stop.place, homeBasePlace)}
+                    onPick={(p) => actions.onPickDraftStop(leg.id, p)}
+                    onCancel={actions.onCancelDraftStop}
+                    cancelLabel="Discard this stop"
+                  />
+                </div>
+              </div>
+            )}
 
             {leg.outboundDrive && (
               <>
@@ -371,7 +505,74 @@ export function RouteView({
         </button>
       </div>
 
-      <RouteRail summary={summary} costs={costs} hasRig={hasRig} units={units} />
+      <RouteRail
+        summary={summary}
+        costs={costs}
+        hasRig={hasRig}
+        units={units}
+        locating={actions.locating}
+        onLocate={actions.onLocate}
+      />
+    </div>
+  );
+}
+
+/**
+ * The one inline place editor — the shipped `PlacePicker` composed unchanged,
+ * plus the two things a picker mounted in a ROW needs and a picker mounted in a
+ * sheet does not.
+ *
+ *  1. The bias line. `near` (PlacePicker.tsx:48) has always existed and has
+ *     never been visible; on a row it is the difference between "search the
+ *     planet" and "search near the stop above", so the row says which.
+ *  2. A way out. The picker itself has no dismiss — its ✕ clears the CHOSEN
+ *     place and drops back to the search box (design state 6 → 1). Abandoning
+ *     the editor entirely is this button, and on a draft row it is also how you
+ *     abandon the stop: nothing has been written yet.
+ *
+ * The value is held here rather than by the caller so that clearing the chip
+ * really does drop back to the search box — a value read straight off the stop
+ * would snap back on the next render.
+ */
+function PlaceEditor({
+  initial,
+  near,
+  onPick,
+  onCancel,
+  cancelLabel,
+}: {
+  initial: PickedPlace | null;
+  near: NearPlace | null;
+  onPick: (picked: PickedPlace) => void;
+  onCancel: () => void;
+  cancelLabel: string;
+}) {
+  const [value, setValue] = useState<PickedPlace | null>(initial);
+  return (
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1">
+        {near && (
+          <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-rv-ink-faded">
+            {nearLabel(near)}
+          </div>
+        )}
+        <PlacePicker
+          value={value}
+          onChange={(picked) => {
+            setValue(picked);
+            if (picked) onPick(picked);
+          }}
+          near={near}
+        />
+      </div>
+      <button
+        type="button"
+        onClick={onCancel}
+        aria-label={cancelLabel}
+        className="mt-[3px] inline-flex flex-none cursor-pointer items-center justify-center rounded-rv-sm border border-rv-border bg-transparent p-1 text-rv-ink-faded"
+      >
+        <X className="size-3.5" />
+      </button>
     </div>
   );
 }
@@ -545,16 +746,27 @@ function Stat({ Icon, label, value, warn }: { Icon: LucideIcon; label: string; v
 
 const kicker = "font-mono text-[11px] uppercase tracking-[0.1em] text-rv-ink-faded";
 
+/** One press geocodes at most `LOCATE_MAX_ROWS` rows — the same ceiling /map's
+ * button slices to, so the running label never promises a batch bigger than the
+ * one the route will accept. */
+function locateBatchSize(summary: RouteSummary): number {
+  return Math.min(summary.unmapped, LOCATE_MAX_ROWS);
+}
+
 function RouteRail({
   summary,
   costs,
   hasRig,
   units,
+  locating,
+  onLocate,
 }: {
   summary: RouteSummary;
   costs: boolean;
   hasRig: boolean;
   units: Units;
+  locating: boolean;
+  onLocate: () => void;
 }) {
   return (
     <aside className="w-full md:w-[260px] md:flex-none">
@@ -632,6 +844,38 @@ function RouteRail({
             label="Stops"
             value={`${summary.stops} · ${summary.scheduled} set / ${summary.floating} floating`}
           />
+
+          {/* Only when there is something to say — the same rule
+              `restrictionCount` follows above. The planner speaks in amber here
+              where /map's unmapped count is a neutral dashed chip, and that is
+              deliberate: /map is a browse surface where an unmapped row costs
+              nothing, and this is where the consequence lives (no connector, no
+              drive time, no route). See docs/design/60. */}
+          {summary.unmapped > 0 && (
+            <>
+              <div className="flex items-start gap-2 text-[12.5px] text-rv-warning">
+                <TriangleAlert className="mt-px size-[15px] flex-none" />
+                <span>
+                  {summary.unmapped} stop{summary.unmapped === 1 ? "" : "s"} without a place
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onLocate}
+                disabled={locating}
+                className={`inline-flex items-center gap-1.5 self-start rounded-rv-pill border border-rv-warning bg-rv-warning-soft px-3 py-1 text-[12px] font-semibold text-rv-warning ${
+                  locating ? "cursor-default opacity-60" : "cursor-pointer"
+                }`}
+              >
+                <LocateFixed className="size-3.5" />
+                {locating
+                  ? `Looking up ${locateBatchSize(summary)} ${
+                      locateBatchSize(summary) === 1 ? "place" : "places"
+                    }…`
+                  : "Locate"}
+              </button>
+            </>
+          )}
         </div>
 
         <div className="h-px bg-rv-border-soft" />

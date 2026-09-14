@@ -326,6 +326,7 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
     ownerId: "dev-user",
     title: "Pacific NW Loop",
     homeBase: null,
+    homeBasePlace: null,
     startDate: "2026-08-01",
     endDate: "2026-08-10",
     status: "planning" as const,

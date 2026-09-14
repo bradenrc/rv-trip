@@ -8,9 +8,9 @@ import {
 } from "@rv-trip/core";
 import { tripSummaryListSchema } from "@rv-trip/core/api-client";
 import { putCachedRoutes } from "@rv-trip/db";
-import { fx } from "@rv-trip/db/testing";
-import { GET } from "@/app/api/trips/route";
-import { describeDb } from "@/test/db";
+import { fx, read } from "@rv-trip/db/testing";
+import { GET, POST } from "@/app/api/trips/route";
+import { describeDb, req } from "@/test/db";
 
 /**
  * §6 the four derivation cases, from the same pinned clock — the cheapest way
@@ -167,5 +167,58 @@ describeDb("GET /api/trips — the miles chip", () => {
 
     expect(summary.miles).toBe(0);
     expect(summary.milesEstimated).toBe(false);
+  });
+});
+
+/**
+ * #60 Q4 → B — the CREATE half of the home base anchor. `createTrip` takes a
+ * flat input, so the route flattens the wire's nested `homeBasePlace` onto the
+ * three columns; without it /trips/new would drop the coordinates the user just
+ * picked and the first stop of the trip would have no search bias.
+ */
+describeDb("POST /api/trips — home base is a real place", () => {
+  it("stores the picked anchor beside the name, and returns it in the tree", async () => {
+    const res = await POST(
+      req({
+        title: "Redwoods Run",
+        startDate: "2026-09-20",
+        endDate: "2026-10-04",
+        homeBase: "Boise, ID",
+        homeBasePlace: {
+          name: "Boise, ID",
+          lat: 43.615,
+          lng: -116.2023,
+          googlePlaceId: "ChIJnbRH",
+        },
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    const trip = (await res.json()) as {
+      id: string;
+      homeBase: string | null;
+      homeBasePlace: { name: string; lat: number | null } | null;
+    };
+    expect(trip.homeBase).toBe("Boise, ID");
+    expect(trip.homeBasePlace).toEqual({
+      name: "Boise, ID",
+      lat: 43.615,
+      lng: -116.2023,
+      googlePlaceId: "ChIJnbRH",
+    });
+
+    const row = (await read.trip(trip.id))!;
+    expect(row.homeBaseLat).toBe(43.615);
+    expect(row.homeBasePlaceId).toBe("ChIJnbRH");
+  });
+
+  it("a trip created without a home base has no anchor at all", async () => {
+    const res = await POST(
+      req({ title: "Redwoods Run", startDate: "2026-09-20", endDate: "2026-10-04" }),
+    );
+    expect(res.status).toBe(201);
+    const trip = (await res.json()) as { homeBase: string | null; homeBasePlace: unknown };
+    expect(trip.homeBase).toBeNull();
+    expect(trip.homeBasePlace).toBeNull();
   });
 });

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { BLANK_TRIP_DRAFT, tripDayCount, tripDraftInput, type TripDraft } from "@rv-trip/core";
 import { FieldLabel } from "@rv-trip/ui";
 import { PageShell } from "@/components/nav/PageShell";
+import { PlacePicker } from "@/components/places/PlacePicker";
 import { Input } from "@/components/ui/input";
 import { tripApi } from "@/lib/trip-api";
 
@@ -89,15 +90,14 @@ export default function NewTripPage() {
             <FieldLabel>
               Home base <span className="font-normal normal-case text-rv-ink-faded">optional</span>
             </FieldLabel>
-            <Input
-              value={draft.homeBase}
-              onChange={(e) => set({ homeBase: e.target.value })}
-              placeholder="Boise, ID"
-              className="h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] text-[13px] text-rv-ink md:text-[13px]"
+            {/* The picker has arrived (#60): home base is a real place, so the
+                first stop of a trip can be searched near home. The component is
+                unstyled by this form — the rv-* names re-resolve on the navy
+                field surface exactly as the Inputs above do. */}
+            <PlacePicker
+              value={draft.homeBasePlace}
+              onChange={(homeBasePlace) => set({ homeBasePlace })}
             />
-            <span className="text-[11.5px] text-rv-ink-faded">
-              Free text for now — the place picker arrives with #23.
-            </span>
           </div>
 
           <div className="mt-[5px] flex items-center gap-[9px]">

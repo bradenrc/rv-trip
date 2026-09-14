@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { tripCreateInput } from "@rv-trip/core";
+import { homeBaseColumns, tripCreateInput } from "@rv-trip/core";
 import { createTrip, getTripById, listTripsForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 
@@ -20,6 +20,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const owner = await getOwner();
-  const row = await createTrip(owner, parsed.data);
+  // `homeBasePlace` is one object on the wire and three nullable columns
+  // underneath — flattened here for the same reason the stop write is (#60).
+  const { homeBasePlace, ...fields } = parsed.data;
+  const row = await createTrip(owner, {
+    ...fields,
+    ...homeBaseColumns(homeBasePlace ?? null),
+  });
   return NextResponse.json(await getTripById(owner, row.id), { status: 201 });
 }

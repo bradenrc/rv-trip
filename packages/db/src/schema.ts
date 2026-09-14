@@ -61,6 +61,13 @@ export const trips = pgTable(
     ownerId: text("owner_id").notNull(),
     title: text("title").notNull(),
     homeBase: text("home_base"),
+    // Home base as a real place (#60 Q4 → B). `home_base` stays the NAME; these
+    // three are the anchor the planner's first-stop search biases to. Additive
+    // and nullable — an existing trip keeps its string and simply has no anchor
+    // until someone re-picks.
+    homeBaseLat: doublePrecision("home_base_lat"),
+    homeBaseLng: doublePrecision("home_base_lng"),
+    homeBasePlaceId: text("home_base_place_id"),
     startDate: date("start_date").notNull(),
     endDate: date("end_date").notNull(),
     status: tripStatus("status").notNull().default("planning"),

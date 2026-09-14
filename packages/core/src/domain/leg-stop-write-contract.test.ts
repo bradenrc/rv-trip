@@ -152,9 +152,41 @@ describe("stopPatchInput", () => {
   });
 
   it("strips the keys a stop write may never carry", () => {
-    expect(stopPatchInput.parse({ notes: "windy", id: STOP_A, place: { name: "x" } })).toEqual({
+    expect(stopPatchInput.parse({ notes: "windy", id: STOP_A, legId: LEG })).toEqual({
       notes: "windy",
+      legId: LEG,
     });
+  });
+
+  /** #60: the whole place travels as ONE key. Coordinates were unreachable
+   * before, which is why a `"New stop"` row could never be repaired by a
+   * patch. Defaults fill the three optional halves so a name-only place is a
+   * legal, honestly coordless write. */
+  it("carries the whole place — name, coordinates and place id together", () => {
+    expect(
+      stopPatchInput.parse({
+        place: {
+          name: "Cape Lookout State Park",
+          lat: 45.3612,
+          lng: -123.9707,
+          googlePlaceId: "ChIJlXc1RkoPlVQR",
+        },
+      }),
+    ).toEqual({
+      place: {
+        name: "Cape Lookout State Park",
+        lat: 45.3612,
+        lng: -123.9707,
+        googlePlaceId: "ChIJlXc1RkoPlVQR",
+      },
+    });
+    expect(stopPatchInput.parse({ place: { name: "rogue ales brewery" } }).place).toEqual({
+      name: "rogue ales brewery",
+      lat: null,
+      lng: null,
+      googlePlaceId: null,
+    });
+    expect(stopPatchInput.safeParse({ place: { name: "" } }).success).toBe(false);
   });
 
   it("still validates the fields it does receive", () => {

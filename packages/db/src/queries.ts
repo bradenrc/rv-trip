@@ -2,6 +2,7 @@ import { eq, and, asc, desc, gt, inArray, sql } from "drizzle-orm";
 import {
   deriveDays,
   deriveTripStatus,
+  homeBasePlaceOf,
   orderedPairs,
   routeCacheKey,
   routeSummary,
@@ -65,6 +66,10 @@ function mapTripRow(row: TripRow, today: IsoDate = todayIso()): Trip {
     ownerId: row.ownerId,
     title: row.title,
     homeBase: row.homeBase,
+    // The three anchor columns read back as one object — without this half,
+    // `trip.homeBasePlace` never reaches the client and the first stop of a leg
+    // would silently have no search bias (#60).
+    homeBasePlace: homeBasePlaceOf(row),
     startDate: row.startDate,
     endDate: row.endDate,
     status: deriveTripStatus(

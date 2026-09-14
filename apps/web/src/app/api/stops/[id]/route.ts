@@ -1,12 +1,24 @@
 import { NextResponse } from "next/server";
-import { stopDatesOutsideTrip, stopOutsideTripMessage, stopPatchInput } from "@rv-trip/core";
+import {
+  stopDatesOutsideTrip,
+  stopOutsideTripMessage,
+  stopPatchColumns,
+  stopPatchInput,
+} from "@rv-trip/core";
 import { deleteStop, getStopDateContext, updateStopFields } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 
 /**
- * The widened stop write: rename (`placeName`), move (`legId`), reorder
- * (`sortOrder`), the dates (both null is "Unschedule"), and the rating/notes it
- * always carried. 204 on success, 404 when the owner-scoped statement matched
+ * The widened stop write: the whole place (`place` — "Change place…"), rename
+ * (`placeName`), move (`legId`), reorder (`sortOrder`), the dates (both null is
+ * "Unschedule"), and the rating/notes it always carried.
+ *
+ * `place` arrives NESTED and there is no `place` column, so it is flattened
+ * through core's `stopPatchColumns` before `updateStopFields` spreads the patch
+ * into drizzle's `.set()`. That mapper also decides the one ambiguity: a body
+ * carrying both `place` and `placeName` writes the place.
+ *
+ * 204 on success, 404 when the owner-scoped statement matched
  * no row — or when the DESTINATION leg of a move is not the caller's, which the
  * mutation checks separately (the stop's own scope only proves where it IS).
  *
@@ -45,7 +57,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   try {
-    const matched = await updateStopFields(owner, id, patch);
+    const matched = await updateStopFields(owner, id, stopPatchColumns(patch));
     if (!matched) return NextResponse.json({ error: "stop not found" }, { status: 404 });
   } catch {
     return NextResponse.json({ error: "leg not found" }, { status: 404 });

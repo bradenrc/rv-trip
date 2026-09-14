@@ -1,3 +1,5 @@
+import type { PickedPlace } from "../providers/place-picker";
+import { placeOf } from "./place-form";
 import {
   isoDate,
   type Idea,
@@ -7,6 +9,7 @@ import {
   type ReservationCreateInput,
   type ReservationPatchInput,
   type ReservationType,
+  type Place,
 } from "./types";
 import { tripDayCount } from "./trip-form";
 
@@ -181,13 +184,33 @@ export function reservationRestoreInput(r: Reservation): ReservationCreateInput 
 // ── the idea form ──────────────────────────────────────────────────────────
 
 /**
- * "Add idea" is one field. An idea is a maybe — it earns its place with a
- * title and nothing else; status, note and rating are what it collects later.
+ * "Add idea" is one field, plus an OPTIONAL place (#60). An idea is a maybe —
+ * it earns its place with a title and nothing else, so Save is disabled on an
+ * empty title only: a place without a title is not an idea. When nothing was
+ * picked this still returns `place: null`, exactly as it always has.
  */
-export function ideaDraftInput(stopId: string, title: string): IdeaCreateInput | null {
+export function ideaDraftInput(
+  stopId: string,
+  title: string,
+  picked: PickedPlace | null = null,
+): IdeaCreateInput | null {
   const t = title.trim();
   if (t === "") return null;
-  return { stopId, title: t, status: "idea", place: null, rating: null, notes: null };
+  return {
+    stopId,
+    title: t,
+    status: "idea",
+    place: ideaPlace(picked),
+    rating: null,
+    notes: null,
+  };
+}
+
+/** The picked place an idea stores, or null — the free-text escape row counts,
+ * which is why a coordless idea is legal for the same reason a coordless save
+ * is. */
+export function ideaPlace(picked: PickedPlace | null): Place | null {
+  return picked && picked.name.trim() !== "" ? placeOf(picked) : null;
 }
 
 /** What "Undo" re-POSTs after an idea delete — the whole row, so a promoted-to
