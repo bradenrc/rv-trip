@@ -11,10 +11,11 @@ judgments, or gate ship (that's the human's call).
 
 **This gate runs on the walk-blind surfaces** — the code a human walking the UI cannot see:
 `packages/core/**` (domain types, Zod schemas, `deriveDays`), `packages/db/**` (Drizzle
-schema, queries, mutations, seed), and the **server-side code in `apps/web`**: the six Next
-route handlers under `apps/web/src/app/api/**/route.ts`, the server components that query
-the DB directly (`app/page.tsx`, `app/places/page.tsx`, `app/trips/[id]/page.tsx`), and the
-tenant seam `apps/web/src/lib/owner.ts`. There are **no server actions** in the tree today
+schema, queries, mutations, seed), and the **server-side code in `apps/web`**: the Next
+route handlers under `apps/web/src/app/api/**/route.ts` (enumerate them from the tree at
+run time — the set grows every phase; never trust a cached count), the server components
+that query the DB directly (`app/page.tsx`, `app/places/page.tsx`, `app/trips/[id]/page.tsx`),
+and the tenant seam `apps/web/src/lib/owner.ts`. There are **no server actions** in the tree today
 (`"use server"` → zero hits) — re-grep rather than assuming that still holds. A
 frontend-only slice skips this gate entirely.
 
@@ -55,10 +56,12 @@ Read `docs/personas/qa_claude.md` §3 (the method) and **§4 (severity tiers) en
    - **Fixture-orphan scrutiny.** A fixture set to `null` / `""` / `[]` to satisfy a type or
      the compiler can silently drop out of a join and stop exercising its assertion while
      the test keeps passing. Check every such fixture.
-   - **Know where a test can even live.** Only `packages/core` has a test runner (`vitest`);
-     `apps/web` and `packages/db` have `lint` + `typecheck` only, so `pnpm turbo run test`
-     runs core's suite and nothing else. If the slice changed db or route-handler behavior
-     and claims coverage, verify the assertion actually executes.
+   - **Know where a test can even live — by looking, not by this brief.** Check each
+     package.json for a `test` script. Today BOTH `packages/core` and `apps/web` run vitest
+     (`apps/web` carries the route-handler integration suite against real Postgres, per #30),
+     so `pnpm turbo run test` exercises both. If the slice changed db or route-handler
+     behavior and claims coverage, verify the assertion actually executes — in whichever
+     suite it lives.
 
 3. **Falsify the load-bearing claims — don't trust the dev-notes.** For each claim the slice
    rests on ("verified X", "the handler already accepts this", "no migration needed"),

@@ -37,9 +37,10 @@ standard) so you judge the design against the same authority it was built from. 
 1. **Verify EVERY data/API surface claim against the real code (your #1 job).** For any
    "no API changes / the handler already supports X" claim, open the actual route handler
    under `apps/web/src/app/api/**/route.ts`:
-   - Does a handler exist at that path, for that method? (Six exist today: `reservations`,
-     `reservations/[id]`, `stops/[id]`, `ideas/[id]`, `ideas/[id]/promote`,
-     `legs/[id]/reorder`.)
+   - Does a handler exist at that path, for that method? **Enumerate the real set at run
+     time** — `ls apps/web/src/app/api/**/route.ts` (or glob it) — and check against that.
+     Never trust a remembered or written-down count: this brief once said "six exist" while
+     the tree held twenty-one, and a stale inventory turns this check into a rubber stamp.
    - Does its **Zod schema** actually accept the field the FE wants to send? A handler
      declares its own `patchSchema` locally — field-name ≠ field-accepted, and an unlisted
      key is dropped by `safeParse`, not passed through.
@@ -89,8 +90,17 @@ standard) so you judge the design against the same authority it was built from. 
    - Server component vs `"use client"`: `components/trip/*` and `components/places/*` are
      client components fed by server pages. Data the design needs must have a path across
      that boundary.
-   - Only `packages/core` has a test runner (`vitest`). A design whose acceptance leans on a
-     test in `apps/web` or `packages/db` is assuming a runner that isn't wired.
+   - **Discover where tests run from the workspace itself** — check each package.json for a
+     `test` script (`packages/core` AND `apps/web` both run vitest today; `apps/web` carries
+     the route-handler integration suite against real Postgres). A design whose acceptance
+     leans on a test in a package with no `test` script is assuming a runner that isn't
+     wired — but verify against the tree, not this sentence.
+
+**Survey-fidelity check (every wireframe, before anything else):** diff the wireframe
+report's resolved answer set against the survey verdict carried in your brief's feedback
+block, value for value. Any **non-null** answer that differs is an automatic fail routed
+back to wireframe — the human's pick is binding (#60 shipped the wrong Q5 exactly this
+way). A "⚠ defaulted" note is legitimate only where the survey value was null.
 
 6. **Runtime-risk flag:** never certify a third-party component / portal / provider-key
    vector as "confirmed working" on static analysis alone — flag it **"render-required at
