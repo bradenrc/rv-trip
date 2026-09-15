@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { eq, and, inArray, isNull, max, sql } from "drizzle-orm";
+import { randomBytes, randomUUID } from "node:crypto";
+import { eq, and, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   legs,
@@ -13,6 +13,7 @@ import {
   userPrefs,
   households,
   householdMembers,
+  householdInvites,
 } from "./schema";
 import type {
   Idea,
@@ -905,4 +906,127 @@ export async function ensureHouseholdForUser(userId: string): Promise<string> {
     throw new Error(`ensureHouseholdForUser: no household for ${userId} after a lost create`);
   }
   return settled;
+}
+
+/** How long a join link lives. Stated here rather than defaulted in DDL so the
+ * window is the app's to say — and so the card's "One use, expires in 14 days"
+ * and the row agree by construction (docs/design/81 §3). */
+export const INVITE_TTL_DAYS = 14;
+
+/** The token is the path segment of `/join/<token>` (schema.ts) — 8 random
+ * bytes, base64url, so it is 11 URL-safe characters with 64 bits behind them.
+ * Short enough to read out over the phone, long enough that a one-use link
+ * living 14 days cannot be found by guessing. */
+function inviteToken(): string {
+  return randomBytes(8).toString("base64url");
+}
+
+export interface CreatedInvite {
+  token: string;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+/**
+ * Mint the household's join link (Q3 = B: a link you send her yourself, no
+ * mailer and no webhook).
+ *
+ * `created_at` is written EXPLICITLY rather than left to `defaultNow()`, and
+ * `expires_at` is derived from that same instant, so "expires 14 days after it
+ * was created" is a property of the row rather than of how long the insert
+ * took. One clock, one subtraction, and the card's copy is provable.
+ *
+ * Exactly ONE live invite per household: a second press supersedes the first
+ * rather than leaving two links that both work, because the card draws "the"
+ * invite and a revoked-looking link that still redeems is the worse surprise.
+ * REDEEMED rows are left alone — that timestamp is how the household knows the
+ * seat was taken and is what /join's one-use check reads (i4).
+ *
+ * The household row is created if it is missing, for the same reason
+ * `ensureHouseholdForUser` creates one: keyless, `getOwner()` answers the
+ * literal `dev-household` without a lookup, so on a migrated-but-unseeded
+ * database the invite's foreign key would have nothing to point at.
+ */
+export async function createHouseholdInvite(householdId: string): Promise<CreatedInvite> {
+  const createdAt = new Date();
+  const expiresAt = new Date(createdAt.getTime() + INVITE_TTL_DAYS * 86_400_000);
+  const token = inviteToken();
+
+  await db.transaction(async (tx) => {
+    await tx.insert(households).values({ id: householdId }).onConflictDoNothing();
+    await tx
+      .delete(householdInvites)
+      .where(
+        and(eq(householdInvites.householdId, householdId), isNull(householdInvites.redeemedAt)),
+      );
+    await tx.insert(householdInvites).values({ token, householdId, createdAt, expiresAt });
+  });
+
+  return { token, createdAt, expiresAt };
+}
+
+/**
+ * "Cancel invite" — revoke a link still in flight. Returns false when the token
+ * is not this household's live invite, which covers three cases the caller
+ * answers identically (404): no such token, someone else's token, and a token
+ * already redeemed. The household is in the WHERE, so holding the URL is not
+ * enough to revoke it.
+ */
+export async function cancelHouseholdInvite(
+  householdId: string,
+  token: string,
+): Promise<boolean> {
+  if (!token) return false;
+  const rows = await db
+    .delete(householdInvites)
+    .where(
+      and(
+        eq(householdInvites.token, token),
+        eq(householdInvites.householdId, householdId),
+        isNull(householdInvites.redeemedAt),
+      ),
+    )
+    .returning({ token: householdInvites.token });
+  return rows.length > 0;
+}
+
+/** Why `removeHouseholdMember` refused, so the route can answer 409 rather than
+ * 404 for the one refusal that is a conflict and not a miss. */
+export type RemoveMemberResult = "removed" | "not_a_member" | "is_owner";
+
+/**
+ * Remove a co-pilot from the household.
+ *
+ * This moves NO rows. Trips, the library and the rig belong to the household
+ * (Q2 = A), so removing someone takes away their way in and nothing else —
+ * which is precisely why the OWNER row must not be removable: a household with
+ * no members would still own every row and nobody could reach them. The role is
+ * read in the same statement rather than checked first, so the refusal cannot
+ * race a concurrent delete.
+ */
+export async function removeHouseholdMember(
+  householdId: string,
+  userId: string,
+): Promise<RemoveMemberResult> {
+  if (!userId) return "not_a_member";
+  const rows = await db
+    .delete(householdMembers)
+    .where(
+      and(
+        eq(householdMembers.householdId, householdId),
+        eq(householdMembers.userId, userId),
+        ne(householdMembers.role, "owner"),
+      ),
+    )
+    .returning({ userId: householdMembers.userId });
+  if (rows.length > 0) return "removed";
+
+  // Nothing deleted: either they are not here, or they are and they own it.
+  const [row] = await db
+    .select({ role: householdMembers.role })
+    .from(householdMembers)
+    .where(
+      and(eq(householdMembers.householdId, householdId), eq(householdMembers.userId, userId)),
+    );
+  return row ? "is_owner" : "not_a_member";
 }

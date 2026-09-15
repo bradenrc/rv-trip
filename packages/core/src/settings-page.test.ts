@@ -65,7 +65,16 @@ describe("/settings is a real page", () => {
 
   it("reads the owner-scoped prefs row and hands it to the client form", () => {
     expect(flat(code(settingsPage))).toContain("getPrefsByOwner(await getOwner())");
-    expect(flat(code(settingsPage))).toContain("<SettingsForm prefs={prefs} />");
+    expect(flat(code(settingsPage))).toContain("<SettingsForm prefs={prefs}");
+  });
+
+  it("reads the household on the SAME seam, and hands it down as props (#77)", () => {
+    // docs/design/81 dev note 3: household + members + the live invite are read
+    // on the server, exactly where `prefs` is, so the card fetches nothing on
+    // mount. A client-side read here would put a spinner on a settings page.
+    expect(flat(code(settingsPage))).toContain("getHouseholdOverview(await getOwner())");
+    expect(flat(code(settingsPage))).toContain("household={{");
+    expect(code(settingsPage)).not.toContain('"use client"');
   });
 
   it("renders inside the one page shell, not a second gutter", () => {

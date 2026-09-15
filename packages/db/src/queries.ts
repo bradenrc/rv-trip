@@ -1,4 +1,4 @@
-import { eq, and, asc, desc, gt, inArray, sql } from "drizzle-orm";
+import { eq, and, asc, desc, gt, inArray, isNull, sql } from "drizzle-orm";
 import {
   deriveDays,
   deriveTripStatus,
@@ -11,7 +11,19 @@ import {
   todayIso,
 } from "@rv-trip/core";
 import { db } from "./index";
-import { trips, legs, stops, savedPlaces, rigs, routes, userPrefs } from "./schema";
+import {
+  trips,
+  legs,
+  stops,
+  savedPlaces,
+  rigs,
+  routes,
+  userPrefs,
+  households,
+  householdMembers,
+  householdInvites,
+} from "./schema";
+import type { HouseholdRole } from "./schema";
 import type {
   IsoDate,
   Trip,
@@ -546,4 +558,97 @@ export async function getCachedNav(keys: string[]): Promise<Record<string, NavCh
   const map: Record<string, NavCheck> = {};
   for (const row of rows) if (row.nav) map[row.key] = row.nav;
   return map;
+}
+
+// ── the household (#77) ────────────────────────────────────────────────────
+
+/** A person in the household, as `/settings` reads them. Names and email
+ * addresses live in Clerk, not here — `household_members` holds the membership
+ * and nothing else, so the page resolves the display half separately
+ * (apps/web/src/lib/members.ts). */
+export interface HouseholdMemberRow {
+  userId: string;
+  role: HouseholdRole;
+  joinedAt: Date;
+}
+
+/** A link still in flight: not redeemed, not expired. */
+export interface LiveHouseholdInvite {
+  token: string;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
+export interface HouseholdOverview {
+  id: string;
+  name: string;
+  /** Oldest membership first, so the owner heads the list. */
+  members: HouseholdMemberRow[];
+  invite: LiveHouseholdInvite | null;
+}
+
+/** What `households.name` means before anyone has renamed it — the column's own
+ * DDL default, repeated here for the one case where there is no row to read it
+ * from (below). */
+export const DEFAULT_HOUSEHOLD_NAME = "My household";
+
+/**
+ * Everything `/settings`'s Household card draws, in one read (docs/design/81
+ * §3, plan item i3): the household, its members, and the one live invite.
+ *
+ * A MISSING `households` row is not an error. Keyless, `getOwner()` answers the
+ * literal `dev-household` without a lookup (apps/web/src/lib/owner.ts), so this
+ * can legitimately be asked about a household that migration 0007 seeded and a
+ * fresh test database did not. Answering a named, empty household is what keeps
+ * /settings rendering on a database nobody seeded, rather than 500ing on a page
+ * whose other three cards need no database at all.
+ *
+ * "Live" is `redeemed_at IS NULL AND expires_at > now()`, newest first: the
+ * card must never offer a dead link, and creating an invite already clears the
+ * previous live one (`createHouseholdInvite`), so the limit is belt and braces.
+ */
+export async function getHouseholdOverview(householdId: string): Promise<HouseholdOverview> {
+  const [row] = await db
+    .select({ name: households.name })
+    .from(households)
+    .where(eq(households.id, householdId));
+
+  const members = await db
+    .select({
+      userId: householdMembers.userId,
+      role: householdMembers.role,
+      joinedAt: householdMembers.joinedAt,
+    })
+    .from(householdMembers)
+    .where(eq(householdMembers.householdId, householdId))
+    .orderBy(asc(householdMembers.joinedAt), asc(householdMembers.userId));
+
+  const [invite] = await db
+    .select({
+      token: householdInvites.token,
+      createdAt: householdInvites.createdAt,
+      expiresAt: householdInvites.expiresAt,
+    })
+    .from(householdInvites)
+    .where(
+      and(
+        eq(householdInvites.householdId, householdId),
+        isNull(householdInvites.redeemedAt),
+        // The APP's clock, not Postgres's: the app writes `expires_at` from
+        // its own `new Date()` (`createHouseholdInvite`), so reading the window
+        // with the same clock is what makes "expires in 14 days" one statement
+        // rather than two that can disagree — and it is what lets a test with a
+        // frozen clock assert the boundary at all.
+        gt(householdInvites.expiresAt, new Date()),
+      ),
+    )
+    .orderBy(desc(householdInvites.createdAt))
+    .limit(1);
+
+  return {
+    id: householdId,
+    name: row?.name ?? DEFAULT_HOUSEHOLD_NAME,
+    members,
+    invite: invite ?? null,
+  };
 }

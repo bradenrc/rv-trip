@@ -228,3 +228,203 @@ Q2 = A. Items i3–i7 are separate dispatches; nothing here renders, routes or m
 
 Not run: `pnpm db:migrate` / `pnpm db:seed` against the shared dev database (flagged above as
 operator-owned). The test suite creates and drops its own database per run.
+
+---
+
+# Issue 81 · dev notes — item **i3 of 7** (Settings → Household card + the invite endpoints)
+
+Scope of this dispatch: the `/settings` surface and the three household routes. Items i4–i7 are
+separate dispatches — nothing here touches `/join`, `change_log`, `lastChange` or `ChangeByline`,
+and `apps/web/src/proxy.ts` is not in the diff.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/db/src/queries.ts:563-643` | new household section: `HouseholdMemberRow`, `LiveHouseholdInvite`, `HouseholdOverview`, `DEFAULT_HOUSEHOLD_NAME:593`, `getHouseholdOverview():610` — the ONE read `/settings` makes |
+| `packages/db/src/queries.ts:1` | `isNull` added to the `drizzle-orm` import |
+| `packages/db/src/queries.ts:14-25` | the three household tables + `HouseholdRole` added to the schema imports |
+| `packages/db/src/mutations.ts:914` | `INVITE_TTL_DAYS = 14` — the window the card's copy promises |
+| `packages/db/src/mutations.ts:920` | `inviteToken()` — `randomBytes(8).toString("base64url")`, 11 URL-safe chars |
+| `packages/db/src/mutations.ts:950` | `createHouseholdInvite()` |
+| `packages/db/src/mutations.ts:975` | `cancelHouseholdInvite()` |
+| `packages/db/src/mutations.ts:995` | `RemoveMemberResult` — `"removed" \| "not_a_member" \| "is_owner"` |
+| `packages/db/src/mutations.ts:1007` | `removeHouseholdMember()` |
+| `packages/db/src/mutations.ts:1-2` | `randomBytes` from `node:crypto`; `ne` from `drizzle-orm`; `householdInvites` imported |
+| `packages/db/src/index.ts:17` | `export type { HouseholdRole }` — so a caller names a role without reaching into `schema` |
+| `apps/web/src/app/api/household/invites/route.ts` | new — `POST` → `201 { token, expiresAt }` |
+| `apps/web/src/app/api/household/invites/[token]/route.ts` | new — `DELETE` → `204` \| `404` |
+| `apps/web/src/app/api/household/members/[userId]/route.ts` | new — `DELETE` → `204` \| `404` \| `409` |
+| `apps/web/src/components/settings/household-view.ts` | new — the card's pure half: `householdCardState():35`, the wireframe's copy `:45-72`, the UTC date labels `:77-90`, `memberView():123`, `inviteView():163` |
+| `apps/web/src/components/settings/HouseholdCard.tsx` | new — `"use client"`, `HouseholdCardProps:43`, `HouseholdCard():56`, `PILL_TONE:167`, `MemberLine:175`, `PendingLine:216` |
+| `apps/web/src/lib/members.ts` | new — `describePeople()`, the Clerk seam that turns user ids into names + emails |
+| `apps/web/src/components/settings/SettingsForm.tsx:8` | imports `HouseholdCard` |
+| `apps/web/src/components/settings/SettingsForm.tsx:34-43` | takes a second prop, `household: HouseholdCardProps` |
+| `apps/web/src/components/settings/SettingsForm.tsx:122` | `<HouseholdCard {...household} />` — the fourth group |
+| `apps/web/src/components/settings/SettingsForm.tsx:140 · :148 · :160` | `GroupKicker` / `Card` / `Row` are now **exported** (bodies unchanged); `Row`'s `children` is optional `:167` |
+| `apps/web/src/app/settings/page.tsx:35` | reads `getHouseholdOverview(await getOwner())` beside the prefs read |
+| `apps/web/src/app/settings/page.tsx:41-63` | resolves names, builds the card's props |
+| `apps/web/src/app/settings/page.tsx:75` | `requestOrigin()` — the invite link's host, from the request |
+| `packages/core/src/settings-page.test.ts:66-80` | the existing source-text seam test, updated + extended (see "what I had to touch") |
+| `apps/web/src/components/settings/household-view.test.ts` | new — 16 tests, the three states + the copy + the labels |
+| `apps/web/src/test/household-overview.test.ts` | new — 7 tests against the real database |
+| `apps/web/src/app/api/household/**/route.test.ts` | new — 16 tests across the three handlers |
+
+## Key decisions
+
+1. **The card's every DECISION is a pure function in `household-view.ts`, not a branch in the
+   TSX.** This is the vet's MED "acceptance assumes a runner that isn't wired", answered for i3:
+   there is no DOM environment anywhere in this repo (`apps/web/vitest.config.mts` is
+   `environment: "node"`; no jsdom, no happy-dom, no @testing-library in any package.json), so
+   "renders all three states purely from its props" cannot be proved by rendering. It is proved
+   instead as `householdCardState({ memberCount, hasInvite })` plus the exported copy constants,
+   all executed by `household-view.test.ts` on the runner that exists. `HouseholdCard.tsx` holds
+   no conditional that file does not cover. **i7 should take the same shape** — the verb
+   derivation as a pure function, the JSX as a thin shell.
+
+2. **`GroupKicker` / `Card` / `Row` are exported from `SettingsForm.tsx` rather than copied.**
+   Plan i3 says "composed with the GroupKicker/Card/Row shapes already in SettingsForm.tsx" —
+   re-declaring them would let the fourth card drift from the other three on the next tweak. Their
+   bodies are byte-identical; only `Row.children` became optional (`:167`), because two of the
+   three states open with a label + help line and no control, and the old signature required a
+   child. The empty `<div className="mt-[9px]">` is now skipped rather than rendered, so a
+   label-only row does not carry 9px of phantom padding.
+   **Note for vet/qa:** design dev note 6 cites `SettingsForm.tsx:126 · :136 · :154`. Those three
+   are now `:140 · :148 · :160` — pushed down by the added import and the widened props object.
+   Same code, new line numbers.
+
+3. **Names and emails come from Clerk, in one place, and never fail the page.** The wireframe
+   renders "Braden · braden@example.com", but `household_members` stores only the membership —
+   no name column, by design. `apps/web/src/lib/members.ts` is the seam: `clerkEnabled()` false →
+   no call at all and an empty map; keyed → one `clerkClient().users.getUserList({ userId })`;
+   any throw → an empty map. `memberView()` then falls back to the **user id in both slots**, so
+   every state still renders. A settings page whose other three cards need no network must not
+   500 because the Backend API was slow. `@clerk/nextjs/server` is imported **dynamically**, the
+   same care `owner.ts` takes with `@rv-trip/db`. **i6 needs `memberName` for the same people —
+   it should reuse `describePeople()` rather than grow a second lookup.**
+
+4. **Dates are formatted on the SERVER, in UTC, through core's `monthDay`.** The card is
+   `"use client"`, so a `Date` formatted inside it with a local-time formatter would render one
+   day on the server and possibly another in the browser — a hydration mismatch on a settings
+   page. Every label ("joined Sep 13", "created Sep 12 · expires Sep 26") is a finished string by
+   the time it crosses the boundary, and `joinedLabel(new Date("…T23:30:00Z"))` is asserted to
+   stay on the 13th.
+
+5. **"Live invite" is read with the APP's clock, not Postgres's.** `createHouseholdInvite` writes
+   `created_at` explicitly and derives `expires_at` from that same `new Date()`, so "expires 14
+   days after it was created" is a property of the row rather than of how long the insert took —
+   and `getHouseholdOverview` filters `expires_at > new Date()` rather than `> now()`. Two clocks
+   would disagree by exactly the amount `apps/web/src/test/setup.ts` freezes the JS one (this is
+   what the first run of `returns the live invite` failed on: PINNED_NOW is 2026-08-15, Postgres's
+   `now()` is today, so every fixture invite read as already expired).
+
+6. **One live invite per household.** A second POST deletes the household's previous *unredeemed*
+   invite inside the same transaction and inserts a fresh one. The card draws "the" invite, and a
+   link that looks superseded but still redeems is the worse surprise. **Redeemed rows are left
+   alone** — that timestamp is how the household knows the seat was taken and is what i4's
+   one-use check reads.
+
+7. **`createHouseholdInvite` lazily creates the `households` row.** Keyless, `getOwner()` answers
+   the literal `dev-household` without ever looking it up (i2), so on a migrated-but-unseeded
+   database the invite's foreign key has nothing to point at. Same lazy-create reasoning as
+   `ensureHouseholdForUser`, and `getHouseholdOverview` is symmetrical: a missing household row is
+   answered as a named, empty household, never a 500.
+
+8. **Removing the owner is a 409, not a 404.** They plainly exist; the removal is refused because
+   Q2 = A moved the rows to the HOUSEHOLD — a household with no members would still own every
+   trip, place and rig, with nobody who could reach them. The role is read in the same
+   `DELETE … WHERE role <> 'owner' RETURNING` statement (then one SELECT only to tell the two
+   refusals apart), so the refusal cannot race a concurrent delete. Everything else — unknown
+   token, another household's token, an already-redeemed token, a member of another household —
+   is one indistinguishable 404, on purpose: the response must not tell whoever holds a URL that
+   it names a real invite somewhere else.
+
+9. **Two members beat a live invite.** `householdCardState` returns `"shared"` whenever
+   `memberCount > 1`, even with an unredeemed invite outstanding. #77 is a couple, not a group
+   (the v1 spec's exclusion stands), so once the second person is in there is no seat for a
+   pending link to fill.
+
+10. **Green appears exactly once.** Per the wireframe's own finding (`conventions.md` says green
+    is the CTA; the shipped app says accent), the invite CTA is `bg-rv-accent-deep` /
+    `text-rv-accent-ink` like every other CTA in the app, and `rv-green` is spent only on the
+    "joined" pill — the verified/done meaning `StatusPill` already reserves it for. The two pill
+    tones are written out as whole class strings in `PILL_TONE` (`HouseholdCard.tsx:167`) because
+    Tailwind scans source text and would never generate a class name assembled from a variable.
+    No raw hex anywhere; every colour is an `rv-*` utility named verbatim from
+    `packages/ui/styles/entry.css`.
+
+## What I had to touch outside the new files
+
+`packages/core/src/settings-page.test.ts` (from #45/#38) asserts the settings page's SOURCE TEXT.
+Two of its claims were made false by this item and are updated rather than deleted:
+
+- `"<SettingsForm prefs={prefs} />"` → `"<SettingsForm prefs={prefs}"`. The component genuinely
+  takes a second prop now; the assertion that the prefs row is threaded through is intact.
+- `getPrefsByOwner(await getOwner())` is **unchanged and still literal in the page** — I
+  deliberately did not hoist `const owner = await getOwner()`, so that guard keeps biting.
+  `getOwner()` is memoized per request (i2), so asking twice costs one lookup.
+- One test ADDED in the same describe: the household is read on the same server seam
+  (`getHouseholdOverview(await getOwner())`, `household={{`, still no `"use client"`).
+
+## Defaulted / flagged
+
+- **FLAG · the token is 11 characters, not the wireframe's 8.** `7fD2QK4N` is sample data (design
+  dev note 8). `randomBytes(8).toString("base64url")` gives 11 URL-safe characters over 64 bits —
+  short enough to read out loud, long enough that a one-use link living 14 days cannot be found by
+  guessing. The field wraps (`flex-wrap`), so the extra three characters do not change the row's
+  shape. If the drawn width is load-bearing, say so and it is a one-line change.
+- **FLAG · the invite link's origin comes from the request headers**
+  (`settings/page.tsx:75`) — `x-forwarded-host` / `host`, with `x-forwarded-proto` and an
+  http-for-localhost fallback. Not an env var: this app answers on preview URLs, on
+  roadvalet.com and on localhost, and a link naming the wrong one is worse than no link.
+  **Unverified behind Vercel's proxy** — that header pair is exactly what a walk on a preview
+  deployment should look at.
+- **FLAG · `describePeople()` is UNEXERCISED here.** It is typechecked against
+  `@clerk/backend@3.17.1`'s `getUserList`/`User` and it cannot throw out of the page, but no test
+  in this repo can hold a Clerk secret key, so the actual Backend API call has never run. Keyed
+  QA/walk: a member whose name renders as `user_2abc…` rather than "Jess" means this call failed
+  and fell back — the card is still correct, just unnamed.
+- **FLAG · the Household card is render-required at the walk.** Nothing static can certify the
+  three states side by side at 390px and 1280px, the disabled keyless CTA, `router.refresh()`
+  redrawing after each action, or the clipboard write (which needs a secure context — on
+  `http://` over a LAN IP `navigator.clipboard` is undefined and the toast fires instead).
+- **The card was NOT rendered in a browser by this dispatch.** Same reason i1 and i2 gave: the
+  shared dev database at `localhost:5433` is still pre-0007, and migrating it would repoint every
+  `owner_id` to `dev-household` and blank out every other issue's walk server. `pnpm db:migrate &&
+  pnpm db:seed` on that database remains **operator-owned** and is now overdue — i3's keyless
+  solo state cannot look right until `dev-household` and its `dev-user` member row exist. A full
+  `next build` was run instead (below), which is what proves the client-module cycle
+  `SettingsForm → HouseholdCard → SettingsForm` resolves; it does, and all three routes register.
+- **Not implemented, because the design names no surface for it:** renaming the household. The
+  shared state renders `households.name`, which is `"My household"` until something writes it.
+  The wireframe's "Callahan household" has no edit affordance drawn anywhere, so no endpoint was
+  invented. Worth a later issue.
+- **`DELETE /api/household/members/[userId]` is reachable by the co-pilot for the owner** only to
+  be refused (409); a member removing *themselves* is allowed by the same route. That is a leave
+  action rather than a remove, and the card never draws a button for it (`Remove` is suppressed on
+  your own row) — flagged because the ROUTE permits what the UI does not offer.
+
+## Claims for qa to check
+
+1. `HouseholdCard.tsx` contains **no `fetch` on mount and no `useEffect`** — the only network
+   calls are in click handlers, and every prop is finished by the server.
+2. **No raw hex and no invented token** in `HouseholdCard.tsx`: every colour is `rv-*`, and every
+   one of them appears in `entry.css`'s `@source inline(...)` list at `:12`.
+3. The three routes each resolve the household through `getOwner()` and pass it into the WHERE —
+   asserted by a test per route that plants a row under `OTHER_OWNER` and shows it survives.
+4. `expiresAt - createdAt === 14 days` is asserted on the ROW, not on the response.
+5. `git diff --name-only` contains no `apps/web/src/proxy.ts`, nothing under `packages/ui/`, and
+   no `ds-bundle/`.
+
+## Checks actually run
+
+| command | result |
+| --- | --- |
+| `pnpm vitest run` on the 5 new test files (apps/web, **before** the implementation) | `Test Files 5 failed (5) · Tests 7 failed (7)` — RED, harness live (`getHouseholdOverview is not a function`) |
+| `pnpm vitest run src/components/settings/household-view.test.ts` (after) | `Test Files 1 passed (1) · Tests 16 passed (16)` |
+| `pnpm vitest run src/test/household-overview.test.ts src/app/api/household` (after) | `Test Files 4 passed (4) · Tests 23 passed (23)` |
+| `pnpm turbo run lint typecheck test` (repo root) | `Tasks: 10 successful, 10 total · Cached: 0 cached` · apps/web `Test Files 32 passed (32) · Tests 216 passed (216)` |
+| `DATABASE_URL=<placeholder> pnpm build` (apps/web) | build succeeded; `ƒ /api/household/invites`, `ƒ /api/household/invites/[token]`, `ƒ /api/household/members/[userId]`, `ƒ /settings` |
+
+Not run: any browser render, and `pnpm db:migrate` / `pnpm db:seed` against the shared dev
+database (flagged above as operator-owned). The route suite creates and drops its own database.
