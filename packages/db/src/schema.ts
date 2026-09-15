@@ -12,6 +12,8 @@ import {
   timestamp,
   jsonb,
   index,
+  uniqueIndex,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import type { NavCheck, RouteResult } from "@rv-trip/core";
@@ -340,6 +342,166 @@ export const userPrefs = pgTable("user_prefs", {
   trackCosts: boolean("track_costs"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+/**
+ * The HOUSEHOLD — the tenant every `owner_id` above points at from #77 on
+ * (docs/design/81 §2, Q1 = A, Q2 = A).
+ *
+ * Deliberately appended at the END of this file, after the four tables that
+ * carry `owner_id`: nothing above it changes. Q2 = A is that the four owner
+ * columns move by VALUE — a Clerk user id becomes a household id — with no DDL
+ * on trips, saved_places, rigs or user_prefs. There is no foreign key from
+ * those columns to `households.id` for the same reason: adding one would be
+ * exactly the ALTER the survey ruled out, and it would also tie the route/test
+ * fixtures' bare owner strings to a row that has to exist first.
+ *
+ * `id` is `text`, not `uuid`, because one household id is a literal the app
+ * must be able to name without a key: the keyless dev tenant, seeded as
+ * `dev-household` (seed.ts), which is what `getOwner()` answers when Clerk is
+ * unconfigured so walks and the route tests stay key-free.
+ */
+export const households = pgTable("households", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().default("My household"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Who a member is TO the household. Two values, and no third is planned —
+ * #77 keeps the v1 spec's group exclusion, so this is "who may not be removed"
+ * and nothing more. `text` rather than a pgEnum (the user_prefs precedent at
+ * :336): a role is read with a fallback everywhere, and a vocabulary this small
+ * should not cost an ALTER TYPE to extend. `$type` keeps it narrow in TS. */
+export type HouseholdRole = "owner" | "member";
+
+/**
+ * Membership. ONE ROW PER PERSON, ever — `user_id` is unique across the whole
+ * table, which is the premise Q4 = A rests on: a person belongs to exactly one
+ * household, so joining is a one-way door and no merge has to reconcile two
+ * rigs (rigs.owner_id is `.unique()`, :226) or two prefs rows (user_prefs's
+ * primary key, :336).
+ *
+ * The composite primary key `(household_id, user_id)` is the row's identity;
+ * the separate index the design asks for on `user_id` IS the unique constraint,
+ * declared as a named unique INDEX so there is one btree rather than two. The
+ * lookup that matters — Clerk user id → household — rides it. (Same reasoning
+ * as rigs' comment at :232: a second index on a unique column is write cost for
+ * nothing.)
+ */
+export const householdMembers = pgTable(
+  "household_members",
+  {
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    role: text("role").$type<HouseholdRole>().notNull(),
+    joinedAt: timestamp("joined_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.householdId, t.userId] }),
+    uniqueIndex("household_members_user_idx").on(t.userId),
+  ],
+);
+
+/**
+ * An invite is a LINK, not a mail (Q3 = B): one row becomes
+ * `/join/<token>`, sent however the household already talks to each other.
+ *
+ * The token is the primary key because it IS the path segment — one row, one
+ * URL, and a collision is impossible rather than merely unlikely. `redeemed_at`
+ * is null until it is used, and that null is the whole of "one use": the join
+ * path refuses a row that already carries a timestamp, and leaves it null when
+ * it refuses for any other reason. `expires_at` is written by the creator
+ * (created_at + 14 days) rather than defaulted in DDL, so the window is the
+ * app's to state and to change.
+ */
+export const householdInvites = pgTable("household_invites", {
+  token: text("token").primaryKey(),
+  householdId: text("household_id")
+    .notNull()
+    .references(() => households.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+});
+
+/**
+ * WHAT was changed, on a thing the household shares a voice on (#78 ·
+ * docs/design/81 §6). Four entities, three fields — deliberately not an
+ * every-write firehose: the four `update*Fields` mutations in mutations.ts are
+ * the only writers, and they log only when a value actually moves.
+ */
+export const changeEntity = pgEnum("change_entity", [
+  "stop",
+  "idea",
+  "reservation",
+  "savedPlace",
+]);
+
+/**
+ * The three shared-voice fields, as the LOG names them.
+ *
+ * `notes` is canonical even though `saved_places` spells its column `note`
+ * (:204) — one vocabulary on the wire, or the /places byline could never match
+ * the set it renders from. The mapping happens at the one write site
+ * (`updateSavedPlaceFields`), never here.
+ */
+export const changeField = pgEnum("change_field", ["rating", "notes", "status"]);
+
+/**
+ * One row per changed field. Two reads consume it (§6): the newest row per
+ * entity, joined onto the list read as `lastChange`, and the last five for one
+ * entity behind `GET /api/history`.
+ *
+ * `household_id` is the tenant — `getOwner()` — and `member_id` is the PERSON —
+ * `getActor()`. They are different strings from #77 on, and the whole feature
+ * rests on the difference: the household owns the row, a member changed it.
+ *
+ * Neither carries a foreign key, for the same reason the four `owner_id`
+ * columns do not (see `households` above): a household id is an opaque string
+ * that need not have a row (the keyless `dev-household`, every route-test
+ * fixture), and a member id is a Clerk user id that is only a member while they
+ * are one — removing a co-pilot must not erase the history of what they wrote.
+ *
+ * `from`/`to` are plain `text` and nullable: one pair of columns carries a
+ * smallint rating, a free-text note and an enum status, so the widest of the
+ * three is the storage, and NULL is a genuinely absent value (an unrated stop,
+ * a cleared note). A rating is written as its decimal digits ("4") and parsed
+ * back by the reader that renders stars.
+ */
+export const changeLog = pgTable(
+  "change_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    householdId: text("household_id").notNull(),
+    entity: changeEntity("entity").notNull(),
+    /** Every one of the four entities has a `uuid` primary key. */
+    entityId: uuid("entity_id").notNull(),
+    field: changeField("field").notNull(),
+    from: text("from"),
+    to: text("to"),
+    memberId: text("member_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // Both reads are "this entity's rows, newest first" — one btree serves the
+    // joined `lastChange` and the five-row history alike.
+    index("change_log_entity_idx").on(t.entity, t.entityId, t.at),
+  ],
+);
+
+export const householdsRelations = relations(households, ({ many }) => ({
+  members: many(householdMembers),
+  invites: many(householdInvites),
+}));
+
+export const householdMembersRelations = relations(householdMembers, ({ one }) => ({
+  household: one(households, { fields: [householdMembers.householdId], references: [households.id] }),
+}));
+
+export const householdInvitesRelations = relations(householdInvites, ({ one }) => ({
+  household: one(households, { fields: [householdInvites.householdId], references: [households.id] }),
+}));
 
 export const tripsRelations = relations(trips, ({ many }) => ({
   legs: many(legs),

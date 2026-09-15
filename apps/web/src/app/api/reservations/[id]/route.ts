@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { reservationPatchInput } from "@rv-trip/core";
 import { deleteReservation, updateReservationFields } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 
 /**
  * The widened reservation write: type, name, both dates, the confirmation
@@ -16,7 +16,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const matched = await updateReservationFields(await getOwner(), id, parsed.data);
+  const matched = await updateReservationFields(
+    await getOwner(),
+    id,
+    parsed.data,
+    await getActor(),
+  );
   if (!matched) return NextResponse.json({ error: "reservation not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });
 }

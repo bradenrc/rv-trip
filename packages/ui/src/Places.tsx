@@ -48,6 +48,7 @@ export function PlaceCard({
   expanded = false,
   drill,
   gline,
+  byline,
   onToggleExpand,
   onPatch,
   onAddToTrip,
@@ -61,6 +62,9 @@ export function PlaceCard({
   /** the quiet Google line, last in the pad. App-filled — a DS component never
    * fetches. */
   gline?: ReactNode;
+  /** The change byline (#78), on its own line in the pad. App-filled: the line
+   * opens a popover that fetches, and no DS component does either. */
+  byline?: ReactNode;
   /** Absent → the card has no expand affordance at all and renders exactly as
    * it shipped. Present → the name is the expand, and pressing it again closes
    * the pad. The open card's id is the library's state, not the card's. */
@@ -125,6 +129,7 @@ export function PlaceCard({
           drill={drill}
           gline={gline}
           meta={meta}
+          byline={byline}
           // Uncontrolled: nothing above this card holds a note draft, and a
           // commit-on-blur field does not need one. `onPatch` is the whole
           // write — one prop, the way `onAddToTrip`/`onRevisit` are one each.

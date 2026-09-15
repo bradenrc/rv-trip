@@ -12,6 +12,9 @@ const pool = new Pool({ connectionString });
 export const db = drizzle(pool, { schema });
 export { schema };
 export type Db = typeof db;
+/** The membership vocabulary, so a caller can name a role without reaching
+ * into `schema` for a type (#77). */
+export type { HouseholdRole } from "./schema";
 
 export * from "./queries";
 export * from "./mutations";

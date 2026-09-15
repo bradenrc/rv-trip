@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { normalizeSavedPlacePatch, savedPlacePatch } from "@rv-trip/core";
 import { deleteSavedPlace, updateSavedPlaceFields } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 
 /**
  * One library row (docs/design/41 §3). PATCH is the edit sheet, the graduation
@@ -35,6 +35,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       await getOwner(),
       id,
       normalizeSavedPlacePatch(parsed.data),
+      await getActor(),
     );
   } catch {
     return NextResponse.json({ error: "trip not found" }, { status: 404 });

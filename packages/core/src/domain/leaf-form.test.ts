@@ -39,6 +39,7 @@ function res(over: Partial<Reservation> = {}): Reservation {
     cost: 64,
     rating: 4,
     notes: "Sit outside.",
+    lastChange: null,
     ...over,
   };
 }
@@ -55,6 +56,7 @@ function ideaFixture(over: Partial<Idea> = {}): Idea {
     rating: null,
     notes: "Ask about the tour.",
     sortOrder: 2,
+    lastChange: null,
     ...over,
   };
 }

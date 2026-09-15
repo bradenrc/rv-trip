@@ -24,6 +24,7 @@ import {
   EmptyShelf,
   type CategoryLabel,
 } from "@rv-trip/ui";
+import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { GoogleLine } from "@/components/places/GoogleLine";
 import { MapMount } from "@/components/map/MapMount";
 import { buildMapModel } from "@/components/map/pins";
@@ -125,6 +126,15 @@ export function PlacesLibrary({
            searches on the name. */
         drill={<DrillRow name={p.place.name} locality={p.region} type={p.type} />}
         gline={<GoogleLine googlePlaceId={p.place.googlePlaceId} />}
+        /* Who last rated or noted this place, and what it was before (#78). */
+        byline={
+          <ChangeBylinePopover
+            last={p.lastChange}
+            entity="savedPlace"
+            entityId={p.id}
+            name={p.place.name}
+          />
+        }
       />
       {cardMenu?.(p)}
     </div>

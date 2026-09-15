@@ -95,6 +95,9 @@ describe("createApiClient", () => {
       cost: 42.5,
       rating: null,
       notes: null,
+      // A create carries no history: the byline is joined on the READ path
+      // (#78 §6), so a just-made row comes back with `lastChange: null`.
+      lastChange: null,
     });
   });
 

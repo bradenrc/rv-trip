@@ -5,6 +5,7 @@ import { Moon, Sun } from "lucide-react";
 import type { UserPrefs } from "@rv-trip/core";
 import { SegmentedControl, type SegmentOption } from "@rv-trip/ui";
 import { Account } from "@/components/nav/Account";
+import { HouseholdCard, type HouseholdCardProps } from "@/components/settings/HouseholdCard";
 import { STYLE_PREF_KEY, STYLE_SEGMENTS } from "@/components/map/MapMount";
 import { DEFAULT_STYLE_MODE, isStyleMode, type StyleMode } from "@/components/map/palette";
 import { PrefSwitch } from "@/components/ui/pref-switch";
@@ -31,7 +32,15 @@ import { DEFAULT_UNITS, UNITS_PREF_KEY, isUnits, unitsFromPrefs, type Units } fr
  * honor it read it on the SERVER, so without an invalidation they would keep
  * rendering the previous unit from the router cache until a hard reload.
  */
-export function SettingsForm({ prefs }: { prefs: UserPrefs | null }) {
+export function SettingsForm({
+  prefs,
+  household,
+}: {
+  prefs: UserPrefs | null;
+  /** #77 · docs/design/81 §3. Read on the SERVER alongside `prefs`, on the same
+   * seam — the card itself fetches nothing. */
+  household: HouseholdCardProps;
+}) {
   const router = useRouter();
   const [theme, setTheme] = useTheme();
   const [storedUnits, setUnits] = useStringPref(UNITS_PREF_KEY, isUnits, DEFAULT_UNITS);
@@ -106,6 +115,11 @@ export function SettingsForm({ prefs }: { prefs: UserPrefs | null }) {
             </div>
           </Row>
         </Card>
+
+        {/* The fourth group (#77). Last, and next to Account, because it is the
+            same question one step out: Account is who YOU are, Household is who
+            else is in here with you. */}
+        <HouseholdCard {...household} />
       </div>
     </>
   );
@@ -123,7 +137,7 @@ function styleFromPrefs(prefs: UserPrefs | null): StyleMode {
   return stored && isStyleMode(stored) ? stored : DEFAULT_STYLE_MODE;
 }
 
-function GroupKicker({ children }: { children: React.ReactNode }) {
+export function GroupKicker({ children }: { children: React.ReactNode }) {
   return (
     <div className="mb-1.5 mt-[18px] font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-rv-accent">
       {children}
@@ -131,7 +145,7 @@ function GroupKicker({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Card({ children }: { children: React.ReactNode }) {
+export function Card({ children }: { children: React.ReactNode }) {
   return (
     <div className="rounded-rv-card border border-rv-border bg-rv-surface px-3.5 py-1 shadow-rv-sm">
       {children}
@@ -140,21 +154,25 @@ function Card({ children }: { children: React.ReactNode }) {
 }
 
 /** One settings row: the 14px label and its 12px helper line, then the control
- * below. A row with no `label` lays its own two halves out instead. */
-function Row({
+ * below. A row with no `label` lays its own two halves out instead, and a row
+ * with no CHILDREN is a label + help line alone — the shape the Household card's
+ * first row takes in two of its three states (docs/design/81 §3). */
+export function Row({
   label,
   help,
   children,
 }: {
   label?: string;
   help?: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }) {
   return (
     <div className="border-b border-rv-border-soft py-[13px] last:border-b-0">
       {label && <div className="text-[14px] font-bold text-rv-ink">{label}</div>}
       {help && <div className="mt-0.5 text-[12px] text-rv-ink-faded">{help}</div>}
-      <div className={label ? "mt-[9px]" : undefined}>{children}</div>
+      {children !== undefined && (
+        <div className={label ? "mt-[9px]" : undefined}>{children}</div>
+      )}
     </div>
   );
 }

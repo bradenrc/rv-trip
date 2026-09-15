@@ -6,7 +6,7 @@ import {
   stopPatchInput,
 } from "@rv-trip/core";
 import { deleteStop, getStopDateContext, updateStopFields } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 
 /**
  * The widened stop write: the whole place (`place` — "Change place…"), rename
@@ -57,7 +57,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   try {
-    const matched = await updateStopFields(owner, id, stopPatchColumns(patch));
+    const matched = await updateStopFields(owner, id, stopPatchColumns(patch), await getActor());
     if (!matched) return NextResponse.json({ error: "stop not found" }, { status: 404 });
   } catch {
     return NextResponse.json({ error: "leg not found" }, { status: 404 });

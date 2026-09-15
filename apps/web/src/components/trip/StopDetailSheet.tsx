@@ -43,6 +43,7 @@ import {
   ideaCategoryType,
   money,
 } from "@rv-trip/ui";
+import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { GoogleLine } from "@/components/places/GoogleLine";
 import { dateRange } from "@/lib/trip-ui";
 import { resDates } from "@/lib/trip-logic";
@@ -518,6 +519,14 @@ export function StopDetailSheet({
                         />
                       }
                       gline={<GoogleLine googlePlaceId={it.place?.googlePlaceId} />}
+                      byline={
+                        <ChangeBylinePopover
+                          last={it.lastChange}
+                          entity="idea"
+                          entityId={it.id}
+                          name={it.title}
+                        />
+                      }
                       onCycle={() => onIdeaCycle(it.id)}
                       onRating={(n) => onIdeaRating(it.id, n)}
                       onNote={(v) => onIdeaNote(it.id, v)}
@@ -645,6 +654,16 @@ export function StopDetailSheet({
               placeholder="What did you love? What to remember for next time…"
               className="min-h-[96px] w-full resize-y rounded-rv-card border border-rv-border bg-rv-surface px-3.5 py-3 text-[14px] leading-relaxed text-rv-ink"
             />
+            {/* The sheet composes its own Stars + textarea rather than the
+                research pad, so the byline is mounted here directly (#78 §5). */}
+            <div className="mt-[9px]">
+              <ChangeBylinePopover
+                last={stop.lastChange}
+                entity="stop"
+                entityId={stop.id}
+                name={stop.place.name}
+              />
+            </div>
           </div>
 
           {/* Stop total — only when tracking costs */}

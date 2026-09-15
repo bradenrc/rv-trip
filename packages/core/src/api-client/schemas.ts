@@ -79,4 +79,8 @@ export const reservationRowSchema = z
     cost: r.cost == null ? null : Number(r.cost),
     rating: r.rating ?? null,
     notes: r.notes ?? null,
+    // A row that was just CREATED has no history yet, and the create response
+    // carries none (#78 §6: the byline is joined on the READ path). The client
+    // splices this shape straight into its trip, so the field has to be there.
+    lastChange: null,
   }));

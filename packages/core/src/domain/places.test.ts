@@ -163,6 +163,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 cost: 204,
                 rating: 5,
                 notes: "Full hookups, site A12 backs to the trees.",
+                lastChange: null,
               },
               {
                 id: "res-museum",
@@ -176,9 +177,11 @@ function pnwLoop(status: Trip["status"]): Trip {
                 cost: 38,
                 rating: null,
                 notes: null,
+                lastChange: null,
               },
             ],
             ideas: [],
+            lastChange: null,
           },
           {
             id: "stop-newport",
@@ -202,9 +205,11 @@ function pnwLoop(status: Trip["status"]): Trip {
                 cost: 160,
                 rating: 4,
                 notes: null,
+                lastChange: null,
               },
             ],
             ideas: [],
+            lastChange: null,
           },
           {
             id: "stop-bend",
@@ -217,6 +222,7 @@ function pnwLoop(status: Trip["status"]): Trip {
             notes: null,
             reservations: [],
             ideas: [],
+            lastChange: null,
           },
         ],
       },
@@ -287,6 +293,7 @@ const libraryRow = (name: string, lat: number | null, lng: number | null): Saved
   rating: 5,
   tripId: null,
   tripName: null,
+  lastChange: null,
 });
 
 describe("buildSuggestionShelf", () => {

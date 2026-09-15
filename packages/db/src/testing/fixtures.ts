@@ -27,8 +27,17 @@ import {
  * handler sees its own rows; pass OTHER_OWNER to make a row foreign.
  */
 
-/** Mirrors apps/web/src/lib/owner.ts:14 — the tenant a keyless process runs as. */
-export const DEV_OWNER = "dev-user";
+/**
+ * Mirrors apps/web/src/lib/owner.ts's DEV_HOUSEHOLD — the tenant a keyless
+ * process runs as, and the value a keyless `getOwner()` returns.
+ *
+ * It became the HOUSEHOLD id in #77 (it was `dev-user`, the person). The name
+ * stays `DEV_OWNER` because that is what it is to the fixtures — the value in
+ * an `owner_id` column — and because every route test names it, unchanged. The
+ * person behind it is `getActor()`'s `dev-user`, which no fixture needs: no
+ * owner column holds it any more.
+ */
+export const DEV_OWNER = "dev-household";
 /** The second seeded tenant. Q3 = A: two real owners, zero `vi.mock`. */
 export const OTHER_OWNER = "other-user";
 

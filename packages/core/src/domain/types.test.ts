@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  changeHistoryRow,
   savedPlace,
   savedPlaceCreate,
   savedPlacePatch,
   normalizeSavedPlacePatch,
+  stop,
+  trip,
   tripSummary,
 } from "./types";
 
@@ -193,5 +196,183 @@ describe("tripSummary — the dashboard row's wire shape", () => {
   it("rejects a row without it", () => {
     const { milesEstimated: _omitted, ...withoutFlag } = SUMMARY_ROW;
     expect(tripSummary.safeParse(withoutFlag).success).toBe(false);
+  });
+});
+
+// ── the byline's joined row (#78 · docs/design/81 §6) ──────────────────────
+// `lastChange` is nullable + .default(null) for one reason: every payload
+// already in flight — a phone build on its own Expo cadence, a cached bundle,
+// a fixture written before #78 — must keep parsing. The tests below are that
+// promise, stated as the shape rather than as a hope.
+
+/** A trip EXACTLY as the server shipped it before #78: no `lastChange` on the
+ * trip, the stop, the reservation, the attached idea or the shelf idea. */
+const PRE_78_TRIP = {
+  id: TRIP_ID,
+  ownerId: "dev-household",
+  title: "Pacific Northwest Loop",
+  homeBase: "Boise, ID",
+  homeBasePlace: null,
+  startDate: "2026-08-01",
+  endDate: "2026-08-28",
+  status: "planning",
+  statusAuto: false,
+  rating: null,
+  note: null,
+  legs: [
+    {
+      id: "leg-coast",
+      tripId: TRIP_ID,
+      title: "Oregon Coast",
+      sortOrder: 0,
+      stops: [
+        {
+          id: "stop-astoria",
+          legId: "leg-coast",
+          place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
+          arriveDate: "2026-08-02",
+          departDate: "2026-08-05",
+          sortOrder: 0,
+          rating: 5,
+          notes: "Loved the riverwalk. Book the same RV park next time.",
+          reservations: [
+            {
+              id: "res-koa",
+              stopId: "stop-astoria",
+              ideaId: null,
+              type: "campground",
+              name: "Astoria/Warrenton KOA",
+              checkIn: "2026-08-02",
+              checkOut: "2026-08-05",
+              confirmationNumber: "KOA-88213",
+              cost: 204,
+              rating: 5,
+              notes: "Full hookups, site A12 backs to the trees.",
+            },
+          ],
+          ideas: [
+            {
+              id: "idea-fort",
+              tripId: TRIP_ID,
+              stopId: "stop-astoria",
+              title: "Fort Stevens bike loop",
+              category: "do",
+              status: "idea",
+              place: null,
+              rating: null,
+              notes: null,
+              sortOrder: 0,
+            },
+          ],
+        },
+      ],
+    },
+  ],
+  ideas: [
+    {
+      id: "idea-shelf",
+      tripId: TRIP_ID,
+      stopId: null,
+      title: "Blue Scorcher Bakery",
+      category: "eat",
+      status: "idea",
+      place: null,
+      rating: null,
+      notes: null,
+      sortOrder: 0,
+    },
+  ],
+};
+
+describe("lastChange — the one joined row the byline reads", () => {
+  it("parses a pre-#78 trip and defaults lastChange to null everywhere", () => {
+    const parsed = trip.parse(PRE_78_TRIP);
+    const parsedStop = parsed.legs[0]!.stops[0]!;
+
+    expect(parsedStop.lastChange).toBeNull();
+    expect(parsedStop.reservations[0]!.lastChange).toBeNull();
+    expect(parsedStop.ideas[0]!.lastChange).toBeNull();
+    expect(parsed.ideas[0]!.lastChange).toBeNull();
+  });
+
+  it("leaves the rest of a pre-#78 trip byte-for-byte alone", () => {
+    const parsed = trip.parse(PRE_78_TRIP);
+    // Everything the planner already reads survives the new field: the only
+    // difference between what went in and what came out is `lastChange`.
+    expect(parsed.title).toBe("Pacific Northwest Loop");
+    expect(parsed.legs[0]!.stops[0]!.place.name).toBe("Astoria, OR");
+    expect(parsed.legs[0]!.stops[0]!.reservations[0]!.cost).toBe(204);
+    expect(parsed.ideas[0]!.title).toBe("Blue Scorcher Bakery");
+  });
+
+  it("carries a real row through — the wireframe's 'rated by Jess · Sep 12'", () => {
+    const withByline = {
+      ...PRE_78_TRIP.legs[0]!.stops[0]!,
+      lastChange: { field: "rating", memberName: "Jess", at: "2026-09-12T18:04:11Z" },
+    };
+    expect(stop.parse(withByline).lastChange).toEqual({
+      field: "rating",
+      memberName: "Jess",
+      at: "2026-09-12T18:04:11Z",
+    });
+  });
+
+  it("speaks only the three shared-voice fields", () => {
+    const bogus = {
+      ...PRE_78_TRIP.legs[0]!.stops[0]!,
+      lastChange: { field: "cost", memberName: "Jess", at: "2026-09-12T18:04:11Z" },
+    };
+    expect(stop.safeParse(bogus).success).toBe(false);
+  });
+
+  it("defaults on a saved place too — the /places card's byline", () => {
+    const row = {
+      id: "sp-1",
+      ownerId: "dev-household",
+      place: { name: "Astoria/Warrenton KOA", lat: null, lng: null, googlePlaceId: null },
+      region: "Astoria, OR",
+      type: "campground",
+      status: "been",
+      note: "Riverfront sites 41–48.",
+      source: null,
+      rating: 5,
+      tripId: null,
+      tripName: null,
+    };
+    expect(savedPlace.parse(row).lastChange).toBeNull();
+    expect(
+      savedPlace.parse({
+        ...row,
+        lastChange: { field: "notes", memberName: "Braden", at: "2026-08-29T15:00:00Z" },
+      }).lastChange,
+    ).toEqual({ field: "notes", memberName: "Braden", at: "2026-08-29T15:00:00Z" });
+  });
+
+  it("is a history ROW that adds from/to — what the popover renders", () => {
+    expect(
+      changeHistoryRow.parse({
+        field: "rating",
+        from: "4",
+        to: "5",
+        memberName: "Jess",
+        at: "2026-09-12T18:04:11Z",
+      }),
+    ).toEqual({
+      field: "rating",
+      from: "4",
+      to: "5",
+      memberName: "Jess",
+      at: "2026-09-12T18:04:11Z",
+    });
+    // "— → ★★★★": a genuinely absent old value is null, never the string.
+    expect(
+      changeHistoryRow.parse({
+        field: "rating",
+        from: null,
+        to: "4",
+        memberName: "Braden",
+        at: "2026-08-30T15:00:00Z",
+      }).from,
+    ).toBeNull();
   });
 });
