@@ -296,3 +296,96 @@ frame **State 3**):
   "node"` with `include: src/**/*.test.ts` — there is no DOM/component runner in
   this repo, so menu VISIBILITY is only provable at the walk; the predicate
   behind it is unit-tested).
+
+---
+
+# #80 i3 — Locate's search text for an idea becomes `coalesce(place_name, title)`
+
+No schema, no new endpoint, no new write. One SQL expression, named once and
+read by both entrances to the locate read path.
+
+## 1 · The change
+
+**`packages/db/src/locate.ts:95` — `ideaSearchText`**
+
+```ts
+const ideaSearchText = sql<string>`coalesce(${ideas.placeName}, ${ideas.title})`;
+```
+
+- `loadIdeas` (`locate.ts:102`) selects it as the target's `name` instead of
+  `ideas.title`, on the trip-scoped `ideas → trips` join i1 left behind. The
+  `where` is untouched — same owner scope, same `coordlessIdea` filter.
+- The idea arm of `listLocateTargetsForOwner` (`locate.ts:131`) selects the
+  same expression — see decision 1.
+- `writeIdeaPin` (`locate.ts:196`, the `placeName` set at `:207`) is **unchanged**: its
+  `coalesce(place_name, <google's name>)` don't-overwrite rule still stands.
+  Read prefers what the human typed; write never replaces it. The doc comment
+  at `locate.ts:72-94` now states the pair explicitly, because they are the
+  same preference spelled in two directions and a future edit to one without
+  the other is the bug.
+
+Why it matters: the picker's free-text escape row lets a human put a place name
+on an idea with no coordinates ("Tumalo Falls, the upper lot" on a row titled
+"waterfall hike"). That typed string is a far better geocode query than the
+title beside it, so more rows resolve per batch press.
+
+## 2 · The tests
+
+`apps/web/src/app/api/places/locate/route.test.ts` — the acceptance's four
+cases are a two-row table (`:157` `LOCATED_CASES` = attached / shelf) crossed
+with the two column states, so each assertion runs for **both an attached and
+an unattached idea** (`:162-208`):
+
+- *"searches on the place_name a human typed, not the title"* — asserts the
+  store's own `load()` returns `name: "Tumalo Falls, the upper lot"` AND that
+  the same string is what reaches the provider (`provider.asked`).
+- *"falls back to the title when place_name is null"* — the same two
+  assertions against `"Tumalo Falls trailhead"`.
+- `:211` *"the whole-owner sweep reads the same coalesced search text as the
+  batch"* — `listLocateTargetsForOwner`, decision 1's cover.
+- `:234` *"locating a row that already carries a typed name keeps that name"* —
+  the read coalesce does not disturb the write coalesce.
+
+Written first, run red — 3 failures, all `expected 'Tumalo Falls, the upper
+lot' … received 'waterfall hike'` — then green.
+
+Two existing tests were re-worded, not re-scoped, because their comments
+asserted the OLD rule in prose: `:48` ("the search text is the idea's TITLE" →
+"this row carries no place name, so the search text falls back to the title")
+and the `:129` test title ("asks Google about the idea's title" → "…when it has
+no place name"). Both still pass unchanged.
+
+**Runner note (the vet's MED, answered):** `packages/db` declares only
+`build`/`typecheck`, so none of this could live beside `locate.ts`. It landed
+in `apps/web`'s route suite against real Postgres, which is where the existing
+`dbLocateStore` coverage already is.
+
+## 3 · Decisions
+
+1. **`listLocateTargetsForOwner` got the same expression, though the plan item
+   named only `loadIdeas`.** Leaving it on bare `ideas.title` would mean
+   `pnpm backfill:places` geocodes an idea under a different name than the map
+   button does — a silent disagreement about what the row is called, and
+   exactly the kind of second spelling i2's `ideaIsLocated` was written to
+   avoid. It is four characters of diff and one test; I judged the divergence a
+   defect rather than scope. **Flagging it for qa as the one line outside the
+   item's literal scope.**
+2. **Plain `coalesce`, no `nullif(place_name, '')`.** An empty string would
+   geocode as a blank query, which is the opposite of the point — but it cannot
+   occur: the `place` grammar declares `name: z.string().min(1)`
+   (`packages/core/src/domain/types.ts:36-41`), so the column is either NULL or
+   real text. Noted rather than defended against, so the guard is not mistaken
+   for dead code later.
+3. **No change to `locatePlaces` or the route.** The search text is a fact the
+   store reads; core's decision tree and the handler never see the column.
+
+## 4 · For qa / the walk
+
+- **Claim to check:** the read coalesce and the write coalesce point opposite
+  directions ON PURPOSE (`locate.ts:95` vs `:207`) — a reader who "fixes" one
+  to match the other breaks either the typed-name preference or the
+  never-rename guarantee. Both directions are pinned by tests.
+- **Nothing here is render-required.** This item has no UI surface; the walk
+  sees it only as "pressing Locate on an idea that shows a typed place name now
+  finds it". The two FLAGs the vet raised (the two-payload drag, the map
+  polish) belong to i1 and i4 and are untouched by this diff.
