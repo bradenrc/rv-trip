@@ -9,7 +9,7 @@ import {
   MapPin,
   SquarePen,
 } from "lucide-react";
-import { PICKED_COORDLESS_LABEL, hasCoords } from "@rv-trip/core";
+import { PICKED_COORDLESS_LABEL, ideaIsLocated } from "@rv-trip/core";
 import type { Reservation, Idea } from "@rv-trip/core";
 import { categoryMeta, ideaCategoryMeta } from "./category";
 import { CategoryTile } from "./CategoryTile";
@@ -211,7 +211,7 @@ export function IdeaCard({
  */
 function IdeaPlaceLine({ idea, onLocate }: { idea: Idea; onLocate?: () => void }) {
   if (!idea.place && !onLocate) return null;
-  const located = idea.place !== null && hasCoords(idea.place);
+  const located = ideaIsLocated(idea);
   return (
     <div className="flex flex-wrap items-center gap-[9px] border-t border-dashed border-rv-border pt-2">
       <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-rv-ink-faded">
@@ -299,7 +299,7 @@ export function ShelfIdeaCard({
   onDragEnd?: () => void;
 }) {
   const cm = ideaCategoryMeta(idea.category);
-  const located = idea.place !== null && hasCoords(idea.place);
+  const located = ideaIsLocated(idea);
   return (
     <div
       draggable

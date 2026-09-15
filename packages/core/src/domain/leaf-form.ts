@@ -1,4 +1,5 @@
 import type { PickedPlace } from "../providers/place-picker";
+import { hasCoords } from "./bounds";
 import { placeOf } from "./place-form";
 import {
   isoDate,
@@ -221,6 +222,26 @@ export function ideaDraftInput(
  * is. */
 export function ideaPlace(picked: PickedPlace | null): Place | null {
   return picked && picked.name.trim() !== "" ? placeOf(picked) : null;
+}
+
+/**
+ * Place-state 3 (#74) — a place WITH both coordinates, the only state that has
+ * something on the map to change or to clear.
+ *
+ * #69 gave the row three place states and left the third a dead end: the
+ * `place: null` clear exists end-to-end and is tested, but the line's own
+ * control (Locate) disappears the moment an idea is located, so nothing in the
+ * UI could press it. The door is the row menu, and THIS is the condition both
+ * of its place items are derived from — a place-less or coordless idea shows
+ * neither, because it still has Locate on its line instead.
+ *
+ * One named predicate rather than `idea.place !== null && hasCoords(...)`
+ * re-spelled at the line and at every menu: the door and the line must agree
+ * about which state a row is in, or the menu offers a clear for a place the row
+ * says it does not have.
+ */
+export function ideaIsLocated(idea: { place: Place | null }): boolean {
+  return idea.place !== null && hasCoords(idea.place);
 }
 
 /** The idea's place columns, as `updateIdeaFields` names them. Nullable all

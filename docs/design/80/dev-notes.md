@@ -211,3 +211,88 @@ New file **`packages/core/src/planner/shelf.ts`**, re-exported from
 - **Not verified:** `pnpm db:seed` was NOT run (the local dev DB is shared with
   other worktrees' walk servers). The migration itself WAS verified against a
   populated scratch database — see HONEST REPORTING in the report.
+
+---
+
+# #80 i2 — "Clear place" (and "Change place") in the idea row's ⋯ menu · #74
+
+#69 shipped the `place: null` clear end-to-end and tested it; the row's own
+control (Locate) disappears the moment an idea is located, so nothing in the UI
+could press it. i2 is that door — **no schema, no new endpoint, no new write**.
+
+## 1 · The derivation, named once
+
+**`packages/core/src/domain/leaf-form.ts:243` — `ideaIsLocated(idea)`**: place
+is non-null AND `hasCoords`. It is the acceptance's "derived from the idea's
+coordinates": the two place items render for exactly the ideas this returns
+true for, so a place-less (state 1) or coordless (state 2) row shows neither
+and keeps its Locate button instead.
+
+It replaces the inline `idea.place !== null && hasCoords(idea.place)` that was
+spelled twice in the DS — `packages/ui/src/DetailCards.tsx:214` (`IdeaPlaceLine`)
+and `:302` (`ShelfIdeaCard`), which now import `ideaIsLocated` instead of
+`hasCoords` (`DetailCards.tsx:12`). One predicate behind the line and the menu,
+because the two must agree about which state a row is in — a menu offering a
+clear for a place the line says is absent is the bug this prevents.
+
+Tests: `packages/core/src/domain/leaf-form.test.ts:369` — true only with BOTH
+coordinates, false for no place, false for the picker's coordless escape row,
+false on a half-coordinate row (one number is not a pin), and indifferent to
+`stopId` (a shelf row is state 3 too). Written first, run red
+(`TypeError: ideaIsLocated is not a function`), then green.
+
+## 2 · The two menus
+
+Both mounts of the idea row menu get the same pair, gated on `ideaIsLocated`,
+in the wireframe's order and copy (index.html §"the door is the ⋯ menu",
+frame **State 3**):
+
+- **Change place** · `MENU_ITEM`, `MapPin`, hint `picker` — re-opens the picker
+  the row already mounts (the state each surface already owned:
+  `setLocatingIdeaId` in the sheet, `setLocatingShelfIdeaId` in the planner).
+- **Clear place** · `MENU_ITEM_WARN`, `MapPinX`, hint `→ no place` — the amber
+  attention colour, never shadcn's destructive red (row-menu.tsx:26-31).
+
+- The **attached** idea, in the stop sheet: `StopDetailSheet.tsx:533-556`, above
+  the existing Delete and below "Move to ideas". New leaf callback
+  `onClearIdeaPlace` (`StopDetailSheet.tsx:116`), implemented at
+  `TripPlanner.tsx:1390` — `setIdeaPlace(trip, stop.id, ideaId, null)` then
+  `PATCH { place: null }` through `persist()`.
+- The **shelf** idea, in the rail: `TripPlanner.tsx:1248-1268`, fired by
+  `doClearShelfIdeaPlace` (`TripPlanner.tsx:612`) —
+  `setShelfIdeaFields(trip, id, { place: null })` then the same PATCH through
+  `persist()`.
+
+`MapPinX` (a pin with an ✕) is the frame's own glyph, not `MapPinOff`'s slash.
+
+## 3 · Decisions
+
+- **"Change place" IS in, as the vet's MED asked me to pin.** q7 signed only
+  "Clear place", but plan i2's scope names Change place and state 3 is otherwise
+  un-re-pickable (`IdeaPlaceLine` hides Locate once located,
+  DetailCards.tsx:234-250). It is accepted as part of #74 and covered by the same
+  `ideaIsLocated` test that gates it — it opens the SHIPPED picker, so it adds
+  no write. This supersedes i1's note 6 ("Change place is NOT here").
+- **No undo toast on the clear.** The frame's hints are deliberate: Delete says
+  `undo`, Clear place says `→ no place`. `persist()` still rolls the tree back
+  and toasts on a failed PATCH, and a successful clear hands the row its own
+  Locate button straight back, which is the way back.
+- **Explicit null on the wire**, never an absent key — `ideaPatchColumns`
+  (leaf-form.ts:255) reads absent as "say nothing about the place". That
+  distinction is already pinned by the core test at leaf-form.test.ts:341 and by
+  the route test "a { place: null } PATCH clears all four columns on a shelf
+  idea" (`apps/web/src/app/api/ideas/[id]/route.test.ts:189`) — both from i1, both
+  re-run green here, and together they are i2's acceptance for the API half.
+
+## 4 · For qa / the walk
+
+- **Claim to check:** the menu is derived, not duplicated — `ideaIsLocated` is
+  the only condition on either mount, and the DS's place line reads the same
+  function, so there is no third spelling of "located" left in the tree
+  (`grep -rn "hasCoords(idea" packages/ui/src` is now empty).
+- **Render-required, unverified here:** that the dropdown actually shows two
+  items on a located row and none on a coordless one, and that "Change place"
+  re-opens the picker in the shelf rail (apps/web's vitest is `environment:
+  "node"` with `include: src/**/*.test.ts` — there is no DOM/component runner in
+  this repo, so menu VISIBILITY is only provable at the walk; the predicate
+  behind it is unit-tested).

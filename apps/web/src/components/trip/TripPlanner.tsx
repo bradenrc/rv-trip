@@ -23,6 +23,7 @@ import {
   UNDO_WINDOW_MS,
   cascadeLossSentence,
   ideaDraftInput,
+  ideaIsLocated,
   ideaPlace,
   ideaRestoreInput,
   isScheduled,
@@ -63,6 +64,7 @@ import {
   CircleAlert,
   Library,
   MapPin,
+  MapPinX,
   Route,
   ChartNoAxesGantt,
   Plus,
@@ -592,6 +594,30 @@ export function TripPlanner({
       tripApi.updateIdea(ideaId, { place }),
       undo,
       "Couldn't save that place — the idea is back the way it was.",
+    );
+  };
+
+  /**
+   * #74 · the shelf row's "Clear place" — the door onto the `place: null`
+   * clear #69 shipped and tested but left unpressable.
+   *
+   * An EXPLICIT null on the wire: `ideaPatchColumns` reads an absent `place` as
+   * "say nothing about the place", and only a real null erases the four
+   * columns. The menu that fires this renders in place-state 3 only, so there
+   * is always something to clear; a failure puts the place back through
+   * `persist`, which is the whole undo this gesture gets — the frame's hint is
+   * "→ no place", not "undo", because clearing hands the row its own Locate
+   * button straight back.
+   */
+  const doClearShelfIdeaPlace = (ideaId: string) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    if (!it) return;
+    const undo = trip;
+    setTrip(setShelfIdeaFields(trip, ideaId, { place: null }));
+    persist(
+      tripApi.updateIdea(ideaId, { place: null }),
+      undo,
+      `Couldn't clear the place on ${it.title} — put back the way it was.`,
     );
   };
 
@@ -1215,6 +1241,30 @@ export function TripPlanner({
             onAddFromPlaces={() => setPlacesPanelOpen((v) => !v)}
             ideaActions={(it) => (
               <RowMenu label={`Actions for ${it.title}`}>
+                {/* #74 · place-state 3 only. A coordless or place-less shelf
+                    row keeps its Locate button, so neither item renders for
+                    it — `ideaIsLocated` is the one derivation behind the row's
+                    place line and both of these doors. */}
+                {ideaIsLocated(it) && (
+                  <>
+                    <DropdownMenuItem
+                      className={MENU_ITEM}
+                      onSelect={() => setLocatingShelfIdeaId(it.id)}
+                    >
+                      <MapPin />
+                      Change place
+                      <MenuHint>picker</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className={MENU_ITEM_WARN}
+                      onSelect={() => doClearShelfIdeaPlace(it.id)}
+                    >
+                      <MapPinX />
+                      Clear place
+                      <MenuHint>→ no place</MenuHint>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuItem
                   className={MENU_ITEM_WARN}
                   onSelect={() => doDeleteShelfIdea(it.id)}
@@ -1335,6 +1385,19 @@ export function TripPlanner({
                 tripApi.updateIdea(ideaId, { place }),
                 undo,
                 "Couldn't save that place — put back the way it was.",
+              );
+            },
+            onClearIdeaPlace: (ideaId) => {
+              // #74 · the ATTACHED idea's clear. Same explicit null, same
+              // endpoint and same optimistic-then-persist shape as the shelf's
+              // (`doClearShelfIdeaPlace`); only the tree write differs, because
+              // this row lives under a stop.
+              const undo = trip;
+              setTrip(setIdeaPlace(trip, selectedStop.id, ideaId, null));
+              persist(
+                tripApi.updateIdea(ideaId, { place: null }),
+                undo,
+                "Couldn't clear that place — put back the way it was.",
               );
             },
             promotingId,

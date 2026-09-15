@@ -3,6 +3,7 @@ import {
   BLANK_RESERVATION_DRAFT,
   UNDO_WINDOW_MS,
   ideaDraftInput,
+  ideaIsLocated,
   ideaPatchColumns,
   ideaRestoreInput,
   reservationCost,
@@ -356,5 +357,52 @@ describe("ideaPatchColumns", () => {
       stopId: STOP,
       status: "planned",
     });
+  });
+});
+
+/**
+ * #74 — the predicate the row menu's place entrances are DERIVED from. "Change
+ * place" and "Clear place" are the doors onto place-state 3, so they render for
+ * exactly the ideas this returns true for: a place-less or coordless idea has
+ * nothing on the map to change or clear (its row still carries Locate instead).
+ */
+describe("ideaIsLocated — place-state 3, the row menu's condition", () => {
+  const LOCATED = {
+    name: "Sand Harbor",
+    lat: 39.1986,
+    lng: -119.9319,
+    googlePlaceId: "ChIJSandHarbor",
+  };
+
+  it("is true only for a place that has BOTH coordinates", () => {
+    expect(ideaIsLocated(ideaFixture({ place: LOCATED }))).toBe(true);
+  });
+
+  it("is false with no place at all — state 1, nothing to clear", () => {
+    expect(ideaIsLocated(ideaFixture({ place: null }))).toBe(false);
+  });
+
+  it("is false for the picker's coordless escape row — state 2", () => {
+    expect(
+      ideaIsLocated(
+        ideaFixture({
+          place: { name: "Mt Rose Meadows", lat: null, lng: null, googlePlaceId: null },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("is false on a half-coordinate row — one number is not a pin", () => {
+    expect(
+      ideaIsLocated(ideaFixture({ place: { ...LOCATED, lng: null } })),
+    ).toBe(false);
+    expect(
+      ideaIsLocated(ideaFixture({ place: { ...LOCATED, lat: null } })),
+    ).toBe(false);
+  });
+
+  it("does not care where the idea lives — a shelf row is state 3 too", () => {
+    expect(ideaIsLocated(ideaFixture({ stopId: null, place: LOCATED }))).toBe(true);
+    expect(ideaIsLocated(ideaFixture({ stopId: null, place: null }))).toBe(false);
   });
 });
