@@ -18,6 +18,7 @@ import {
   DrillRow,
   ideaCategoryType,
 } from "@rv-trip/ui";
+import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { GoogleLine } from "@/components/places/GoogleLine";
 import type { Idea } from "@rv-trip/core";
 import type { IdeaShelf, ShelfFilter, TimelineGap, TimelineModel } from "@/lib/trip-logic";
@@ -260,6 +261,14 @@ export function Timeline({
                         />
                       }
                       gline={<GoogleLine googlePlaceId={row.idea.place?.googlePlaceId} />}
+                      byline={
+                        <ChangeBylinePopover
+                          last={row.idea.lastChange}
+                          entity="idea"
+                          entityId={row.idea.id}
+                          name={row.idea.title}
+                        />
+                      }
                       onClick={() =>
                         setExpandedIdeaId((id) => (id === row.idea.id ? null : row.idea.id))
                       }

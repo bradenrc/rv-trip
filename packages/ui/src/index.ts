@@ -2,6 +2,8 @@ export * from "./category";
 export * from "./drill";
 export { DrillRow } from "./DrillRow";
 export { noteLinks, linkLabel } from "./notes";
+export * from "./change-byline";
+export { ChangeByline, ChangeHistoryList } from "./ChangeByline";
 export { money } from "./format";
 export { Stars } from "./Stars";
 export { CategoryTile } from "./CategoryTile";

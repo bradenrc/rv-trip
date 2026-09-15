@@ -28,6 +28,7 @@ export function ResearchPad({
   onNoteCommit,
   onRating,
   meta,
+  byline,
 }: {
   /** The note's value — live when `onNoteChange` is given, the initial value
    * when it is not (see below). */
@@ -54,6 +55,14 @@ export function ResearchPad({
    * a saved place's "Heard from Dana" or the trip it was visited on. It moves
    * here while the pad is open so the footer never shows the same fact twice. */
   meta?: ReactNode;
+  /**
+   * "rated by Jess · Sep 12 ▸" (#78) — its OWN line under the rating row, not
+   * the `meta` slot beside the stars: `PlaceCard` already fills `meta`
+   * (Places.tsx:127, "Visited on…"), and two facts fighting for one line is
+   * what the separate prop avoids. App-filled, because the line opens a
+   * popover that fetches and no DS component does either.
+   */
+  byline?: ReactNode;
 }) {
   const readOnly = !onNoteCommit;
   const links = noteLinks(note);
@@ -97,6 +106,7 @@ export function ResearchPad({
             <Stars value={rating} size={14} onSet={onRating} />
             {meta}
           </div>
+          {byline}
           {drill}
           {gline}
         </>

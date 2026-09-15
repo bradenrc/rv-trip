@@ -872,3 +872,164 @@ under `packages/ui` or `apps/web/src/components/**` is in the diff except two te
 
 The suite's own throwaway database is created and dropped by the harness; `localhost:5433` was
 never read or written. No server was started and no process was killed by this item.
+
+---
+
+# Issue 81 · dev notes — item **i7 of 7** (`ChangeByline` + the four mounts)
+
+Scope of this dispatch: the line itself. i5 wrote the rows, i6 put the newest one on the wire
+and opened `GET /api/history` behind it — this item draws "rated by Jess · Sep 12 ▸" under the
+four things that carry it, and opens the audit when it is tapped. This is the LAST item of the
+epic plan; nothing after it.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/ui/src/change-byline.ts` | new — everything the line DECIDES, as pure functions: `changeVerb` :41, `changeStamp` :68 (UTC), `bylineLabel` :76, `changeFieldLabel` :87, `changeValueLabel` :99, `historyTitle` :122, plus `BYLINE_CARET` :16, `BYLINE_CARET_OPEN` :17, `HISTORY_ROWS` :22 and `HISTORY_TRUNCATED` :25 |
+| `packages/ui/src/ChangeByline.tsx:36` | new — `ChangeByline`, the closed line: `font-mono text-[10.5px] text-rv-ink-faded`, null when `last` is null, a `<button>` that forwards every button prop (so radix's `asChild` can own it) |
+| `packages/ui/src/ChangeByline.tsx:76` | new — `ChangeHistoryList`, the opened panel's CONTENTS (header + rows + the truncation line). The panel's chrome belongs to the app's `PopoverContent` |
+| `packages/ui/src/index.ts:5-6` | both exported, plus the pure module |
+| `packages/ui/src/ResearchPad.tsx:31,65,109` | new `byline?: ReactNode` prop, rendered on its own line UNDER the rating row. `meta` is untouched and still renders beside the stars |
+| `packages/ui/src/Places.tsx:51,67,132` | `PlaceCard` takes `byline` and passes it to the pad |
+| `packages/ui/src/DetailCards.tsx:126,158,221` | `IdeaCard` — same |
+| `packages/ui/src/DetailCards.tsx:312,346,448` | `ShelfIdeaCard` — same |
+| `apps/web/src/components/history/ChangeBylinePopover.tsx` | new — the app half: the shadcn `Popover` + the fetch-on-open, composed around the DS line |
+| `apps/web/src/components/places/PlacesLibrary.tsx:130` | mount ① — the /places card (`entity="savedPlace"`) |
+| `apps/web/src/components/trip/StopDetailSheet.tsx:522` | mount ② — an attached idea (`entity="idea"`) |
+| `apps/web/src/components/trip/Timeline.tsx:264` | mount ③ — a shelf idea (`entity="idea"`) |
+| `apps/web/src/components/trip/StopDetailSheet.tsx:660` | mount ④ — the stop's own take, directly under the notes textarea (`entity="stop"`) |
+| `packages/ui/src/change-byline.test.ts` | new — 16 tests (the file was left RED by the interrupted prior run; this item made it green) |
+
+## Key decisions
+
+1. **The component's HOME stayed `packages/ui`; its POPOVER moved to the app.** The vet's third
+   HIGH was right and unarguable: `packages/ui` has no `radix-ui` dependency, no `@/` alias into
+   `apps/web`, and not one `fetch(` or `useEffect` in any of its files — a DS component that
+   "opens the app's shadcn Popover and fetches /api/history" cannot be built where the design put
+   it. The split that keeps BOTH halves of i7's acceptance is: `ChangeByline` is the closed line
+   and nothing else (a `<button>` that spreads the props radix's `asChild` hands it), and
+   `apps/web/src/components/history/ChangeBylinePopover.tsx` wraps it in `Popover` /
+   `PopoverTrigger asChild` / `PopoverContent` and does the fetch. So `ChangeByline` IS exported
+   from `packages/ui/src/index.ts` as the design says, no popover primitive was added to the kit,
+   and the app's existing `apps/web/src/components/ui/popover.tsx` is what opens. `GoogleLine` is
+   the precedent this copies exactly: an app component filled into a DS slot because it costs a
+   request.
+
+2. **The verb derivation is a pure module, because that is the runner that exists.** The vet's
+   MED was right too — `packages/ui` has no vitest config, no jsdom/happy-dom, no
+   @testing-library anywhere in the workspace, so a render assertion could not have run here.
+   Everything the line decides therefore lives in `change-byline.ts` and is executed directly by
+   `change-byline.test.ts`. The component's own acceptance case ("renders nothing when `last` is
+   null") is proved by CALLING `ChangeByline({ last: null })` — a component is a plain function,
+   and a `null` return needs no renderer — and the class assertion reads `el.props.className` off
+   the returned element the same way.
+
+3. **`status` reads "moved by Jess", not "moved to planned by Jess".** §5's closed status line is
+   `"moved to planned by Jess · Sep 12 ▸"`, but the shipped `lastChange` contract is
+   `{ field, memberName, at }` and carries no VALUE (`packages/core/src/domain/types.ts:70`,
+   landed in i6). The value-bearing half of that phrase is not derivable from what the row read
+   sends. Widening `lastChange` is i6's file set, not i7's, so the closed line says "moved by …"
+   and the popover under it shows `status  idea → planned`, which is where the value already
+   lives. **Flagged below** rather than guessed at.
+
+4. **The popover's field label is `note`, singular — as a LABEL.** The vet's second HIGH was
+   fixed upstream in i5/i6 (the wire's vocabulary is `notes` everywhere, and `saved_places.note`
+   is mapped once at the write site), so the only remaining trace of the singular is what the
+   popover DRAWS, which §5 shows as "note". `changeFieldLabel` (change-byline.ts:87) is that one
+   mapping and it touches no key.
+
+5. **A rating stringifies as filled stars; a null is an em dash.** `from`/`to` are `text` in the
+   log (i5), so "4" becomes ★★★★ and `null` becomes "—" — which is how "— → ★★★★" tells *never
+   set* from *cleared*, exactly as §5 draws it. A note is quoted and cut at a word boundary at 24
+   characters, which is the width §5's own two examples imply ("Loved the riverwalk…",
+   "Riverfront sites 41–48…", "Nice riverwalk" left whole). All six cases are asserted.
+
+6. **`changeStamp` reads the instant in UTC.** `at` is an ISO instant, not one of this grammar's
+   plain `YYYY-MM-DD` days. A local-time formatter would render "Sep 12" on the server and "Sep
+   12" or "Sep 13" in a browser west of the line — a hydration mismatch on a line nobody is
+   looking at. Asserted with a 23:30Z case.
+
+7. **The fetch is keyed by the id it answers for, and every failure lands the same way.** One
+   piece of state (`{ id, rows }`), so "in flight" is derived rather than a second flag that can
+   disagree — `GoogleLine`'s shape. A 404 (not this household's), a 400, a network error or an
+   unrecognised body all produce `rows: []`, so the panel shows its header and no lines; a raw
+   error never appears inside a hover card. The body is validated with
+   `changeHistoryRow.array().safeParse` rather than trusted.
+
+8. **The `byline` prop is its own slot, never `meta`.** As §5 requires: `PlaceCard` already fills
+   `meta` with "Visited on…" (`Places.tsx:127`), so the two facts would fight for one line.
+   `meta` is unchanged and still renders beside the stars.
+
+## Deviation from the wireframe — one, deliberate
+
+§5's CSS paints the caret, the panel header and each row's field label in `--rv-ink-subtle`. The
+nightfall sweep retired that token for TEXT glyphs — it is empty stars, grip handles and disabled
+icons only — and `packages/core/src/theme/nightfall-tokens.test.ts:334` is a guard that fails the
+build on any other use. Those three glyphs therefore take `rv-ink-faded`, the role table's
+documented "mono kickers" colour, which is what the closed line itself already uses. Verified by
+watching the guard go red (it named `ChangeByline.tsx:57,81,89,102`) and then green.
+
+## Defaulted / flagged
+
+- **FLAG · the status verb loses its value** (decision 3). Closed, a status change reads "moved by
+  Jess · Sep 12" where §5 drew "moved to planned by Jess · Sep 12". Fixing it properly means
+  adding the new value to `lastChange` — i6's contract, i6's file set, and every fixture that
+  names the field.
+- **FLAG · the byline's NAME is i6's inherited seam, unchanged here.** With Clerk ON,
+  `lastChange.memberName` is the Clerk user id (packages/db cannot ask the identity provider),
+  while the OPENED popover resolves real names through `describePeople`. So in a keyed deploy the
+  closed line and the panel under it can disagree. Keyless — every walk, the whole suite — both
+  say `dev-user`. i6 flagged it explicitly as handed on; i7 does not touch the read boundary
+  where it would be fixed.
+- **Defaulted · no loading copy.** While `/api/history` is in flight the panel renders its header
+  and no rows. The design specifies no spinner and no "checking…" line for this surface, and
+  inventing copy is worse than a panel that fills in ~100ms on a five-row query.
+- **Defaulted · "older changes aren't kept" shows when the answer is FULL** (`rows.length >= 5`).
+  The route caps at five without saying whether a sixth exists, so a thing with exactly five
+  changes will show the line. The alternative is a count on the wire, which is a route change.
+- **Defaulted · ASCII apostrophe in that line.** The wireframe's spec line and the repo's own copy
+  (`PlacesWorkspace.tsx:71` "That didn't save…") both use `'`. The prior interrupted run's test
+  asserted a curly `’`; that one expectation was corrected to the design's spelling.
+- **Defaulted · no `byline` on `ReservationCard`.** i7's scope names four mounts and a reservation
+  is not one of them, even though `reservation.lastChange` is on the wire.
+- **The byline is INSIDE the research pad's expanded block** on all three cards — a collapsed card
+  shows nothing, which is §5's "nothing on a card that has never been rated or noted" plus the
+  pad's own density rule.
+- **No process was started or killed by this item**, and the shared dev database at
+  `localhost:5433` was neither read nor migrated.
+
+## Claims for qa to check
+
+1. **`packages/ui` gained no dependency.** `packages/ui/package.json` is not in this item's diff:
+   no `radix-ui`, no `fetch`, no `useEffect`. `grep -rn "radix\|fetch(\|useEffect" packages/ui/src`
+   returns exactly ONE line — the word "radix" inside `ChangeByline.tsx`'s own doc comment
+   explaining why it is not there (ran; that is the whole output).
+2. **`ResearchPad`'s `meta` is untouched.** The only edit to the pad is the new `byline` prop and
+   the one `{byline}` line after the rating row; `meta` still renders beside `<Stars>` at
+   `ResearchPad.tsx:98`.
+3. **Four mounts, four entities, the right id each time** — `savedPlace`/`p.id`, `idea`/`it.id`,
+   `idea`/`row.idea.id`, `stop`/`stop.id`. Each also passes the human name the popover header
+   uses.
+4. **Nothing fetches until something opens.** The `useEffect` returns immediately while `open` is
+   false, so a /places grid of twenty cards makes zero history requests on load.
+5. **The closed line is the design's copy, character for character** — "rated by Jess · Sep 12",
+   "noted by Braden · Sep 8", the "▸" caret — asserted in `change-byline.test.ts`.
+
+## Checks actually run
+
+| command | result |
+| --- | --- |
+| `pnpm vitest run src/change-byline.test.ts` (in `packages/ui`, immediately after writing the two source files) | `Test Files 1 passed (1) · Tests 16 passed (16)` |
+| `pnpm turbo run lint typecheck` (repo root) | `Tasks: 7 successful, 7 total` |
+| `pnpm turbo run lint typecheck test` (repo root, first attempt) | RED — `@rv-trip/core#test`: `rv-ink-subtle paints no text glyphs` named `packages/ui/src/ChangeByline.tsx:57,81,89,102` (the deviation above) |
+| `pnpm turbo run lint typecheck test` (repo root, after the token fix) | `Tasks: 10 successful, 10 total` · `@rv-trip/web:test Test Files 36 passed (36) · Tests 268 passed (268)` |
+| `pnpm vitest run` (in `packages/ui`) | `Test Files 3 passed (3) · Tests 42 passed (42)` |
+| `pnpm --filter @rv-trip/web build` | `✓ Compiled successfully in 2.5s` |
+
+**NOT verified here — render-required, for the walk.** The radix Popover portal opening from
+inside a DS-rendered byline (the `asChild` ref hand-off to `ChangeByline`'s `<button>`, the
+portal's placement over the stop sheet's own scroll container and over a /places card, and the
+fetch-on-open) is exactly the vector the vet flagged as static-analysis-blind. It compiles, it
+typechecks and the line's logic is proved; that it OPENS in a browser is not, and needs a keyed
+walk on both surfaces.

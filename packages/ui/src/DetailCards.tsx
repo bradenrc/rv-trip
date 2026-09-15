@@ -123,6 +123,7 @@ export function IdeaCard({
   picker,
   drill,
   gline,
+  byline,
   onCycle,
   onRating,
   onNote,
@@ -152,6 +153,9 @@ export function IdeaCard({
   /** the quiet Google line, LAST in the pad (#82). App-filled, because a DS
    * component never fetches. */
   gline?: ReactNode;
+  /** The change byline (#78), on its own line in the pad. App-filled: the line
+   * opens a popover that fetches, and no DS component does either. */
+  byline?: ReactNode;
   onCycle: () => void;
   onRating: (n: number) => void;
   onNote: (v: string) => void;
@@ -214,6 +218,7 @@ export function IdeaCard({
           expanded={expanded}
           drill={drill}
           gline={gline}
+          byline={byline}
           onNoteChange={onNote}
           onNoteCommit={onCommitNote}
           onRating={onRating}
@@ -304,6 +309,7 @@ export function ShelfIdeaCard({
   picker,
   drill,
   gline,
+  byline,
   onClick,
   onCycle,
   onLocate,
@@ -335,6 +341,9 @@ export function ShelfIdeaCard({
   /** the quiet Google line, last in the pad (#82). An unlocated row has no
    * `google_place_id`, so the app fills this with nothing at all. */
   gline?: ReactNode;
+  /** The change byline (#78), on its own line in the pad. App-filled: the line
+   * opens a popover that fetches, and no DS component does either. */
+  byline?: ReactNode;
   /**
    * Absent → the title is plain text. A shelf row is still not a LINK — there
    * is no detail surface for an unattached idea to open — but since #82 it is
@@ -436,6 +445,7 @@ export function ShelfIdeaCard({
           expanded
           drill={drill}
           gline={gline}
+          byline={byline}
           onNoteChange={onNote}
           onNoteCommit={onNote && onCommitNote ? onCommitNote : undefined}
           onRating={onRating}
