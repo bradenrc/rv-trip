@@ -53,13 +53,28 @@
            border-radius:9999px; padding:7px 14px; font-size:12.5px; font-weight:600; }
   .drill:hover { border-color:var(--accent); color:var(--accent); }
   .drill span.i { font-size:13px; }
-  .come-back { display:flex; align-items:center; gap:10px; border-top:1px solid var(--line);
-               margin-top:16px; padding-top:13px; }
+  .quicknote { width:100%; min-height:64px; margin-top:12px; background:var(--canvas);
+               color:var(--ink); border:1px solid var(--line); border-radius:8px;
+               padding:10px 12px; font:inherit; font-size:13px; resize:vertical; }
+  .quicknote::placeholder { color:var(--subtle); }
+  .pastechip { margin-top:6px; font-size:10.5px; color:var(--accent);
+               background:rgba(56,189,248,.08); border:1px solid var(--line);
+               border-radius:9999px; padding:3px 10px; display:inline-block; }
+  .rate-row { display:flex; align-items:center; gap:10px; margin-top:10px; }
+  .rate-row .lbl { font-size:12px; color:var(--faded); }
   .stars { color:var(--accent); font-size:14px; letter-spacing:1.5px; }
   .stars .off { color:var(--subtle); }
-  .come-back .lbl { font-size:12px; color:var(--faded); }
   .pillbtn { margin-left:auto; background:var(--accent-cta); color:var(--shell); border:none;
              font:inherit; font-size:12px; font-weight:700; border-radius:6px; padding:6px 12px; }
+  .drillgroups { display:flex; flex-wrap:wrap; gap:14px; }
+  .dg { display:flex; align-items:center; gap:6px; }
+  .dg-l { font-size:9px; letter-spacing:.08em; text-transform:uppercase; color:var(--subtle); margin-right:2px; }
+  .ic { width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center;
+        text-decoration:none; font-size:13px; font-weight:700; color:var(--muted);
+        background:var(--high); border:1px solid var(--line-hi); border-radius:8px; }
+  .ic:hover { border-color:var(--accent); color:var(--accent); }
+  .cat-note { margin-top:8px; font-size:9.5px; color:var(--subtle); }
+  .g-line { border-top:1px solid var(--line); margin-top:14px; padding-top:11px; }
 
   .foot { max-width:920px; margin:30px auto 0; padding:0 28px; font-size:13px; color:var(--faded); }
   .foot b { color:var(--ink); }
@@ -90,24 +105,40 @@
     <div class="sheet">
       <div class="row1"><span class="chip stay">⛺ Stay</span><b>Village Camp Truckee</b>
         <span class="who">added by B · Tue</span></div>
-      <div class="g-line">G ★ 4.6 · <a href="https://villagecamp.com" target="_blank" rel="noopener">website</a> ·
-        <a href="tel:+15305871111">call</a> <span style="color:var(--subtle)">— the quiet line, that's all the in-app research there is</span></div>
 
-      <div class="looklabel">Look it up — opens in your own logged-in world</div>
-      <div class="drills">
-        <a class="drill" target="_blank" rel="noopener" href="https://www.google.com/search?q=Village%20Camp%20Truckee"><span class="i">🔍</span>Google</a>
-        <a class="drill" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q=Village%20Camp%20Truckee"><span class="i">🖼</span>Images</a>
-        <a class="drill" target="_blank" rel="noopener" href="https://www.google.com/search?udm=50&q=What%20is%20it%20like%20staying%20at%20Village%20Camp%20Truckee%20RV%20resort"><span class="i">✨</span>AI Mode</a>
-        <a class="drill" target="_blank" rel="noopener" href="https://www.reddit.com/search/?q=Village%20Camp%20Truckee"><span class="i">👽</span>Reddit</a>
-        <a class="drill" target="_blank" rel="noopener" href="https://www.instagram.com/explore/search/keyword/?q=village%20camp%20truckee"><span class="i">📷</span>Instagram</a>
-        <a class="drill" target="_blank" rel="noopener" href="https://www.facebook.com/search/top?q=Village%20Camp%20Truckee"><span class="i">👥</span>Facebook</a>
-      </div>
-
-      <div class="come-back">
-        <span class="lbl">back from the internet:</span>
+      <!-- 1 · CAPTURE FIRST — the quick notetaker -->
+      <textarea class="quicknote" placeholder="jot / paste what you find…">Reddit says the river sites (40s) are the ones — book early. Pool closes Oct 15.</textarea>
+      <div class="pastechip mono">🔗 reddit.com/r/GoRVing/comments/… <span style="color:var(--subtle)">pasted links become chips</span></div>
+      <div class="rate-row">
+        <span class="lbl">my rating</span>
         <span class="stars">★★★★<span class="off">★</span></span>
         <button class="pillbtn" type="button">Keep it</button>
       </div>
+
+      <!-- 2 · THEN the doors out — small icons, tooltips, grouped; third group is category-aware -->
+      <div class="looklabel">Look it up</div>
+      <div class="drillgroups">
+        <div class="dg"><span class="dg-l mono">google</span>
+          <a class="ic" title="Google search" target="_blank" rel="noopener" href="https://www.google.com/search?q=Village%20Camp%20Truckee">G</a>
+          <a class="ic" title="Ask Google AI Mode" target="_blank" rel="noopener" href="https://www.google.com/search?udm=50&q=What%20is%20it%20like%20staying%20at%20Village%20Camp%20Truckee%20RV%20resort">✨</a>
+          <a class="ic" title="Image search" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q=Village%20Camp%20Truckee">🖼</a>
+        </div>
+        <div class="dg"><span class="dg-l mono">social</span>
+          <a class="ic" title="Reddit" target="_blank" rel="noopener" href="https://www.reddit.com/search/?q=Village%20Camp%20Truckee">👽</a>
+          <a class="ic" title="Instagram" target="_blank" rel="noopener" href="https://www.instagram.com/explore/search/keyword/?q=village%20camp%20truckee">📷</a>
+          <a class="ic" title="Facebook" target="_blank" rel="noopener" href="https://www.facebook.com/search/top?q=Village%20Camp%20Truckee">👥</a>
+        </div>
+        <div class="dg"><span class="dg-l mono">stay ⛺</span>
+          <a class="ic" title="The Dyrt — campground reviews" target="_blank" rel="noopener" href="https://thedyrt.com/search?q=Village%20Camp%20Truckee">🏕</a>
+          <a class="ic" title="Campendium — reviews + cell signal" target="_blank" rel="noopener" href="https://www.campendium.com/search?search=Village%20Camp%20Truckee">📶</a>
+          <a class="ic" title="YouTube — park tour videos" target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=Village%20Camp%20Truckee%20tour">▶</a>
+        </div>
+      </div>
+      <div class="cat-note mono">third group follows the category — eat → Yelp · TripAdvisor / do → AllTrails · TripAdvisor</div>
+
+      <!-- 3 · the quiet line, last -->
+      <div class="g-line">G ★ 4.6 · <a href="https://villagecamp.com" target="_blank" rel="noopener">website</a> ·
+        <a href="tel:+15305871111">call</a></div>
     </div>
   </div>
 </div>
