@@ -21,7 +21,8 @@
     "db:studio": "pnpm --filter @rv-trip/db studio",
     "db:seed": "pnpm --filter @rv-trip/db seed",
     "db:reown": "pnpm --filter @rv-trip/db reown",
-    "backfill:places": "pnpm --filter @rv-trip/db backfill:places"
+    "backfill:places": "pnpm --filter @rv-trip/db backfill:places",
+    "marks:drill": "node scripts/fetch-drill-marks.mjs"
   },
   "devDependencies": {
     "turbo": "^2.5.5",

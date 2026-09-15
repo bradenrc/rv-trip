@@ -35,12 +35,15 @@ import {
 } from "@rv-trip/core";
 import {
   Stars,
+  DrillRow,
   FieldLabel,
   ReservationCard,
   IdeaCard,
   categoryMeta,
+  ideaCategoryType,
   money,
 } from "@rv-trip/ui";
+import { GoogleLine } from "@/components/places/GoogleLine";
 import { dateRange } from "@/lib/trip-ui";
 import { resDates } from "@/lib/trip-logic";
 import { StopMiniMap } from "@/components/map/StopMiniMap";
@@ -495,6 +498,26 @@ export function StopDetailSheet({
                     <IdeaCard
                       idea={it}
                       noteVisible={ideaNoteOpen.has(it.id) || !!(it.notes && it.notes.trim())}
+                      /* #82 Q2 → B. The ✎ button is the expand and the sheet's
+                         own `ideaNoteOpen` set is the expand state — the same
+                         set, not new state. An idea that merely HAS a note
+                         still shows only that note (the row collapsed is
+                         exactly what shipped), so the sheet's density is
+                         untouched for anyone who is not researching. */
+                      expanded={ideaNoteOpen.has(it.id)}
+                      /* An attached idea's locality is its parent STOP's place
+                         name — `place_name` is NOT NULL in the schema, so an
+                         attached idea always has one. `Idea` itself carries no
+                         locality, which is exactly why this is filled here and
+                         not in the kit. */
+                      drill={
+                        <DrillRow
+                          name={it.title}
+                          locality={stop.place.name}
+                          type={ideaCategoryType(it.category)}
+                        />
+                      }
+                      gline={<GoogleLine googlePlaceId={it.place?.googlePlaceId} />}
                       onCycle={() => onIdeaCycle(it.id)}
                       onRating={(n) => onIdeaRating(it.id, n)}
                       onNote={(v) => onIdeaNote(it.id, v)}

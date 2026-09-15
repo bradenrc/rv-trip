@@ -395,6 +395,26 @@ export const savedPlace = z.object({
 export type SavedPlace = z.infer<typeof savedPlace>;
 
 /**
+ * A cached Google row — the READ grammar for the `places` table (#82 Q3 → A).
+ *
+ * Its own schema and not a slice of `savedPlace`, because it describes a
+ * REAL-WORLD place rather than one of ours: it is not owner-scoped, it has no
+ * status and no note, and it expires. `rating` here is GOOGLE's 0–5 float, so
+ * it is deliberately NOT the domain `rating` above (an integer 1–5) — that one
+ * is ours, rendered in Sky <Stars>; this one renders font-mono and faded, and
+ * the two must never be mistaken for each other.
+ */
+export const placeEnrichment = z.object({
+  googlePlaceId: z.string(),
+  name: z.string(),
+  rating: z.number().nullable().default(null),
+  userRatingCount: z.number().int().nullable().default(null),
+  websiteUri: z.string().nullable().default(null),
+  nationalPhoneNumber: z.string().nullable().default(null),
+});
+export type PlaceEnrichment = z.infer<typeof placeEnrichment>;
+
+/**
  * The WRITE grammar for the Places library (docs/design/41 §3).
  *
  * `savedPlace` above is the READ shape: the place fields are nested under

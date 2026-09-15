@@ -1,4 +1,4 @@
-import type { LatLng, PlaceSummary, PlacesProvider } from "./index";
+import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index";
 
 /**
  * Google Places (New) — SERVER SIDE ONLY.
@@ -32,7 +32,21 @@ export const DETAILS_URL_BASE = "https://places.googleapis.com/v1/places/";
  * we stay in the cheapest SKU and never receive data we have no place to put.
  */
 const PLACE_FIELDS = ["id", "displayName", "location", "rating", "formattedAddress"] as const;
-export const DETAILS_FIELD_MASK = PLACE_FIELDS.join(",");
+
+/**
+ * The two masks FORK (#82 §7②). `userRatingCount` / `websiteUri` /
+ * `nationalPhoneNumber` are Enterprise-SKU fields; on `places:searchText` they
+ * would bill on EVERY RESULT of every keystroke-driven search. Details only —
+ * one call, one pick, and search keeps its cheap five.
+ */
+const DETAILS_FIELDS = [
+  ...PLACE_FIELDS,
+  "userRatingCount",
+  "websiteUri",
+  "nationalPhoneNumber",
+] as const;
+
+export const DETAILS_FIELD_MASK = DETAILS_FIELDS.join(",");
 export const SEARCH_FIELD_MASK = PLACE_FIELDS.map((f) => `places.${f}`).join(",");
 
 /**
@@ -88,7 +102,7 @@ export class GooglePlacesProvider implements PlacesProvider {
     return parseSearchResponse(await res.json());
   }
 
-  async details(googlePlaceId: string): Promise<PlaceSummary | null> {
+  async details(googlePlaceId: string): Promise<PlaceDetails | null> {
     const res = await fetch(`${DETAILS_URL_BASE}${encodeURIComponent(googlePlaceId)}`, {
       headers: {
         "X-Goog-Api-Key": this.credentials.apiKey,
@@ -113,6 +127,10 @@ interface GooglePlace {
   location?: GoogleLatLng;
   rating?: number;
   formattedAddress?: string;
+  /** Details only — requested by DETAILS_FIELD_MASK and by nothing else. */
+  userRatingCount?: number;
+  websiteUri?: string;
+  nationalPhoneNumber?: string;
 }
 
 /** Text Search wraps its hits in `places`, and omits the key entirely on none. */
@@ -124,8 +142,26 @@ export function parseSearchResponse(body: unknown): PlaceSummary[] {
 }
 
 /** Details answers with the place itself, unwrapped. */
-export function parseDetailsResponse(body: unknown): PlaceSummary | null {
-  return toPlaceSummary(body as GooglePlace | null);
+export function parseDetailsResponse(body: unknown): PlaceDetails | null {
+  return toPlaceDetails(body as GooglePlace | null);
+}
+
+/**
+ * The details mapper WRAPS the search mapper rather than replacing it (#82
+ * §7②). Widening `toPlaceSummary` in place is exactly what would re-couple the
+ * two paths — and silently drop the three fields on the floor if it were left
+ * alone, which is the trap this fork exists to disarm.
+ */
+function toPlaceDetails(place: GooglePlace | null | undefined): PlaceDetails | null {
+  // The same id/name guard, decided once and in one place.
+  const summary = toPlaceSummary(place);
+  if (!summary) return null;
+  return {
+    ...summary,
+    userRatingCount: typeof place?.userRatingCount === "number" ? place.userRatingCount : null,
+    websiteUri: place?.websiteUri ?? null,
+    nationalPhoneNumber: place?.nationalPhoneNumber ?? null,
+  };
 }
 
 function toPlaceSummary(place: GooglePlace | null | undefined): PlaceSummary | null {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { LatLng, PlaceSummary, PlacesProvider } from "./index";
+import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index";
 import { StubPlacesProvider } from "./index";
 import {
   LOCATE_MAX_ROWS,
@@ -61,7 +61,8 @@ class FakeProvider implements PlacesProvider {
     this.searches.push(query);
     return this.byQuery[query] ?? [];
   }
-  async details(): Promise<PlaceSummary | null> {
+  // Locate never calls details; the type widened with #82's PlaceDetails.
+  async details(): Promise<PlaceDetails | null> {
     return null;
   }
 }
@@ -70,7 +71,8 @@ class BrokenProvider implements PlacesProvider {
   async search(): Promise<PlaceSummary[]> {
     throw new Error("Google places:searchText → 500");
   }
-  async details(): Promise<PlaceSummary | null> {
+  // Locate never calls details; the type widened with #82's PlaceDetails.
+  async details(): Promise<PlaceDetails | null> {
     return null;
   }
 }

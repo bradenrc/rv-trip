@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { LatLng, PlaceSummary, PlacesProvider } from "./index";
+import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index";
 import { StubPlacesProvider } from "./index";
 import {
   OwnerTokenBucket,
+  PLACE_CACHE_TTL_MS,
   SEARCH_RATE_LIMIT,
   SEARCH_RATE_WINDOW_MS,
   detailsPlacesEnvelope,
@@ -10,6 +11,7 @@ import {
   placesEnvelopeStatus,
   placesSearchQuerySchema,
   searchPlacesEnvelope,
+  type PlacesCacheStore,
 } from "./places-search";
 
 /**
@@ -28,6 +30,17 @@ const KALALOCH: PlaceSummary = {
   address: "156954 US-101, Forks, WA 98331",
 };
 
+/**
+ * The same place as a DETAILS answer (#82 §7①): search and details no longer
+ * share one shape, so the fixture has a second, wider form.
+ */
+const KALALOCH_DETAILS: PlaceDetails = {
+  ...KALALOCH,
+  userRatingCount: 812,
+  websiteUri: "https://www.fs.usda.gov/olympic",
+  nationalPhoneNumber: "(360) 962-2271",
+};
+
 /** Answers with the fixture and records what it was asked. */
 class FakeProvider implements PlacesProvider {
   readonly searches: { query: string; near?: LatLng }[] = [];
@@ -37,9 +50,9 @@ class FakeProvider implements PlacesProvider {
     this.searches.push({ query, near });
     return this.rows;
   }
-  async details(googlePlaceId: string): Promise<PlaceSummary | null> {
+  async details(googlePlaceId: string): Promise<PlaceDetails | null> {
     this.detailsCalls.push(googlePlaceId);
-    return this.rows[0] ?? null;
+    return this.rows.length > 0 ? KALALOCH_DETAILS : null;
   }
 }
 
@@ -48,8 +61,28 @@ class BrokenProvider implements PlacesProvider {
   async search(): Promise<PlaceSummary[]> {
     throw new Error("Google places:searchText → 500");
   }
-  async details(): Promise<PlaceSummary | null> {
+  async details(): Promise<PlaceDetails | null> {
     throw new Error("Google places/details → 500");
+  }
+}
+
+/** An in-memory `PlacesCacheStore`, with the two failure modes scriptable. */
+class FakeCache implements PlacesCacheStore {
+  readonly puts: PlaceDetails[] = [];
+  readonly gets: string[] = [];
+  constructor(
+    private row: { details: PlaceDetails; fetchedAt: Date } | null = null,
+    private readonly mode: "ok" | "get-throws" | "put-throws" = "ok",
+  ) {}
+  async get(googlePlaceId: string) {
+    this.gets.push(googlePlaceId);
+    if (this.mode === "get-throws") throw new Error("cache read blew up");
+    return this.row;
+  }
+  async put(details: PlaceDetails) {
+    if (this.mode === "put-throws") throw new Error("cache write blew up");
+    this.puts.push(details);
+    this.row = { details, fetchedAt: new Date() };
   }
 }
 
@@ -252,7 +285,7 @@ describe("detailsPlacesEnvelope", () => {
       configured: true,
       googlePlaceId: KALALOCH.googlePlaceId,
     });
-    expect(envelope).toEqual({ results: [KALALOCH], degraded: false });
+    expect(envelope).toEqual({ results: [KALALOCH_DETAILS], degraded: false });
     expect(provider.detailsCalls).toEqual([KALALOCH.googlePlaceId]);
   });
 
@@ -294,5 +327,100 @@ describe("detailsPlacesEnvelope", () => {
       });
       expect(envelope.degraded).toBe(false);
     }
+  });
+});
+
+// ── the 30-day cache (#82 Q3 → A) ──────────────────────────────────────────
+describe("detailsPlacesEnvelope · the places cache", () => {
+  const NOW = Date.UTC(2026, 8, 15);
+  const fresh = (ageMs: number) => ({
+    details: KALALOCH_DETAILS,
+    fetchedAt: new Date(NOW - ageMs),
+  });
+
+  it("a fresh row answers outright — Google is never called", async () => {
+    const provider = new FakeProvider();
+    const cache = new FakeCache(fresh(29 * 24 * 60 * 60 * 1000));
+    const envelope = await detailsPlacesEnvelope({
+      provider,
+      configured: true,
+      googlePlaceId: KALALOCH.googlePlaceId,
+      cache,
+      now: NOW,
+    });
+    expect(envelope).toEqual({ results: [KALALOCH_DETAILS], degraded: false });
+    expect(provider.detailsCalls).toEqual([]);
+    expect(cache.puts).toEqual([]);
+  });
+
+  it("a row past the 30-day TTL is a miss — refetched and written back", async () => {
+    const provider = new FakeProvider();
+    const cache = new FakeCache(fresh(PLACE_CACHE_TTL_MS + 1));
+    const envelope = await detailsPlacesEnvelope({
+      provider,
+      configured: true,
+      googlePlaceId: KALALOCH.googlePlaceId,
+      cache,
+      now: NOW,
+    });
+    expect(envelope.results).toEqual([KALALOCH_DETAILS]);
+    expect(provider.detailsCalls).toEqual([KALALOCH.googlePlaceId]);
+    expect(cache.puts).toEqual([KALALOCH_DETAILS]);
+  });
+
+  it("a miss fetches and writes through", async () => {
+    const cache = new FakeCache(null);
+    await detailsPlacesEnvelope({
+      provider: new FakeProvider(),
+      configured: true,
+      googlePlaceId: KALALOCH.googlePlaceId,
+      cache,
+      now: NOW,
+    });
+    expect(cache.puts).toEqual([KALALOCH_DETAILS]);
+  });
+
+  it("a cache that throws never fails the read — on either side", async () => {
+    for (const mode of ["get-throws", "put-throws"] as const) {
+      const cache = new FakeCache(null, mode);
+      const envelope = await detailsPlacesEnvelope({
+        provider: new FakeProvider(),
+        configured: true,
+        googlePlaceId: KALALOCH.googlePlaceId,
+        cache,
+        now: NOW,
+      });
+      expect(envelope).toEqual({ results: [KALALOCH_DETAILS], degraded: false });
+    }
+  });
+
+  it("never caches what the stub did not look up — state ④ stays empty", async () => {
+    const cache = new FakeCache(null);
+    const envelope = await detailsPlacesEnvelope({
+      provider: new StubPlacesProvider(),
+      configured: false,
+      googlePlaceId: KALALOCH.googlePlaceId,
+      cache,
+      now: NOW,
+    });
+    expect(envelope).toEqual({ results: [], degraded: true, reason: "no_provider" });
+    expect(cache.puts).toEqual([]);
+  });
+
+  it("caches nothing for an id Google has retired — no row to remember", async () => {
+    const cache = new FakeCache(null);
+    const envelope = await detailsPlacesEnvelope({
+      provider: new FakeProvider([]),
+      configured: true,
+      googlePlaceId: "ChIJretired",
+      cache,
+      now: NOW,
+    });
+    expect(envelope).toEqual({ results: [], degraded: false });
+    expect(cache.puts).toEqual([]);
+  });
+
+  it("is 30 days, to the millisecond", () => {
+    expect(PLACE_CACHE_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
   });
 });

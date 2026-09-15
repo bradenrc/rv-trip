@@ -8,9 +8,15 @@ import {
   Map as MapIcon,
   MapPinned,
 } from "lucide-react";
-import type { ReservationType, SavedPlace, SavedPlaceStatus } from "@rv-trip/core";
+import type {
+  ReservationType,
+  SavedPlace,
+  SavedPlacePatch,
+  SavedPlaceStatus,
+} from "@rv-trip/core";
 import {
   categoryMeta,
+  DrillRow,
   PlaceCard,
   SegmentedControl,
   ViewSwitch,
@@ -18,6 +24,7 @@ import {
   EmptyShelf,
   type CategoryLabel,
 } from "@rv-trip/ui";
+import { GoogleLine } from "@/components/places/GoogleLine";
 import { MapMount } from "@/components/map/MapMount";
 import { buildMapModel } from "@/components/map/pins";
 
@@ -42,6 +49,7 @@ export function PlacesLibrary({
   places,
   leading,
   cardMenu,
+  onPatch,
 }: {
   places: SavedPlace[];
   /** Cards that go before the library's own — the "Been there?" suggestions of
@@ -54,10 +62,18 @@ export function PlacesLibrary({
    * ships two optional props and this epic gives them no siblings
    * (docs/design/41 §5). Absent when nothing is wired to it. */
   cardMenu?: (place: SavedPlace) => ReactNode;
+  /** The research pad's ONE write (#82) — the note and the rating a card
+   * already renders, now editable on BOTH shelves. `tripApi.updatePlace` is
+   * owned one level up, in PlacesWorkspace; absent, the pad renders read-only,
+   * which is today's behaviour. */
+  onPatch?: (place: SavedPlace, patch: SavedPlacePatch) => void;
 }) {
   const [status, setStatus] = useState<SavedPlaceStatus>("want");
   const [cat, setCat] = useState<CatFilter>("All");
   const [view, setView] = useState<View>("grid");
+  /** Which card has its research pad open — one at a time, the library's own
+   * state. The card renders the pad; it never knows about the shelf. */
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const shelf = useMemo(() => places.filter((p) => p.status === status), [places, status]);
 
@@ -99,7 +115,17 @@ export function PlacesLibrary({
   // design, not by omission.
   const cards = list.map((p) => (
     <div key={p.id} className="relative grid">
-      <PlaceCard savedPlace={p} />
+      <PlaceCard
+        savedPlace={p}
+        expanded={expandedId === p.id}
+        onToggleExpand={() => setExpandedId((id) => (id === p.id ? null : p.id))}
+        onPatch={onPatch ? (patch) => onPatch(p, patch) : undefined}
+        /* A saved place's locality is its own `region` — display-only and
+           nullable, and there is no fourth source: a region-less place simply
+           searches on the name. */
+        drill={<DrillRow name={p.place.name} locality={p.region} type={p.type} />}
+        gline={<GoogleLine googlePlaceId={p.place.googlePlaceId} />}
+      />
       {cardMenu?.(p)}
     </div>
   ));

@@ -282,6 +282,40 @@ export const routes = pgTable(
 );
 
 /**
+ * The Google enrichment cache (#82 Q3 → A) — the quiet "G ★ 4.6 · 812 · website
+ * · call" line, remembered for 30 days.
+ *
+ * Modelled on `routes` above, deliberately: a text primary key, a `fetched_at`
+ * with a 30-day TTL read as a FILTER (no sweeper), and an index on it so the
+ * eventual cron is a follow-up rather than a migration.
+ *
+ * NOT owner-scoped — a real-world place is not anybody's, the same reason a
+ * route between two coordinates isn't. The `google_place_id` columns on `stops`
+ * (:115), `ideas` (:155) and `saved_places` (:199) are the join key, with NO
+ * foreign key in either direction, because a place row is a CACHE: a missing one
+ * must degrade to "no G-line", never to a broken read.
+ *
+ * Only the fields the G-line renders. Coordinates and the formatted address stay
+ * on the rows that already carry them (the picker writes those through
+ * `/api/places/search`), so this table never becomes a second, staler copy of a
+ * place we already own.
+ */
+export const places = pgTable(
+  "places",
+  {
+    googlePlaceId: text("google_place_id").primaryKey(),
+    displayName: text("display_name").notNull(),
+    /** GOOGLE's 0-5 float — not our integer `rating`. */
+    rating: doublePrecision("rating"),
+    userRatingCount: integer("user_rating_count"),
+    websiteUri: text("website_uri"),
+    nationalPhoneNumber: text("national_phone_number"),
+    fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("places_fetched_at_idx").on(t.fetchedAt)],
+);
+
+/**
  * Preferences that follow the account (docs/design/45 §Q6, issue #38).
  *
  * ONE row per account and `owner_id` IS the primary key — the same

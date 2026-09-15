@@ -16,6 +16,7 @@ import { CategoryTile } from "./CategoryTile";
 import { Stars } from "./Stars";
 import { StatusPill } from "./StatusPill";
 import { money } from "./format";
+import { ResearchPad } from "./ResearchPad";
 
 /** Styled placeholder for a stop's map (real map is a follow-up). */
 export function MapPlaceholder({ label }: { label: string }) {
@@ -117,8 +118,11 @@ export function ReservationCard({
 export function IdeaCard({
   idea,
   noteVisible,
+  expanded = false,
   actions,
   picker,
+  drill,
+  gline,
   onCycle,
   onRating,
   onNote,
@@ -129,10 +133,25 @@ export function IdeaCard({
 }: {
   idea: Idea;
   noteVisible: boolean;
+  /**
+   * The research pad (#82 Q2 → B). The ✎ button is the expand: pressed, the
+   * note becomes the pad's first element and the rating, the doors out and the
+   * quiet Google line appear under it. COLLAPSED the row is exactly what ships
+   * today — an idea that merely HAS a note still shows only that note, so the
+   * sheet's density is untouched for anyone who is not researching.
+   */
+  expanded?: boolean;
   /** optional row-menu slot, pinned to the end of the header line */
   actions?: ReactNode;
   /** the open place picker, mounted under the place line (#69) */
   picker?: ReactNode;
+  /** the doors out, mounted inside the pad (#82). The app fills it with
+   * `<DrillRow>` because only the app knows this idea's locality — the parent
+   * stop's `placeName`, which the card never receives. */
+  drill?: ReactNode;
+  /** the quiet Google line, LAST in the pad (#82). App-filled, because a DS
+   * component never fetches. */
+  gline?: ReactNode;
   onCycle: () => void;
   onRating: (n: number) => void;
   onNote: (v: string) => void;
@@ -151,12 +170,16 @@ export function IdeaCard({
 }) {
   const cm = ideaCategoryMeta(idea.category);
   const isDone = idea.status === "done";
+  const noteOpen = noteVisible || expanded;
   return (
     <div className="flex flex-col gap-2 rounded-rv-md border border-rv-border bg-rv-surface px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <cm.Icon className="size-[18px]" style={{ color: cm.color }} />
         <span className="min-w-[120px] flex-1 text-[14px] text-rv-ink">{idea.title}</span>
-        {isDone && <Stars value={idea.rating ?? 0} size={14} onSet={onRating} />}
+        {/* Collapsed keeps today's gate, so the header line does not grow.
+            Expanded, the pad's rating row carries the stars instead — one star
+            row on a card, never two (#82 gap 4). */}
+        {isDone && !expanded && <Stars value={idea.rating ?? 0} size={14} onSet={onRating} />}
         <StatusPill status={idea.status} onClick={onCycle} />
         {!isDone && onPromote && (
           <button
@@ -172,9 +195,10 @@ export function IdeaCard({
         <button
           type="button"
           onClick={onToggleNote}
-          title="Add a note"
+          title={expanded ? "Close" : "Look it up"}
+          aria-expanded={expanded}
           className="inline-flex size-7 cursor-pointer items-center justify-center border-none bg-transparent p-0"
-          style={{ color: noteVisible ? "var(--color-rv-accent)" : "var(--color-rv-ink-subtle)" }}
+          style={{ color: noteOpen ? "var(--color-rv-accent)" : "var(--color-rv-ink-subtle)" }}
         >
           <SquarePen className="size-[17px]" />
         </button>
@@ -182,13 +206,17 @@ export function IdeaCard({
       </div>
       <IdeaPlaceLine idea={idea} onLocate={onLocate} />
       {picker}
-      {noteVisible && (
-        <textarea
-          value={idea.notes ?? ""}
-          onChange={(e) => onNote(e.target.value)}
-          onBlur={onCommitNote}
+      {noteOpen && (
+        <ResearchPad
+          note={idea.notes ?? ""}
           placeholder="Add a note — call ahead, what to remember…"
-          className="min-h-[38px] w-full resize-y rounded-rv-md border border-rv-border-soft bg-rv-surface-alt px-2.5 py-[7px] text-[13px] leading-relaxed text-rv-ink-muted"
+          rating={idea.rating ?? 0}
+          expanded={expanded}
+          drill={drill}
+          gline={gline}
+          onNoteChange={onNote}
+          onNoteCommit={onCommitNote}
+          onRating={onRating}
         />
       )}
     </div>
@@ -271,11 +299,17 @@ export function ShelfIdeaCard({
   idea,
   nearestStopName,
   distanceMi,
+  expanded = false,
   actions,
   picker,
+  drill,
+  gline,
   onClick,
   onCycle,
   onLocate,
+  onRating,
+  onNote,
+  onCommitNote,
   onDragStart,
   onDragEnd,
 }: {
@@ -285,16 +319,41 @@ export function ShelfIdeaCard({
    * stop you already own (`ideaShelf` in @rv-trip/core decides both). */
   nearestStopName?: string | null;
   distanceMi?: number | null;
+  /**
+   * The research pad, open in place (#82 Q2 → B). A shelf row still has no
+   * detail surface to NAVIGATE to — it grows one where it stands, which is what
+   * lets the issue's own scenario ("he drops it on the shelf Tuesday, she opens
+   * it Thursday") happen at all.
+   */
+  expanded?: boolean;
   actions?: ReactNode;
   /** the open place picker, mounted under the place line */
   picker?: ReactNode;
-  /** Absent → the title is plain text. A shelf row is a HANDLE, not a link:
-   * there is no detail surface for an unattached idea to open. */
+  /** the doors out, inside the pad (#82). A shelf idea has no parent stop and
+   * so no locality: every query is the bare title. */
+  drill?: ReactNode;
+  /** the quiet Google line, last in the pad (#82). An unlocated row has no
+   * `google_place_id`, so the app fills this with nothing at all. */
+  gline?: ReactNode;
+  /**
+   * Absent → the title is plain text. A shelf row is still not a LINK — there
+   * is no detail surface for an unattached idea to open — but since #82 it is
+   * the row's EXPAND: pressing the title opens the pad in place and pressing it
+   * again closes it. The open row's id is the app's state, not the card's.
+   */
   onClick?: () => void;
   /** Cycles idea → planned → done. Absent → the pill is read-only. */
   onCycle?: () => void;
   /** Opens the app's picker. Absent → the line is read-only. */
   onLocate?: () => void;
+  /**
+   * The pad's writes (#82). Shelf-side and NEW: an unattached idea is not in any
+   * stop's `ideas`, so the sheet's stop-scoped handlers cannot serve this row.
+   * Absent → the pad renders read-only.
+   */
+  onRating?: (n: number) => void;
+  onNote?: (v: string) => void;
+  onCommitNote?: () => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }) {
@@ -302,18 +361,29 @@ export function ShelfIdeaCard({
   const located = ideaIsLocated(idea);
   return (
     <div
-      draggable
+      // #82 gap 2: text selection and caret placement inside a `draggable`
+      // ancestor are unreliable across browsers, so the pad's note would be
+      // half-broken exactly where the issue's scenario lives. The drag is
+      // suspended while the row is open and restored the moment it closes —
+      // #73's drop targets are untouched either way.
+      draggable={!expanded}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      className="mb-2 flex cursor-grab flex-col gap-1.5 rounded-rv-md border border-rv-border bg-rv-surface px-2.5 py-2 shadow-rv-sm"
+      className={`mb-2 flex flex-col gap-1.5 rounded-rv-md border bg-rv-surface px-2.5 py-2 shadow-rv-sm ${
+        expanded ? "cursor-default border-rv-border-hi shadow-rv-lg" : "cursor-grab border-rv-border"
+      }`}
     >
       <div className="flex items-center gap-2">
-        <GripVertical className="size-4 flex-none text-rv-ink-subtle" aria-hidden />
+        <GripVertical
+          className={`size-4 flex-none ${expanded ? "text-rv-border" : "text-rv-ink-subtle"}`}
+          aria-hidden
+        />
         <cm.Icon className="size-4 flex-none" style={{ color: cm.color }} />
         {onClick ? (
           <button
             type="button"
             onClick={onClick}
+            aria-expanded={expanded}
             className="min-w-0 flex-1 cursor-pointer truncate border-none bg-transparent p-0 text-left text-[13.5px] text-rv-ink"
           >
             {idea.title}
@@ -358,6 +428,20 @@ export function ShelfIdeaCard({
         )}
       </div>
       {picker}
+      {expanded && (
+        <ResearchPad
+          note={idea.notes ?? ""}
+          placeholder="Jot or paste what you find…"
+          rating={idea.rating ?? 0}
+          expanded
+          drill={drill}
+          gline={gline}
+          onNoteChange={onNote}
+          onNoteCommit={onNote && onCommitNote ? onCommitNote : undefined}
+          onRating={onRating}
+        />
+      )}
     </div>
   );
 }
+

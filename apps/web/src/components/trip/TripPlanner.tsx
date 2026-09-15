@@ -594,6 +594,47 @@ export function TripPlanner({
     );
   };
 
+  /**
+   * The shelf row's RESEARCH PAD (#82) — its stars and its note.
+   *
+   * TWO NEW handlers, not a re-thread of the stop sheet's three. Those are
+   * stop-scoped by construction: `setIdeaRating(trip, selectedStop.id, …)` and
+   * `setIdeaNote(…)` both walk into a stop's `ideas`, and an unattached idea is
+   * not in any stop's — it lives in `trip.ideas`. So the shelf's pad writes
+   * through `setShelfIdeaFields`, the same pure mutation the pill and Locate
+   * already use. The PATCH is unchanged: `ideaPatchInput` has carried `rating`
+   * and `notes` all along.
+   */
+  const setShelfIdeaRating = (ideaId: string, n: number) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    if (!it) return;
+    // Stars toggle-to-clear hands back 0; the column is nullable, not zero.
+    const rating = n === 0 ? null : n;
+    const undo = trip;
+    setTrip(setShelfIdeaFields(trip, ideaId, { rating }));
+    persist(
+      tripApi.updateIdea(ideaId, { rating }),
+      undo,
+      "Couldn't save that rating — the old rating is back.",
+    );
+  };
+
+  /** Keystrokes only — optimistic, coalesced into ONE undo by `beginNoteEdit`,
+   * exactly as the sheet's note does. The write happens on blur. */
+  const setShelfIdeaNote = (ideaId: string, v: string) => {
+    beginNoteEdit();
+    setTrip((t) => setShelfIdeaFields(t, ideaId, { notes: v }));
+  };
+
+  const commitShelfIdeaNote = (ideaId: string) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    persist(
+      tripApi.updateIdea(ideaId, { notes: it?.notes ?? "" }),
+      takeNoteUndo(),
+      "Couldn't save that note — the old note is back.",
+    );
+  };
+
   /** The shelf row's Locate — the picker's choice, straight through the shipped
    * `PATCH { place }`. `ideaPlace` is the same PickedPlace → Place mapper the
    * sheet's card uses, so the free-text escape row stays a legal pick and the
@@ -1235,6 +1276,9 @@ export function TripPlanner({
             onOpenStop={openStop}
             onCycleIdea={cycleShelfIdeaStatus}
             onLocateIdea={(id) => setLocatingShelfIdeaId(id)}
+            onRateIdea={setShelfIdeaRating}
+            onNoteIdea={setShelfIdeaNote}
+            onCommitIdeaNote={commitShelfIdeaNote}
             ideaPicker={(it) =>
               locatingShelfIdeaId === it.id ? (
                 <PlacePicker

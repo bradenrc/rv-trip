@@ -43,6 +43,13 @@
       "when": 1789434260292,
       "tag": "0005_parched_frank_castle",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789486674481,
+      "tag": "0006_silly_vindicator",
+      "breakpoints": true
     }
   ]
 }

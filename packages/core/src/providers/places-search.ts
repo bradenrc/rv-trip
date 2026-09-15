@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LatLng, PlaceSummary, PlacesProvider } from "./index";
+import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index";
 
 /**
  * The place-search WIRE — docs/design/41 §3.
@@ -32,8 +32,8 @@ export type PlacesDegradedReason = "no_provider" | "upstream_error" | "rate_limi
  * or the search leg moves to Autocomplete (a different result shape). Echoing a
  * token that buys nothing would be a lie in a payload.
  */
-export interface PlacesEnvelope {
-  results: PlaceSummary[];
+export interface PlacesEnvelope<T extends PlaceSummary = PlaceSummary> {
+  results: T[];
   degraded: boolean;
   reason?: PlacesDegradedReason;
   retryAfterMs?: number;
@@ -123,11 +123,14 @@ export const googlePlaceIdSchema = z.string().trim().min(1);
 
 // ── the envelopes ──────────────────────────────────────────────────────────
 
-function healthy(results: PlaceSummary[]): PlacesEnvelope {
+function healthy<T extends PlaceSummary>(results: T[]): PlacesEnvelope<T> {
   return { results, degraded: false };
 }
 
-function degraded(reason: PlacesDegradedReason, retryAfterMs?: number): PlacesEnvelope {
+function degraded<T extends PlaceSummary>(
+  reason: PlacesDegradedReason,
+  retryAfterMs?: number,
+): PlacesEnvelope<T> {
   return retryAfterMs === undefined
     ? { results: [], degraded: true, reason }
     : { results: [], degraded: true, reason, retryAfterMs };
@@ -139,7 +142,7 @@ function degraded(reason: PlacesDegradedReason, retryAfterMs?: number): PlacesEn
  * degraded shape; the status is the honest HTTP word for it, per §3's
  * "429 · owner token bucket".
  */
-export function placesEnvelopeStatus(envelope: PlacesEnvelope): number {
+export function placesEnvelopeStatus(envelope: PlacesEnvelope<PlaceSummary>): number {
   return envelope.reason === "rate_limited" ? 429 : 200;
 }
 
@@ -182,10 +185,34 @@ export async function searchPlacesEnvelope(input: PlacesSearchInput): Promise<Pl
   return healthy(results);
 }
 
+/**
+ * How long a cached Google row stands — the issue's 30-day refresh (#82 Q3 → A).
+ * A READ filter, not a sweeper: a stale row is simply re-fetched and upserted
+ * over, exactly as the route cache ages (packages/db/src/queries.ts).
+ */
+export const PLACE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The cache seam. Core DECLARES it, packages/db implements it — the same split
+ * `LocateStore` / `dbLocateStore` already keeps, so nothing here imports Drizzle
+ * and the decision tree stays unit-testable.
+ *
+ * NOT owner-scoped: a real-world place is not anybody's, for the same reason a
+ * route between two coordinates isn't.
+ */
+export interface PlacesCacheStore {
+  get(googlePlaceId: string): Promise<{ details: PlaceDetails; fetchedAt: Date } | null>;
+  put(details: PlaceDetails): Promise<void>;
+}
+
 export interface PlacesDetailsInput {
   provider: PlacesProvider;
   configured: boolean;
   googlePlaceId: string;
+  /** Absent → every open asks Google. Present → a fresh row answers for free. */
+  cache?: PlacesCacheStore;
+  /** Injectable clock, so the TTL is provable without waiting 30 days. */
+  now?: number;
 }
 
 /**
@@ -198,15 +225,41 @@ export interface PlacesDetailsInput {
  * is the reason this is not a 404: the picker's degraded branch must not light
  * up for it.
  */
-export async function detailsPlacesEnvelope(input: PlacesDetailsInput): Promise<PlacesEnvelope> {
-  const { provider, configured, googlePlaceId } = input;
-  let place: PlaceSummary | null;
+export async function detailsPlacesEnvelope(
+  input: PlacesDetailsInput,
+): Promise<PlacesEnvelope<PlaceDetails>> {
+  const { provider, configured, googlePlaceId, cache, now = Date.now() } = input;
+
+  // A fresh row answers outright — no Google call at all (#82 §7⑤). A cache
+  // READ that throws is swallowed for the same reason a write is: a cache is
+  // never allowed to fail a read it is only supposed to speed up.
+  if (cache) {
+    try {
+      const hit = await cache.get(googlePlaceId);
+      if (hit && now - hit.fetchedAt.getTime() < PLACE_CACHE_TTL_MS) {
+        return healthy([hit.details]);
+      }
+    } catch {
+      // fall through to the provider
+    }
+  }
+
+  let place: PlaceDetails | null;
   try {
     place = await provider.details(googlePlaceId);
   } catch {
     return degraded("upstream_error");
   }
   const results = place ? [place] : [];
+  // A miss against the stub is not worth remembering: `configured` false means
+  // nobody looked, and caching "nothing" would answer for it for 30 days.
   if (!configured) return { results, degraded: true, reason: "no_provider" };
+  if (cache && place) {
+    try {
+      await cache.put(place);
+    } catch {
+      // The answer is already in hand.
+    }
+  }
   return healthy(results);
 }

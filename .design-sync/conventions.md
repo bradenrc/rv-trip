@@ -26,6 +26,10 @@ or new class names — the palette below is the whole vocabulary.
   "Travel" category color, and — as a 3px `border-l` only — the structural accent
   that marks a card as being about a *drive* (the restricted drive card in the
   route view). Never a text or fill color outside the category language.
+- Light island (`rv-light-island`): a subtree pinned to the light half so foreign
+  artwork keeps the contrast it was drawn for. Only ever wraps third-party marks;
+  never our own chrome, which flips with the app. Inline-style call sites
+  (`categoryMeta().color`) do NOT re-resolve inside one.
 
 **Radius**: `rounded-rv-sm|md|card|pill`. **Shadow**: `shadow-rv-sm|md|lg|xl`.
 
