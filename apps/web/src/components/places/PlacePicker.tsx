@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useId, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { createPortal } from "react-dom";
 import { CircleDot, MapPin, Pencil, TriangleAlert, X } from "lucide-react";
 import {
   PICKER_DEBOUNCE_MS,
   moveHighlight,
+  pickerListFrame,
   pickerView,
   type PickedPlace,
+  type PickerListFrame,
   type PickerRow,
   type PlacesEnvelope,
 } from "@rv-trip/core";
@@ -24,6 +27,26 @@ import { tripApi } from "@/lib/trip-api";
  * list (results, no matches, degraded), so there is no empty state to design
  * and saving is never blocked: a coordless row is a legal row
  * (`saved_places.lat` is nullable) and Locate exists to fix it.
+ *
+ * The open list is PORTALED to `document.body` on a PAGE (#80's walk). Inline it
+ * was an `absolute … z-10` child of the field's wrapper, and a z-index only ever
+ * wins inside the stacking context it lives in — and ties inside it are settled
+ * by document order. On the trip page the picker opens inside the add-idea card
+ * and the Gantt's row labels come later at the SAME level
+ * (`sticky left-0 z-10`, packages/ui/src/Gantt.tsx:18), so every row that fell
+ * past the card's bottom edge was painted over by an opaque RHYTHM / LEG 1 /
+ * UNPLANNED label. A body portal has no ancestor left to trap it.
+ *
+ * Inside a Radix layer the list stays INLINE, one z-level higher than before.
+ * That is not timidity: a modal sheet or dialog blocks the rest of the document
+ * with `pointer-events: none` (react-remove-scroll), so a list portaled to the
+ * BODY from inside a sheet would be visible, dead to the mouse, and read as an
+ * outside press that dismisses the sheet under it. `role="dialog"` is the one
+ * marker every Radix layer carries, so the decision is a single `closest()`.
+ *
+ * The price of the portal is that the list must be told where to go: the frame
+ * arithmetic is `pickerListFrame` in @rv-trip/core, where it is unit-tested, and
+ * this file only measures the field and re-measures it on scroll and resize.
  *
  * The state machine itself — which rows exist, what the status line reads, what
  * a chosen row emits, where the highlight starts — is
@@ -55,6 +78,12 @@ export function PlacePicker({
   // body (react-hooks/set-state-in-effect).
   const [answer, setAnswer] = useState<{ q: string; envelope: PlacesEnvelope } | null>(null);
   const [cursor, setCursor] = useState<{ q: string; index: number } | null>(null);
+  // Where the list goes: `portal` false means "inline, as it always was"
+  // (inside a sheet/dialog/popover), and the frame is the viewport rect the
+  // portaled list is pinned to. Null until the field has been measured, which is
+  // what keeps the server render on the inline path.
+  const [mount, setMount] = useState<{ portal: boolean; frame: PickerListFrame } | null>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
   const listId = useId();
 
   // `near` is an object prop, so its identity changes every render; the two
@@ -99,6 +128,47 @@ export function PlacePicker({
     // starts where the design says it starts.
     highlight: cursor?.q === q ? cursor.index : undefined,
   });
+
+  // The list is open exactly when `pickerView` says "list" — computed up here,
+  // above the picked-state early return, because the measuring effect below is
+  // a hook and hooks cannot be conditional.
+  const listOpen = view.state === "list";
+
+  // Measure the field while the list is open. Nothing here calls setState in
+  // the effect BODY (react-hooks/set-state-in-effect): `measure` only ever runs
+  // from a callback — the ResizeObserver fires once on `observe`, which is the
+  // first measurement, and then again whenever the field itself changes size.
+  // Scroll is listened to in the CAPTURE phase because the scroller is usually
+  // an ancestor (the page, a sheet's own body) and a scroll event does not
+  // bubble out of one; a fixed list that ignored it would hang in mid-air.
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!listOpen || !el) return;
+    const measure = () =>
+      setMount({
+        // Every Radix layer — sheet, dialog, popover — carries role="dialog".
+        portal: el.closest('[role="dialog"]') === null,
+        frame: pickerListFrame(el.getBoundingClientRect(), window.innerHeight),
+      });
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [listOpen]);
+
+  // The cap above makes the list a scroller, and a highlight the arrow keys
+  // moved past the fold is a highlight the user cannot see. `block: "nearest"`
+  // is the one that does nothing while the row is already visible.
+  const highlight = view.state === "list" ? view.highlight : -1;
+  useEffect(() => {
+    if (!listOpen || highlight < 0) return;
+    document.getElementById(`${listId}-${highlight}`)?.scrollIntoView({ block: "nearest" });
+  }, [listOpen, listId, highlight]);
 
   const reset = () => {
     setQuery("");
@@ -193,9 +263,89 @@ export function PlacePicker({
     }
   };
 
+  /**
+   * The list itself — ONE copy, mounted two ways. Whichever branch takes it, it
+   * is the same rows, the same ids and the same handlers; only the box around
+   * it differs.
+   */
+  const listBody = list ? (
+    <>
+      <div
+        id={listId}
+        role="listbox"
+        className={cn(
+          "min-h-0 overflow-y-auto overscroll-contain border border-t-0 border-rv-border bg-rv-surface shadow-rv-xl",
+          !list.degradedMessage && "rounded-b-rv-md",
+        )}
+      >
+        {rows.map((row, i) => (
+          <div
+            key={row.kind === "escape" ? "escape" : (row.picked.googlePlaceId ?? row.name)}
+            id={`${listId}-${i}`}
+            role="option"
+            aria-selected={i === list.highlight}
+            onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={() => setCursor({ q, index: i })}
+            onClick={() => commit(row.picked)}
+            className={cn(
+              "flex cursor-pointer items-center gap-2.5 border-b border-rv-border-soft px-3 py-[9px] last:border-b-0",
+              row.kind === "escape" && "bg-rv-navy",
+              i === list.highlight && "bg-rv-navy-soft",
+            )}
+          >
+            <span
+              className={cn(
+                "inline-flex size-[26px] flex-none items-center justify-center rounded-rv-sm",
+                row.kind === "escape"
+                  ? "bg-rv-surface-alt text-rv-ink-faded"
+                  : "bg-rv-green-soft text-rv-green",
+              )}
+            >
+              {row.kind === "escape" ? (
+                <Pencil className="size-[14px]" />
+              ) : (
+                <MapPin className="size-[14px]" />
+              )}
+            </span>
+            <span className="min-w-0">
+              <span
+                className={cn(
+                  "block truncate text-[13px]",
+                  row.kind === "escape"
+                    ? "font-semibold text-rv-ink-muted"
+                    : "font-[650] text-rv-ink",
+                )}
+              >
+                {row.name}
+              </span>
+              {row.detail ? (
+                <span className="block truncate font-mono text-[10.5px] text-rv-ink-faded">
+                  {row.detail}
+                </span>
+              ) : null}
+            </span>
+            {row.rating !== null ? (
+              <span className="ml-auto flex-none whitespace-nowrap font-mono text-[10.5px] text-rv-accent">
+                ★ {row.rating}
+              </span>
+            ) : null}
+          </div>
+        ))}
+      </div>
+
+      {list.degradedMessage ? (
+        <div className="flex flex-none items-start gap-[9px] rounded-b-rv-md border border-t-0 border-rv-warning bg-rv-warning-soft px-3 py-[9px] text-[12.5px] text-rv-warning">
+          <TriangleAlert className="mt-[2px] size-[13px] flex-none" />
+          <span>{list.degradedMessage}</span>
+        </div>
+      ) : null}
+    </>
+  ) : null;
+
   return (
     <div className="relative">
       <div
+        ref={fieldRef}
         className={cn(
           "flex items-center gap-[9px] border bg-rv-surface px-3 py-[9px] text-[13.5px]",
           "focus-within:border-rv-green",
@@ -229,78 +379,30 @@ export function PlacePicker({
         ) : null}
       </div>
 
-      {open ? (
-        <div className="absolute inset-x-0 top-full z-10">
+      {open && mount?.portal ? (
+        createPortal(
           <div
-            id={listId}
-            role="listbox"
-            className={cn(
-              "border border-t-0 border-rv-border bg-rv-surface shadow-rv-xl",
-              !list.degradedMessage && "rounded-b-rv-md",
-            )}
+            // Portaled and fixed: no ancestor stacking context is left to trap
+            // it, and z-[60] clears the sheets, dialogs and toasts (z-50) it can
+            // be opened on top of. The frame is the field's own rect, so the
+            // list stays exactly as wide as, and welded to, the box it hangs off.
+            className="fixed z-[60] flex flex-col font-sans"
+            style={{
+              left: mount.frame.left,
+              top: mount.frame.top,
+              width: mount.frame.width,
+              maxHeight: mount.frame.maxHeight,
+            }}
           >
-            {rows.map((row, i) => (
-              <div
-                key={row.kind === "escape" ? "escape" : (row.picked.googlePlaceId ?? row.name)}
-                id={`${listId}-${i}`}
-                role="option"
-                aria-selected={i === list.highlight}
-                onMouseDown={(e) => e.preventDefault()}
-                onMouseEnter={() => setCursor({ q, index: i })}
-                onClick={() => commit(row.picked)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-2.5 border-b border-rv-border-soft px-3 py-[9px] last:border-b-0",
-                  row.kind === "escape" && "bg-rv-navy",
-                  i === list.highlight && "bg-rv-navy-soft",
-                )}
-              >
-                <span
-                  className={cn(
-                    "inline-flex size-[26px] flex-none items-center justify-center rounded-rv-sm",
-                    row.kind === "escape"
-                      ? "bg-rv-surface-alt text-rv-ink-faded"
-                      : "bg-rv-green-soft text-rv-green",
-                  )}
-                >
-                  {row.kind === "escape" ? (
-                    <Pencil className="size-[14px]" />
-                  ) : (
-                    <MapPin className="size-[14px]" />
-                  )}
-                </span>
-                <span className="min-w-0">
-                  <span
-                    className={cn(
-                      "block truncate text-[13px]",
-                      row.kind === "escape"
-                        ? "font-semibold text-rv-ink-muted"
-                        : "font-[650] text-rv-ink",
-                    )}
-                  >
-                    {row.name}
-                  </span>
-                  {row.detail ? (
-                    <span className="block truncate font-mono text-[10.5px] text-rv-ink-faded">
-                      {row.detail}
-                    </span>
-                  ) : null}
-                </span>
-                {row.rating !== null ? (
-                  <span className="ml-auto flex-none whitespace-nowrap font-mono text-[10.5px] text-rv-accent">
-                    ★ {row.rating}
-                  </span>
-                ) : null}
-              </div>
-            ))}
-          </div>
-
-          {list.degradedMessage ? (
-            <div className="flex items-start gap-[9px] rounded-b-rv-md border border-t-0 border-rv-warning bg-rv-warning-soft px-3 py-[9px] text-[12.5px] text-rv-warning">
-              <TriangleAlert className="mt-[2px] size-[13px] flex-none" />
-              <span>{list.degradedMessage}</span>
-            </div>
-          ) : null}
-        </div>
+            {listBody}
+          </div>,
+          document.body,
+        )
+      ) : open ? (
+        // Inside a Radix layer, and on the server render before the field has
+        // been measured: the original absolute list, one level clear of the
+        // `z-10` it used to tie with.
+        <div className="absolute inset-x-0 top-full z-30 flex flex-col">{listBody}</div>
       ) : null}
     </div>
   );

@@ -709,3 +709,118 @@ The remaining verdict lines are `DD` (confirmations) and `FLAG`
    is in scope. I judged it part of the same FN — the finding is a write-order
    bug and firing both unordered is the same bug with a race in front of it —
    but it is one line beyond the literal fix.
+
+---
+
+# Rework round 3 — the walk's place-picker report + the last CL
+
+Two findings this round, and nothing else was touched: the walk's dropdown bug
+(the human's write-up, tiered CN) and the one open `CL` from the qa verdict.
+Every earlier round's code is unchanged.
+
+## 1 · The place-search dropdown was painted over by the timeline
+
+**What was actually wrong.** The report called it a stacking-context trap; the
+mechanism is one level simpler and worth writing down, because it decides the
+fix. The list was `absolute inset-x-0 top-full z-10` inside the field's
+`relative` wrapper (`PlacePicker.tsx:233` on `mc/dev/issue-80-v0` before this round). Nothing in the
+add-idea card's ancestry creates a stacking context — I checked the whole chain
+(`ShelfIdeaDraft`'s dashed card, the `max-w-[1240px]` shell, the `min-h-screen`
+page div): no transform, no filter, no opacity, no isolation. So the list was in
+the ROOT context at z-10 — and so is the Gantt's row-label column, which is
+`sticky left-0 z-10` at `packages/ui/src/Gantt.tsx:18`, opaque, and LATER in
+document order. Equal z, later in the document, wins. That is exactly what the
+reporter saw: the covering text was RHYTHM / LEG 1 Yellowstone / LEG 2 Tetons /
+UNPLANNED — those four strings ARE the sticky label column — and the rows that
+"show only their tail" are rows whose leading 92px (the label column's width,
+pin icon included) sits under it. Not overflow clipping.
+
+**The fix, and why it is a hybrid.**
+
+- **`apps/web/src/components/places/PlacePicker.tsx:381-402`** — on a page, the
+  open list is now `createPortal(…, document.body)`, `position: fixed`, at
+  `z-[60]`. A body portal has no ancestor left to trap it and no sibling left to
+  tie with, which is the reporter's preferred fix and the one that also survives
+  a future `overflow-hidden` anywhere above the field.
+- **`:403-406`** — inside a Radix layer the list stays INLINE, but at `z-30`
+  instead of `z-10`. This is the one place I did not follow the report, and the
+  reason is load-bearing: `PlacePicker` is mounted six times and three of those
+  are inside a modal sheet (`StopDetailSheet.tsx:277/473/507/680`,
+  `PlaceSheet.tsx:52`). A modal Radix layer blocks the rest of the document with
+  `pointer-events: none` (react-remove-scroll 2.7.2,
+  `dist/es2015/SideEffect.js:15`), so a list portaled to the BODY from inside a
+  sheet would render, be dead to the mouse, and — because Radix's dismissable
+  layer sees a pointerdown outside its node — close the sheet under it. That
+  would have turned a CN into an FN at three call sites the walk may not even
+  open. `role="dialog"` is the marker every Radix layer carries, so the branch
+  is one `el.closest('[role="dialog"]')`. Inside a sheet the markup is what
+  shipped, one z-level higher.
+- **`:144-166`** — the measurement. A ResizeObserver on the field gives the
+  first frame (it fires once on `observe`) and every later size change; `scroll`
+  is listened to in the CAPTURE phase because the scroller is usually an
+  ancestor (a sheet's body, the page) and scroll does not bubble out of one.
+  Both are torn down when the list closes. No `setState` in an effect body — the
+  file's existing `react-hooks/set-state-in-effect` discipline holds, because
+  `measure` only ever runs from a callback.
+- **`packages/core/src/providers/place-picker.ts:268-329`** — `pickerListFrame`,
+  the arithmetic, pure and in the one workspace that runs unit tests. The list is
+  welded to the field (`top === anchor.bottom`, same `left`, same `width`) — no
+  flip above, because the field draws `rounded-t` and the list `border-t-0` and a
+  gap of one pixel shows as a broken border. It caps `maxHeight` to the viewport
+  less a 12px gutter, with a 132px floor for a field sitting near the bottom
+  edge.
+- **`:165-171` (PlacePicker)** — the cap makes the listbox a scroller, so an
+  arrow-keyed highlight can go past the fold. One effect brings it back with
+  `scrollIntoView({ block: "nearest" })`. That is mine, not the design's: it
+  exists only because the cap is mine.
+- **`:271-350`** — the row JSX is now ONE `listBody`, mounted by both branches.
+  Two copies would drift.
+
+**Not changed:** no row markup, no copy, no token, no state machine. `git diff`
+on the component is the wrapper, the mount branch and the measurement; the rows
+are the same bytes, re-indented one level.
+
+**Tests.**
+
+- `packages/core/src/providers/place-picker.test.ts` — four executed cases for
+  `pickerListFrame`: the weld (top/left/width), the cap, the floor near the
+  bottom edge, and no negative height for a field scrolled off-screen. Teeth:
+  `top: anchor.bottom + 4` and dropping the `Math.max` floor RED 3 of the 4
+  (3 failed / 39 passed), restored after.
+- `apps/web/src/components/places/place-picker-portal.test.ts` (new) — the
+  structural claims as SOURCE TEXT, the idiom `navigate-control.test.ts` and
+  `plan-undo.test.ts` already use, and named as such in its docblock: apps/web's
+  vitest is `environment: "node"` with no jsdom and no
+  `@testing-library/react`, so there is no DOM to portal into and no z-order to
+  read back. It asserts the portal exists, that no `className` carries `z-10`
+  any more, that the Radix branch is there, that the frame comes from core's
+  tested function, that both listeners + the ResizeObserver are wired and torn
+  down, and that there is exactly one `listBody` and one `role="listbox"`.
+  Teeth: `z-[60]`→`z-40`, `z-30`→`z-10` and `portal: true` (dropping the layer
+  check) RED 2 of the 8 (2 failed / 6 passed), restored byte-identical (md5).
+
+## 2 · CL · `plan-undo.test.ts`'s slice could silently widen
+
+- **`apps/web/src/components/trip/plan-undo.test.ts:31-50`** — the start and end
+  markers are now named constants, both indexes asserted (`opens > -1`,
+  `closes > opens`) inside the existing "is a real slice" case. Proved: renaming
+  `doAttachIdea` in `TripPlanner.tsx` REDs the new guard (1 failed / 3 passed)
+  while the OLD test file, run against the same renamed source, passes all 4 —
+  which is the blindness the verdict described.
+
+## For qa / the walk
+
+1. **Render-required, the point of the whole round:** trip page → Timeline lens
+   → Add → "Something to do" → type `trail` in PLACE. Every result row must sit
+   above the rhythm strip and the leg labels, and the FOURTH row must be
+   clickable — the reporter's escalation test.
+2. **The arm I could not exercise:** the same picker inside a sheet — open a
+   stop (`StopDetailSheet`) and use Locate / Change place. It must still work
+   exactly as it shipped: rows clickable, and picking one must NOT close the
+   sheet. That is the inline branch, and it is the risk the hybrid exists to
+   avoid.
+3. A picker near the bottom of the window (scroll so the add-idea card is low):
+   the list should cap and scroll inside itself, and it should follow the field
+   while the page scrolls rather than hanging in mid-air.
+4. Everything flagged render-required in rounds 1-2 is unchanged and still
+   render-required.

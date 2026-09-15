@@ -5,6 +5,8 @@ import {
   PICKER_DEBOUNCE_MS,
   PICKER_DEGRADED_MESSAGE,
   PICKER_ESCAPE_BLURB,
+  PICKER_LIST_GUTTER_PX,
+  PICKER_LIST_MIN_PX,
   PICKER_PLACEHOLDER,
   PICKED_COORDLESS_LABEL,
   escapeRowLabel,
@@ -13,6 +15,7 @@ import {
   pickedCoordLabel,
   pickedFromFreeText,
   pickedFromSummary,
+  pickerListFrame,
   pickerView,
   type PickedPlace,
 } from "./place-picker";
@@ -365,5 +368,35 @@ describe("keyboard navigation of the result list", () => {
   it("has nowhere to go in an empty list", () => {
     expect(moveHighlight(-1, 0, 1)).toBe(-1);
     expect(moveHighlight(-1, 0, -1)).toBe(-1);
+  });
+});
+
+describe("the open list's frame — #80's stacking-context fix", () => {
+  // A field 480px wide, sitting 200px down a 900px-tall window.
+  const anchor = { left: 320, bottom: 200, width: 480 };
+
+  it("is welded to the bottom of the field, at the field's own width", () => {
+    const frame = pickerListFrame(anchor, 900);
+    // No offset of any kind: the field's `rounded-t` and the list's
+    // `border-t-0` are one continuous box, and a portal must not open a seam.
+    expect(frame.top).toBe(200);
+    expect(frame.left).toBe(320);
+    expect(frame.width).toBe(480);
+  });
+
+  it("caps itself to what is left of the viewport, less the gutter", () => {
+    expect(pickerListFrame(anchor, 900).maxHeight).toBe(900 - 200 - PICKER_LIST_GUTTER_PX);
+  });
+
+  it("keeps a usable list when the field is near the bottom edge", () => {
+    // 60px of room left: capping to that would leave less than one row plus the
+    // escape row, so the floor wins and the list scrolls over the gutter.
+    const low = pickerListFrame({ ...anchor, bottom: 828 }, 900);
+    expect(low.maxHeight).toBe(PICKER_LIST_MIN_PX);
+  });
+
+  it("never asks for a negative height when the field is off-screen below", () => {
+    const off = pickerListFrame({ ...anchor, bottom: 1200 }, 900);
+    expect(off.maxHeight).toBeGreaterThan(0);
   });
 });

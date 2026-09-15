@@ -29,13 +29,21 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(HERE, "TripPlanner.tsx"), "utf8");
 
 /** The body of `doPlanIdea`, from its declaration to the next one. */
-const doPlanIdea = source.slice(
-  source.indexOf("const doPlanIdea ="),
-  source.indexOf("const doAttachIdea ="),
-);
+const OPENS = "const doPlanIdea =";
+const CLOSES = "const doAttachIdea =";
+const opens = source.indexOf(OPENS);
+const closes = source.indexOf(CLOSES);
+const doPlanIdea = source.slice(opens, closes);
 
 describe("doPlanIdea's Undo, as source", () => {
   it("is a real slice of the file, not an empty string", () => {
+    // BOTH markers, explicitly. A missing END is the dangerous one: `indexOf`
+    // returns -1, `slice(opens, -1)` silently widens the window to nearly the
+    // whole file, and `stopId: null` also occurs in doDetachIdea — so the order
+    // assertions below would pass on the WRONG function. The "contains
+    // createStop" guard cannot see that; this can.
+    expect(opens).toBeGreaterThan(-1);
+    expect(closes).toBeGreaterThan(opens);
     expect(doPlanIdea).toContain("tripApi.createStop(");
     expect(doPlanIdea.length).toBeGreaterThan(200);
   });
