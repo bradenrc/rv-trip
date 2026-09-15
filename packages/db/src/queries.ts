@@ -652,3 +652,36 @@ export async function getHouseholdOverview(householdId: string): Promise<Househo
     invite: invite ?? null,
   };
 }
+
+/**
+ * One invite row, by TOKEN and nothing else — what `/join/<token>` reads
+ * before it knows who is looking (#77 · docs/design/81 §4).
+ *
+ * Deliberately NOT owner-scoped, unlike every other read in this file: the
+ * visitor is not a member of the inviting household yet, so there is no owner
+ * to scope it by. The token IS the capability (schema.ts — it is the primary
+ * key because it is the path segment), and 64 bits of it is what stands
+ * between a stranger and this row.
+ *
+ * Expiry and one-use are NOT filtered here: `/join` has to tell an expired link
+ * apart from a spent one to render the right refusal, so the row comes back raw
+ * and `joinVerdict` (mutations.ts) is the one place that judges it.
+ */
+export async function getHouseholdInvite(token: string): Promise<HouseholdInviteRow | null> {
+  if (!token) return null;
+  const [row] = await db
+    .select()
+    .from(householdInvites)
+    .where(eq(householdInvites.token, token))
+    .limit(1);
+  return row ?? null;
+}
+
+export interface HouseholdInviteRow {
+  token: string;
+  householdId: string;
+  createdAt: Date;
+  expiresAt: Date;
+  /** Null until it is used — that null IS "one use" (schema.ts). */
+  redeemedAt: Date | null;
+}

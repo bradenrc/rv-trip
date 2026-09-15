@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq, and, inArray, isNull, max, ne, sql } from "drizzle-orm";
+import { eq, and, inArray, isNull, max, ne, notExists, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   legs,
@@ -37,6 +37,7 @@ import type {
   UserPrefsPatch,
 } from "@rv-trip/core";
 import {
+  getHouseholdInvite,
   mapIdea,
   mapLeg,
   mapReservation,
@@ -1029,4 +1030,191 @@ export async function removeHouseholdMember(
       and(eq(householdMembers.householdId, householdId), eq(householdMembers.userId, userId)),
     );
   return row ? "is_owner" : "not_a_member";
+}
+
+/* ── joining a household (#77 · docs/design/81 §4) ──────────────────────── */
+
+/**
+ * What `/join/<token>` and `POST /api/household/join` both answer.
+ *
+ * `ok` means the join is on: the accept card on the page, a 204 from the route.
+ * The three refusals are §4's 409 codes, verbatim, and the page renders one
+ * card per code. `already_here` is not a refusal and not a code the design
+ * names — it is the household's own member opening their own link, where there
+ * is simply nothing to do.
+ */
+export type JoinVerdict =
+  | "ok"
+  | "already_here"
+  | "invite_not_found"
+  | "invite_expired"
+  | "invite_used"
+  | "account_not_empty";
+
+/** §4's three refusals, in the order they are checked. */
+export type JoinRefusal = "invite_expired" | "invite_used" | "account_not_empty";
+
+/**
+ * THE order, in one pure function — §4 states the codes "in the order they are
+ * checked", and the page (which renders the refusal) and the route (which
+ * performs the join) have to reach the same conclusion about the same row.
+ * Neither owns it; this does.
+ *
+ * `already_here` sits between the invite's own two checks and the visitor's,
+ * where it cannot disturb either: an expired or spent link still reads as
+ * expired or spent even to the person who minted it, and the emptiness check
+ * never runs against a household the visitor is already in — which matters,
+ * because that path would otherwise delete the household the invite belongs to.
+ */
+export function joinVerdict(input: {
+  invite: { householdId: string; expiresAt: Date; redeemedAt: Date | null } | null;
+  now: Date;
+  visitorHousehold: string;
+  visitorHouseholdIsEmpty: boolean;
+}): JoinVerdict {
+  const { invite, now, visitorHousehold, visitorHouseholdIsEmpty } = input;
+  if (!invite) return "invite_not_found";
+  // `<=`, matching `getHouseholdOverview`'s `expires_at > now` for "live": an
+  // invite is expired the instant it stops being live, never both.
+  if (invite.expiresAt.getTime() <= now.getTime()) return "invite_expired";
+  if (invite.redeemedAt !== null) return "invite_used";
+  if (invite.householdId === visitorHousehold) return "already_here";
+  if (!visitorHouseholdIsEmpty) return "account_not_empty";
+  return "ok";
+}
+
+/**
+ * What makes a household NOT empty — the three tables that hold what a person
+ * planned. Written once and used twice: once as a read (`householdIsEmpty`) and
+ * once as the WHERE of the delete that acts on it, so the question and the
+ * guard cannot drift.
+ *
+ * `user_prefs` is deliberately absent. §4's prose says "any trip, saved place,
+ * rig or prefs row", but the card it maps to says "This account already has
+ * trips" and offers "an account that hasn't planned anything" — and a prefs row
+ * is written by any theme, units or map-style save (`upsertPrefs`), so counting
+ * it would refuse a visitor who had done nothing but flip dark mode, with copy
+ * that is false about her. The copy is the signed pixel target, so the
+ * CONDITION gives way: preferences are a display choice, not a plan. The
+ * visitor's prefs row is dropped with her household when she joins
+ * (`redeemHouseholdInvite`), because it is keyed by the household id that is
+ * about to stop existing.
+ *
+ * Nothing else needs listing: ideas and reservations hang off a trip, and
+ * `places` is a shared geocode cache that no household owns.
+ */
+const ownedContent = (householdId: string) => [
+  db.select({ one: sql<number>`1` }).from(trips).where(eq(trips.ownerId, householdId)),
+  db.select({ one: sql<number>`1` }).from(savedPlaces).where(eq(savedPlaces.ownerId, householdId)),
+  db.select({ one: sql<number>`1` }).from(rigs).where(eq(rigs.ownerId, householdId)),
+];
+
+/** Has this household planned anything at all? The question Q4 = A turns on:
+ * only an empty account may join, because a merge would have to destroy one of
+ * two rigs and one of two prefs rows (schema.ts). */
+export async function householdIsEmpty(householdId: string): Promise<boolean> {
+  for (const query of ownedContent(householdId)) {
+    if ((await query.limit(1)).length > 0) return false;
+  }
+  return true;
+}
+
+/** A second redeemer got there between our lock and our stamp. Thrown so the
+ * transaction rolls back rather than returning a value (which would commit the
+ * household we had already deleted); caught below and answered `invite_used`. */
+class InviteAlreadySpent extends Error {}
+
+/**
+ * Redeem a join link: the whole of §4's "On success, in ONE transaction".
+ *
+ * The three writes have to be all-or-nothing, and their ORDER is what makes
+ * each refusal safe to return:
+ *
+ *   1. the visitor's own household is deleted — CONDITIONALLY, re-stating
+ *      `ownedContent` in SQL. Nothing else has been written yet, so a household
+ *      that picked up a trip since the verdict simply returns
+ *      `account_not_empty` with `redeemed_at` still null, which is exactly the
+ *      promise the refusal card makes ("the link still works for the right
+ *      account"). The cascade takes her old membership row with it, which is
+ *      what lets the insert below satisfy `user_id`'s unique index.
+ *   2. her prefs row goes with it (no FK, so no cascade does this for us) — it
+ *      is keyed by a household id that no longer exists, and she reads the
+ *      household's row from here on.
+ *   3. the member row, then the stamp. `expires_at`/`redeemed_at` are re-read
+ *      under `FOR UPDATE`, so a second redeemer blocks here and then sees the
+ *      stamp rather than a second seat.
+ */
+export async function redeemHouseholdInvite(
+  token: string,
+  visitor: { userId: string; householdId: string },
+): Promise<JoinVerdict> {
+  const invite = await getHouseholdInvite(token);
+  const empty = await householdIsEmpty(visitor.householdId);
+  const verdict = joinVerdict({
+    invite,
+    now: new Date(),
+    visitorHousehold: visitor.householdId,
+    visitorHouseholdIsEmpty: empty,
+  });
+  if (verdict !== "ok") return verdict;
+
+  try {
+    return await db.transaction(async (tx) => {
+      const [locked] = await tx
+        .select()
+        .from(householdInvites)
+        .where(eq(householdInvites.token, token))
+        .limit(1)
+        .for("update");
+
+      const settled = joinVerdict({
+        invite: locked ?? null,
+        now: new Date(),
+        visitorHousehold: visitor.householdId,
+        visitorHouseholdIsEmpty: empty,
+      });
+      if (settled !== "ok") return settled;
+
+      const dropped = await tx
+        .delete(households)
+        .where(
+          and(
+            eq(households.id, visitor.householdId),
+            ...ownedContent(visitor.householdId).map((query) => notExists(query)),
+          ),
+        )
+        .returning({ id: households.id });
+
+      if (dropped.length === 0) {
+        // Either the guard refused (she planned something between the verdict
+        // and here) or there was no household ROW to delete at all — which is
+        // legitimate: keyless, `getOwner()` answers the `dev-household` literal
+        // without ever looking it up. The row's continued existence is what
+        // tells the two apart.
+        const [survivor] = await tx
+          .select({ id: households.id })
+          .from(households)
+          .where(eq(households.id, visitor.householdId))
+          .limit(1);
+        if (survivor) return "account_not_empty";
+      }
+
+      await tx.delete(userPrefs).where(eq(userPrefs.ownerId, visitor.householdId));
+      await tx
+        .insert(householdMembers)
+        .values({ householdId: locked!.householdId, userId: visitor.userId, role: "member" });
+
+      const stamped = await tx
+        .update(householdInvites)
+        .set({ redeemedAt: new Date() })
+        .where(and(eq(householdInvites.token, token), isNull(householdInvites.redeemedAt)))
+        .returning({ token: householdInvites.token });
+      if (stamped.length === 0) throw new InviteAlreadySpent();
+
+      return "ok";
+    });
+  } catch (err) {
+    if (err instanceof InviteAlreadySpent) return "invite_used";
+    throw err;
+  }
 }

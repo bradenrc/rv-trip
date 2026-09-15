@@ -428,3 +428,151 @@ Two of its claims were made false by this item and are updated rather than delet
 
 Not run: any browser render, and `pnpm db:migrate` / `pnpm db:seed` against the shared dev
 database (flagged above as operator-owned). The route suite creates and drops its own database.
+
+---
+
+# Issue 81 · dev notes — item **i4 of 7** (`/join/<token>` — the redemption route and its three refusals)
+
+Scope of this dispatch: the join surface only — one page, one route, two components, two db
+functions. Nothing in `apps/web/src/proxy.ts`, nothing in `packages/ui`, no schema change and
+no migration (0007 already carries `household_invites`). Items i5–i7 are separate dispatches.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/db/src/queries.ts:657-686` | `getHouseholdInvite(token)` + `HouseholdInviteRow` — the one read in this file that is **not** owner-scoped, because the visitor is not a member of the inviting household yet. Returns the row RAW (expiry and `redeemed_at` unfiltered) so `/join` can tell an expired link from a spent one |
+| `packages/db/src/mutations.ts:2` | `notExists` added to the `drizzle-orm` import |
+| `packages/db/src/mutations.ts:40` | `getHouseholdInvite` added to the existing `./queries` import |
+| `packages/db/src/mutations.ts:1046-1054` | `JoinVerdict` — `ok · already_here · invite_not_found` + §4's three 409 codes |
+| `packages/db/src/mutations.ts:1055` | `JoinRefusal` — just the three codes the page renders a card for |
+| `packages/db/src/mutations.ts:1069-1082` | `joinVerdict()` — **the order, in one pure function**, shared by the page and the transaction |
+| `packages/db/src/mutations.ts:1106-1110` | `ownedContent()` — the three tables that make a household non-empty, written once and used as both a read and a WHERE |
+| `packages/db/src/mutations.ts:1115-1120` | `householdIsEmpty()` |
+| `packages/db/src/mutations.ts:1125` | `InviteAlreadySpent` — the rollback sentinel for a lost redemption race |
+| `packages/db/src/mutations.ts:1147-1220` | `redeemHouseholdInvite()` — §4's "On success, in ONE transaction", with the invite row taken `FOR UPDATE` |
+| `apps/web/src/app/api/household/join/route.ts:1-45` | `POST { token } → 204 \| 400 \| 404 \| 409`; Zod `safeParse` on the body, `getActor()` for the person and `getOwner()` for the household being left |
+| `apps/web/src/app/join/[token]/page.tsx:1-87` | the server component: resolves the invite + the visitor, renders the accept card or one refusal card. `params` is awaited (Next 16) |
+| `apps/web/src/components/join/join-view.ts:1-134` | every string and every branch, pure and testable |
+| `apps/web/src/components/join/JoinAccept.tsx:1-90` | the accept card (`"use client"` — it owns the one button that writes) |
+| `apps/web/src/components/join/JoinRefused.tsx:1-70` | the refusal card (server; the only interactive thing on it is Clerk's own `SignOutButton`) |
+| `apps/web/src/components/join/join-view.test.ts` | 7 tests — the copy and both `acceptTitle` branches |
+| `apps/web/src/app/api/household/join/route.test.ts` | 11 tests — the three refusals in order, the no-op, the join, and one-use |
+
+## Key decisions
+
+1. **The check order lives in exactly one function.** `joinVerdict()` (mutations.ts) is pure and
+   is called twice: once by the page to decide which card to draw, once inside
+   `redeemHouseholdInvite`'s transaction against the row it just locked. The page and the button
+   therefore cannot disagree about the same invite. `already_here` is slotted *between* the
+   invite's two checks and the visitor's, where it disturbs neither — and it has to exist,
+   because without it the owner opening his own link would take the "delete the visitor's
+   household" path and cascade away the invite's own household.
+2. **`FOR UPDATE`, then a conditional stamp.** The transaction re-reads the invite with
+   `.for("update")`, so a second redeemer blocks and then sees the stamp rather than a second
+   seat. The `set redeemed_at … where redeemed_at is null` that follows is belt-and-braces; if it
+   ever writes 0 rows the whole transaction is rolled back through `InviteAlreadySpent` and the
+   caller gets `invite_used` rather than a half-applied join.
+3. **The emptiness guard is the DELETE itself.** `ownedContent()` is stated once and used twice —
+   as the read (`householdIsEmpty`) and as `notExists(...)` inside the `delete from households`.
+   The delete happens FIRST, before any other write, so an account that picked up a trip between
+   the verdict and the transaction returns `account_not_empty` with nothing written and
+   `redeemed_at` still null. That is exactly what the card promises ("the invite is NOT
+   consumed"). A delete that matches 0 rows is disambiguated by re-reading the household row: if
+   it is still there the guard refused; if it is gone there was never a row to delete, which is
+   legitimate keyless (`getOwner()` answers the `dev-household` literal without a lookup).
+4. **The cascade is load-bearing.** `household_members.user_id` is UNIQUE across the whole table,
+   so the visitor's old membership must be gone before the new one is inserted. Deleting her
+   household cascades it (`schema.ts`'s `onDelete: "cascade"`), which is why the delete precedes
+   the insert.
+5. **`proxy.ts` is untouched, deliberately.** `/join` stays behind the auth boundary so the
+   visitor is signed in *before* anything binds. `git diff --name-only` contains no `proxy.ts`.
+6. **The page renders; it never writes.** The only write is the button's POST. On a 409 the card
+   just calls `router.refresh()` and the server redraws the matching refusal, so a stale tab
+   cannot keep offering a button that no longer works.
+
+## Vet findings addressed
+
+- **MED · "refusal condition contradicts its own copy."** Resolved in favour of the copy, which is
+  the signed pixel target: `ownedContent()` counts **trips, saved places and rigs** and NOT
+  `user_prefs`. A prefs row is written by any theme/units/map-style save, so counting it would
+  refuse a visitor who had done nothing but flip dark mode with a card that says "This account
+  already has trips" and asks for "an account that hasn't planned anything". The reasoning is
+  written out at `mutations.ts:1088-1105`, and
+  `route.test.ts` ("does NOT count a preferences row") pins it. Consequence handled: her prefs
+  row is keyed by the household id that is about to stop existing, so the transaction deletes it
+  alongside the household (`mutations.ts:1202`) rather than orphaning it — she reads the
+  household's preferences from then on.
+
+## Defaulted / flagged — for the walk
+
+1. **Copy the wireframe does not draw.** §4 names three 409 codes but draws only
+   `account_not_empty`. `invite_expired` ("This invite has expired") and `invite_used` ("This
+   invite has already been used") are written in `join-view.ts:118-133` in the same card and the
+   same voice, with **no button** on either — signing in as somebody else does not revive a dead
+   link. Both strings want a human's eye at the walk.
+2. **`acceptTitle`'s second branch.** The wireframe's title is "Braden invited you to the Callahan
+   household", but nothing in this epic renames a household, so `households.name` is still its
+   DDL default for everybody — and "the My household" is not a sentence. An unnamed household
+   drops out of the line: "Braden invited you to their household"
+   (`join-view.ts:45-59`, both branches tested). The literal `"My household"` is mirrored in
+   `join-view.ts:31` rather than imported, because a value import from `@rv-trip/db` would pull
+   the pg pool into the client bundle.
+3. **`text-rv-ink-subtle` → `text-rv-ink-faded` on the two mono footers.** The wireframe paints
+   them `var(--rv-ink-subtle)`, but `packages/core/src/theme/nightfall-tokens.test.ts:334`
+   (a vet HIGH from the Nightfall sweep) forbids `rv-ink-subtle` on any text glyph and routes
+   meta text to `rv-ink-faded`. The shipped guard wins; the result is one step MORE contrast, not
+   less. Nothing else in either card departs from §4.
+4. **The mono line "the invite is NOT consumed — the link still works for the right account"** is
+   rendered verbatim as user-facing copy, because it sits inside a frame the wireframe marks
+   "real UI copy". It reads a little like an annotation; if it was meant as one, deleting it is a
+   one-line change in `join-view.ts:115`.
+5. **An unknown token is a 404**, not a fourth 409 — §4 has no code for it and there is nothing
+   there to conflict with. The page calls `notFound()`; `POST` answers
+   `{ error: "invite not found" }` with 404.
+6. **"Already in that household" is a 204 + a redirect to `/`.** Not a code §4 names; nothing is
+   written, the invite is not spent, and refusing someone entry to a household they are already
+   in would be a refusal about nothing. It is also the ONLY thing a keyless walker can see when
+   they open a link minted by `/settings`, because keyless there is exactly one tenant
+   (`dev-household`) — see the render check below for how the other four states were exercised.
+7. **Keyed walk still required** for the one vector nothing here can certify: `proxy.ts:21`'s
+   `auth.protect()` handing an unsigned visitor to Clerk's HOSTED sign-in and back to
+   `/join/<token>` (the app ships no `/sign-in` route). Same for `SignOutButton`'s
+   `redirectUrl` round trip on the `account_not_empty` card — the keyless branch renders that
+   button disabled with `KEYLESS_SWITCH_HINT`, so only a keyed session exercises it.
+
+## Claims for qa to check
+
+1. `joinVerdict` is the ONLY place the order is written, and both callers (page + transaction)
+   use it — `grep -n "joinVerdict" packages/db/src/mutations.ts "apps/web/src/app/join/[token]/page.tsx"`.
+2. A refused join never stamps `redeemed_at`: asserted for `invite_expired`, `invite_used` and
+   `account_not_empty` in `route.test.ts`.
+3. `account_not_empty` cannot be reached by a `user_prefs` row — one test plants prefs and expects
+   **204**.
+4. The success path does all three writes and no more: the invite stamped, exactly one new member
+   row with role `member`, and the visitor's household row gone (and no membership left behind).
+5. `git diff --name-only` contains no `apps/web/src/proxy.ts`, nothing under `packages/ui/`, no
+   `ds-bundle/`, and no migration.
+6. No raw hex and no invented token in either card; every colour is an `rv-*` utility that already
+   ships elsewhere in the app.
+
+## Checks actually run
+
+| command | result |
+| --- | --- |
+| `pnpm vitest run src/components/join src/app/api/household/join` (apps/web) | `Test Files 2 passed (2) · Tests 18 passed (18)` |
+| mutation check — expiry/use swapped inside `joinVerdict`, suite re-run | `Tests 1 failed \| 10 passed (11)` — "checks expiry BEFORE use" reds, so the order assertion bites; file restored from backup and re-run green (`11 passed`) |
+| `pnpm turbo run lint typecheck test` (repo root) | `Tasks: 10 successful, 10 total` · apps/web `Test Files 34 passed (34) · Tests 234 passed (234)` · core `940 passed` |
+| `pnpm --filter @rv-trip/web build` | build succeeded; `ƒ /join/[token]` and `ƒ /api/household/join` in the route table |
+| **render check** — `next start -p 3117` against a throwaway `rvtrip_join_check` database (created, migrated with `db:migrate`, seeded by hand, dropped afterwards) | `/join/devcheck1` 200 → accept card: "walkcheck-owner invited you to the Callahan household … signed in as dev-user · invite expires Sep 26"; with a trip planted → "Can’t join yet / This account already has trips"; `/join/expiredtok` → "This invite has expired"; `/join/usedtok` → "This invite has already been used"; `/join/nosuchtoken` → **404** |
+| **end-to-end redeem** — `POST /api/household/join` against that server | `204`; `household_members` = `(walkcheck-hh, dev-user, member)` + the owner; `devcheck1.redeemed_at` not null; `households` = `walkcheck-hh` only (the visitor's row gone); a second POST → `409 {"error":"invite_used"}` |
+
+Machine conduct: the only server started was mine, on port 3117 (free beforehand), stopped by
+`kill $(lsof -ti :3117)`. No pattern-wide kill. The scratch database was created and dropped;
+the shared dev database was **not** touched — note it is currently behind on migration 0007
+(`relation "households" does not exist`), which is the walk-env migration lag rv-trip#65 already
+tracks, and a `pnpm db:migrate` against it is operator-owned.
+
+The TDD order was tests-first (both test files were written before any implementation file), but
+their first EXECUTION was after the implementation landed — so instead of a red-first screenshot
+the bite is evidenced by the mutation check in the table above.
