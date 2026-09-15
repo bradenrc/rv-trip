@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Drill into the internet — concept sketch (#82)</title>
+<style>
+  * { box-sizing:border-box; margin:0; }
+  :root {
+    --canvas:#0f172a; --shell:#020617; --card:#1e293b; --high:#334155;
+    --line:#334155; --line-hi:#475569;
+    --ink:#f1f5f9; --muted:#cbd5e1; --faded:#94a3b8; --subtle:#64748b;
+    --accent:#38bdf8; --accent-cta:#0ea5e9;
+    --stay:#34d399; --eat:#fbbf24; --do:#22d3ee;
+    font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  }
+  .mono { font-family:"Geist Mono",ui-monospace,"SF Mono",monospace; }
+  body { background:var(--canvas); color:var(--ink); line-height:1.5; padding:0 0 60px; }
+  .hero { background:var(--shell); border-bottom:1px solid var(--line); padding:32px 28px 26px; margin-bottom:36px; }
+  .hero-in { max-width:920px; margin:0 auto; }
+  .kicker { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.11em; color:var(--accent); margin-bottom:6px; }
+  h1 { font-size:23px; letter-spacing:-0.015em; margin-bottom:6px; }
+  .hero p { color:var(--muted); font-size:14px; max-width:76ch; }
+  .wrap { max-width:920px; margin:0 auto; padding:0 28px; display:grid;
+          grid-template-columns:1fr 1fr; gap:28px; align-items:start; }
+  @media (max-width:820px){ .wrap { grid-template-columns:1fr; } }
+  .col-label { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; letter-spacing:.1em;
+               text-transform:uppercase; color:var(--subtle); margin-bottom:10px; }
+
+  /* the shelf card, collapsed */
+  .idea { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .row1 { display:flex; align-items:center; gap:9px; }
+  .chip { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; font-weight:700;
+          text-transform:uppercase; letter-spacing:.05em; border-radius:9999px; padding:3px 9px; }
+  .chip.stay { background:rgba(52,211,153,.14); color:var(--stay); }
+  .idea b { font-size:15px; }
+  .who { margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace; font-size:10.5px; color:var(--faded); }
+  .note { font-size:12.5px; color:var(--muted); font-style:italic; margin-top:6px; }
+  .hint-tap { margin-top:10px; font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; color:var(--subtle); }
+
+  /* expanded: her view */
+  .sheet { background:var(--card); border:1px solid var(--line-hi); border-radius:14px; padding:17px 18px;
+           box-shadow:0 14px 40px -12px rgba(0,0,0,.6); }
+  .g-line { display:flex; align-items:center; gap:10px; margin:9px 0 3px;
+            font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; color:var(--faded); }
+  .g-line a { color:var(--accent); text-decoration:none; }
+  .looklabel { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; letter-spacing:.1em;
+               text-transform:uppercase; color:var(--subtle); margin:16px 0 8px; }
+  .drills { display:flex; flex-wrap:wrap; gap:8px; }
+  .drill { display:inline-flex; align-items:center; gap:7px; text-decoration:none;
+           background:var(--high); color:var(--ink); border:1px solid var(--line-hi);
+           border-radius:9999px; padding:7px 14px; font-size:12.5px; font-weight:600; }
+  .drill:hover { border-color:var(--accent); color:var(--accent); }
+  .drill span.i { font-size:13px; }
+  .come-back { display:flex; align-items:center; gap:10px; border-top:1px solid var(--line);
+               margin-top:16px; padding-top:13px; }
+  .stars { color:var(--accent); font-size:14px; letter-spacing:1.5px; }
+  .stars .off { color:var(--subtle); }
+  .come-back .lbl { font-size:12px; color:var(--faded); }
+  .pillbtn { margin-left:auto; background:var(--accent-cta); color:var(--shell); border:none;
+             font:inherit; font-size:12px; font-weight:700; border-radius:6px; padding:6px 12px; }
+
+  .foot { max-width:920px; margin:30px auto 0; padding:0 28px; font-size:13px; color:var(--faded); }
+  .foot b { color:var(--ink); }
+</style>
+</head>
+<body>
+
+<div class="hero"><div class="hero-in">
+  <div class="kicker">#82 concept sketch · not a stage artifact</div>
+  <h1>The tool doesn't research. It knows where the internet is.</h1>
+  <p>The async-couple flow: Braden drops an idea Tuesday. His wife opens it Thursday and drills straight
+     out to her own research surfaces — every button below is a REAL link for this real place. Click them.</p>
+</div></div>
+
+<div class="wrap">
+  <div>
+    <div class="col-label">Tuesday · he adds it (the #80 shelf)</div>
+    <div class="idea">
+      <div class="row1"><span class="chip stay">⛺ Stay</span><b>Village Camp Truckee</b>
+        <span class="who">B · Tue</span></div>
+      <div class="note">"first week anchor? looks right on the map"</div>
+      <div class="hint-tap">tap →</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="col-label">Thursday · she opens it</div>
+    <div class="sheet">
+      <div class="row1"><span class="chip stay">⛺ Stay</span><b>Village Camp Truckee</b>
+        <span class="who">added by B · Tue</span></div>
+      <div class="g-line">G ★ 4.6 · <a href="https://villagecamp.com" target="_blank" rel="noopener">website</a> ·
+        <a href="tel:+15305871111">call</a> <span style="color:var(--subtle)">— the quiet line, that's all the in-app research there is</span></div>
+
+      <div class="looklabel">Look it up — opens in your own logged-in world</div>
+      <div class="drills">
+        <a class="drill" target="_blank" rel="noopener" href="https://www.google.com/search?q=Village%20Camp%20Truckee"><span class="i">🔍</span>Google</a>
+        <a class="drill" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q=Village%20Camp%20Truckee"><span class="i">🖼</span>Images</a>
+        <a class="drill" target="_blank" rel="noopener" href="https://www.google.com/search?udm=50&q=What%20is%20it%20like%20staying%20at%20Village%20Camp%20Truckee%20RV%20resort"><span class="i">✨</span>AI Mode</a>
+        <a class="drill" target="_blank" rel="noopener" href="https://www.reddit.com/search/?q=Village%20Camp%20Truckee"><span class="i">👽</span>Reddit</a>
+        <a class="drill" target="_blank" rel="noopener" href="https://www.instagram.com/explore/search/keyword/?q=village%20camp%20truckee"><span class="i">📷</span>Instagram</a>
+        <a class="drill" target="_blank" rel="noopener" href="https://www.facebook.com/search/top?q=Village%20Camp%20Truckee"><span class="i">👥</span>Facebook</a>
+      </div>
+
+      <div class="come-back">
+        <span class="lbl">back from the internet:</span>
+        <span class="stars">★★★★<span class="off">★</span></span>
+        <button class="pillbtn" type="button">Keep it</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="foot"><b>What this is NOT:</b> reviews in-app, photo galleries, AI summaries. One quiet Google
+  line, six doors out, and the star row waiting when you come back. The AI Mode link even carries a
+  question, not just a name — that's the pre-LLM version of "what do we think?"</div>
+
+</body>
+</html>
