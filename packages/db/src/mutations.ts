@@ -11,6 +11,7 @@ import {
   routes,
   savedPlaces,
   userPrefs,
+  changeLog,
   households,
   householdMembers,
   householdInvites,
@@ -76,6 +77,102 @@ const ownedStopIds = (owner: string) =>
  */
 const ownedTripIds = (owner: string) =>
   db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
+
+// ── the change log ────────────────────────────────────────────────────────
+//
+// #78 · docs/design/81 §6. Three fields on four things — not an every-write
+// firehose. Everything below this comment is the ONLY code in this file that
+// touches `change_log`: the four `update*Fields` mutations each hand it a
+// before/after pair, and it decides what (if anything) is worth a row.
+
+/** The three shared-voice fields, as the LOG names them (schema.ts). */
+type LoggedField = "rating" | "notes" | "status";
+
+/** A before/after pair per field the patch actually NAMED. A field the patch
+ * left absent never appears here, so it can never be logged. */
+type LoggedPair = Partial<Record<LoggedField, { before: unknown; after: unknown }>>;
+
+/**
+ * One column value as the log stores it. `from`/`to` are `text`, so a rating
+ * travels as its decimal digits and an absent value stays NULL rather than
+ * becoming the string "null" — the reader has to tell "cleared" from "was never
+ * set" to render "★★★★ → —".
+ */
+const logValue = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
+
+/**
+ * Does this patch NAME any of the three logged fields? The answer decides
+ * whether the write needs a transaction at all — a rename, a move, a date or a
+ * cost stays the single statement it has always been.
+ */
+const logs = (patch: object, map: Partial<Record<LoggedField, string>> = {}): boolean =>
+  (["rating", "notes", "status"] as const).some((field) => (map[field] ?? field) in patch);
+
+/**
+ * Pick the logged fields a patch NAMED, pairing each with what the row held
+ * before the update. `before` is a row read in the SAME transaction as the
+ * write — `.returning()` cannot serve it, because it yields post-update values
+ * only.
+ *
+ * `map` exists for exactly one column: `saved_places.note` is singular
+ * (schema.ts:204) while the log's vocabulary is `notes`, so the saved-place
+ * call site maps the key here and nothing downstream has to know.
+ */
+function loggedPairs<P extends object, B extends object>(
+  patch: P,
+  before: B,
+  map: Partial<Record<LoggedField, string>> = {},
+): LoggedPair {
+  const pairs: LoggedPair = {};
+  for (const field of ["rating", "notes", "status"] as const) {
+    const key = map[field] ?? field;
+    if (!(key in patch)) continue;
+    pairs[field] = {
+      before: (before as Record<string, unknown>)[key],
+      after: (patch as Record<string, unknown>)[key],
+    };
+  }
+  return pairs;
+}
+
+/**
+ * Write one row per field whose value actually MOVED. A no-op save — the stars
+ * re-clicked on the rating they already showed, a note blurred without an edit
+ * — writes nothing at all, which is what keeps the byline honest about who last
+ * changed the thing.
+ *
+ * `owner` is the household (`getOwner()`); `actor` is the person
+ * (`getActor()`). They are the two different strings #77 separated.
+ */
+async function logChanges(
+  tx: { insert: typeof db.insert },
+  input: {
+    owner: string;
+    actor: string;
+    entity: (typeof changeLog.$inferInsert)["entity"];
+    entityId: string;
+    pairs: LoggedPair;
+  },
+): Promise<void> {
+  const rows = (Object.keys(input.pairs) as LoggedField[])
+    .map((field) => ({
+      field,
+      from: logValue(input.pairs[field]!.before),
+      to: logValue(input.pairs[field]!.after),
+    }))
+    .filter((r) => r.from !== r.to)
+    .map((r) => ({
+      householdId: input.owner,
+      entity: input.entity,
+      entityId: input.entityId,
+      field: r.field,
+      from: r.from,
+      to: r.to,
+      memberId: input.actor,
+    }));
+  if (rows.length === 0) return;
+  await tx.insert(changeLog).values(rows);
+}
 
 // ── trips ─────────────────────────────────────────────────────────────────
 //
@@ -336,6 +433,7 @@ export async function updateStopFields(
     arriveDate?: IsoDate | null;
     departDate?: IsoDate | null;
   },
+  actor: string,
 ): Promise<boolean> {
   if (patch.legId !== undefined) await assertOwnedLeg(db, owner, patch.legId);
   const scope = and(eq(stops.id, stopId), inArray(stops.legId, ownedLegIds(owner)));
@@ -343,8 +441,28 @@ export async function updateStopFields(
     const rows = await db.select({ id: stops.id }).from(stops).where(scope);
     return rows.length > 0;
   }
-  const updated = await db.update(stops).set(patch).where(scope).returning({ id: stops.id });
-  return updated.length > 0;
+  // A patch that names neither rating nor notes stays the ONE statement it has
+  // always been — the log costs a transaction, and only a logged field pays it.
+  if (!logs(patch)) {
+    const updated = await db.update(stops).set(patch).where(scope).returning({ id: stops.id });
+    return updated.length > 0;
+  }
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({ rating: stops.rating, notes: stops.notes })
+      .from(stops)
+      .where(scope);
+    const updated = await tx.update(stops).set(patch).where(scope).returning({ id: stops.id });
+    if (!before || updated.length === 0) return false;
+    await logChanges(tx, {
+      owner,
+      actor,
+      entity: "stop",
+      entityId: stopId,
+      pairs: loggedPairs(patch, before),
+    });
+    return true;
+  });
 }
 
 /** Reservations and ideas cascade with the stop. */
@@ -448,6 +566,7 @@ export async function updateReservationFields(
     rating?: number | null;
     notes?: string | null;
   },
+  actor: string,
 ): Promise<boolean> {
   const scope = and(
     eq(reservations.id, resId),
@@ -460,12 +579,34 @@ export async function updateReservationFields(
   // `cost` is the one column whose wire type is not its stored type.
   const { cost, ...rest } = patch;
   const values = cost === undefined ? rest : { ...rest, cost: cost === null ? null : String(cost) };
-  const updated = await db
-    .update(reservations)
-    .set(values)
-    .where(scope)
-    .returning({ id: reservations.id });
-  return updated.length > 0;
+  if (!logs(patch)) {
+    const updated = await db
+      .update(reservations)
+      .set(values)
+      .where(scope)
+      .returning({ id: reservations.id });
+    return updated.length > 0;
+  }
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({ rating: reservations.rating, notes: reservations.notes })
+      .from(reservations)
+      .where(scope);
+    const updated = await tx
+      .update(reservations)
+      .set(values)
+      .where(scope)
+      .returning({ id: reservations.id });
+    if (!before || updated.length === 0) return false;
+    await logChanges(tx, {
+      owner,
+      actor,
+      entity: "reservation",
+      entityId: resId,
+      pairs: loggedPairs(patch, before),
+    });
+    return true;
+  });
 }
 
 /** A leaf delete — nothing cascades from it, which is why the client offers an
@@ -572,27 +713,46 @@ export async function updateIdeaFields(
     stopId?: string | null;
     category?: IdeaCategory;
   },
+  actor: string,
 ): Promise<void> {
   // An empty patch is a legal "nothing changed" on the wire, and drizzle throws
   // on `.set({})` — so the no-op is answered here rather than by a SQL error.
   if (Object.keys(patch).length === 0) return;
   const scope = and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner)));
   // A DETACH (`stopId: null`) names no stop, so there is nothing to prove and
-  // it stays the single statement every other field patch is.
+  // — when the patch logs nothing either — it stays the single statement every
+  // other field patch is.
   const target = patch.stopId;
-  if (target === undefined || target === null) {
+  const attaching = target !== undefined && target !== null;
+  if (!attaching && !logs(patch)) {
     await db.update(ideas).set(patch).where(scope);
     return;
   }
   await db.transaction(async (tx) => {
-    const owned = await tx.select({ tripId: ideas.tripId }).from(ideas).where(scope);
+    const owned = await tx
+      .select({
+        tripId: ideas.tripId,
+        rating: ideas.rating,
+        notes: ideas.notes,
+        status: ideas.status,
+      })
+      .from(ideas)
+      .where(scope);
     const mine = owned[0];
     // A foreign (or absent) idea stays the shipped silent no-op this handler
     // has always answered 204 to — the guard below is about the TARGET, and
-    // there is no owned row to attach in the first place.
+    // there is no owned row to attach in the first place. It is also what keeps
+    // a refused patch out of the log.
     if (!mine) return;
-    await assertStopInTrip(tx, mine.tripId, target);
+    if (attaching) await assertStopInTrip(tx, mine.tripId, target);
     await tx.update(ideas).set(patch).where(eq(ideas.id, ideaId));
+    await logChanges(tx, {
+      owner,
+      actor,
+      entity: "idea",
+      entityId: ideaId,
+      pairs: loggedPairs(patch, mine),
+    });
   });
 }
 
@@ -758,22 +918,61 @@ export async function createSavedPlace(
 }
 
 /**
+ * The ONE place the log's vocabulary and a column name differ: this table
+ * spells its note `note`, SINGULAR (schema.ts:204), while the log — and the
+ * byline that reads it — says `notes`.
+ */
+const SAVED_PLACE_COLUMNS = { notes: "note" } as const;
+
+/**
  * Patch a library row in place — the edit sheet, the graduation ("been" +
  * rating + tripId, source cleared) and the Locate coordinate backfill all land
  * here. Returns false when the id is not this owner's.
+ *
+ * Unlike stops and reservations this table DOES carry `status` (schema.ts:203),
+ * so the want → been graduation is a shared-voice change like any other and is
+ * logged as one.
  */
 export async function updateSavedPlaceFields(
   owner: string,
   placeId: string,
   patch: SavedPlacePatch,
+  actor: string,
 ): Promise<boolean> {
   if (patch.tripId !== undefined) await ownedTripTitle(owner, patch.tripId);
-  const rows = await db
-    .update(savedPlaces)
-    .set(patch)
-    .where(and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner)))
-    .returning({ id: savedPlaces.id });
-  return rows.length > 0;
+  const scope = and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner));
+  if (!logs(patch, SAVED_PLACE_COLUMNS)) {
+    const rows = await db
+      .update(savedPlaces)
+      .set(patch)
+      .where(scope)
+      .returning({ id: savedPlaces.id });
+    return rows.length > 0;
+  }
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({
+        rating: savedPlaces.rating,
+        note: savedPlaces.note,
+        status: savedPlaces.status,
+      })
+      .from(savedPlaces)
+      .where(scope);
+    const rows = await tx
+      .update(savedPlaces)
+      .set(patch)
+      .where(scope)
+      .returning({ id: savedPlaces.id });
+    if (!before || rows.length === 0) return false;
+    await logChanges(tx, {
+      owner,
+      actor,
+      entity: "savedPlace",
+      entityId: placeId,
+      pairs: loggedPairs(patch, before, SAVED_PLACE_COLUMNS),
+    });
+    return true;
+  });
 }
 
 /** Hard delete, owner-scoped. Returns false when the id is not this owner's. */

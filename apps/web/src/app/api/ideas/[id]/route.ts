@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { ideaPatchColumns, ideaPatchInput } from "@rv-trip/core";
 import { deleteIdea, updateIdeaFields } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 
 /**
  * The idea PATCH. The schema is core's `ideaPatchInput` — the same grammar the
@@ -26,7 +26,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    await updateIdeaFields(await getOwner(), id, ideaPatchColumns(parsed.data));
+    await updateIdeaFields(
+      await getOwner(),
+      id,
+      ideaPatchColumns(parsed.data),
+      await getActor(),
+    );
   } catch (e) {
     if (e instanceof Error && e.message === "stop not found") {
       return NextResponse.json({ error: e.message }, { status: 404 });

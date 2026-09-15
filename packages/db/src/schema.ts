@@ -425,6 +425,71 @@ export const householdInvites = pgTable("household_invites", {
   redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
 });
 
+/**
+ * WHAT was changed, on a thing the household shares a voice on (#78 ·
+ * docs/design/81 §6). Four entities, three fields — deliberately not an
+ * every-write firehose: the four `update*Fields` mutations in mutations.ts are
+ * the only writers, and they log only when a value actually moves.
+ */
+export const changeEntity = pgEnum("change_entity", [
+  "stop",
+  "idea",
+  "reservation",
+  "savedPlace",
+]);
+
+/**
+ * The three shared-voice fields, as the LOG names them.
+ *
+ * `notes` is canonical even though `saved_places` spells its column `note`
+ * (:204) — one vocabulary on the wire, or the /places byline could never match
+ * the set it renders from. The mapping happens at the one write site
+ * (`updateSavedPlaceFields`), never here.
+ */
+export const changeField = pgEnum("change_field", ["rating", "notes", "status"]);
+
+/**
+ * One row per changed field. Two reads consume it (§6): the newest row per
+ * entity, joined onto the list read as `lastChange`, and the last five for one
+ * entity behind `GET /api/history`.
+ *
+ * `household_id` is the tenant — `getOwner()` — and `member_id` is the PERSON —
+ * `getActor()`. They are different strings from #77 on, and the whole feature
+ * rests on the difference: the household owns the row, a member changed it.
+ *
+ * Neither carries a foreign key, for the same reason the four `owner_id`
+ * columns do not (see `households` above): a household id is an opaque string
+ * that need not have a row (the keyless `dev-household`, every route-test
+ * fixture), and a member id is a Clerk user id that is only a member while they
+ * are one — removing a co-pilot must not erase the history of what they wrote.
+ *
+ * `from`/`to` are plain `text` and nullable: one pair of columns carries a
+ * smallint rating, a free-text note and an enum status, so the widest of the
+ * three is the storage, and NULL is a genuinely absent value (an unrated stop,
+ * a cleared note). A rating is written as its decimal digits ("4") and parsed
+ * back by the reader that renders stars.
+ */
+export const changeLog = pgTable(
+  "change_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    householdId: text("household_id").notNull(),
+    entity: changeEntity("entity").notNull(),
+    /** Every one of the four entities has a `uuid` primary key. */
+    entityId: uuid("entity_id").notNull(),
+    field: changeField("field").notNull(),
+    from: text("from"),
+    to: text("to"),
+    memberId: text("member_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // Both reads are "this entity's rows, newest first" — one btree serves the
+    // joined `lastChange` and the five-row history alike.
+    index("change_log_entity_idx").on(t.entity, t.entityId, t.at),
+  ],
+);
+
 export const householdsRelations = relations(households, ({ many }) => ({
   members: many(householdMembers),
   invites: many(householdInvites),

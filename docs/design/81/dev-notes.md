@@ -576,3 +576,149 @@ tracks, and a `pnpm db:migrate` against it is operator-owned.
 The TDD order was tests-first (both test files were written before any implementation file), but
 their first EXECUTION was after the implementation landed — so instead of a red-first screenshot
 the bite is evidenced by the mutation check in the table above.
+
+---
+
+# Issue 81 · dev notes — item **i5 of 7** (`change_log` + the four mutation write sites)
+
+Scope of this dispatch: the log's storage and its four writers. Nothing renders — no file under
+`packages/ui`, `packages/core/src/domain/types.ts` or `apps/web/src/components/**` is in the
+diff. `lastChange` on the wire and `GET /api/history` are **i6**; `ChangeByline` is **i7**.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/db/src/schema.ts:434-441` | `changeEntity` pgEnum — `stop \| idea \| reservation \| savedPlace` |
+| `packages/db/src/schema.ts:449` | `changeField` pgEnum — `rating \| notes \| status` |
+| `packages/db/src/schema.ts:472-491` | `change_log` — `id` uuid pk, `household_id` text, `entity`, `entity_id` uuid, `field`, `from`/`to` text nullable, `member_id` text, `at` timestamptz; plus `change_log_entity_idx` on `(entity, entity_id, at)` |
+| `packages/db/drizzle/0008_change_log.sql` | generated DDL (`pnpm drizzle-kit generate --name change_log`) — two `CREATE TYPE`, one `CREATE TABLE`, one `CREATE INDEX`, **zero `ALTER TABLE`** |
+| `packages/db/drizzle/meta/0008_snapshot.json`, `meta/_journal.json` | drizzle's generated bookkeeping |
+| `packages/db/src/mutations.ts:14` | `changeLog` added to the schema import |
+| `packages/db/src/mutations.ts:81-175` | the whole change-log section: `LoggedField`, `LoggedPair`, `logValue`, `logs()`, `loggedPairs()`, `logChanges()` — **the only `.insert(changeLog)` in the file** (:174) |
+| `packages/db/src/mutations.ts:418-451` | `updateStopFields(owner, stopId, patch, actor)` — logs `rating`, `notes` |
+| `packages/db/src/mutations.ts:556-604` | `updateReservationFields(owner, resId, patch, actor)` — logs `rating`, `notes` |
+| `packages/db/src/mutations.ts:702-751` | `updateIdeaFields(owner, ideaId, patch, actor)` — logs `rating`, `notes`, `status` |
+| `packages/db/src/mutations.ts:925` | `SAVED_PLACE_COLUMNS = { notes: "note" }` — the one column/vocabulary mismatch |
+| `packages/db/src/mutations.ts:936-975` | `updateSavedPlaceFields(owner, placeId, patch, actor)` — logs `rating`, `notes` (← `note`), `status` |
+| `packages/db/src/testing/truncate.ts:4,37` | `changeLog` added to `truncateAll`, so log rows cannot leak between test files |
+| `apps/web/src/app/api/stops/[id]/route.ts:9,60` | passes `await getActor()` |
+| `apps/web/src/app/api/reservations/[id]/route.ts:4,19-24` | passes `await getActor()` |
+| `apps/web/src/app/api/ideas/[id]/route.ts:4,29-34` | passes `await getActor()` |
+| `apps/web/src/app/api/places/[id]/route.ts:5,34-39` | passes `await getActor()` |
+| `packages/core/src/prefs-account.test.ts:135-139` | the pgEnum-count guard: 7 → 9, with the two new names spelled out in its comment |
+| `apps/web/src/test/change-log.test.ts` | new — 17 tests (2 file-level, 15 against the migrated database through the real handlers) |
+
+## Key decisions
+
+1. **The three vet HIGHs against §6 are the three deviations from the wireframe's coverage
+   table, and each is deliberate.**
+   - **`saved_places` DOES have `status`** (`schema.ts:203`), so the want → been graduation IS
+     logged. §6's table said "— no column" for it; that claim is simply false, and under Q6 = A a
+     graduation is exactly a shared-voice status change. Stops and reservations genuinely have no
+     status column, so for them the design's table stands. Asserted by "logs the want → been
+     graduation".
+   - **The saved place's column is `note`, singular**, while the log's vocabulary is `notes`. The
+     column is mapped to the canonical field at the one write site
+     (`SAVED_PLACE_COLUMNS`, mutations.ts:925) rather than widening the enum to four values —
+     otherwise §5's `/places` popover row could never match the set it renders from. The enum
+     stays the three values i5's scope names. **i7 owns the display label** and may still want to
+     read "note" on a saved place; the stored field is `notes`.
+   - **`from`/`to` are `text`, nullable.** §6 never named a type, and one pair of columns has to
+     carry a smallint rating, free text and an enum. A rating is written as its decimal digits
+     (`"4"`) and NULL means genuinely absent (unrated, cleared) rather than the string `"null"` —
+     the reader needs that distinction to render "★★★★ → —". `logValue` (mutations.ts:101) is the
+     one place that conversion happens.
+
+2. **The "before" is a SELECT inside the same transaction, not `.returning()`** — the vet's MED.
+   `.returning()` yields POST-update values only, so every logged write is now
+   `db.transaction(select → update → insert)`. A patch that names none of the three fields keeps
+   the single statement it has always been (`logs(patch)`, mutations.ts:108): a rename, a move, a
+   date, a cost or a Locate backfill pays nothing for a feature it does not use.
+
+3. **A refused patch logs nothing, because the log insert is inside the same transaction as the
+   proof.** Three refusals are covered: an un-owned row (the scope matches nothing → `return
+   false` before `logChanges`), a foreign destination leg (`assertOwnedLeg` throws before the
+   transaction opens), and a foreign attach target (`assertStopInTrip` throws inside it, rolling
+   the update back with it).
+
+4. **`updateIdeaFields` keeps its `Promise<void>` and its empty-patch early return** — the vet's
+   other MED. Its two shapes are now one branch: it takes the transaction when it is *attaching*
+   **or** when the patch logs, and stays a single statement otherwise. The `if (!mine) return`
+   silent no-op for a foreign or absent idea is unchanged — it is what the handler has always
+   answered 204 to, and it is now also what keeps a refused patch out of the log.
+
+5. **`entity_id` is `uuid`.** All four entities have `uuid` primary keys (`schema.ts:97, 143, 168,
+   195`), so the truthful type is uuid — and i6's join from `change_log` to each entity will
+   compare like with like rather than casting, which would defeat the index. **Flag for i6:** a
+   non-uuid `?id=` on `GET /api/history` must be refused at the parse (the shipped precedent is
+   `placeId = z.string().uuid()` in `api/places/[id]/route.ts:21`) or the driver will 500.
+
+6. **Neither `household_id` nor `member_id` carries a foreign key.** Same reasoning the four
+   `owner_id` columns already carry (i1 decision 2): a household id is an opaque string that need
+   not have a row — the keyless `dev-household`, and every route-test fixture's bare owner — so an
+   FK would fail on the first logged write in the suite. For `member_id` there is a second reason:
+   removing a co-pilot (i3's `removeHouseholdMember`) must not erase the history of what they
+   wrote.
+
+7. **One index, `(entity, entity_id, at)`.** Both reads §6 names are "this entity's rows, newest
+   first", so one btree serves the joined `lastChange` and the five-row history alike. This is one
+   line past the plan's column list; without it both of i6's reads are a sequential scan of a
+   table that only grows.
+
+8. **The `at` clock is Postgres's `now()`**, so two rows from one patch (rating + notes together)
+   share a timestamp exactly. Nothing in the tests orders on `at` for that reason. **Flag for
+   i6:** "newest first" needs a tiebreak — order by `at desc, id desc` — or a two-field save will
+   render its two rows in an arbitrary order.
+
+9. **The pgEnum-count guard in `packages/core/src/prefs-account.test.ts` was updated, not
+   deleted.** It exists to stop a *preference* vocabulary becoming an enum; `change_entity` and
+   `change_field` are vocabularies the product speaks, so the count moves 7 → 9 and the comment
+   now names them. The four `pgEnum("theme"…)` assertions below it are untouched.
+
+## Defaulted / flagged
+
+- **FLAG · the shared dev database at `localhost:5433` was NOT migrated.** 0008 is additive (one
+  new table, no ALTER), but that database is still behind on **0007** — the lag i1/i2/i4 all
+  flagged and rv-trip#65 tracks. `pnpm db:migrate` against it stays **operator-owned**; every
+  check below ran against the suite's own throwaway database, which it creates and drops itself.
+- **FLAG · the walk cannot see this item.** i5 writes rows nothing reads yet: `lastChange` on the
+  wire is i6 and the byline is i7. Until those land the only evidence a change was logged is the
+  `change_log` table itself (`pnpm db:studio`, or the test file). Nothing about the four PATCH
+  responses changed — same 204/404/409, same bodies.
+- **Defaulted · a note change logs the WHOLE old and new text**, untruncated. §5 truncates in the
+  popover ("Riverfront sites 41–48…"), which is a render decision; truncating at the write would
+  make the stored history lossy and is not something the design asks for.
+- **Not in scope, deliberately:** `createStop`/`createIdea`/`createReservation`/`createSavedPlace`
+  write no log row (a create is not a change), and neither does `upsertPrefs`, `updateTripFields`
+  or any other mutation. `trips.rating`/`trips.note` are NOT logged — the design's four entities
+  are the stop, the idea, the reservation and the saved place, and a trip is none of them.
+
+## Claims for qa to check
+
+1. `grep -c "\.insert(changeLog)" packages/db/src/mutations.ts` is **1** — one shared helper is
+   the only writer, which is i5's "no other function in mutations.ts writes to change_log". The
+   test file asserts this from the source text, so it cannot rot.
+2. `actor` is **required**, not optional, on all four functions — proved by deleting it from one
+   call site and watching `tsc` fail (the check table below), then restoring it.
+3. `0008_change_log.sql` contains exactly **one** `CREATE TABLE` and **no** `ALTER TABLE` — also
+   asserted in the test.
+4. No no-op writes a row: two tests cover it directly (a stop re-saved with the same rating AND
+   the same note; a saved place patched with only `tripId`), plus three "field outside the three"
+   cases (stop `placeName`, reservation `cost`, saved-place `tripId`).
+5. The diff touches **no** rendering file and **no** `packages/core/src/domain/types.ts` — the
+   wire shape is unchanged, which is why i6 is a separate item.
+
+## Checks actually run
+
+| command | result |
+| --- | --- |
+| `pnpm vitest run src/test/change-log.test.ts` (in `apps/web`, **before** the implementation) | `Test Files 1 failed (1) · Tests 17 failed (17)` — RED, harness live (`Cannot read properties of undefined (reading 'Symbol(drizzle:Columns)')` — no `changeLog` yet) |
+| `pnpm drizzle-kit generate --name change_log` (in `packages/db`) | `[✓] Your SQL migration file ➜ drizzle/0008_change_log.sql` · `change_log 9 columns 1 indexes 0 fks` |
+| `pnpm vitest run src/test/change-log.test.ts` (after) | `Test Files 1 passed (1) · Tests 17 passed (17)` |
+| `pnpm typecheck` (in `apps/web`) with `await getActor()` deleted from the reservations call site | `src/app/api/reservations/[id]/route.ts(19,25): error TS2554: Expected 4 arguments, but got 3.` — the required-parameter claim, then restored |
+| `pnpm typecheck` (in `apps/web`, restored) | clean, no output |
+| `pnpm turbo run lint typecheck test` (repo root) | `Tasks: 10 successful, 10 total · Cached: 0 cached` · `@rv-trip/web:test  Test Files 35 passed (35) · Tests 251 passed (251)` |
+
+Machine conduct: no server was started and no process was killed by this item. The test harness
+created and dropped its own database; `localhost:5433` was never written to.
