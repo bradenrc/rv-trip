@@ -11,6 +11,8 @@
   },
   "scripts": {
     "build": "tsup && tailwindcss -i styles/entry.css -o dist/styles.css",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,6 +29,7 @@
     "geist": "^1.7.2",
     "tailwindcss": "^4",
     "tsup": "^8",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
   }
 }

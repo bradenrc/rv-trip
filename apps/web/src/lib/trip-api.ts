@@ -8,6 +8,7 @@ import type {
   LegPatchInput,
   LocateResponse,
   LocateRow,
+  PlaceDetails,
   PlacesEnvelope,
   Reservation,
   ReservationCreateInput,
@@ -181,6 +182,25 @@ export const tripApi = {
     try {
       const res = await fetch(`/api/places/search?${params}`);
       const body = (await res.json()) as PlacesEnvelope;
+      if (!Array.isArray(body?.results)) throw new Error("not an envelope");
+      return body;
+    } catch {
+      return { results: [], degraded: true, reason: "upstream_error" };
+    }
+  },
+
+  /**
+   * One place's Google facts for the research pad's quiet line (#82 §7) —
+   * modelled on `searchPlaces` above and, for the same reason, deliberately NOT
+   * through `req`: every outcome this call has is renderable. No key, an id
+   * Google retired, an outage, offline, a proxy serving HTML — all of them come
+   * back as the one degraded envelope, so the G-line has exactly one shape to
+   * render and never a thrown error to catch.
+   */
+  placeDetails: async (googlePlaceId: string): Promise<PlacesEnvelope<PlaceDetails>> => {
+    try {
+      const res = await fetch(`/api/places/details/${encodeURIComponent(googlePlaceId)}`);
+      const body = (await res.json()) as PlacesEnvelope<PlaceDetails>;
       if (!Array.isArray(body?.results)) throw new Error("not an envelope");
       return body;
     } catch {

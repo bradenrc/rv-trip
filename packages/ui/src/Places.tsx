@@ -1,9 +1,10 @@
 import type { ReactNode } from "react";
 import { MapPin, UserRound, Plus, RotateCcw, Map as MapIcon, type LucideIcon } from "lucide-react";
-import type { ReservationType, SavedPlace } from "@rv-trip/core";
+import type { ReservationType, SavedPlace, SavedPlacePatch } from "@rv-trip/core";
 import { categoryMeta } from "./category";
 import { CategoryTile } from "./CategoryTile";
 import { Stars } from "./Stars";
+import { ResearchPad } from "./ResearchPad";
 
 /**
  * The Places library — a cross-trip shelf of saved spots. Two shelves off one
@@ -30,18 +31,60 @@ export function CategoryChip({ type }: { type: ReservationType }) {
  * A saved place. The footer is what differs by shelf: a "want" place shows who
  * the tip came from and promotes into a trip; a "been" place shows the rating
  * and the trip it was visited on, and offers a revisit.
+ *
+ * Since #82 the card also EXPANDS in place (Q2 → B): pressing the name opens
+ * the research pad, which PROMOTES the two fields the card already renders
+ * read-only — `note` and `rating` — into live ones, on BOTH shelves, and hangs
+ * the doors out and Google's own line under them. A place you are still
+ * deciding about is exactly the one worth a note and a star.
+ *
+ * Nothing is duplicated by that: while the pad is open, the footer's left slot
+ * (the source line on "want", the stars + trip on "been") is EMPTY, because the
+ * pad is carrying both — two star rows on one card is the very thing the pad
+ * exists to prevent.
  */
 export function PlaceCard({
   savedPlace,
+  expanded = false,
+  drill,
+  gline,
+  onToggleExpand,
+  onPatch,
   onAddToTrip,
   onRevisit,
 }: {
   savedPlace: SavedPlace;
+  /** The research pad, open in place (#82). */
+  expanded?: boolean;
+  /** the doors out, inside the pad. Locality is `savedPlace.region`. */
+  drill?: ReactNode;
+  /** the quiet Google line, last in the pad. App-filled — a DS component never
+   * fetches. */
+  gline?: ReactNode;
+  /** Absent → the card has no expand affordance at all and renders exactly as
+   * it shipped. Present → the name is the expand, and pressing it again closes
+   * the pad. The open card's id is the library's state, not the card's. */
+  onToggleExpand?: () => void;
+  /** The pad's ONE write, optional exactly like the two buttons below it:
+   * absent, the pad's fields render read-only, which is today's behaviour. */
+  onPatch?: (patch: SavedPlacePatch) => void;
   onAddToTrip?: () => void;
   onRevisit?: () => void;
 }) {
   const p = savedPlace;
   const want = p.status === "want";
+  /** "Heard from Dana" on the queue, the trip it was visited on in the archive —
+   * whichever the footer would have shown, shown beside the stars instead. */
+  const meta = want ? (
+    p.source ? (
+      <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-rv-ink-faded">
+        <UserRound className="size-3 text-rv-ink-subtle" />
+        Heard from {p.source}
+      </span>
+    ) : null
+  ) : p.tripName ? (
+    <span className="truncate font-mono text-[11px] text-rv-ink-faded">· {p.tripName}</span>
+  ) : null;
   return (
     <div className="flex flex-col gap-[11px] rounded-rv-card border border-rv-border bg-rv-surface px-[18px] py-4 shadow-rv-sm transition-[transform,box-shadow] duration-[120ms] hover:-translate-y-0.5 hover:shadow-rv-lg">
       <div className="flex items-start justify-between gap-2.5">
@@ -49,7 +92,18 @@ export function PlaceCard({
           <CategoryTile type={p.type} size="md" />
           <div className="min-w-0">
             <h3 className="m-0 mb-0.5 truncate text-[16px] font-extrabold tracking-[-0.01em] text-rv-ink">
-              {p.place.name}
+              {onToggleExpand ? (
+                <button
+                  type="button"
+                  onClick={onToggleExpand}
+                  aria-expanded={expanded}
+                  className="m-0 max-w-full cursor-pointer truncate border-none bg-transparent p-0 text-left text-[16px] font-extrabold tracking-[-0.01em] text-rv-ink"
+                >
+                  {p.place.name}
+                </button>
+              ) : (
+                p.place.name
+              )}
             </h3>
             {p.region && (
               <div className="inline-flex items-center gap-[5px] font-mono text-[12px] text-rv-ink-faded">
@@ -62,10 +116,38 @@ export function PlaceCard({
         <CategoryChip type={p.type} />
       </div>
 
-      {p.note && <p className="m-0 text-[13.5px] leading-relaxed text-rv-ink-muted">{p.note}</p>}
+      {expanded ? (
+        <ResearchPad
+          note={p.note ?? ""}
+          placeholder="Jot or paste what you find…"
+          rating={p.rating ?? 0}
+          expanded
+          drill={drill}
+          gline={gline}
+          meta={meta}
+          // Uncontrolled: nothing above this card holds a note draft, and a
+          // commit-on-blur field does not need one. `onPatch` is the whole
+          // write — one prop, the way `onAddToTrip`/`onRevisit` are one each.
+          onNoteCommit={
+            onPatch
+              ? (v) => {
+                  const next = v.trim() === "" ? null : v;
+                  if (next !== (p.note ?? null)) onPatch({ note: next });
+                }
+              : undefined
+          }
+          onRating={onPatch ? (n) => onPatch({ rating: n === 0 ? null : n }) : undefined}
+        />
+      ) : (
+        p.note && <p className="m-0 text-[13.5px] leading-relaxed text-rv-ink-muted">{p.note}</p>
+      )}
 
       <div className="mt-auto flex items-center justify-between gap-2.5 border-t border-rv-border pt-1.5">
-        {want ? (
+        {/* The pad has both of these while it is open; the footer keeps only its
+            action, which is untouched. */}
+        {expanded ? (
+          <span />
+        ) : want ? (
           <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-rv-ink-faded">
             <UserRound className="size-3.5 text-rv-ink-subtle" />
             {p.source ? `Heard from ${p.source}` : "Saved"}

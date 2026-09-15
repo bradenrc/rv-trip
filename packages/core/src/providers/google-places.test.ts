@@ -108,7 +108,7 @@ describe("response mapping", () => {
     expect(parseSearchResponse({})).toEqual([]);
   });
 
-  it("maps a details payload (one place, unwrapped) onto one PlaceSummary", () => {
+  it("maps a details payload (one place, unwrapped) onto one PlaceDetails", () => {
     expect(
       parseDetailsResponse({
         id: "ChIJvT2R2rSjkFQRRJgVJZ2Xk1Q",
@@ -123,7 +123,50 @@ describe("response mapping", () => {
       location: { lat: 47.6118, lng: -124.3762 },
       rating: 4.4,
       address: "156954 US-101, Forks, WA 98331",
+      // The three details-only fields are always PRESENT, and null when Google
+      // did not send them (#82 §7②) — the whole point of the mapper fork.
+      userRatingCount: null,
+      websiteUri: null,
+      nationalPhoneNumber: null,
     });
+  });
+
+  it("carries the three G-line fields through instead of dropping them (#82)", () => {
+    expect(
+      parseDetailsResponse({
+        id: "ChIJN1t_tDeuEmsRUsoyG83frY4",
+        displayName: { text: "Astoria/Warrenton KOA" },
+        rating: 4.6,
+        userRatingCount: 812,
+        websiteUri: "https://koa.com/campgrounds/astoria/",
+        nationalPhoneNumber: "(503) 325-0013",
+      }),
+    ).toEqual({
+      googlePlaceId: "ChIJN1t_tDeuEmsRUsoyG83frY4",
+      name: "Astoria/Warrenton KOA",
+      location: null,
+      rating: 4.6,
+      address: null,
+      userRatingCount: 812,
+      websiteUri: "https://koa.com/campgrounds/astoria/",
+      nationalPhoneNumber: "(503) 325-0013",
+    });
+  });
+
+  it("still drops a row with no id or no name, three extra fields or not", () => {
+    expect(parseDetailsResponse({ displayName: { text: "Nameless id" }, userRatingCount: 9 })).toBeNull();
+    expect(parseDetailsResponse({ id: "ChIJ_no_name", websiteUri: "https://x.test" })).toBeNull();
+  });
+
+  it("the masks FORK — the Enterprise fields are on details and NOT on search", () => {
+    for (const field of ["userRatingCount", "websiteUri", "nationalPhoneNumber"]) {
+      expect(DETAILS_FIELD_MASK.split(",")).toContain(field);
+      expect(SEARCH_FIELD_MASK).not.toContain(field);
+    }
+    // Search keeps exactly its cheap five, each under `places.`
+    expect(SEARCH_FIELD_MASK).toBe(
+      "places.id,places.displayName,places.location,places.rating,places.formattedAddress",
+    );
   });
 });
 

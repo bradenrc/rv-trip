@@ -36,7 +36,9 @@ pnpm dev                     # http://localhost:3000
 ```
 
 Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
-(Drizzle Studio), `pnpm db:down`, `pnpm backfill:places` (geocode every
+(Drizzle Studio), `pnpm db:down`, `pnpm marks:drill` (re-fetch the research
+pad's ten brand favicons into `apps/web/public/drill/` — build time, committed
+output, never a runtime hotlink), `pnpm backfill:places` (geocode every
 coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
 is the Locate button beside the map's "N unmapped" count). Phone:
 `pnpm --filter @rv-trip/mobile ios` (a native dev client on the iOS

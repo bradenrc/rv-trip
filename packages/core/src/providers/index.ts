@@ -64,10 +64,26 @@ export interface PlaceSummary {
   address: string | null;
 }
 
+/**
+ * What a DETAILS call answers with (#82 §7①) — `PlaceSummary` plus the three
+ * fields the quiet Google line renders.
+ *
+ * A separate type rather than three more fields on `PlaceSummary`, because one
+ * type served both calls and both mappers: the three below are Enterprise-SKU
+ * fields, and widening `PlaceSummary` would push them onto `places:searchText`,
+ * billed per result of every keystroke-driven search. It EXTENDS `PlaceSummary`,
+ * so every existing `details()` caller still typechecks unchanged.
+ */
+export interface PlaceDetails extends PlaceSummary {
+  userRatingCount: number | null;
+  websiteUri: string | null;
+  nationalPhoneNumber: string | null;
+}
+
 /** Place search + details/reviews. Implemented by Google Places in prod. */
 export interface PlacesProvider {
   search(query: string, near?: LatLng): Promise<PlaceSummary[]>;
-  details(googlePlaceId: string): Promise<PlaceSummary | null>;
+  details(googlePlaceId: string): Promise<PlaceDetails | null>;
 }
 
 /** The nominal RV highway speed the straight-line estimate assumes. */
@@ -115,7 +131,14 @@ export class StubPlacesProvider implements PlacesProvider {
   async search(): Promise<PlaceSummary[]> {
     return [];
   }
-  async details(): Promise<PlaceSummary | null> {
+  /**
+   * Still `null`, and that is the whole point (#82 §7 state ④): only the RETURN
+   * TYPE moved. An object of nulls would make `detailsPlacesEnvelope` answer
+   * `results: [<hollow row>]` instead of `[]`, and the G-line would render
+   * "G ★ — · —" in the one state that is normal in every local, CI and walk
+   * environment. No provider means no line at all.
+   */
+  async details(): Promise<PlaceDetails | null> {
     return null;
   }
 }

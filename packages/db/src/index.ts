@@ -16,3 +16,4 @@ export type Db = typeof db;
 export * from "./queries";
 export * from "./mutations";
 export * from "./locate";
+export * from "./places-cache";

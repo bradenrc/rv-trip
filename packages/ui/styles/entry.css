@@ -164,3 +164,67 @@
   --rv-shadow-lg: 0 4px 10px -2px rgba(0, 0, 0, 0.44), 0 2px 4px -2px rgba(0, 0, 0, 0.36);
   --rv-shadow-xl: 0 12px 28px -6px rgba(0, 0, 0, 0.55), 0 4px 10px -4px rgba(0, 0, 0, 0.44);
 }
+
+/* ── a LIGHT ISLAND — a subtree pinned back to the light half (#82) ────
+   For FOREIGN artwork only: a third-party favicon was drawn for a white
+   backing and has no dark variant we are allowed to make, so the chip under
+   one keeps the contrast it was drawn for in BOTH halves. Our own marks never
+   go in an island; they flip with the app.
+
+   Not one new colour and not a new token: every declaration below is the
+   `:root` block above, repeated verbatim under a second selector. It works for
+   the same reason `.dark` works — the utility compiles to `var(--rv-surface)`,
+   so it re-resolves inside any island.
+
+   THE ONE GOTCHA, already written down above: `@theme inline` still emits
+   `--color-rv-*` on `:root`, and those are substituted at computed-value time
+   ON `:root` — so an inline style reading `var(--color-rv-green)` resolves the
+   DOCUMENT half, never the island's. `categoryMeta()` returns exactly those
+   strings, so CategoryTile / CategoryChip / `cm.Icon` must NEVER be placed
+   inside an island. It holds the chip's backing and the <img>, and nothing
+   else. */
+.rv-light-island {
+  /* The three "chrome" tokens (--rv-navy, --rv-navy-deep, --rv-green-on-dark)
+     are NOT re-declared: they carry the same byte in both halves, so an island
+     that repeated them would say nothing — and the manifest's theme_color is
+     asserted to be exactly TWO `--rv-navy` declarations (pwa.test.ts). */
+  /* surfaces */
+  --rv-surface-alt: #f8fafc; /* slate-50 */
+  --rv-surface: #ffffff; /* white */
+  --rv-navy-soft: #f1f5f9; /* slate-100 */
+  /* borders */
+  --rv-border: #e2e8f0; /* slate-200 */
+  --rv-border-soft: #f1f5f9; /* slate-100 */
+  --rv-border-hi: #cbd5e1; /* slate-300 */
+  /* ink */
+  --rv-ink: #0f172a; /* slate-900 */
+  --rv-ink-muted: #475569; /* slate-600 */
+  --rv-ink-faded: #64748b; /* slate-500 */
+  --rv-ink-subtle: #94a3b8; /* slate-400 */
+  /* accent */
+  --rv-accent: #0369a1; /* sky-700 */
+  --rv-accent-bright: #0ea5e9; /* sky-500 */
+  --rv-accent-deep: #0284c7; /* sky-600 */
+  --rv-accent-soft: #f0f9ff; /* sky-50 */
+  --rv-accent-ink: #ffffff; /* white */
+  /* green */
+  --rv-green: #059669; /* emerald-600 */
+  --rv-green-cta: #059669; /* emerald-600 */
+  --rv-green-soft: #ecfdf5; /* emerald-50 */
+  --rv-green-ink: #047857; /* emerald-700 */
+  /* status */
+  --rv-warning: #d97706; /* amber-600 */
+  --rv-warning-soft: #fffbeb; /* amber-50 */
+  --rv-info: #0891b2; /* cyan-600 */
+  --rv-info-soft: #ecfeff; /* cyan-50 */
+  --rv-info-ink: #0891b2; /* cyan-600 */
+  /* travel category */
+  --rv-travel: #7c3aed; /* violet-600 */
+  --rv-travel-ink: #7c3aed; /* violet-600 */
+  --rv-travel-soft: #f5f3ff; /* violet-50 */
+  /* elevation — slate-900 alphas; pure black reads leaden on slate-50 */
+  --rv-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --rv-shadow-md: 0 1px 3px rgba(15, 23, 42, 0.1), 0 1px 2px -1px rgba(15, 23, 42, 0.08);
+  --rv-shadow-lg: 0 4px 10px -2px rgba(15, 23, 42, 0.12), 0 2px 4px -2px rgba(15, 23, 42, 0.08);
+  --rv-shadow-xl: 0 12px 28px -6px rgba(15, 23, 42, 0.16), 0 4px 10px -4px rgba(15, 23, 42, 0.1);
+}

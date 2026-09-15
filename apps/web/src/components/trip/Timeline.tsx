@@ -15,7 +15,10 @@ import {
   FloatingStopCard,
   AllScheduledCard,
   ShelfIdeaCard,
+  DrillRow,
+  ideaCategoryType,
 } from "@rv-trip/ui";
+import { GoogleLine } from "@/components/places/GoogleLine";
 import type { Idea } from "@rv-trip/core";
 import type { IdeaShelf, ShelfFilter, TimelineGap, TimelineModel } from "@/lib/trip-logic";
 
@@ -56,6 +59,9 @@ export function Timeline({
   onAddFromPlaces,
   onCycleIdea,
   onLocateIdea,
+  onRateIdea,
+  onNoteIdea,
+  onCommitIdeaNote,
   ideaPicker,
   ideaActions,
 }: {
@@ -79,12 +85,28 @@ export function Timeline({
   /** Opens the app's place picker on a coordless shelf row — the same #69
    * entrance the stop sheet's card has. */
   onLocateIdea: (ideaId: string) => void;
+  /**
+   * The expanded row's research pad (#82). SHELF-SIDE handlers, not the stop
+   * sheet's: an unattached idea is not in any stop's `ideas`, so the sheet's
+   * `onIdeaRating`/`onIdeaNote` — which all key on `selectedStop.id` — cannot
+   * reach this row at all.
+   */
+  onRateIdea: (ideaId: string, n: number) => void;
+  onNoteIdea: (ideaId: string, v: string) => void;
+  onCommitIdeaNote: (ideaId: string) => void;
   /** The open picker, mounted under the row the app opened it on. */
   ideaPicker?: (idea: Idea) => ReactNode;
   /** The row menu the app hangs on a shelf card (#74's door lands here). */
   ideaActions?: (idea: Idea) => ReactNode;
 }) {
   const [dragged, setDragged] = useState<TimelineDrag | null>(null);
+  /**
+   * Which shelf row has its research pad open — ONE at a time, and the rail's
+   * own state, exactly as `dragged` is. It never leaves this component: the
+   * pad's writes go straight out through the handlers above, so there is
+   * nothing for TripPlanner to hold.
+   */
+  const [expandedIdeaId, setExpandedIdeaId] = useState<string | null>(null);
 
   const openActive = landsOnOpenDays(dragged);
   const stopActive = landsOnAStop(dragged);
@@ -223,10 +245,29 @@ export function Timeline({
                       idea={row.idea}
                       nearestStopName={row.nearestStopName}
                       distanceMi={row.distanceMi}
+                      expanded={expandedIdeaId === row.idea.id}
                       actions={ideaActions?.(row.idea)}
                       picker={ideaPicker?.(row.idea)}
+                      /* A shelf idea has no parent stop and so NO LOCALITY:
+                         every query is the bare title, and the AI-Mode question
+                         drops its " in <locality>" clause. `nearestStopName` is
+                         deliberately not used — "nearest stop you already own"
+                         is a proximity fact, not this place's town. */
+                      drill={
+                        <DrillRow
+                          name={row.idea.title}
+                          type={ideaCategoryType(row.idea.category)}
+                        />
+                      }
+                      gline={<GoogleLine googlePlaceId={row.idea.place?.googlePlaceId} />}
+                      onClick={() =>
+                        setExpandedIdeaId((id) => (id === row.idea.id ? null : row.idea.id))
+                      }
                       onCycle={() => onCycleIdea(row.idea.id)}
                       onLocate={() => onLocateIdea(row.idea.id)}
+                      onRating={(n) => onRateIdea(row.idea.id, n)}
+                      onNote={(v) => onNoteIdea(row.idea.id, v)}
+                      onCommitNote={() => onCommitIdeaNote(row.idea.id)}
                       onDragStart={() =>
                         setDragged({
                           kind: "idea",

@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { locatePlaces, type PlaceSummary, type PlacesProvider } from "@rv-trip/core";
+import {
+  locatePlaces,
+  type PlaceDetails,
+  type PlaceSummary,
+  type PlacesProvider,
+} from "@rv-trip/core";
 import { dbLocateStore, listLocateTargetsForOwner } from "@rv-trip/db";
 import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { POST } from "@/app/api/places/locate/route";
@@ -26,7 +31,8 @@ class FakeProvider implements PlacesProvider {
     this.asked.push(query);
     return this.answer ? [this.answer] : [];
   }
-  async details(): Promise<PlaceSummary | null> {
+  // Locate never calls details; the type widened with #82's PlaceDetails.
+  async details(): Promise<PlaceDetails | null> {
     return null;
   }
 }

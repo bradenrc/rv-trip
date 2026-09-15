@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { detailsPlacesEnvelope, googlePlaceIdSchema, placesEnvelopeStatus } from "@rv-trip/core";
+import { dbPlacesCache } from "@rv-trip/db";
 import { placesProvider } from "@/lib/places";
 
 /**
@@ -10,6 +11,13 @@ import { placesProvider } from "@/lib/places";
  * Not rate limited: a pick is not a keystroke. An id Google has retired comes
  * back as `{ results: [], degraded: false }` — we asked, and there is nothing
  * there. The logic is unit tested in packages/core's `detailsPlacesEnvelope`.
+ *
+ * Since #82 the answer is a `PlaceDetails` — `PlaceSummary` plus the rating
+ * count, the website and the phone the research pad's quiet G-line renders —
+ * and it is read through the 30-day `places` cache first, so a second open of
+ * the same row costs nothing. The cache is NOT owner-scoped: a real-world
+ * place is not anybody's. This route is the G-line's only consumer; the picker
+ * never calls it.
  *
  * §3 draws a `sessionToken` echoed from search onto this call. It is not
  * implemented and takes no query parameter: a session token is a Google
@@ -27,6 +35,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     provider,
     configured,
     googlePlaceId: parsed.data,
+    cache: dbPlacesCache(),
   });
   return NextResponse.json(envelope, { status: placesEnvelopeStatus(envelope) });
 }

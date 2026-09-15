@@ -7,6 +7,7 @@ import type {
   GraduateForm,
   PlaceSuggestion,
   SavedPlace,
+  SavedPlacePatch,
   SavePlaceForm,
 } from "@rv-trip/core";
 import {
@@ -157,6 +158,26 @@ export function PlacesWorkspace({
   };
 
   /**
+   * The research pad's write (#82) — one field at a time, off the card itself
+   * rather than through the edit sheet.
+   *
+   * It goes through the SAME `tripApi.updatePlace` + `applySavedPlacePatch` pair
+   * the sheet and the graduation already use, so the island's list stays the
+   * one truth about the library. `savedPlacePatch` is a full partial of the
+   * create grammar — `note` and `rating` are in it, with no status constraint —
+   * and PATCH /api/places/[id] is owner-scoped, so nothing new is opened up.
+   *
+   * Optimistic, and NOT rolled back on failure: unlike the sheet there is no
+   * dialog left open to report into, so a failed patch surfaces the same toast
+   * every other library write uses and the card keeps what you typed rather
+   * than silently swallowing it.
+   */
+  const patchPlace = (place: SavedPlace, patch: SavedPlacePatch) => {
+    setPlaces((ps) => ps.map((p) => (p.id === place.id ? applySavedPlacePatch(p, patch) : p)));
+    tripApi.updatePlace(place.id, patch).catch(failed);
+  };
+
+  /**
    * Delete is a hard delete (§3), so the undo toast re-saves the row rather
    * than un-deleting it: same content, new id. The card leaves the grid first
    * and comes back only if the server refuses, so the shelf never lies about
@@ -208,6 +229,7 @@ export function PlacesWorkspace({
 
       <PlacesLibrary
         places={places}
+        onPatch={patchPlace}
         leading={shelf?.suggestions.map((s) => (
           <SuggestedPlaceCard
             key={s.key}
