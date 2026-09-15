@@ -113,7 +113,10 @@ export interface IdeaPin {
    * and the sheet row are recognisably one object. */
   name: string;
   status: IdeaStatus;
-  stopName: string;
+  /** The stop this idea hangs under, or `null` for a SHELF idea (#80): a
+   * trip-level idea is attached to no stop, so there is no name to borrow and
+   * the rail prints the trip alone. */
+  stopName: string | null;
   tripId: string;
   tripTitle: string;
 }
@@ -216,23 +219,32 @@ function reservationsOf(stop: Stop): PinReservation[] {
 }
 
 /**
- * A stop's ideas, split the same way its own point is: a drawable one becomes
- * an `IdeaPin`, a coordless one an `UnmappedRow`.
+ * A trip's ideas, split the same way a stop's own point is: a drawable one
+ * becomes an `IdeaPin`, a coordless one an `UnmappedRow`.
+ *
+ * Called twice per trip — once per stop for the ideas hanging under it, and
+ * once for `trip.ideas`, the SHELF (#80): the `stop_id IS NULL` rows the trip
+ * tree carries beside its legs. One row has one home (queries.ts TRIP_WITH
+ * filters the shelf to unattached rows), so nothing is drawn twice, and
+ * `stopName` is the only thing that differs — a shelf idea has no stop to
+ * borrow a name from.
  *
  * No new query — `Trip` already carries ideas with a nullable `place`, and
- * `listTripsWithStopsForOwner` already hydrates them. Q4 = A: EVERY status
- * counts into the unmapped total, because the dashed chip and the Locate button
- * beside it have to tell one story, and a "done" idea with no coordinates is
- * still a row the map cannot draw.
+ * `listTripsWithStopsForOwner` already hydrates both lists. Q4 = A: EVERY
+ * status counts into the unmapped total, because the dashed chip and the Locate
+ * button beside it have to tell one story, and a "done" idea with no
+ * coordinates is still a row the map cannot draw — and a shelf idea that never
+ * reached this list would be a row the Locate batch could never see.
  */
 function pushIdeas(
   pins: MapPin[],
   unmapped: UnmappedRow[],
   trip: Trip,
-  stop: Stop,
+  ideas: Stop["ideas"],
+  stopName: string | null,
   layer: Exclude<MapLayer, "saved">,
 ): void {
-  for (const idea of stop.ideas) {
+  for (const idea of ideas) {
     // `mapIdea` returns a non-null `place` the moment place_name is set, with
     // lat/lng still null — the normal outcome of the picker's free-text escape
     // row. Half a place is not a pin, so the same `hasCoords` test the stops
@@ -249,7 +261,7 @@ function pushIdeas(
       layer,
       name: idea.title,
       status: idea.status,
-      stopName: stop.place.name,
+      stopName,
       tripId: trip.id,
       tripTitle: trip.title,
     });
@@ -293,7 +305,7 @@ export function buildMapModel(
           unmapped.push({ id: stop.id, name: stop.place.name, layer, kind: "stop" });
           // The stop has no pin, but its ideas still do — an idea's coordinates
           // are its own, not borrowed from the stop it hangs under.
-          pushIdeas(pins, unmapped, trip, stop, layer);
+          pushIdeas(pins, unmapped, trip, stop.ideas, stop.place.name, layer);
           continue;
         }
         pins.push({
@@ -315,9 +327,14 @@ export function buildMapModel(
           notes: stop.notes,
           reservations: reservationsOf(stop),
         });
-        pushIdeas(pins, unmapped, trip, stop, layer);
+        pushIdeas(pins, unmapped, trip, stop.ideas, stop.place.name, layer);
       }
     }
+
+    // The shelf, after the legs: the trip's unattached ideas (#80). They are
+    // drawn last, so a maybe never lands between the stops in the rail's
+    // reading order.
+    pushIdeas(pins, unmapped, trip, trip.ideas, null, layer);
 
     // Arcs are drawn only for the trips AHEAD of you — a traveled trip's drive
     // already happened, and a dashed estimate over a real past route is a lie.

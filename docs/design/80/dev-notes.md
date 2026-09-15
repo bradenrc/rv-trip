@@ -389,3 +389,165 @@ in `apps/web`'s route suite against real Postgres, which is where the existing
   sees it only as "pressing Locate on an idea that shows a typed place name now
   finds it". The two FLAGs the vet raised (the two-payload drag, the map
   polish) belong to i1 and i4 and are untouched by this diff.
+
+---
+
+# #80 i4 — Map render polish batch from the #69 walk · #76
+
+Four render findings the #69 dev-notes flagged as render-required
+(`docs/design/69/dev-notes.md:136-146`), landed last so they sit against the pin
+population the shelf actually produces. No schema, no endpoint, no route.
+
+## 0 · The gap i4 had to close first: the shelf produced no pins at all
+
+`buildMapModel` walked `stop.ideas` only, so every row i1 put on `trip.ideas[]`
+was invisible to the map — not drawn, and *not even counted as unmapped*, which
+means the /map Locate button could never batch a shelf idea even though i3's
+`loadIdeas` and `listLocateTargetsForOwner` both return them. Half the locate
+path was wired and half was not. The plan item says i4 runs "last so it lands
+against **the final pin population the shelf produces**", and its acceptance is
+written about "a far-flung idea joining the pin set" — a sentence that only has
+a referent once shelf ideas pin. So closing it is item 4's own precondition.
+
+- **`apps/web/src/components/map/pins.ts:239`** — `pushIdeas` now takes the
+  ideas array and a `stopName`, instead of a `Stop`. Two call sites per trip:
+  `:308`/`:330` for a stop's ideas, and **`:337`** for `trip.ideas` — the shelf,
+  pushed after the legs so a maybe never lands between stops in the rail's
+  reading order. `TRIP_WITH` already filters the shelf to `stop_id IS NULL`
+  rows (i1, queries.ts:53-59), so one row still has exactly one home and
+  nothing is drawn twice.
+- **`pins.ts:119`** — `IdeaPin.stopName` becomes `string | null`. An unattached
+  idea hangs under no stop; there is no name to borrow and inventing one
+  ("Ideas", "the shelf") would be copy the design never wrote.
+- **`MapOverview.tsx:445`** and **`:520`** (the two readers, forced by the type):
+  `[pin.tripTitle, pin.stopName].filter(Boolean).join(" · ")` and
+  `["Idea", pin.status, pin.stopName].filter(Boolean).join(" · ")` — the same
+  idiom the saved-place meta beside them already uses (`:523`). MapOverview is
+  outside the item's named scope (`MapView.tsx` + `pins.ts`); these two lines
+  are the whole of it. **Flagged for qa.**
+
+Tests — `apps/web/src/components/map/pins.test.ts:400`, four cases: a located
+shelf idea draws with `stopName: null`; a coordless one becomes an
+`{kind: "idea"}` unmapped row that `locateRowOf` round-trips (the Locate path);
+`layerCounts` counts it under its trip's layer beside the attached ones; and the
+shelf's pins arrive once, after the stops. Written first, run red (4 failed),
+then green.
+
+## 1 · IdeaRing legibility at real zoom (`MapView.tsx:499`)
+
+Two changes, both inside the shipped vocabulary — no new palette key, no raw
+hex, so `map-palette` is untouched:
+
+- **the centre is `palette.hollowGround`, not `transparent`.** An 11px unfilled
+  ring disappears into the cartography at real zoom, worst on sat where a
+  photograph runs through it. `hollowGround` is the ground the "been there"
+  disc already uses, so the ring stays *hollow in the grammar's sense* — not a
+  commitment — while reading against any basemap.
+- **selection repaints** (`:504-505`): `palette.selStroke` / `palette.selFill`,
+  the same two keys `StopDisc` takes. It used to change only its `box-shadow`,
+  so picking an idea from the rail barely moved anything on the canvas while a
+  stop and a saved place both repaint.
+
+Unchanged on purpose: **11px, no number, never an arc endpoint** — the whole
+"a maybe reads quieter than a commitment" rule. It did not need growing; it
+needed to stop vanishing.
+
+## 2 · The re-fit no longer fights the reader (`MapView.tsx:121-142`)
+
+The #69 flag: "`boundsFor` is computed over the pin set and refits on
+`boundsKey`, so idea pins change /map's initial camera — worth a look at whether
+a far-flung idea over-zooms out."
+
+The box itself is right and stays right: it must contain every pin, outlier
+included (that is the acceptance, asserted below). What was wrong is that it
+fired **unconditionally** — every located idea, every layer-chip toggle, every
+`router.refresh()` after a Locate press threw the camera back to the whole-set
+box and discarded whatever pan/zoom the reader had chosen.
+
+- **`packages/core/src/domain/bounds.ts:81` `boundsKey(b)`** — the refit
+  identity, lifted out of `MapView`'s inline template so the phone's lens keys
+  its own refit the same way and so it is testable at all.
+- **`bounds.ts:99` `boundsCovers(outer, inner)`** — is the new box already
+  inside what the camera shows? `outer` null (no projection yet) covers
+  nothing; `inner` null (nothing to fit) is covered by anything.
+- **`MapView.tsx:136`** — the effect asks that question and returns early when
+  the answer is yes. A **far-flung** idea is *not* covered, so the map does
+  re-fit and shows it: the outlier still wins, the neighbour no longer
+  interrupts.
+- **`MapView.tsx:350` `shownBounds(map)`** — the vendor seam: `getBounds()` is a
+  `LngLatBounds` of accessors, `boundsCovers` is pure geometry that has never
+  heard of Mapbox. The `onLoad` fit (`:177`) is unchanged and still
+  unconditional — the first frame has nothing to preserve.
+
+Tests (the acceptance names `bounds` and `map-pins`):
+
+- `packages/core/src/domain/bounds.test.ts:165` — a far-flung idea (Moab) joining
+  the PNW stops: the box **contains every pin**, both spans **grow** rather than
+  collapsing, and neither is near `MIN_BOUNDS_SPAN`; a *near* idea produces a
+  box identical to the stops' own.
+- `bounds.test.ts:204` `boundsKey`, `:218` `boundsCovers` — five cases including
+  the two the guard turns on: an already-covered box (skip) and the far-flung
+  one (fit). Written first, run red (8 failed, `boundsCovers is not a
+  function`), then green.
+- `packages/core/src/planner/map-pins.test.ts:304` — the same property through
+  `mapBounds`, i.e. over arcs **and** pins, plus `:329` the `boundsCovers`
+  pairing on the real seed trip. These two assert behaviour `boundsFor` already
+  had — they are the acceptance's characterization of it, not tests that drove
+  new code, and I would rather say so than imply they caught something.
+
+## 3 · Spiderfy when an idea shares a stop's coordinate
+
+Already correct in the shipped code: `MapView.tsx:95` passes
+`anchor: p.kind === "stop"`, and `spiderfy` (bounds.ts) anchors on the first
+`anchor` member. The vet's FLAG was right that only a real render proves the
+*drawn* result; what static code can prove is the placement, and it was not
+pinned for the idea case (the existing tests all use a saved place).
+
+`bounds.test.ts:253` now pins it: a stop and an idea on one coordinate resolve to
+**two distinct screen points**, the stop keeps the true position
+(`spiderfied: false`, `dx/dy === 0`), the idea is the one moved by
+`SPIDER_RADIUS_PX`, both keep the true lat/lng for the leader, and the anchor
+is the stop **whichever order the pins arrive in**.
+
+## 4 · The "Planning now" chip density — what I did NOT invent
+
+`pins.ts:36` is `LAYER_LABEL.planning`. The #69 walk had already *accepted* the
+count growth ("The Planning-now chip going 4 → 9 on the seeded trip (G4,
+accepted in the design)"), and neither the wireframe nor any survey answer
+specifies a new chip grammar — no second number, no Maybes chip, no copy.
+
+So what i4 delivers here is the only thing that was actually broken: the
+planning layer's **membership**. With §0, a shelf idea now counts under its
+trip's layer (`layerCounts`, pins.ts), so the chip's number and the set the chip
+toggles still describe each other — which is the invariant MapOverview:88-96
+already argues for in prose. On the seeded trip that number grows again (i1
+plants three shelf ideas).
+
+**Flagged, not guessed:** if at the walk "Planning now · 12" reads too dense
+against a real shelf, the fix is a chip-grammar decision (split commitments from
+maybes, or fold ideas under their own chip) that no answered question covers. It
+should come back as its own issue rather than be invented in a render-polish
+batch. Changing `layerCounts` to under-count silently would be worse than the
+dense number: the chip would then hide rows it is still toggling.
+
+## For qa / the walk
+
+- **Claim to check:** §0 is the one piece of i4 that is not "polish" — it is a
+  behaviour gap between i1's shelf and the map. If qa reads the item's scope
+  strictly (MapView + pins.ts render polish only), §0 is still *inside* the named
+  files, but it is the reason the item's own acceptance sentence has a subject.
+  The two `MapOverview.tsx` lines are the only edit outside the named two files.
+- **Render-required, unverified here — the vet's second FLAG stands.** All four
+  findings run through react-map-gl/Mapbox GL against a provider key and there
+  is no DOM/component runner in this repo (`apps/web` vitest is
+  `environment: "node"`, `include: src/**/*.test.ts`). Specifically unproven by
+  static analysis:
+  - whether the `hollowGround`-centred ring now reads at real zoom on **sat**
+    and **night**, and whether the selected ring is distinguishable at 11px;
+  - whether the refit guard feels right in the hand — locate a near idea and the
+    camera should NOT move; locate a far-flung one and it SHOULD re-frame;
+  - whether a spiderfied idea beside its stop is legible once the 11px ring and
+    the 27px disc are 26px apart with a dashed leader between them;
+  - the Planning-now chip's density with a seeded shelf.
+- **Not run:** `pnpm db:seed` (the local dev DB is shared with other worktrees'
+  walk servers), and no dev server was started.

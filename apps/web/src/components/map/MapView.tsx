@@ -3,8 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import MapGL, { Layer, Marker, Source, type MapRef } from "react-map-gl/mapbox";
 import type { MapEvent } from "react-map-gl/mapbox";
-import type { ExpressionSpecification } from "mapbox-gl";
-import { boundsFor, spiderfy, type SpiderPoint } from "@rv-trip/core";
+import type { ExpressionSpecification, Map as MapboxMap } from "mapbox-gl";
+import {
+  boundsCovers,
+  boundsFor,
+  boundsKey,
+  spiderfy,
+  type Bounds,
+  type SpiderPoint,
+} from "@rv-trip/core";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { applyNightfall } from "./nightfall";
 import {
@@ -109,21 +116,37 @@ export function MapView({
       ]),
     [pins, arcs],
   );
-  // Re-fit whenever the visible set changes — toggling a layer chip re-fits.
-  const boundsKey = bounds ? `${bounds.west},${bounds.south},${bounds.east},${bounds.north}` : "";
+  // `bounds` is rebuilt on every render; the string key is the real dependency
+  // (core's `boundsKey`, so the phone's lens keys its own re-fit identically).
+  const key = boundsKey(bounds);
 
+  /**
+   * Re-fit when the visible set changes — but only when it changes something
+   * the camera is not already showing (#80 i4).
+   *
+   * The shelf lets an idea sit anywhere on the trip, so the pin set now grows
+   * genuine outliers, and the old unconditional re-fit made that hostile: every
+   * located idea, every chip toggle, every refresh threw the camera back to the
+   * whole-set box and undid the reader's own pan and zoom. `boundsCovers` asks
+   * the one question worth asking — is the new box already on screen? — and
+   * skips the fit when it is. A FAR-FLUNG idea is not covered, so the map does
+   * re-fit and actually shows it: the outlier still wins, the neighbour no
+   * longer interrupts.
+   */
   useEffect(() => {
     if (!bounds) return;
-    ref.current?.fitBounds(
+    const map = ref.current?.getMap();
+    if (!map) return;
+    if (boundsCovers(shownBounds(map), bounds)) return;
+    map.fitBounds(
       [
         [bounds.west, bounds.south],
         [bounds.east, bounds.north],
       ],
       { padding: 56, maxZoom: 11, duration: 600 },
     );
-    // `bounds` is rebuilt on every render; the string key is the real dependency.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey]);
+  }, [key]);
 
   // The Nightfall repaint is STYLE-owned, not map-owned: `setStyle` throws away
   // every `setPaintProperty` write, and `load` fires once per map while
@@ -158,7 +181,7 @@ export function MapView({
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [boundsKey, mode]);
+  }, [key, mode]);
 
   const arcGeoJson = useMemo(
     () => ({
@@ -317,6 +340,19 @@ function labelAt(a: DriveArc): [number, number] {
   return [(a.from.lng + a.to.lng) / 2, (a.from.lat + a.to.lat) / 2];
 }
 
+/**
+ * What the camera is showing right now, as core's `Bounds`.
+ *
+ * The vendor seam for the re-fit guard: `getBounds()` is a `LngLatBounds` with
+ * accessor methods, and `boundsCovers` (bounds.ts) is pure geometry that has
+ * never heard of Mapbox. It returns null before the map has a projection.
+ */
+function shownBounds(map: MapboxMap): Bounds | null {
+  const b = map.getBounds();
+  if (!b) return null;
+  return { west: b.getWest(), south: b.getSouth(), east: b.getEast(), north: b.getNorth() };
+}
+
 /** 1px dashed leader from a nudged pin back to its true coordinate. */
 function SpiderLeader({ dx, dy, palette }: { dx: number; dy: number; palette: OverlayPalette }) {
   const length = Math.hypot(dx, dy);
@@ -440,20 +476,33 @@ function PlaceDrop({
 }
 
 /**
- * An idea: an 11px hollow ring in the Do/activity colour — under half the 27px
- * stop disc, which is the whole point. A maybe reads smaller than a commitment,
+ * An idea: an 11px ring in the Do/activity colour — under half the 27px stop
+ * disc, which is the whole point. A maybe reads smaller than a commitment,
  * carries no number and is never an arc endpoint.
  *
  * The colour resolves through `palette.category.Do`, the same key `PlaceDrop`
  * already reads, so this adds no palette key and no map-palette test churn.
+ *
+ * Two legibility fixes from the #69 walk (#80 i4), both inside the shipped
+ * vocabulary rather than a new one:
+ *
+ * - The ring's centre is `hollowGround`, not `transparent`. An 11px unfilled
+ *   ring disappears into the cartography at real zoom — worst on sat, where a
+ *   photograph runs straight through it. `hollowGround` is the ground the
+ *   "been there" disc already uses, so the ring stays HOLLOW in the grammar's
+ *   sense (not a commitment) while reading against any basemap.
+ * - Selection repaints, rather than only re-shadowing. It used to change its
+ *   box-shadow alone, so picking an idea from the rail barely moved anything on
+ *   the canvas while a stop and a saved place both repaint. Same two selection
+ *   keys `StopDisc` takes, same 11px, still no number.
  */
 function IdeaRing({ selected, palette }: { selected: boolean; palette: OverlayPalette }) {
   return (
     <div
       className="size-[11px] rounded-full border-2"
       style={{
-        borderColor: palette.category.Do,
-        background: "transparent",
+        borderColor: selected ? palette.selStroke : palette.category.Do,
+        background: selected ? palette.selFill : palette.hollowGround,
         boxShadow: markerShadow(selected ? "lg" : "sm", palette, selected),
       }}
     />

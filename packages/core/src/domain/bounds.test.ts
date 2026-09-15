@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  boundsCovers,
   boundsFor,
+  boundsKey,
   hasCoords,
   spiderfy,
   MIN_BOUNDS_SPAN,
@@ -151,5 +153,125 @@ describe("spiderfy", () => {
     for (const p of out.filter((q) => q.spiderfied)) {
       expect(Math.hypot(p.dx, p.dy)).toBeCloseTo(SPIDER_RADIUS_PX, 1);
     }
+  });
+});
+
+/**
+ * #80 i4 — the shelf lets an idea sit anywhere on the trip, not only beside a
+ * stop, so the pin set can now grow a genuine outlier. These pin the two
+ * properties the refit rests on: the box still holds EVERY pin, and it does not
+ * collapse to the degenerate floor on the way.
+ */
+describe("boundsFor — a far-flung idea joins the pin set", () => {
+  // The Pacific Northwest Loop's three scheduled stops.
+  const trip = [
+    { lat: 46.1879, lng: -123.8313 }, // Astoria
+    { lat: 44.6365, lng: -124.053 }, // Newport
+    { lat: 44.0582, lng: -121.3153 }, // Bend
+  ];
+  // A shelf idea parked a long way off — Moab, UT.
+  const farFlung = { lat: 38.5733, lng: -109.5498 };
+
+  it("still encloses every pin, the outlier included", () => {
+    const b = boundsFor([...trip, farFlung])!;
+    for (const p of [...trip, farFlung]) {
+      expect(p.lat).toBeGreaterThanOrEqual(b.south);
+      expect(p.lat).toBeLessThanOrEqual(b.north);
+      expect(p.lng).toBeGreaterThanOrEqual(b.west);
+      expect(p.lng).toBeLessThanOrEqual(b.east);
+    }
+    expect(b).toEqual({ west: -124.053, south: 38.5733, east: -109.5498, north: 46.1879 });
+  });
+
+  it("grows the fit rather than collapsing it", () => {
+    const before = boundsFor(trip)!;
+    const after = boundsFor([...trip, farFlung])!;
+    const span = (b: typeof before) => ({ lat: b.north - b.south, lng: b.east - b.west });
+    expect(span(after).lat).toBeGreaterThan(span(before).lat);
+    expect(span(after).lng).toBeGreaterThan(span(before).lng);
+    // and neither axis is anywhere near the degenerate floor
+    expect(span(after).lat).toBeGreaterThan(MIN_BOUNDS_SPAN);
+    expect(span(after).lng).toBeGreaterThan(MIN_BOUNDS_SPAN);
+  });
+
+  it("a near idea moves nothing the trip's own stops did not already cover", () => {
+    // An idea a couple of miles from Bend, inside the box the stops already make.
+    const near = { lat: 44.0601, lng: -121.3402 };
+    expect(boundsFor([...trip, near])).toEqual(boundsFor(trip));
+  });
+});
+
+describe("boundsKey", () => {
+  it("is the same string for the same box and differs when the box moves", () => {
+    const a = boundsFor([{ lat: 44, lng: -121 }, { lat: 46, lng: -123 }]);
+    const b = boundsFor([{ lat: 44, lng: -121 }, { lat: 46, lng: -123 }]);
+    const c = boundsFor([{ lat: 44, lng: -121 }, { lat: 47, lng: -123 }]);
+    expect(boundsKey(a)).toBe(boundsKey(b));
+    expect(boundsKey(a)).not.toBe(boundsKey(c));
+  });
+
+  it("is the empty string when there is nothing to fit", () => {
+    expect(boundsKey(null)).toBe("");
+  });
+});
+
+describe("boundsCovers — the refit guard", () => {
+  const shown = { west: -125, south: 43, east: -120, north: 47 };
+
+  it("is true when the box on screen already holds the new one", () => {
+    expect(boundsCovers(shown, { west: -124, south: 44, east: -121, north: 46 })).toBe(true);
+  });
+
+  it("is true for an identical box — a refit would reveal nothing", () => {
+    expect(boundsCovers(shown, { ...shown })).toBe(true);
+  });
+
+  it("is false when a far-flung idea pushes the new box outside", () => {
+    // Moab is south and east of everything the camera is showing.
+    expect(boundsCovers(shown, { west: -125, south: 38.5733, east: -109.5498, north: 47 })).toBe(
+      false,
+    );
+  });
+
+  it("is false when the boxes merely overlap", () => {
+    expect(boundsCovers(shown, { west: -130, south: 44, east: -124, north: 46 })).toBe(false);
+  });
+
+  it("covers nothing when there is no camera box yet, and everything when there is nothing to show", () => {
+    expect(boundsCovers(null, shown)).toBe(false);
+    expect(boundsCovers(shown, null)).toBe(true);
+    expect(boundsCovers(null, null)).toBe(true);
+  });
+});
+
+/**
+ * #80 i4 — an idea pinned at the very place its stop sits (the picker hands
+ * back the campground's own coordinate often enough). `MapView` passes
+ * `anchor: p.kind === "stop"`, so the commitment must keep the true point and
+ * the maybe must be the one that moves.
+ */
+describe("spiderfy — an idea sharing a stop's exact coordinate", () => {
+  const stop: SpiderPoint = { id: "stop-bend", lat: 44.0582, lng: -121.3153, anchor: true };
+  const idea: SpiderPoint = { id: "idea-float", lat: 44.0582, lng: -121.3153 };
+
+  it("resolves to two distinct screen points with the stop as the anchor", () => {
+    const out = spiderfy([stop, idea]);
+    const s = out.find((p) => p.id === "stop-bend")!;
+    const i = out.find((p) => p.id === "idea-float")!;
+
+    expect(s.spiderfied).toBe(false);
+    expect([s.dx, s.dy]).toEqual([0, 0]);
+    expect(i.spiderfied).toBe(true);
+    // two points, not one: the drawn positions differ by the ring radius
+    expect(Math.hypot(i.dx - s.dx, i.dy - s.dy)).toBeCloseTo(SPIDER_RADIUS_PX, 1);
+    // both still hang off the one true coordinate — the leader needs it
+    expect([i.lat, i.lng]).toEqual([stop.lat, stop.lng]);
+  });
+
+  it("anchors on the stop whichever order the pins arrive in", () => {
+    const a = spiderfy([stop, idea]).find((p) => p.id === "idea-float")!;
+    const b = spiderfy([idea, stop]).find((p) => p.id === "idea-float")!;
+    expect([a.dx, a.dy]).toEqual([b.dx, b.dy]);
+    expect(spiderfy([idea, stop]).find((p) => p.id === "stop-bend")!.spiderfied).toBe(false);
   });
 });
