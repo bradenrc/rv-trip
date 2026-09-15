@@ -12,6 +12,12 @@ import { getOwner } from "@/lib/owner";
  * lat / lng / google_place_id, and — the part that matters — it does that ONLY
  * when the body actually carried a `place` key. A status cycle, a rating and a
  * note save each send one field, and none of them may erase a located idea.
+ *
+ * `stopId` IS a real column, so it rides through unflattened — and it is the
+ * one key on this body that names a row the WHERE cannot vouch for. The
+ * mutation proves the pair and throws "stop not found"; that is a 404 here, the
+ * same answer `POST /api/ideas` gives the same mistake. Anything else rethrows:
+ * a database fault is not a missing stop.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -19,7 +25,14 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  await updateIdeaFields(await getOwner(), id, ideaPatchColumns(parsed.data));
+  try {
+    await updateIdeaFields(await getOwner(), id, ideaPatchColumns(parsed.data));
+  } catch (e) {
+    if (e instanceof Error && e.message === "stop not found") {
+      return NextResponse.json({ error: e.message }, { status: 404 });
+    }
+    throw e;
+  }
   return new NextResponse(null, { status: 204 });
 }
 

@@ -129,3 +129,47 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
     expect(await res.json()).toEqual({ error: "trip not found" });
   });
 });
+
+/**
+ * #80 — the trip tree carries the SHELF.
+ *
+ * `trip.ideas[]` is the trip's UNATTACHED maybes and only those: an idea with a
+ * stop already arrives under that stop, and loading it twice would draw it
+ * twice. The bundle schema is the phone's parse of the same payload, so this
+ * also proves the wire did not drift.
+ */
+describeDb("GET /api/trips/[id] — the idea shelf (#80)", () => {
+  it("returns the unattached ideas beside the legs, and only those", async () => {
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const shelf = await fx.idea({
+      tripId: trip.id,
+      stopId: null,
+      category: "stay",
+      title: "Coachland RV Park",
+    });
+
+    const bundle = tripBundleSchema.parse(
+      await (await GET(req(undefined, "GET"), ctx(trip.id))).json(),
+    );
+
+    expect(bundle.trip.ideas.map((i) => i.id)).toEqual([shelf.id]);
+    expect(bundle.trip.ideas[0]).toMatchObject({ stopId: null, category: "stay" });
+    // …and the fixture's ATTACHED idea is still where it always was.
+    const attached = bundle.trip.legs
+      .flatMap((l) => l.stops)
+      .find((s) => s.id === astoria.id)!.ideas;
+    expect(attached).toHaveLength(1);
+    expect(attached[0]!.stopId).toBe(astoria.id);
+    expect(bundle.trip.ideas.map((i) => i.id)).not.toContain(attached[0]!.id);
+  });
+
+  it("is an empty array on a trip with nothing on its shelf", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+
+    const bundle = tripBundleSchema.parse(
+      await (await GET(req(undefined, "GET"), ctx(trip.id))).json(),
+    );
+
+    expect(bundle.trip.ideas).toEqual([]);
+  });
+});

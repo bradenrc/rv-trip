@@ -333,6 +333,7 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "l1",

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MIN_BOUNDS_SPAN } from "../domain/bounds";
+import { boundsCovers, MIN_BOUNDS_SPAN } from "../domain/bounds";
 import { orderedPairs, routeCacheKey } from "../domain/route-order";
 import type { Stop, Trip } from "../domain/types";
 import type { RouteResult } from "../providers/index";
@@ -60,6 +60,7 @@ function seedTrip(): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "coast",
@@ -292,5 +293,49 @@ describe("mapBounds", () => {
 
   it("is null when there is nothing to fit — the caller draws a frame instead", () => {
     expect(mapBounds([], [])).toBeNull();
+  });
+
+  /**
+   * #80 i4 — the trip-level shelf lets an idea sit anywhere on the trip, so the
+   * camera box can now grow a genuine outlier. The two properties the refit
+   * rests on: the box holds EVERY point, and the fit grows rather than
+   * collapsing.
+   */
+  it("holds a far-flung idea without collapsing the fit", () => {
+    const trip = seedTrip();
+    const arcs = tripArcs(trip);
+    const pins = tripStopPins(trip);
+    // A shelf idea parked a long way off the route — Moab, UT.
+    const idea = { lat: 38.5733, lng: -109.5498 };
+
+    const before = mapBounds(arcs, pins)!;
+    const after = mapBounds(arcs, [...pins, idea])!;
+
+    for (const p of [...pins, idea]) {
+      expect(p.lat).toBeGreaterThanOrEqual(after.south);
+      expect(p.lat).toBeLessThanOrEqual(after.north);
+      expect(p.lng).toBeGreaterThanOrEqual(after.west);
+      expect(p.lng).toBeLessThanOrEqual(after.east);
+    }
+    expect(after.south).toBeCloseTo(idea.lat, 4);
+    expect(after.east).toBeCloseTo(idea.lng, 4);
+    expect(after.north - after.south).toBeGreaterThan(before.north - before.south);
+    expect(after.east - after.west).toBeGreaterThan(before.east - before.west);
+    expect(after.north - after.south).toBeGreaterThan(MIN_BOUNDS_SPAN);
+  });
+
+  /** The other half of the refit guard: the camera only moves when the new box
+   * is NOT already on screen (bounds.ts `boundsCovers`). */
+  it("a near idea is already covered by the box the stops make; the outlier is not", () => {
+    const trip = seedTrip();
+    const arcs = tripArcs(trip);
+    const pins = tripStopPins(trip);
+    const shown = mapBounds(arcs, pins)!;
+
+    const near = mapBounds(arcs, [...pins, { lat: 44.0601, lng: -121.3402 }])!;
+    expect(boundsCovers(shown, near)).toBe(true);
+
+    const far = mapBounds(arcs, [...pins, { lat: 38.5733, lng: -109.5498 }])!;
+    expect(boundsCovers(shown, far)).toBe(false);
   });
 });

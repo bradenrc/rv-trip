@@ -206,12 +206,21 @@ export function ViewSwitch<T extends string>({
   );
 }
 
-/** A filter chip with a count — active fills navy. */
+/**
+ * A filter chip with a count — active fills navy.
+ *
+ * `tone="warn"` is the third look (#80): the amber "No place yet" chip. It is
+ * not another slice of the same pile — it is the pile that cannot be drawn on
+ * the map — so the INACTIVE state carries the documented attention colour
+ * rather than the neutral hairline. Active still fills navy: pressed is
+ * pressed, whatever the chip is about.
+ */
 export function FilterChip({
   label,
   count,
   active,
   type,
+  tone = "default",
   onClick,
 }: {
   label: string;
@@ -219,18 +228,21 @@ export function FilterChip({
   active: boolean;
   /** When set, the chip carries that category's icon in its color. */
   type?: ReservationType;
+  tone?: "default" | "warn";
   onClick: () => void;
 }) {
   const cm = type ? categoryMeta(type) : null;
+  const idle =
+    tone === "warn"
+      ? "border-rv-warning bg-rv-warning-soft text-rv-warning"
+      : "border-rv-border bg-rv-surface text-rv-ink-muted";
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={`inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border px-[13px] py-1.5 text-[13px] font-semibold ${
-        active
-          ? "border-transparent bg-rv-navy text-white"
-          : "border-rv-border bg-rv-surface text-rv-ink-muted"
+        active ? "border-transparent bg-rv-navy text-white" : idle
       }`}
     >
       {cm && <cm.Icon className="size-3.5" style={active ? undefined : { color: cm.color }} />}

@@ -31,6 +31,7 @@ function seedTrip(): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "coast",

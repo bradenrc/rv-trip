@@ -440,7 +440,9 @@ function SelectedIdea({ pin }: { pin: IdeaPin }) {
         {pin.name}
       </div>
       <div className="font-mono text-[11.5px] text-rv-ink-faded">
-        {pin.tripTitle} · {pin.stopName}
+        {/* A SHELF idea (#80) hangs under no stop, so there is no second half
+            to print — the same `filter(Boolean)` the saved-place meta uses. */}
+        {[pin.tripTitle, pin.stopName].filter(Boolean).join(" · ")}
       </div>
       <div className="font-mono text-[11.5px] text-rv-ink-faded">{formatCoords(pin)}</div>
     </>
@@ -515,7 +517,7 @@ function railMeta(pin: MapPin): string {
     return `${LAYER_LABEL[pin.layer]} · ${pin.dates ?? "floating"}`;
   }
   if (pin.kind === "idea") {
-    return `Idea · ${pin.status} · ${pin.stopName}`;
+    return ["Idea", pin.status, pin.stopName].filter(Boolean).join(" · ");
   }
   const shelf = pin.status === "want" ? "want" : "been";
   return ["Saved", shelf, pin.region].filter(Boolean).join(" · ");

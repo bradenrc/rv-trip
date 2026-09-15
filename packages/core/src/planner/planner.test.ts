@@ -83,6 +83,7 @@ function seedTrip(): Trip {
     statusAuto: false,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "coast",
@@ -153,6 +154,7 @@ function fixture(endDate = "2026-08-10"): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "A",
@@ -210,8 +212,10 @@ function fixture(endDate = "2026-08-10"): Trip {
             ideas: [
               {
                 id: "i1",
+                tripId: "t",
                 stopId: "S3",
                 title: "Float",
+                category: "do",
                 status: "idea",
                 place: null,
                 rating: null,
@@ -882,8 +886,10 @@ describe("reservation and idea tree mutations", () => {
   function ideaRow(over: Partial<Idea> = {}): Idea {
     return {
       id: "i1",
+      tripId: "seed",
       stopId: "S1",
       title: "Rogue Ales brewery lunch",
+      category: "eat",
       status: "planned",
       place: null,
       rating: null,

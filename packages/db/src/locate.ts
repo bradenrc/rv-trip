@@ -12,9 +12,9 @@ import { ideas, legs, savedPlaces, stops, trips } from "./schema";
  * Two guarantees live here and nowhere else:
  *
  * 1. **Only this owner's rows.** Stops scope through leg → trip exactly as
- *    mutations.ts scopes every stop write; ideas take the same walk one level
- *    deeper (idea → stop → leg → trip → owner); saved places scope on
- *    `owner_id` directly. Another tenant's id simply does not come back, so it
+ *    mutations.ts scopes every stop write; ideas join straight to their own
+ *    `trip_id` (#80 — a shelf idea has no stop to walk through); saved places
+ *    scope on `owner_id` directly. Another tenant's id simply does not come back, so it
  *    is never geocoded and never written.
  * 2. **Only coordless rows.** A row that already has a pin is not re-read and
  *    not re-billed, and a coordinate the user placed by hand can never be
@@ -40,11 +40,12 @@ const ownedLegIds = (owner: string) =>
     .innerJoin(trips, eq(legs.tripId, trips.id))
     .where(eq(trips.ownerId, owner));
 
-/** One level deeper, mirrored the same way — `mutations.ts` keeps its copy
- * private to the write path, so this is the second copy by the same rule the
- * comment above names, not an omission. */
-const ownedStopIds = (owner: string) =>
-  db.select({ id: stops.id }).from(stops).where(inArray(stops.legId, ownedLegIds(owner)));
+/** The IDEA scope (#80). An idea carries `trip_id` attached or not, so the walk
+ * is one hop, not four — and a shelf idea (NULL `stop_id`) is in no
+ * `ownedStopIds` list, which is why this is the only correct scope for an idea
+ * write. Mirrored from mutations.ts by the same rule the two above are. */
+const ownedTripIds = (owner: string) =>
+  db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
 
 async function loadStops(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
@@ -69,21 +70,38 @@ async function loadPlaces(owner: string, ids: string[]): Promise<LocateTarget[]>
 }
 
 /**
- * An idea's search text is its TITLE. A stop searches on `stops.place_name`; an
- * idea's `place_name` is null until something locates it, and the title is all
- * the row has — so "Tumalo Falls trailhead" resolves and "Deschutes River
+ * An idea's search text (#80 i3): **`coalesce(place_name, title)`**.
+ *
+ * A stop searches on `stops.place_name`, and an idea now does the same thing
+ * when it has one. It usually does not — `place_name` is null until something
+ * locates the row — but the picker's free-text escape row lets a HUMAN type a
+ * place onto an idea without ever giving it coordinates ("Tumalo Falls, the
+ * upper lot" on a row titled "waterfall hike"). That typed name is a far better
+ * geocode query than the title beside it, so preferring it resolves more rows
+ * per batch. `title` is the fallback, and for most ideas it is still the only
+ * text there is — so "Tumalo Falls trailhead" resolves and "Deschutes River
  * float" never will, which is a fact about that idea rather than a failure.
- * `region` is null for the same reason a stop's is: the trip's geography is not
- * a fact about this idea.
+ *
+ * `coalesce` is enough on its own: the `place` grammar declares
+ * `name: z.string().min(1)` (core/domain/types.ts:36-41), so the column is
+ * either NULL or real text — an empty string can never reach it and be
+ * geocoded as a blank query.
+ *
+ * The mirror of this rule on the WRITE side is `writeIdeaPin` below, which
+ * coalesces the other way round — Google's name fills the column only when it
+ * is empty. Read prefers what the human typed; write never overwrites it. The
+ * two are the same preference stated twice.
  */
+const ideaSearchText = sql<string>`coalesce(${ideas.placeName}, ${ideas.title})`;
+
+/** `region` is null for the same reason a stop's is: the trip's geography is
+ * not a fact about this idea. */
 async function loadIdeas(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
   const rows = await db
-    .select({ id: ideas.id, name: ideas.title })
+    .select({ id: ideas.id, name: ideaSearchText })
     .from(ideas)
-    .innerJoin(stops, eq(ideas.stopId, stops.id))
-    .innerJoin(legs, eq(stops.legId, legs.id))
-    .innerJoin(trips, eq(legs.tripId, trips.id))
+    .innerJoin(trips, eq(ideas.tripId, trips.id))
     .where(and(eq(trips.ownerId, owner), inArray(ideas.id, ids), coordlessIdea));
   return rows.map((r) => ({ kind: "idea" as const, id: r.id, name: r.name, region: null }));
 }
@@ -92,6 +110,10 @@ async function loadIdeas(owner: string, ids: string[]): Promise<LocateTarget[]> 
  * Every coordless row this owner has, all three kinds — what `pnpm backfill:places`
  * walks. The page never calls this: the map already knows its unmapped rows and
  * sends the ids it is showing.
+ *
+ * The idea arm reads the same `ideaSearchText` the batch loader does. The two
+ * entry points geocoding an idea under different names would be a silent
+ * disagreement about what the row is called.
  */
 export async function listLocateTargetsForOwner(owner: string): Promise<LocateTarget[]> {
   const [stopRows, placeRows, ideaRows] = await Promise.all([
@@ -106,11 +128,9 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
       .from(savedPlaces)
       .where(and(eq(savedPlaces.ownerId, owner), coordlessPlace)),
     db
-      .select({ id: ideas.id, name: ideas.title })
+      .select({ id: ideas.id, name: ideaSearchText })
       .from(ideas)
-      .innerJoin(stops, eq(ideas.stopId, stops.id))
-      .innerJoin(legs, eq(stops.legId, legs.id))
-      .innerJoin(trips, eq(legs.tripId, trips.id))
+      .innerJoin(trips, eq(ideas.tripId, trips.id))
       .where(and(eq(trips.ownerId, owner), coordlessIdea)),
   ]);
   return [
@@ -186,7 +206,7 @@ async function writeIdeaPin(
       googlePlaceId: found.googlePlaceId,
       placeName: sql`coalesce(${ideas.placeName}, ${found.name})`,
     })
-    .where(and(eq(ideas.id, ideaId), inArray(ideas.stopId, ownedStopIds(owner))))
+    .where(and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner))))
     .returning({ id: ideas.id });
   return rows.length > 0;
 }

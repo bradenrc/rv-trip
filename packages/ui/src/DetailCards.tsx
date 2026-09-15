@@ -3,14 +3,15 @@ import {
   Check,
   CircleDashed,
   CornerRightUp,
+  GripVertical,
   LocateFixed,
   Map as MapIcon,
   MapPin,
   SquarePen,
 } from "lucide-react";
-import { PICKED_COORDLESS_LABEL, hasCoords } from "@rv-trip/core";
+import { PICKED_COORDLESS_LABEL, ideaIsLocated } from "@rv-trip/core";
 import type { Reservation, Idea } from "@rv-trip/core";
-import { categoryMeta } from "./category";
+import { categoryMeta, ideaCategoryMeta } from "./category";
 import { CategoryTile } from "./CategoryTile";
 import { Stars } from "./Stars";
 import { StatusPill } from "./StatusPill";
@@ -137,12 +138,18 @@ export function IdeaCard({
   onNote: (v: string) => void;
   onCommitNote: () => void;
   onToggleNote: () => void;
-  onPromote: () => void;
+  /**
+   * "Book" — promote to a reservation. OPTIONAL (#80): `reservations.stop_id`
+   * is NOT NULL, so an UNATTACHED idea cannot become a reservation at all, and
+   * without this handler the action does not render — the same way `onLocate`'s
+   * absence already makes the place line read-only.
+   */
+  onPromote?: () => void;
   /** Opens the app's picker. Without it the place line renders READ-ONLY, and
    * with neither a place nor a handler the card renders nothing new at all. */
   onLocate?: () => void;
 }) {
-  const cm = categoryMeta("activity");
+  const cm = ideaCategoryMeta(idea.category);
   const isDone = idea.status === "done";
   return (
     <div className="flex flex-col gap-2 rounded-rv-md border border-rv-border bg-rv-surface px-3 py-2.5">
@@ -151,7 +158,7 @@ export function IdeaCard({
         <span className="min-w-[120px] flex-1 text-[14px] text-rv-ink">{idea.title}</span>
         {isDone && <Stars value={idea.rating ?? 0} size={14} onSet={onRating} />}
         <StatusPill status={idea.status} onClick={onCycle} />
-        {!isDone && (
+        {!isDone && onPromote && (
           <button
             type="button"
             onClick={onPromote}
@@ -204,7 +211,7 @@ export function IdeaCard({
  */
 function IdeaPlaceLine({ idea, onLocate }: { idea: Idea; onLocate?: () => void }) {
   if (!idea.place && !onLocate) return null;
-  const located = idea.place !== null && hasCoords(idea.place);
+  const located = ideaIsLocated(idea);
   return (
     <div className="flex flex-wrap items-center gap-[9px] border-t border-dashed border-rv-border pt-2">
       <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-rv-ink-faded">
@@ -241,6 +248,116 @@ function IdeaPlaceLine({ idea, onLocate }: { idea: Idea; onLocate?: () => void }
           </button>
         )
       )}
+    </div>
+  );
+}
+
+/**
+ * An idea on the trip's SHELF (#80) — the side rail's row, and deliberately NOT
+ * `IdeaCard`.
+ *
+ * The sheet's card is a detail surface: stars, a note pen, a status pill and a
+ * Book action. The shelf row is a HANDLE — something you pick up and drop on a
+ * day or on a stop — so it carries a grip, the title, where it is relative to
+ * the trip, and nothing else. (Book is absent for a harder reason than density:
+ * `reservations.stop_id` is NOT NULL, so an unattached idea is not bookable at
+ * all.) The two are separate components rather than one with five flags,
+ * because they are two different objects that happen to read the same row.
+ *
+ * `actions` is the same composition slot every other card carries — the app
+ * hangs its `RowMenu` there (#74 puts "Clear place" on it).
+ */
+export function ShelfIdeaCard({
+  idea,
+  nearestStopName,
+  distanceMi,
+  actions,
+  picker,
+  onClick,
+  onCycle,
+  onLocate,
+  onDragStart,
+  onDragEnd,
+}: {
+  idea: Idea;
+  /** The nearest stop the trip has actually placed, and how far — the row's
+   * second line. There is no city column on an idea, so the anchor named is a
+   * stop you already own (`ideaShelf` in @rv-trip/core decides both). */
+  nearestStopName?: string | null;
+  distanceMi?: number | null;
+  actions?: ReactNode;
+  /** the open place picker, mounted under the place line */
+  picker?: ReactNode;
+  /** Absent → the title is plain text. A shelf row is a HANDLE, not a link:
+   * there is no detail surface for an unattached idea to open. */
+  onClick?: () => void;
+  /** Cycles idea → planned → done. Absent → the pill is read-only. */
+  onCycle?: () => void;
+  /** Opens the app's picker. Absent → the line is read-only. */
+  onLocate?: () => void;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+}) {
+  const cm = ideaCategoryMeta(idea.category);
+  const located = ideaIsLocated(idea);
+  return (
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      className="mb-2 flex cursor-grab flex-col gap-1.5 rounded-rv-md border border-rv-border bg-rv-surface px-2.5 py-2 shadow-rv-sm"
+    >
+      <div className="flex items-center gap-2">
+        <GripVertical className="size-4 flex-none text-rv-ink-subtle" aria-hidden />
+        <cm.Icon className="size-4 flex-none" style={{ color: cm.color }} />
+        {onClick ? (
+          <button
+            type="button"
+            onClick={onClick}
+            className="min-w-0 flex-1 cursor-pointer truncate border-none bg-transparent p-0 text-left text-[13.5px] text-rv-ink"
+          >
+            {idea.title}
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[13.5px] text-rv-ink">{idea.title}</span>
+        )}
+        {actions}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 pl-6">
+        {located ? (
+          <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-rv-ink-faded">
+            <MapPin className="size-3 flex-none" />
+            {nearestStopName && distanceMi !== null && distanceMi !== undefined
+              ? `${nearestStopName} · ${distanceMi} mi`
+              : idea.place!.name}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-rv-ink-faded">
+            <CircleDashed className="size-3 flex-none text-rv-ink-subtle" />
+            {idea.place ? idea.place.name : "No place yet"}
+          </span>
+        )}
+        {!located && idea.place && (
+          <span className="font-mono text-[10px] text-rv-ink-faded">{PICKED_COORDLESS_LABEL}</span>
+        )}
+        {located ? (
+          <span className="ml-auto">
+            <StatusPill status={idea.status} onClick={onCycle} />
+          </span>
+        ) : (
+          onLocate && (
+            <button
+              type="button"
+              onClick={onLocate}
+              className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-rv-pill border border-rv-green bg-rv-green-soft px-2 py-0.5 font-mono text-[10px] font-bold text-rv-green"
+            >
+              <LocateFixed className="size-3" />
+              Locate
+            </button>
+          )
+        )}
+      </div>
+      {picker}
     </div>
   );
 }

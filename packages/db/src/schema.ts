@@ -37,6 +37,12 @@ export const reservationType = pgEnum("reservation_type", [
 
 export const ideaStatus = pgEnum("idea_status", ["idea", "planned", "done"]);
 
+// What KIND of maybe an idea is (#80 Q2 = A). Its OWN vocabulary, not a reuse
+// of reservation_type: the shelf groups on Stay/Eat/Do and nothing else. The
+// bridge into the DS's five-category language is ideaCategoryMeta in
+// packages/ui/src/category.ts.
+export const ideaCategory = pgEnum("idea_category", ["do", "eat", "stay"]);
+
 // Lifecycle of a trip on the dashboard: actively planning, scheduled ahead, or done.
 export const tripStatus = pgEnum("trip_status", ["planning", "upcoming", "complete"]);
 
@@ -117,14 +123,31 @@ export const stops = pgTable(
   (t) => [index("stops_leg_idx").on(t.legId)],
 );
 
+/**
+ * An idea belongs to the TRIP; a stop is optional (#80).
+ *
+ * `trip_id` is NOT NULL for every idea, attached or not, and it is the single
+ * ownership path every idea write scopes on — a NULL `stop_id` is in no
+ * `ownedStopIds` list, so scoping through the stop would make every shelf
+ * write a silent no-op on exactly the rows this epic exists to create.
+ *
+ * The one invariant no FK can span the join: when `stop_id` is set, that stop's
+ * leg must belong to `trip_id`. `createIdea` proves it; nothing else may set
+ * the pair.
+ */
 export const ideas = pgTable(
   "ideas",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    stopId: uuid("stop_id")
+    tripId: uuid("trip_id")
       .notNull()
-      .references(() => stops.id, { onDelete: "cascade" }),
+      .references(() => trips.id, { onDelete: "cascade" }),
+    // Null => a SHELF idea: a maybe not committed to a stop yet.
+    stopId: uuid("stop_id").references(() => stops.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
+    // Every idea shipped before #80 was a blue "Do", so that is the default the
+    // backfill leaves them on.
+    category: ideaCategory("category").notNull().default("do"),
     status: ideaStatus("status").notNull().default("idea"),
     placeName: text("place_name"),
     lat: doublePrecision("lat"),
@@ -134,7 +157,7 @@ export const ideas = pgTable(
     notes: text("notes"),
     sortOrder: integer("sort_order").notNull(),
   },
-  (t) => [index("ideas_stop_idx").on(t.stopId)],
+  (t) => [index("ideas_stop_idx").on(t.stopId), index("ideas_trip_idx").on(t.tripId)],
 );
 
 export const reservations = pgTable(
@@ -287,6 +310,9 @@ export const userPrefs = pgTable("user_prefs", {
 export const tripsRelations = relations(trips, ({ many }) => ({
   legs: many(legs),
   savedPlaces: many(savedPlaces),
+  // The shelf (#80). Every idea is here, attached or not; the read path filters
+  // to `stop_id IS NULL` so the tree carries each row exactly once.
+  ideas: many(ideas),
 }));
 
 export const savedPlacesRelations = relations(savedPlaces, ({ one }) => ({
@@ -305,6 +331,7 @@ export const stopsRelations = relations(stops, ({ one, many }) => ({
 }));
 
 export const ideasRelations = relations(ideas, ({ one }) => ({
+  trip: one(trips, { fields: [ideas.tripId], references: [trips.id] }),
   stop: one(stops, { fields: [ideas.stopId], references: [stops.id] }),
 }));
 

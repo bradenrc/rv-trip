@@ -8,6 +8,9 @@ import {
   Receipt,
   Plus,
   Check,
+  Lightbulb,
+  MapPin,
+  MapPinX,
   Pencil,
   Trash2,
   CornerRightUp,
@@ -21,6 +24,7 @@ import type {
   Stop,
 } from "@rv-trip/core";
 import {
+  ideaIsLocated,
   isScheduled,
   nearLabel,
   nearOf,
@@ -96,11 +100,20 @@ export interface StopLeafActions {
   onIdeaDraftChange: (v: string) => void;
   onSubmitIdea: () => void;
   onDeleteIdea: (ideaId: string) => void;
+  /** #80 gesture 3 — the attached idea goes BACK to the trip's shelf. The
+   * drag has no source here (an attached idea is not a shelf card), so the
+   * menu is its door; the write is the same `PATCH { stopId: null }`. */
+  onDetachIdea: (ideaId: string) => void;
 
   /** #69 · the row's Locate. Unlike the map's batch — which geocodes a title
    * server-side — this one lets the human choose, so the picked place is
    * written straight through the idea PATCH. `null` clears it. */
   onLocateIdea: (ideaId: string, picked: PickedPlace | null) => void;
+
+  /** #74 · the clear that finally has a door. Fires the shipped
+   * `PATCH { place: null }`, and only ever from place-state 3 — see the menu
+   * below, which is derived from `ideaIsLocated`. */
+  onClearIdeaPlace: (ideaId: string) => void;
 
   /** "Book" opens the type picker rather than promoting straight away — the
    * type is the whole point of the gesture. */
@@ -504,6 +517,39 @@ export function StopDetailSheet({
                       }
                       actions={
                         <RowMenu label={`Actions for ${it.title}`}>
+                          <DropdownMenuItem
+                            className={MENU_ITEM}
+                            onSelect={() => leaves.onDetachIdea(it.id)}
+                          >
+                            <Lightbulb />
+                            Move to ideas
+                            <MenuHint>→ the shelf</MenuHint>
+                          </DropdownMenuItem>
+                          {/* #74 · place-state 3 only. A coordless or
+                              place-less idea still carries Locate on its line,
+                              so neither item renders for it — one derivation,
+                              `ideaIsLocated`, behind both the line and this
+                              menu. */}
+                          {ideaIsLocated(it) && (
+                            <>
+                              <DropdownMenuItem
+                                className={MENU_ITEM}
+                                onSelect={() => setLocatingIdeaId(it.id)}
+                              >
+                                <MapPin />
+                                Change place
+                                <MenuHint>picker</MenuHint>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className={MENU_ITEM_WARN}
+                                onSelect={() => leaves.onClearIdeaPlace(it.id)}
+                              >
+                                <MapPinX />
+                                Clear place
+                                <MenuHint>→ no place</MenuHint>
+                              </DropdownMenuItem>
+                            </>
+                          )}
                           <DropdownMenuItem
                             className={MENU_ITEM_WARN}
                             onSelect={() => leaves.onDeleteIdea(it.id)}

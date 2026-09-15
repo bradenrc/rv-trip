@@ -28,6 +28,17 @@ export type ReservationType = z.infer<typeof reservationType>;
 export const ideaStatus = z.enum(["idea", "planned", "done"]);
 export type IdeaStatus = z.infer<typeof ideaStatus>;
 
+/**
+ * What KIND of maybe an idea is — the three words the product speaks (#80
+ * Q2 → A). Deliberately NOT a reuse of `reservationType`: the shelf groups on
+ * Stay / Eat / Do and nothing else, and a five-value vocabulary would have to
+ * be narrowed at every render. The bridge INTO the DS's five-category language
+ * is `ideaCategoryMeta` (packages/ui/src/category.ts) — one lookup, never two
+ * drifting ones.
+ */
+export const ideaCategory = z.enum(["do", "eat", "stay"]);
+export type IdeaCategory = z.infer<typeof ideaCategory>;
+
 /** 1-5 stars, or null when unrated. Seeds the memory layer ("what we loved"). */
 export const rating = z.number().int().min(1).max(5).nullable();
 
@@ -56,10 +67,18 @@ export const reservation = z.object({
 });
 export type Reservation = z.infer<typeof reservation>;
 
+/**
+ * An idea is the grammar's MAYBE. It belongs to the TRIP (#80): `tripId` is
+ * always set — it is the single ownership path every idea write scopes on —
+ * and `stopId` is optional. A null `stopId` is a *shelf* idea: a maybe you have
+ * not committed to a stop yet, which is the whole of #80.
+ */
 export const idea = z.object({
   id: z.string(),
-  stopId: z.string(),
+  tripId: z.string(),
+  stopId: z.string().nullable().default(null),
   title: z.string().min(1),
+  category: ideaCategory.default("do"),
   status: ideaStatus.default("idea"),
   place: place.nullable().default(null),
   rating,
@@ -128,6 +147,13 @@ export const trip = z.object({
   rating: rating,
   note: z.string().nullable().default(null),
   legs: z.array(leg).default([]),
+  /**
+   * The idea SHELF (#80) — the trip's unattached maybes, the rows whose
+   * `stopId` is null. It sits beside `legs`, not inside it, because that is
+   * exactly what the column says: one row, one home. An idea attached to a stop
+   * keeps rendering under that stop (`stop.ideas`) and is NOT mirrored here.
+   */
+  ideas: z.array(idea).default([]),
 });
 export type Trip = z.infer<typeof trip>;
 
@@ -284,10 +310,22 @@ export const reservationPatchInput = reservation
   .partial();
 export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
 
-/** `POST /api/ideas` — the stop sheet's "Add idea", and the undo. */
+/**
+ * `POST /api/ideas` — the stop sheet's "Add idea", the shelf's "+ Add", the
+ * Add-from-Places copy, and the undo.
+ *
+ * `tripId` is REQUIRED (#80): an idea belongs to the trip whether or not it is
+ * attached to a stop, and that is the column every idea write is owner-scoped
+ * on. `stopId` is nullable and defaults to null — a shelf idea is the create
+ * with no stop in hand, and the handler's 404 arm proves the TRIP in that case.
+ */
 export const ideaCreateInput = idea
-  .pick({ title: true, status: true, place: true, notes: true })
-  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+  .pick({ title: true, status: true, place: true, notes: true, category: true })
+  .extend({
+    tripId: z.string().uuid(),
+    stopId: z.string().uuid().nullable().default(null),
+    rating: rating.default(null),
+  });
 export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
 
 /**
@@ -305,7 +343,17 @@ export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
  * stop write flattens through `stopPatchColumns`.
  */
 export const ideaPatchInput = idea
-  .pick({ status: true, rating: true, notes: true, place: true })
+  .pick({ status: true, rating: true, notes: true, place: true, category: true })
+  .extend({
+    /**
+     * The drop (#80). Unlike `place`, `stop_id` IS a real column, so this key
+     * passes through `ideaPatchColumns` untouched. Three gestures write it: a
+     * stay-idea dropped on open days (the new stop's id), a do/eat idea dropped
+     * on a stop bar (that stop's id), and an attached idea dragged back to the
+     * shelf (an EXPLICIT null). Absent still means "leave it alone".
+     */
+    stopId: z.string().uuid().nullable(),
+  })
   .partial();
 export type IdeaPatchInput = z.infer<typeof ideaPatchInput>;
 

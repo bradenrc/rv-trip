@@ -267,3 +267,62 @@ export function nearOf(
 export function nearLabel(near: NearPlace): string {
   return `near · ${near.name} · ${coord(near.lat)}, ${coord(near.lng)}`;
 }
+
+// ── the open list's frame (#80 walk) ───────────────────────────────────────
+
+/**
+ * The open list used to be an `absolute` child of the field's `relative`
+ * wrapper. That is a stacking-context trap: `z-10` only ever wins inside
+ * whatever context the wrapper happens to sit in, so on the trip page — where
+ * the picker opens inside the add-idea card and the Gantt's own `sticky z-10`
+ * row labels come LATER in the document — every row below the card's edge was
+ * painted over by the timeline. The fix is to portal the list to `document.body`,
+ * where no ancestor can trap it, which means the component now has to say where
+ * the list goes. That arithmetic is here, where it can be tested: the component
+ * only measures the field and hands the numbers over.
+ */
+
+/** The breathing room kept between the bottom of the list and the viewport. */
+export const PICKER_LIST_GUTTER_PX = 12;
+
+/**
+ * The shortest list worth drawing. Below this a cap is worse than an overflow —
+ * the field is so close to the bottom edge that capping would leave a sliver
+ * with no room even for the escape row, so the list is allowed to run past the
+ * gutter and scroll instead.
+ */
+export const PICKER_LIST_MIN_PX = 132;
+
+/** The field box's viewport rect — the three numbers of `getBoundingClientRect`
+ * the list's frame is derived from. */
+export interface PickerAnchor {
+  left: number;
+  bottom: number;
+  width: number;
+}
+
+/** A `position: fixed` frame, in viewport pixels. */
+export interface PickerListFrame {
+  left: number;
+  top: number;
+  width: number;
+  /** The list scrolls inside this rather than running off the screen. */
+  maxHeight: number;
+}
+
+/**
+ * Where the portaled list sits: flush under the field, exactly as wide, capped
+ * to what is left of the viewport. The seam matters — the field draws
+ * `rounded-t` + the list `border-t-0`, so a gap of even a pixel would show as a
+ * broken border — which is why the list never flips above: it stays welded to
+ * the box and scrolls internally instead.
+ */
+export function pickerListFrame(anchor: PickerAnchor, viewportHeight: number): PickerListFrame {
+  const room = viewportHeight - anchor.bottom - PICKER_LIST_GUTTER_PX;
+  return {
+    left: anchor.left,
+    top: anchor.bottom,
+    width: anchor.width,
+    maxHeight: Math.max(PICKER_LIST_MIN_PX, room),
+  };
+}

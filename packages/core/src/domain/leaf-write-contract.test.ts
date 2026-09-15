@@ -18,6 +18,7 @@ import {
  */
 
 const STOP = "6f1c5b4e-0000-4000-8000-000000000001";
+const TRIP = "6f1c5b4e-0000-4000-8000-0000000000aa";
 
 describe("reservationCreateInput", () => {
   it("fills the optional half of the form with nulls", () => {
@@ -82,8 +83,12 @@ describe("reservationPatchInput", () => {
 
 describe("ideaCreateInput", () => {
   it("defaults a fresh idea to the 'idea' status with no place", () => {
-    expect(ideaCreateInput.parse({ stopId: STOP, title: "Cape Perpetua overlook" })).toEqual({
+    expect(
+      ideaCreateInput.parse({ tripId: TRIP, stopId: STOP, title: "Cape Perpetua overlook" }),
+    ).toEqual({
+      tripId: TRIP,
       stopId: STOP,
+      category: "do",
       title: "Cape Perpetua overlook",
       status: "idea",
       place: null,
@@ -93,9 +98,35 @@ describe("ideaCreateInput", () => {
   });
 
   it("never lets the client pick a sortOrder — the server appends", () => {
-    expect(ideaCreateInput.parse({ stopId: STOP, title: "X", sortOrder: 99 })).not.toHaveProperty(
-      "sortOrder",
-    );
+    expect(
+      ideaCreateInput.parse({ tripId: TRIP, stopId: STOP, title: "X", sortOrder: 99 }),
+    ).not.toHaveProperty("sortOrder");
+  });
+
+  /** #80 — the shelf create. A maybe belongs to the TRIP; the stop is the
+   * optional half, and the trip is the half that cannot be left out. */
+  it("takes a shelf idea: an explicit null stopId and a category", () => {
+    expect(
+      ideaCreateInput.parse({ tripId: TRIP, stopId: null, category: "stay", title: "Coachland" }),
+    ).toEqual({
+      tripId: TRIP,
+      stopId: null,
+      category: "stay",
+      title: "Coachland",
+      status: "idea",
+      place: null,
+      rating: null,
+      notes: null,
+    });
+  });
+
+  it("defaults stopId to null — an idea with no stop in hand is a shelf idea", () => {
+    expect(ideaCreateInput.parse({ tripId: TRIP, title: "Hot springs" }).stopId).toBeNull();
+  });
+
+  it("refuses a create with no trip — there is no other ownership path", () => {
+    expect(ideaCreateInput.safeParse({ stopId: STOP, title: "Orphan" }).success).toBe(false);
+    expect(ideaCreateInput.safeParse({ tripId: "not-a-uuid", title: "Orphan" }).success).toBe(false);
   });
 });
 
@@ -130,9 +161,27 @@ describe("ideaPatchInput", () => {
   });
 
   it("clears the place with an explicit null, and strips what is not editable", () => {
-    expect(ideaPatchInput.parse({ place: null, id: "i1", stopId: STOP, sortOrder: 9 })).toEqual({
+    expect(ideaPatchInput.parse({ place: null, id: "i1", sortOrder: 9 })).toEqual({
       place: null,
     });
+  });
+
+  /** #80 — the drop. `stop_id` IS a column, so unlike `place` it is editable
+   * through this patch: an id attaches, an explicit null sends the row back to
+   * the shelf, and an absent key still leaves the attachment alone. */
+  it("carries the drop's stopId, including an explicit null", () => {
+    expect(ideaPatchInput.parse({ stopId: STOP })).toEqual({ stopId: STOP });
+    expect(ideaPatchInput.parse({ stopId: null })).toEqual({ stopId: null });
+    expect("stopId" in ideaPatchInput.parse({ status: "planned" })).toBe(false);
+  });
+
+  it("refuses a stopId that is not a uuid — it addresses a real uuid column", () => {
+    expect(ideaPatchInput.safeParse({ stopId: "nope" }).success).toBe(false);
+  });
+
+  it("carries the category — a maybe can be re-filed from Do to Eat", () => {
+    expect(ideaPatchInput.parse({ category: "eat" })).toEqual({ category: "eat" });
+    expect(ideaPatchInput.safeParse({ category: "sleep" }).success).toBe(false);
   });
 
   it("refuses a place with no name", () => {

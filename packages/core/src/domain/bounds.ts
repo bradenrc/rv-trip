@@ -69,6 +69,44 @@ function padSpan(lo: number, hi: number, min: number, max: number): [number, num
   return [Math.max(min, mid - half), Math.min(max, mid + half)];
 }
 
+/**
+ * The box's identity as a dependency key.
+ *
+ * `boundsFor` returns a fresh object on every render, so a renderer that wants
+ * to re-fit only when the BOX changes has to compare values, not references.
+ * The string lived inline in `MapView.tsx`; it lives here so the native lens
+ * keys its own re-fit the same way and so the behaviour is testable at all.
+ * `""` for "nothing to fit" — a falsy key no fit ever matches.
+ */
+export function boundsKey(b: Bounds | null): string {
+  return b ? `${b.west},${b.south},${b.east},${b.north}` : "";
+}
+
+/**
+ * Does the box already on screen enclose the one we would fit to?
+ *
+ * The refit guard (#80 i4). Auto-fit used to fire on every change to the pin
+ * set, so locating one idea — or toggling a layer chip that reveals nothing new
+ * — threw the camera away from wherever the reader had put it. When the new box
+ * is already inside what the camera shows there is nothing to reveal, so the
+ * fit is skipped and the reader's own pan/zoom survives. A far-flung idea, the
+ * case that made this worth fixing, is NOT covered: its box falls outside, so
+ * the map does re-fit and the outlier is actually shown.
+ *
+ * `outer` null means no camera box yet (nothing is covered — fit); `inner` null
+ * means nothing to show (there is no fit to skip — so, covered).
+ */
+export function boundsCovers(outer: Bounds | null, inner: Bounds | null): boolean {
+  if (!inner) return true;
+  if (!outer) return false;
+  return (
+    outer.west <= inner.west &&
+    outer.south <= inner.south &&
+    outer.east >= inner.east &&
+    outer.north >= inner.north
+  );
+}
+
 // ── deterministic spiderfy ─────────────────────────────────────────────────
 //
 // The seed carries four exact coordinate collisions (a saved place sitting on

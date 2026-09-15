@@ -133,8 +133,10 @@ describe("packages/db/src/schema.ts — userPrefs", () => {
 
   it("adds no pgEnum — a preference vocabulary must not need an ALTER TYPE", () => {
     // The six the base sha already had: reservation_type, idea_status,
-    // trip_status, saved_place_status, rig_type, route_source. Not seven.
-    expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(6);
+    // trip_status, saved_place_status, rig_type, route_source — plus
+    // idea_category (#80), which IS a vocabulary the product speaks. A
+    // preference is not, and that is what this guard is about.
+    expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(7);
     for (const name of ["theme", "units", "map_style", "track_costs"])
       expect(code(schema)).not.toContain(`pgEnum("${name}"`);
   });

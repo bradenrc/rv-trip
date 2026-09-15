@@ -448,7 +448,12 @@ export function RouteView({
                     {row.ideas.length > 0 && (
                       <div className="flex flex-col gap-1">
                         {row.ideas.map((it) => (
-                          <IdeaLineItem key={it.id} type={it.type} title={it.title} status={it.status} />
+                          <IdeaLineItem
+                            key={it.id}
+                            category={it.category}
+                            title={it.title}
+                            status={it.status}
+                          />
                         ))}
                       </div>
                     )}

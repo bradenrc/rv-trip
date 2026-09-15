@@ -108,8 +108,16 @@ export function SwimLane({
   );
 }
 
-/** A scheduled stop as a gantt bar, positioned by grid-column. Navy left edge
- * = the arrival/drive-in day. Meta chips show rating, reservation and idea counts. */
+/**
+ * A scheduled stop as a gantt bar, positioned by grid-column. Navy left edge
+ * = the arrival/drive-in day. Meta chips show rating, reservation and idea counts.
+ *
+ * It is ALSO a drop target (#80): a do/eat idea dragged off the shelf lands on
+ * a stop rather than on open days — an open span is not a stop, so there is
+ * nothing there for it to attach to. `active` is the same highlight contract
+ * `OpenSpan` already holds: the caller lights only the targets the thing in
+ * hand can actually land on, so the wrong target simply never invites the drop.
+ */
 export function StopBar({
   name,
   range,
@@ -119,7 +127,10 @@ export function StopBar({
   startCol,
   span,
   compact = false,
+  active = false,
   onClick,
+  onDragOver,
+  onDrop,
 }: {
   name: string;
   range: string;
@@ -130,16 +141,22 @@ export function StopBar({
   span: number;
   /** tighter padding/gap for the Compact & Dense timeline densities */
   compact?: boolean;
+  /** Lit because the thing being dragged can land here. */
+  active?: boolean;
   onClick?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: () => void;
 }) {
   const showMeta = rating > 0 || resCount > 0 || ideaCount > 0;
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`relative m-[4px_3px] flex cursor-pointer flex-col overflow-hidden rounded-rv-md border border-rv-green bg-rv-green-soft text-left shadow-rv-sm transition hover:-translate-y-px hover:shadow-rv-lg ${
-        compact ? "gap-[2px] p-[6px_8px_6px_12px]" : "gap-[3px] p-[8px_9px_8px_13px]"
-      }`}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      className={`relative m-[4px_3px] flex cursor-pointer flex-col overflow-hidden rounded-rv-md border bg-rv-green-soft text-left shadow-rv-sm transition hover:-translate-y-px hover:shadow-rv-lg ${
+        active ? "border-dashed border-rv-accent shadow-rv-lg" : "border-rv-green"
+      } ${compact ? "gap-[2px] p-[6px_8px_6px_12px]" : "gap-[3px] p-[8px_9px_8px_13px]"}`}
       style={{ gridColumn: `${startCol} / span ${span}`, gridRow: 1 }}
     >
       <span className="absolute inset-y-0 left-0 w-1 rounded-l-rv-sm bg-rv-navy" />

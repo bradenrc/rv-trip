@@ -1,4 +1,4 @@
-import { eq, and, inArray, max, sql } from "drizzle-orm";
+import { eq, and, inArray, isNull, max, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   legs,
@@ -18,6 +18,7 @@ import type {
   Place,
   Reservation,
   ReservationType,
+  IdeaCategory,
   IdeaStatus,
   IsoDate,
   NavCheck,
@@ -57,6 +58,16 @@ const ownedLegIds = (owner: string) =>
 
 const ownedStopIds = (owner: string) =>
   db.select({ id: stops.id }).from(stops).where(inArray(stops.legId, ownedLegIds(owner)));
+
+/**
+ * The ownership path for IDEAS (#80). An idea carries `trip_id` whether or not
+ * it is attached to a stop, so this — never `ownedStopIds` — is what every idea
+ * write scopes on: a NULL `stop_id` matches no IN list, and scoping through the
+ * stop would make the status pill, the stars, the note, the delete and #74's
+ * Clear place all silent no-ops on exactly the shelf rows this epic creates.
+ */
+const ownedTripIds = (owner: string) =>
+  db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
 
 // ── trips ─────────────────────────────────────────────────────────────────
 //
@@ -357,6 +368,22 @@ async function assertOwnedStop(
   if (!owned.length) throw new Error("stop not found");
 }
 
+/** The invariant no FK can span the join: an attached idea's stop must live on
+ * the trip the idea claims. Ownership is already proved by the trip above, so
+ * this is about the PAIR, not about tenancy. */
+async function assertStopInTrip(
+  tx: { select: typeof db.select },
+  tripId: string,
+  stopId: string,
+): Promise<void> {
+  const found = await tx
+    .select({ id: stops.id })
+    .from(stops)
+    .innerJoin(legs, eq(stops.legId, legs.id))
+    .where(and(eq(stops.id, stopId), eq(legs.tripId, tripId)));
+  if (!found.length) throw new Error("stop not found");
+}
+
 /**
  * The stop sheet's reservation form — and the body an undone DELETE re-POSTs,
  * which is why every column travels rather than the four the form used to
@@ -444,32 +471,51 @@ export async function deleteReservation(owner: string, resId: string): Promise<b
 }
 
 /**
- * "Add idea" — appended to the end of its stop's list. The sortOrder is read
- * and written in ONE transaction, so two concurrent adds cannot claim the same
- * position (the read path orders on it).
+ * "Add idea" — the stop sheet's form, the shelf's "+ Add", the Add-from-Places
+ * copy, and the undo.
+ *
+ * The TRIP is proved always: an insert has no WHERE to match zero rows, so a
+ * foreign `tripId` has to be refused explicitly and reads as 404. A `stopId` is
+ * proved too when one is sent, AND it must belong to the same trip — that is
+ * the one invariant no FK can span the join (schema.ts), and this is the only
+ * place the pair is set.
+ *
+ * The sortOrder is read and written in ONE transaction, appended within the
+ * row's own list (its stop's, or the shelf's), so two concurrent adds cannot
+ * claim the same position.
  */
 export async function createIdea(
   owner: string,
   input: {
-    stopId: string;
+    tripId: string;
+    stopId?: string | null;
     title: string;
+    category: IdeaCategory;
     status: IdeaStatus;
     place: Place | null;
     rating: number | null;
     notes: string | null;
   },
 ): Promise<Idea> {
+  const stopId = input.stopId ?? null;
   return db.transaction(async (tx) => {
-    await assertOwnedStop(tx, owner, input.stopId);
+    await assertOwnedTrip(tx, owner, input.tripId);
+    if (stopId !== null) await assertStopInTrip(tx, input.tripId, stopId);
     const [agg] = await tx
       .select({ highest: max(ideas.sortOrder) })
       .from(ideas)
-      .where(eq(ideas.stopId, input.stopId));
+      .where(
+        stopId === null
+          ? and(eq(ideas.tripId, input.tripId), isNull(ideas.stopId))
+          : eq(ideas.stopId, stopId),
+      );
     const [row] = await tx
       .insert(ideas)
       .values({
-        stopId: input.stopId,
+        tripId: input.tripId,
+        stopId,
         title: input.title,
+        category: input.category,
         status: input.status,
         placeName: input.place?.name ?? null,
         lat: input.place?.lat ?? null,
@@ -493,6 +539,16 @@ export async function createIdea(
  * A key the caller left out is a column left alone: the status pill, the stars
  * and the note each send one field, and none of them may disturb the place an
  * idea has been given.
+ *
+ * #80 adds `stopId` to that list, and with it the ONE thing the WHERE cannot
+ * prove. The scope `ideas.tripId in ownedTripIds` proves the row being written
+ * is yours; it says nothing about the stop the body points AT. So a bare spread
+ * would let a hand-rolled PATCH plant one of your ideas under a stop on someone
+ * else's trip — rendered by their `getTripById`, and undeletable by them,
+ * because `deleteIdea` is scoped the same way. `createIdea` already proves the
+ * pair with `assertStopInTrip` (schema.ts:134 states the invariant); an attach
+ * is the same write arriving later, so it gets the same proof, inside the same
+ * transaction as the update so a refusal moves no column at all.
  */
 export async function updateIdeaFields(
   owner: string,
@@ -505,22 +561,38 @@ export async function updateIdeaFields(
     lat?: number | null;
     lng?: number | null;
     googlePlaceId?: string | null;
+    stopId?: string | null;
+    category?: IdeaCategory;
   },
 ): Promise<void> {
   // An empty patch is a legal "nothing changed" on the wire, and drizzle throws
   // on `.set({})` — so the no-op is answered here rather than by a SQL error.
   if (Object.keys(patch).length === 0) return;
-  await db
-    .update(ideas)
-    .set(patch)
-    .where(and(eq(ideas.id, ideaId), inArray(ideas.stopId, ownedStopIds(owner))));
+  const scope = and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner)));
+  // A DETACH (`stopId: null`) names no stop, so there is nothing to prove and
+  // it stays the single statement every other field patch is.
+  const target = patch.stopId;
+  if (target === undefined || target === null) {
+    await db.update(ideas).set(patch).where(scope);
+    return;
+  }
+  await db.transaction(async (tx) => {
+    const owned = await tx.select({ tripId: ideas.tripId }).from(ideas).where(scope);
+    const mine = owned[0];
+    // A foreign (or absent) idea stays the shipped silent no-op this handler
+    // has always answered 204 to — the guard below is about the TARGET, and
+    // there is no owned row to attach in the first place.
+    if (!mine) return;
+    await assertStopInTrip(tx, mine.tripId, target);
+    await tx.update(ideas).set(patch).where(eq(ideas.id, ideaId));
+  });
 }
 
 /** The other leaf delete. Same undo toast, same absence of a cascade. */
 export async function deleteIdea(owner: string, ideaId: string): Promise<boolean> {
   const deleted = await db
     .delete(ideas)
-    .where(and(eq(ideas.id, ideaId), inArray(ideas.stopId, ownedStopIds(owner))))
+    .where(and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner))))
     .returning({ id: ideas.id });
   return deleted.length > 0;
 }
@@ -541,9 +613,14 @@ export async function promoteIdeaToReservation(
     const owned = await tx
       .select()
       .from(ideas)
-      .where(and(eq(ideas.id, ideaId), inArray(ideas.stopId, ownedStopIds(owner))));
+      .where(and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner))));
     const idea = owned[0];
     if (!idea) throw new Error("idea not found");
+    // `reservations.stop_id` is NOT NULL, so an unattached idea cannot become a
+    // reservation: it becomes bookable by being dropped onto a stop first. The
+    // shelf card renders no Book action at all — this is the server half of the
+    // same rule, so a hand-rolled POST is a 404 rather than a constraint error.
+    if (idea.stopId === null) throw new Error("idea not found");
     await tx.delete(ideas).where(eq(ideas.id, ideaId));
     const [res] = await tx
       .insert(reservations)

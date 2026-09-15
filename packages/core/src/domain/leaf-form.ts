@@ -1,8 +1,10 @@
 import type { PickedPlace } from "../providers/place-picker";
+import { hasCoords } from "./bounds";
 import { placeOf } from "./place-form";
 import {
   isoDate,
   type Idea,
+  type IdeaCategory,
   type IdeaCreateInput,
   type IdeaPatchInput,
   type IsoDate,
@@ -189,16 +191,24 @@ export function reservationRestoreInput(r: Reservation): ReservationCreateInput 
  * it earns its place with a title and nothing else, so Save is disabled on an
  * empty title only: a place without a title is not an idea. When nothing was
  * picked this still returns `place: null`, exactly as it always has.
+ *
+ * `parent` is the row's HOME (#80): the trip it belongs to (always), the stop
+ * it is attached to (the sheet's form) or null (the shelf's "+ Add"), and which
+ * of the three kinds it is. One object rather than three positional arguments,
+ * so the shelf's create and the sheet's create cannot be confused for each
+ * other at a call site.
  */
 export function ideaDraftInput(
-  stopId: string,
+  parent: { tripId: string; stopId?: string | null; category?: IdeaCategory },
   title: string,
   picked: PickedPlace | null = null,
 ): IdeaCreateInput | null {
   const t = title.trim();
   if (t === "") return null;
   return {
-    stopId,
+    tripId: parent.tripId,
+    stopId: parent.stopId ?? null,
+    category: parent.category ?? "do",
     title: t,
     status: "idea",
     place: ideaPlace(picked),
@@ -212,6 +222,26 @@ export function ideaDraftInput(
  * is. */
 export function ideaPlace(picked: PickedPlace | null): Place | null {
   return picked && picked.name.trim() !== "" ? placeOf(picked) : null;
+}
+
+/**
+ * Place-state 3 (#74) — a place WITH both coordinates, the only state that has
+ * something on the map to change or to clear.
+ *
+ * #69 gave the row three place states and left the third a dead end: the
+ * `place: null` clear exists end-to-end and is tested, but the line's own
+ * control (Locate) disappears the moment an idea is located, so nothing in the
+ * UI could press it. The door is the row menu, and THIS is the condition both
+ * of its place items are derived from — a place-less or coordless idea shows
+ * neither, because it still has Locate on its line instead.
+ *
+ * One named predicate rather than `idea.place !== null && hasCoords(...)`
+ * re-spelled at the line and at every menu: the door and the line must agree
+ * about which state a row is in, or the menu offers a clear for a place the row
+ * says it does not have.
+ */
+export function ideaIsLocated(idea: { place: Place | null }): boolean {
+  return idea.place !== null && hasCoords(idea.place);
 }
 
 /** The idea's place columns, as `updateIdeaFields` names them. Nullable all
@@ -236,6 +266,12 @@ export interface IdeaPlaceColumns {
  * Only an EXPLICIT `null` clears them. Mapping unconditionally would erase a
  * located idea's coordinates on every status cycle, rating and note save,
  * because each of those is a single-field patch.
+ *
+ * ONLY `place` is flattened. `stopId` (#80) and `category` ARE real columns, so
+ * they ride through in `...rest` untouched — an explicit `{ stopId: null }` is
+ * the drag back to the shelf and must reach `.set()` as a null, while an absent
+ * `stopId` still leaves the attachment alone. Re-deriving that distinction for
+ * a second key is exactly the bug this function exists to prevent.
  */
 export function ideaPatchColumns(
   patch: IdeaPatchInput,
@@ -255,7 +291,9 @@ export function ideaPatchColumns(
  * -"planned" idea does not come back as a fresh maybe. */
 export function ideaRestoreInput(i: Idea): IdeaCreateInput {
   return {
+    tripId: i.tripId,
     stopId: i.stopId,
+    category: i.category,
     title: i.title,
     status: i.status,
     place: i.place,

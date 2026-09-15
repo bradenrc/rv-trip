@@ -7,6 +7,7 @@ import {
   type Reservation,
   type ReservationPatchInput,
   type Idea,
+  type IdeaCategory,
   type IsoDate,
   type Place,
   type ReservationType,
@@ -41,6 +42,8 @@ export * from "./map-arcs";
 /** The map's stop discs + camera box — the other half of the same model
  * (#44 i4). Also the home of the scheduled ordinal the stop sheet prints. */
 export * from "./map-pins";
+/** The trip's idea shelf — the side rail's model (#80 i1). */
+export * from "./shelf";
 
 export function allStops(trip: Trip): Stop[] {
   return trip.legs.flatMap((l) => l.stops);
@@ -232,7 +235,11 @@ export interface RouteReservation {
 export interface RouteIdea {
   id: string;
   title: string;
-  type: ReservationType;
+  /** The idea's OWN kind (#80). It used to be a hardcoded activity type, so
+   * every idea on the route lens was a blue "Do" whatever it was; the renderer
+   * resolves this through `ideaCategoryMeta`, the one bridge into the DS's
+   * five-category language. */
+  category: IdeaCategory;
   status: Idea["status"];
 }
 export interface RouteRow {
@@ -469,7 +476,7 @@ export function routeModel(
       ideas: stop.ideas.map((it) => ({
         id: it.id,
         title: it.title,
-        type: "activity" as ReservationType,
+        category: it.category,
         status: it.status,
       })),
       showIdeaDivider: stop.reservations.length > 0 && stop.ideas.length > 0,
@@ -705,7 +712,7 @@ export function removeIdea(trip: Trip, stopId: string, ideaId: string): Trip {
  *
  * The reservation is the row the 201 handed back, TYPE INCLUDED: the type is
  * the one you picked on the way in, not a client guess. (This used to build
- * the row locally and hardcode "activity".)
+ * the row locally and hardcode the activity type.)
  */
 export function applyPromotion(
   trip: Trip,
@@ -758,8 +765,24 @@ export function scheduleFloating(
   gap: TimelineGap | null = null,
   nights = 3,
 ): Trip {
-  const stops = allStops(trip);
-  const { days } = deriveDays(trip, stops);
+  const dates = spanDates(trip, gap, nights);
+  if (!dates) return trip;
+  return updateStop(trip, stopId, (s) => ({ ...s, ...dates }));
+}
+
+/** The dates a drop lands on, or null when there is nothing to land on. */
+export interface PlannedDates {
+  arriveDate: IsoDate;
+  departDate: IsoDate;
+}
+
+/**
+ * The ONE date rule both drops share. `gap` is the open span that was dropped
+ * on; `null` is the stop sheet's "Schedule" button, which has no drop target
+ * and falls back to the trip's longest open run.
+ */
+function spanDates(trip: Trip, gap: TimelineGap | null, nights: number): PlannedDates | null {
+  const { days } = deriveDays(trip, allStops(trip));
 
   let start: number;
   let runLen: number;
@@ -767,18 +790,34 @@ export function scheduleFloating(
     start = gap.startCol - 1;
     // A gap the trip no longer has (the window moved under the drag) is a
     // no-op rather than a guess.
-    if (start < 0 || start >= days.length) return trip;
+    if (start < 0 || start >= days.length) return null;
     runLen = Math.min(gap.span, days.length - start);
   } else {
     [start, runLen] = longestOpenRun(days);
-    if (start < 0) return trip;
+    if (start < 0) return null;
   }
-  if (runLen < 1) return trip;
+  if (runLen < 1) return null;
 
   const span = Math.min(nights, runLen);
   const arriveDate = days[start]!.date;
-  const departDate = addDays(arriveDate, span - 1);
-  return updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate }));
+  return { arriveDate, departDate: addDays(arriveDate, span - 1) };
+}
+
+/**
+ * A stay-idea dropped on an open span (#80 Q3 → A): the dates the stop that
+ * drop CREATES is born with.
+ *
+ * It is `scheduleFloating`'s rule, not a second one — both call `spanDates`, so
+ * a drop on the Oct 18–24 span yields Oct 18 – 20 for an idea exactly as it
+ * does for a floating stop. Q3's answer is "identical to the floating-stop
+ * drop"; this is what identical means.
+ */
+export function planIdeaOnGap(
+  trip: Trip,
+  gap: TimelineGap,
+  nights = 3,
+): PlannedDates | null {
+  return spanDates(trip, gap, nights);
 }
 
 /** Reorder a floating stop within its leg (dragged before target). */

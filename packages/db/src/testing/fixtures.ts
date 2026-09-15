@@ -83,6 +83,10 @@ export interface StopSeed {
 
 export interface IdeaSeed {
   title: string;
+  /** #80: an idea belongs to the TRIP; the stop is optional. Passing
+   * `stopId: null` seeds a SHELF idea. */
+  stopId: string | null;
+  category: "do" | "eat" | "stay";
   status: "idea" | "planned" | "done";
   placeName: string | null;
   lat: number | null;
@@ -205,12 +209,14 @@ async function insertStop(p: { legId: string } & Partial<StopSeed>): Promise<Sto
   return row!;
 }
 
-async function insertIdea(p: { stopId: string } & Partial<IdeaSeed>): Promise<IdeaRow> {
+async function insertIdea(p: { tripId: string } & Partial<IdeaSeed>): Promise<IdeaRow> {
   const [row] = await db
     .insert(ideas)
     .values({
-      stopId: p.stopId,
+      tripId: p.tripId,
+      stopId: p.stopId === undefined ? null : p.stopId,
       title: p.title ?? "Fort Stevens bike loop",
+      category: p.category ?? "do",
       status: p.status ?? "idea",
       placeName: p.placeName ?? null,
       lat: p.lat ?? null,
@@ -339,7 +345,7 @@ async function pacificNorthwestLoop(owner: string = DEV_OWNER): Promise<LoopFixt
     rating: 5,
     notes: "Full hookups, site A12 backs to the trees.",
   });
-  const idea = await insertIdea({ stopId: astoria.id });
+  const idea = await insertIdea({ tripId: trip.id, stopId: astoria.id });
   return { trip, legCoast, legMountains, astoria, newport, bend, reservation, idea };
 }
 
@@ -468,6 +474,11 @@ export const read = {
   },
   async countIdeas(stopId: string): Promise<number> {
     const [row] = await db.select({ n: count() }).from(ideas).where(eq(ideas.stopId, stopId));
+    return Number(row!.n);
+  },
+  /** Every idea on a trip, attached or on the shelf (#80). */
+  async countTripIdeas(tripId: string): Promise<number> {
+    const [row] = await db.select({ n: count() }).from(ideas).where(eq(ideas.tripId, tripId));
     return Number(row!.n);
   },
   async countReservations(stopId: string): Promise<number> {

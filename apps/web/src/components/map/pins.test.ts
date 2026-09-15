@@ -55,6 +55,7 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "coast",
@@ -238,8 +239,10 @@ describe("buildMapModel — drive arcs over the one ordered pair set", () => {
 function mkIdea(over: Partial<Idea> & { id: string }): Idea {
   return {
     id: over.id,
+    tripId: over.tripId ?? "t1",
     stopId: over.stopId ?? "bend",
     title: over.title ?? "Deschutes River float",
+    category: over.category ?? "do",
     status: over.status ?? "idea",
     place: over.place ?? null,
     rating: over.rating ?? null,
@@ -378,5 +381,79 @@ describe("buildMapModel — the third pin kind", () => {
     const trip = tripWithIdeas([mkIdea({ id: "float" })]);
     const rows: UnmappedRow[] = buildMapModel([trip], [], {}, HASH).unmapped;
     expect(rows.every((u) => u.layer !== "saved")).toBe(true);
+  });
+});
+
+/**
+ * The SHELF (#80 i4). `trip.ideas[]` is the trip's unattached ideas — the rows
+ * with `stop_id IS NULL` that i1 put on the tree. They are drawable points like
+ * any other idea, and they are the reason the camera box can now grow a genuine
+ * outlier: a shelf idea is parked wherever the reader found it, not beside a
+ * stop.
+ */
+function tripWithShelf(ideas: Idea[]): Trip {
+  const trip = seedTrip();
+  trip.ideas = ideas;
+  return trip;
+}
+
+describe("buildMapModel — the trip's idea shelf", () => {
+  const moab = {
+    name: "Arches National Park",
+    lat: 38.7331,
+    lng: -109.5925,
+    googlePlaceId: "ChIJarches",
+  };
+
+  it("draws a located shelf idea, with no stop name to borrow", () => {
+    const trip = tripWithShelf([
+      mkIdea({ id: "arches", stopId: null, title: "Arches at sunrise", place: moab }),
+    ]);
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    const idea = pins.find((p) => p.kind === "idea") as IdeaPin;
+    expect(idea).toMatchObject({
+      kind: "idea",
+      id: "arches",
+      lat: 38.7331,
+      lng: -109.5925,
+      layer: "planning",
+      name: "Arches at sunrise",
+      // An unattached idea hangs under no stop — the rail prints the trip alone.
+      stopName: null,
+      tripId: "t1",
+      tripTitle: "Pacific Northwest Loop",
+    });
+    expect(unmapped).toEqual([]);
+  });
+
+  it("keeps a coordless shelf idea as an unmapped `idea` row, so Locate can reach it", () => {
+    const trip = tripWithShelf([mkIdea({ id: "hot-springs", stopId: null, title: "a hot spring" })]);
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    expect(pins.some((p) => p.kind === "idea")).toBe(false);
+    expect(unmapped.map((u) => [u.id, u.kind, u.layer])).toEqual([
+      ["hot-springs", "idea", "planning"],
+    ]);
+    expect(unmapped.map(locateRowOf)).toEqual([{ kind: "idea", id: "hot-springs" }]);
+  });
+
+  it("counts a shelf idea under its trip's layer beside the attached ones", () => {
+    const trip = tripWithShelf([
+      mkIdea({ id: "arches", stopId: null, place: moab }),
+      mkIdea({ id: "hot-springs", stopId: null }),
+    ]);
+    trip.legs[1]!.stops[0]!.ideas = [mkIdea({ id: "float" })];
+    const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
+    // Four stops + one shelf pin drawn; one shelf row and one attached row unmapped.
+    expect(layerCounts(pins, unmapped).planning).toBe(7);
+    expect(pins.filter((p) => p.kind === "idea").map((p) => p.id)).toEqual(["arches"]);
+  });
+
+  it("draws the shelf's ideas once, after the stops they are not attached to", () => {
+    // Render order is z-order (MapView keys the marker tier off `kind`, but the
+    // rail reads this list straight): a shelf idea is neither duplicated under a
+    // stop nor interleaved with one.
+    const trip = tripWithShelf([mkIdea({ id: "arches", stopId: null, place: moab })]);
+    const { pins } = buildMapModel([trip], [], {}, HASH);
+    expect(pins.map((p) => p.id)).toEqual(["astoria", "newport", "bend", "crater", "arches"]);
   });
 });
