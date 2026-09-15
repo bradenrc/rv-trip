@@ -111,12 +111,13 @@ pipeline:
     - id: wireframe
       kind: worker
       agent: wireframe
-      on_pass: signoff
-      on_fail: mock
-    - id: signoff
-      kind: human
+      # signoff RETIRED (2026-09-15): 176 approvals / 3 rejections (all pre-Aug-10, all
+      # survey-shaped) = a rubber stamp costing ~375h parked. The survey is the design
+      # decision point; vet pressure-tests the wireframe against it mechanically; the walk
+      # is the human gate that earns its keep (9% catch rate). reset_to_gate re-enters
+      # wireframe if a pixel look is ever wanted.
       on_pass: vet
-      on_fail: wireframe
+      on_fail: mock
     - id: vet
       kind: worker
       agent: vet

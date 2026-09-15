@@ -172,7 +172,7 @@ goes back as a rework.
 the very bottom, then the buttons directly under it, POSTing to the relative
 `answers` url:
 
-- **Sign off ✓** → `intent:'signoff'`.
+- (Sign-off buttons retired 2026-09-15 — the wireframe is a pure static artifact; vet is next.)
 - **Review · Refine** → two reject choices, each carrying the textarea
   verbatim: **Rework the direction** (`intent:'refine', route:'mock'`) and
   **Refine this wireframe** (`intent:'refine', route:'wireframe'`).
@@ -202,6 +202,6 @@ Domain             packages/core/src/domain/    Zod types + deriveDays
 Data               packages/db/src/             Drizzle schema/queries/mutations
 
 Stage artifact     docs/design/<issue>/index.html   (epic also: plan.json)
-Gate order         mock -> survey -> wireframe -> signoff -> vet -> dev -> qa -> walk -> ship
+Gate order         mock -> survey -> wireframe -> vet -> dev -> qa -> walk -> ship  (signoff retired 2026-09-15 — the survey is the design decision; vet checks fidelity)
 Local gate         pnpm turbo run lint typecheck test
 ```
