@@ -3,6 +3,7 @@ import { placeOf } from "./place-form";
 import {
   isoDate,
   type Idea,
+  type IdeaCategory,
   type IdeaCreateInput,
   type IdeaPatchInput,
   type IsoDate,
@@ -189,16 +190,24 @@ export function reservationRestoreInput(r: Reservation): ReservationCreateInput 
  * it earns its place with a title and nothing else, so Save is disabled on an
  * empty title only: a place without a title is not an idea. When nothing was
  * picked this still returns `place: null`, exactly as it always has.
+ *
+ * `parent` is the row's HOME (#80): the trip it belongs to (always), the stop
+ * it is attached to (the sheet's form) or null (the shelf's "+ Add"), and which
+ * of the three kinds it is. One object rather than three positional arguments,
+ * so the shelf's create and the sheet's create cannot be confused for each
+ * other at a call site.
  */
 export function ideaDraftInput(
-  stopId: string,
+  parent: { tripId: string; stopId?: string | null; category?: IdeaCategory },
   title: string,
   picked: PickedPlace | null = null,
 ): IdeaCreateInput | null {
   const t = title.trim();
   if (t === "") return null;
   return {
-    stopId,
+    tripId: parent.tripId,
+    stopId: parent.stopId ?? null,
+    category: parent.category ?? "do",
     title: t,
     status: "idea",
     place: ideaPlace(picked),
@@ -236,6 +245,12 @@ export interface IdeaPlaceColumns {
  * Only an EXPLICIT `null` clears them. Mapping unconditionally would erase a
  * located idea's coordinates on every status cycle, rating and note save,
  * because each of those is a single-field patch.
+ *
+ * ONLY `place` is flattened. `stopId` (#80) and `category` ARE real columns, so
+ * they ride through in `...rest` untouched — an explicit `{ stopId: null }` is
+ * the drag back to the shelf and must reach `.set()` as a null, while an absent
+ * `stopId` still leaves the attachment alone. Re-deriving that distinction for
+ * a second key is exactly the bug this function exists to prevent.
  */
 export function ideaPatchColumns(
   patch: IdeaPatchInput,
@@ -255,7 +270,9 @@ export function ideaPatchColumns(
  * -"planned" idea does not come back as a fresh maybe. */
 export function ideaRestoreInput(i: Idea): IdeaCreateInput {
   return {
+    tripId: i.tripId,
     stopId: i.stopId,
+    category: i.category,
     title: i.title,
     status: i.status,
     place: i.place,

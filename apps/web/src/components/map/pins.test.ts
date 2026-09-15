@@ -55,6 +55,7 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "coast",
@@ -238,8 +239,10 @@ describe("buildMapModel — drive arcs over the one ordered pair set", () => {
 function mkIdea(over: Partial<Idea> & { id: string }): Idea {
   return {
     id: over.id,
+    tripId: over.tripId ?? "t1",
     stopId: over.stopId ?? "bend",
     title: over.title ?? "Deschutes River float",
+    category: over.category ?? "do",
     status: over.status ?? "idea",
     place: over.place ?? null,
     rating: over.rating ?? null,

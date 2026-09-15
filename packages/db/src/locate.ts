@@ -12,9 +12,9 @@ import { ideas, legs, savedPlaces, stops, trips } from "./schema";
  * Two guarantees live here and nowhere else:
  *
  * 1. **Only this owner's rows.** Stops scope through leg → trip exactly as
- *    mutations.ts scopes every stop write; ideas take the same walk one level
- *    deeper (idea → stop → leg → trip → owner); saved places scope on
- *    `owner_id` directly. Another tenant's id simply does not come back, so it
+ *    mutations.ts scopes every stop write; ideas join straight to their own
+ *    `trip_id` (#80 — a shelf idea has no stop to walk through); saved places
+ *    scope on `owner_id` directly. Another tenant's id simply does not come back, so it
  *    is never geocoded and never written.
  * 2. **Only coordless rows.** A row that already has a pin is not re-read and
  *    not re-billed, and a coordinate the user placed by hand can never be
@@ -40,11 +40,12 @@ const ownedLegIds = (owner: string) =>
     .innerJoin(trips, eq(legs.tripId, trips.id))
     .where(eq(trips.ownerId, owner));
 
-/** One level deeper, mirrored the same way — `mutations.ts` keeps its copy
- * private to the write path, so this is the second copy by the same rule the
- * comment above names, not an omission. */
-const ownedStopIds = (owner: string) =>
-  db.select({ id: stops.id }).from(stops).where(inArray(stops.legId, ownedLegIds(owner)));
+/** The IDEA scope (#80). An idea carries `trip_id` attached or not, so the walk
+ * is one hop, not four — and a shelf idea (NULL `stop_id`) is in no
+ * `ownedStopIds` list, which is why this is the only correct scope for an idea
+ * write. Mirrored from mutations.ts by the same rule the two above are. */
+const ownedTripIds = (owner: string) =>
+  db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
 
 async function loadStops(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
@@ -81,9 +82,7 @@ async function loadIdeas(owner: string, ids: string[]): Promise<LocateTarget[]> 
   const rows = await db
     .select({ id: ideas.id, name: ideas.title })
     .from(ideas)
-    .innerJoin(stops, eq(ideas.stopId, stops.id))
-    .innerJoin(legs, eq(stops.legId, legs.id))
-    .innerJoin(trips, eq(legs.tripId, trips.id))
+    .innerJoin(trips, eq(ideas.tripId, trips.id))
     .where(and(eq(trips.ownerId, owner), inArray(ideas.id, ids), coordlessIdea));
   return rows.map((r) => ({ kind: "idea" as const, id: r.id, name: r.name, region: null }));
 }
@@ -108,9 +107,7 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
     db
       .select({ id: ideas.id, name: ideas.title })
       .from(ideas)
-      .innerJoin(stops, eq(ideas.stopId, stops.id))
-      .innerJoin(legs, eq(stops.legId, legs.id))
-      .innerJoin(trips, eq(legs.tripId, trips.id))
+      .innerJoin(trips, eq(ideas.tripId, trips.id))
       .where(and(eq(trips.ownerId, owner), coordlessIdea)),
   ]);
   return [
@@ -186,7 +183,7 @@ async function writeIdeaPin(
       googlePlaceId: found.googlePlaceId,
       placeName: sql`coalesce(${ideas.placeName}, ${found.name})`,
     })
-    .where(and(eq(ideas.id, ideaId), inArray(ideas.stopId, ownedStopIds(owner))))
+    .where(and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner))))
     .returning({ id: ideas.id });
   return rows.length > 0;
 }

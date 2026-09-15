@@ -1,5 +1,10 @@
 import { notFound } from "next/navigation";
-import { getTripById, getRigByOwner, getPrefsByOwner } from "@rv-trip/db";
+import {
+  getTripById,
+  getRigByOwner,
+  getPrefsByOwner,
+  listSavedPlacesForOwner,
+} from "@rv-trip/db";
 import { TripPlanner } from "@/components/trip/TripPlanner";
 import { getOwner } from "@/lib/owner";
 import { unitsFromPrefs } from "@/lib/units";
@@ -27,6 +32,11 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // and every drive row render in the right unit with no flash, and no display
   // component has to become a preference consumer (lib/units.ts).
   const units = unitsFromPrefs(await getPrefsByOwner(owner));
+  // The "Add from Places" entrance (#80 Q6 → A). The library is account-scoped
+  // and already read server-side on /places; the trip screen reads it on the
+  // SAME seam rather than inventing a client fetch, so picking a place is one
+  // POST and not a round-trip to discover what there is to pick.
+  const savedPlaces = await listSavedPlacesForOwner(owner);
 
   return (
     <TripPlanner
@@ -36,6 +46,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       nav={nav}
       hasRig={rig !== null}
       units={units}
+      savedPlaces={savedPlaces}
     />
   );
 }

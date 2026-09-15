@@ -237,18 +237,18 @@ describe("home base — one object on the wire, three columns underneath", () =>
 
 describe("ideaDraftInput — the picker on Add idea is optional", () => {
   it("still returns place: null when nothing was picked", () => {
-    expect(ideaDraftInput("11111111-2222-4333-8444-555566667777", "Cape Perpetua overlook")?.place)
+    expect(ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", stopId: "11111111-2222-4333-8444-555566667777" }, "Cape Perpetua overlook")?.place)
       .toBeNull();
   });
 
   it("attaches the picked place when there is one", () => {
     expect(
-      ideaDraftInput("11111111-2222-4333-8444-555566667777", "Cape Perpetua overlook", CAPE)?.place,
+      ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", stopId: "11111111-2222-4333-8444-555566667777" }, "Cape Perpetua overlook", CAPE)?.place,
     ).toEqual(placeOf(CAPE));
   });
 
   it("a place without a title is not an idea", () => {
-    expect(ideaDraftInput("11111111-2222-4333-8444-555566667777", "   ", CAPE)).toBeNull();
+    expect(ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", stopId: "11111111-2222-4333-8444-555566667777" }, "   ", CAPE)).toBeNull();
   });
 
   it("ideaPlace drops an empty pick rather than storing a nameless place", () => {
@@ -315,6 +315,7 @@ describe("routeSummary — the rail counts the stops it cannot draw", () => {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "l1",

@@ -9,7 +9,7 @@ describeDb("POST /api/ideas/[id]/promote", () => {
     const trip = await fx.trip();
     const leg = await fx.leg({ tripId: trip.id });
     const astoria = await fx.stop({ legId: leg.id });
-    const idea = await fx.idea({ stopId: astoria.id, title: "Fort Stevens bike loop" });
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Fort Stevens bike loop" });
 
     // body-less POST — exercises the handler's `.catch(() => ({}))` and
     // ideaPromoteInput's `.default("activity")` (types.ts:268) together

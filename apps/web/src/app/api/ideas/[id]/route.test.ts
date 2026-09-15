@@ -97,8 +97,8 @@ describeDb("PATCH /api/ideas/[id] — the place (#69)", () => {
   });
 
   it("does NOT touch the place when the patch is a status cycle", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ stopId: astoria.id, ...locatedColumns() });
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, ...locatedColumns() });
 
     await PATCH(req({ status: "planned" }, "PATCH"), ctx(idea.id));
     await PATCH(req({ rating: 4 }, "PATCH"), ctx(idea.id));
@@ -116,8 +116,8 @@ describeDb("PATCH /api/ideas/[id] — the place (#69)", () => {
   });
 
   it("clears all four on an EXPLICIT null", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ stopId: astoria.id, ...locatedColumns() });
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, ...locatedColumns() });
 
     const res = await PATCH(req({ place: null }, "PATCH"), ctx(idea.id));
 
@@ -154,5 +154,98 @@ describeDb("PATCH /api/ideas/[id] — the place (#69)", () => {
     const { idea } = await fx.pacificNorthwestLoop();
     const res = await PATCH(req({}, "PATCH"), ctx(idea.id));
     expect(res.status).toBe(204);
+  });
+});
+
+/**
+ * #80 — the writes that reach a SHELF idea at all.
+ *
+ * This is Gap 1 in one file. Every idea write used to be scoped
+ * `inArray(ideas.stopId, ownedStopIds(owner))`, and a NULL `stop_id` is in no
+ * IN list — so shipping the nullable column without re-scoping would make the
+ * status pill, the note, the place clear and the delete silent no-ops on
+ * exactly the rows this epic exists to create. The re-scope is to `trip_id`,
+ * and these prove both halves: the owner's shelf idea is writable, and another
+ * owner's still is not.
+ */
+describeDb("PATCH/DELETE /api/ideas/[id] — a shelf idea (#80)", () => {
+  const LOCATED = {
+    placeName: "Coachland RV Park",
+    lat: 39.3438,
+    lng: -120.2046,
+    googlePlaceId: "ChIJcoachland",
+  };
+
+  it("a status PATCH reaches a row with a null stop_id", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland" });
+
+    const res = await PATCH(req({ status: "planned" }, "PATCH"), ctx(idea.id));
+
+    expect(res.status).toBe(204);
+    expect((await read.idea(idea.id))!.status).toBe("planned");
+  });
+
+  it("a { place: null } PATCH clears all four columns on a shelf idea", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, ...LOCATED });
+
+    const res = await PATCH(req({ place: null }, "PATCH"), ctx(idea.id));
+
+    expect(res.status).toBe(204);
+    const row = (await read.idea(idea.id))!;
+    expect(row.placeName).toBeNull();
+    expect(row.lat).toBeNull();
+    expect(row.lng).toBeNull();
+    expect(row.googlePlaceId).toBeNull();
+  });
+
+  it("a DELETE removes a shelf idea", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null });
+
+    const res = await DELETE(req(undefined, "DELETE"), ctx(idea.id));
+
+    expect(res.status).toBe(204);
+    expect(await read.idea(idea.id)).toBeNull();
+  });
+
+  it("a foreign owner's shelf idea still matches nothing", async () => {
+    const { trip } = await fx.pacificNorthwestLoop(OTHER_OWNER);
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Theirs" });
+
+    await PATCH(req({ status: "done", notes: "hijacked" }, "PATCH"), ctx(idea.id));
+    const del = await DELETE(req(undefined, "DELETE"), ctx(idea.id));
+
+    expect(del.status).toBe(404);
+    const row = (await read.idea(idea.id))!;
+    expect(row.status).toBe("idea");
+    expect(row.notes).toBeNull();
+  });
+
+  /** The three drop gestures, on the wire. `stop_id` is a real column, so it
+   * passes through `ideaPatchColumns` unflattened — including the explicit
+   * null that sends a row back to the shelf. */
+  it("attaches with a stopId and detaches with an explicit null", async () => {
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, ...LOCATED });
+
+    expect((await PATCH(req({ stopId: astoria.id }, "PATCH"), ctx(idea.id))).status).toBe(204);
+    expect((await read.idea(idea.id))!.stopId).toBe(astoria.id);
+
+    expect((await PATCH(req({ stopId: null }, "PATCH"), ctx(idea.id))).status).toBe(204);
+    expect((await read.idea(idea.id))!.stopId).toBeNull();
+  });
+
+  it("the drop never disturbs the place it is carrying", async () => {
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, ...LOCATED });
+
+    await PATCH(req({ stopId: astoria.id }, "PATCH"), ctx(idea.id));
+
+    const row = (await read.idea(idea.id))!;
+    expect(row.placeName).toBe("Coachland RV Park");
+    expect(row.lat).toBe(39.3438);
+    expect(row.googlePlaceId).toBe("ChIJcoachland");
   });
 });

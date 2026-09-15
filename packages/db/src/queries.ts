@@ -49,6 +49,13 @@ const TRIP_WITH = {
       },
     },
   },
+  // The SHELF (#80): the trip's UNATTACHED ideas. `stop_id IS NULL` is what
+  // keeps one row in one place — an attached idea already arrives under its
+  // stop above, and loading it twice would draw it twice.
+  ideas: {
+    where: (i, { isNull }) => isNull(i.stopId),
+    orderBy: (i, { asc }) => [asc(i.sortOrder)],
+  },
 } satisfies NonNullable<Parameters<typeof db.query.trips.findFirst>[0]>["with"];
 
 type TripRow = NonNullable<
@@ -85,6 +92,7 @@ function mapTripRow(row: TripRow, today: IsoDate = todayIso()): Trip {
     rating: row.rating,
     note: row.note,
     legs: row.legs.map(mapLeg),
+    ideas: row.ideas.map(mapIdea),
   };
 }
 
@@ -378,8 +386,10 @@ export function mapReservation(r: MapReservationRow): Reservation {
 
 interface MapIdeaRow {
   id: string;
-  stopId: string;
+  tripId: string;
+  stopId: string | null;
   title: string;
+  category: Idea["category"];
   status: Idea["status"];
   placeName: string | null;
   lat: number | null;
@@ -395,8 +405,10 @@ interface MapIdeaRow {
 export function mapIdea(i: MapIdeaRow): Idea {
   return {
     id: i.id,
+    tripId: i.tripId,
     stopId: i.stopId,
     title: i.title,
+    category: i.category,
     status: i.status,
     place:
       i.placeName === null

@@ -133,6 +133,7 @@ function pnwLoop(status: Trip["status"]): Trip {
     statusAuto: false,
     rating: null,
     note: null,
+    ideas: [],
     legs: [
       {
         id: "leg-coast",

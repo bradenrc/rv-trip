@@ -42,6 +42,7 @@ function fixture(over: Partial<Trip> = {}): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    ideas: [],
     legs: [],
     ...over,
   };
@@ -251,8 +252,10 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
     })),
     ideas: Array.from({ length: ideas }, (_, i) => ({
       id: `${id}-i${i}`,
+      tripId: "t1",
       stopId: id,
       title: "idea",
+      category: "do" as const,
       status: "idea" as const,
       place: null,
       rating: null,
@@ -300,8 +303,10 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
 describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () => {
   const idea = (id: string, stopId: string, i: number) => ({
     id,
+    tripId: "t1",
     stopId,
     title: "idea",
+    category: "do" as const,
     status: "idea" as const,
     place: null,
     rating: null,

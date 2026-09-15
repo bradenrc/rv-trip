@@ -1,4 +1,5 @@
-import type { ReservationType, IdeaStatus } from "@rv-trip/core";
+import type { IdeaCategory, ReservationType, IdeaStatus } from "@rv-trip/core";
+import { ideaCategoryMeta } from "./category";
 import { CategoryTile } from "./CategoryTile";
 import { StatusMarker } from "./StatusMarker";
 import { money } from "./format";
@@ -26,17 +27,19 @@ export function ReservationLineItem({
 
 /** An idea as a compact row: category tile, title, status marker. */
 export function IdeaLineItem({
-  type,
+  category,
   title,
   status,
 }: {
-  type: ReservationType;
+  /** The idea's OWN kind (#80) — it used to be a hardcoded activity type, so
+   * every idea in the route row was a blue "Do" whatever it was. */
+  category: IdeaCategory;
   title: string;
   status: IdeaStatus;
 }) {
   return (
     <div className="flex items-center gap-2.5 py-1">
-      <CategoryTile type={type} />
+      <CategoryTile meta={ideaCategoryMeta(category)} />
       <span className="min-w-0 flex-1 truncate text-[13px] text-rv-ink-muted">{title}</span>
       <StatusMarker status={status} />
     </div>

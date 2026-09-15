@@ -21,6 +21,7 @@ import {
 } from "./types";
 
 const STOP = "6f1c5b4e-0000-4000-8000-000000000001";
+const TRIP = "6f1c5b4e-0000-4000-8000-0000000000aa";
 
 /** The reservation the design's undo toast is holding: "Rogue Ales brewery
  * lunch", promoted from an idea and rated. */
@@ -44,8 +45,10 @@ function res(over: Partial<Reservation> = {}): Reservation {
 function ideaFixture(over: Partial<Idea> = {}): Idea {
   return {
     id: "i1",
+    tripId: TRIP,
     stopId: STOP,
     title: "Rogue Ales brewery lunch",
+    category: "eat",
     status: "planned",
     place: null,
     rating: null,
@@ -205,8 +208,12 @@ describe("reservationRestoreInput — what Undo re-POSTs", () => {
 
 describe("ideaDraftInput / ideaRestoreInput", () => {
   it("creates an idea from just a title", () => {
-    expect(ideaDraftInput(STOP, "  Cape Perpetua overlook  ")).toEqual({
+    expect(
+      ideaDraftInput({ tripId: TRIP, stopId: STOP }, "  Cape Perpetua overlook  "),
+    ).toEqual({
+      tripId: TRIP,
       stopId: STOP,
+      category: "do",
       title: "Cape Perpetua overlook",
       status: "idea",
       place: null,
@@ -216,13 +223,15 @@ describe("ideaDraftInput / ideaRestoreInput", () => {
   });
 
   it("is null on an empty title", () => {
-    expect(ideaDraftInput(STOP, "   ")).toBeNull();
+    expect(ideaDraftInput({ tripId: TRIP, stopId: STOP }, "   ")).toBeNull();
   });
 
   it("restores a deleted idea with its status, rating and note intact", () => {
     const body = ideaRestoreInput(ideaFixture());
     expect(body).toEqual({
+      tripId: TRIP,
       stopId: STOP,
+      category: "eat",
       title: "Rogue Ales brewery lunch",
       status: "planned",
       place: null,
@@ -318,5 +327,34 @@ describe("ideaPatchColumns", () => {
   it("never hands `place` to `.set()` — there is no such column", () => {
     expect(ideaPatchColumns({ place: { name: "X", lat: null, lng: null, googlePlaceId: null } }))
       .not.toHaveProperty("place");
+  });
+
+  /** #80 — `stop_id` IS a column, so it is the one key that must NOT be
+   * flattened. All three drop gestures write it, and the middle one writes an
+   * explicit null. */
+  it("passes stopId straight through as a real column", () => {
+    expect(ideaPatchColumns({ stopId: STOP })).toEqual({ stopId: STOP });
+    expect(ideaPatchColumns({ stopId: null })).toEqual({ stopId: null });
+    expect(ideaPatchColumns({ category: "stay" })).toEqual({ category: "stay" });
+  });
+
+  it("still distinguishes absent from explicit null for `place` while it does", () => {
+    // The drag back to the shelf sends { stopId: null } and NOTHING about the
+    // place: a phantom place: null here would wipe a located idea's pin.
+    const back = ideaPatchColumns({ stopId: null });
+    expect(back).toEqual({ stopId: null });
+    expect("placeName" in back).toBe(false);
+    expect("lat" in back).toBe(false);
+
+    // And the reverse: clearing the place says nothing about the attachment.
+    const cleared = ideaPatchColumns({ place: null });
+    expect("stopId" in cleared).toBe(false);
+  });
+
+  it("carries the drop and the clear together when a body sends both", () => {
+    expect(ideaPatchColumns({ stopId: STOP, status: "planned" })).toEqual({
+      stopId: STOP,
+      status: "planned",
+    });
   });
 });

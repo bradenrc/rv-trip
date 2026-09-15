@@ -11,7 +11,7 @@ import {
   Clock,
   CircleCheck,
 } from "lucide-react";
-import type { ReservationType, IdeaStatus } from "@rv-trip/core";
+import type { IdeaCategory, ReservationType, IdeaStatus } from "@rv-trip/core";
 
 /**
  * The design system's category language — every reservation/idea type maps to
@@ -72,6 +72,47 @@ export function categoryMeta(type: ReservationType): CategoryMeta {
       return { cat: "Travel", Icon: Caravan, ...TRAVEL };
     default:
       return { cat: "Other", Icon: type === "other" ? Ellipsis : MapPin, ...OTHER };
+  }
+}
+
+/**
+ * The do/eat/stay vocabulary's ONE door into the five-category language (#80
+ * Q2 → A). It lives in this file rather than beside the enum so there is a
+ * single lookup and not two drifting ones: an idea's colour and icon are
+ * whatever `categoryMeta` already says for the reservation type it reads as.
+ */
+export function ideaCategoryType(c: IdeaCategory): ReservationType {
+  switch (c) {
+    case "stay":
+      return "campground";
+    case "eat":
+      return "dining";
+    default:
+      return "activity";
+  }
+}
+
+/** The idea's category as the DS renders it — Tent/green, Utensils/amber,
+ * Binoculars/blue. */
+export function ideaCategoryMeta(c: IdeaCategory): CategoryMeta {
+  return categoryMeta(ideaCategoryType(c));
+}
+
+/**
+ * The same bridge walked the OTHER way (#80 Q6 → A): a saved place's
+ * `reservation_type` becoming the idea category the Add-from-Places copy is
+ * born with. It reads `categoryMeta(type).cat` rather than re-listing the eight
+ * types, so the five-category language stays the single lookup — Stay → stay,
+ * Eat → eat, and everything else (Do · Travel · Other) → do.
+ */
+export function ideaCategoryOfType(type: ReservationType): IdeaCategory {
+  switch (categoryMeta(type).cat) {
+    case "Stay":
+      return "stay";
+    case "Eat":
+      return "eat";
+    default:
+      return "do";
   }
 }
 

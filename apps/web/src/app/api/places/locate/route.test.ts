@@ -46,8 +46,8 @@ describeDb("POST /api/places/locate — ideas", () => {
   });
 
   it("loads a coordless idea by id, under the owner's scope", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ stopId: astoria.id, title: "Tumalo Falls trailhead" });
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Tumalo Falls trailhead" });
 
     const targets = await dbLocateStore(DEV_OWNER).load([{ kind: "idea", id: idea.id }]);
 
@@ -79,15 +79,15 @@ describeDb("POST /api/places/locate — ideas", () => {
   });
 
   it("loads nothing for an idea that already has a pin — no re-bill, no moving it", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ stopId: astoria.id, lat: 44.0317, lng: -121.5678 });
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, lat: 44.0317, lng: -121.5678 });
 
     expect(await dbLocateStore(DEV_OWNER).load([{ kind: "idea", id: idea.id }])).toEqual([]);
   });
 
   it("writes the pin onto the idea, and FILLS an empty place_name with Google's", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ stopId: astoria.id, title: "Tumalo Falls trailhead" });
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Tumalo Falls trailhead" });
 
     const answer = await locatePlaces({
       rows: [{ kind: "idea", id: idea.id }],
@@ -106,9 +106,10 @@ describeDb("POST /api/places/locate — ideas", () => {
   });
 
   it("KEEPS a place name the human typed — a batch press never renames their row", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
     // The picker's free-text escape row: a name, no coordinates.
     const idea = await fx.idea({
+      tripId: trip.id,
       stopId: astoria.id,
       title: "waterfall hike",
       placeName: "Tumalo Falls, the upper lot",
@@ -126,8 +127,8 @@ describeDb("POST /api/places/locate — ideas", () => {
   });
 
   it("asks Google about the idea's title — a row's name never comes from the client", async () => {
-    const { astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ stopId: astoria.id, title: "Deschutes River float" });
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Deschutes River float" });
     const provider = new FakeProvider(null);
 
     await locatePlaces({
@@ -145,7 +146,7 @@ describeDb("POST /api/places/locate — ideas", () => {
   it("spans all three kinds in one batch", async () => {
     const { astoria, trip } = await fx.pacificNorthwestLoop();
     const stop = await fx.stop({ legId: astoria.legId, lat: null, lng: null, sortOrder: 9 });
-    const idea = await fx.idea({ stopId: astoria.id });
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id });
     const place = await fx.savedPlace({ lat: null, lng: null, tripId: trip.id });
 
     const targets = await dbLocateStore(DEV_OWNER).load([

@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import type {
   CascadeCounts,
   Idea,
+  IdeaCategory,
   PickedPlace,
+  SavedPlace,
   Reservation,
   ReservationDraft,
   ReservationType,
@@ -51,20 +53,29 @@ import {
   tripSettingsPatch,
   unscheduleStopPatch,
 } from "@rv-trip/core";
-import { FieldLabel, Stars } from "@rv-trip/ui";
+import { CategoryTile, FieldLabel, Stars, ideaCategoryMeta, ideaCategoryOfType } from "@rv-trip/ui";
 import {
+  Binoculars,
   Compass,
   House,
   CalendarDays,
+  ChevronDown,
   CircleAlert,
+  Library,
+  MapPin,
   Route,
   ChartNoAxesGantt,
   Plus,
   Settings,
+  Tent,
+  Trash2,
+  Utensils,
+  X,
 } from "lucide-react";
 import {
   allStops,
   appendIdea,
+  appendShelfIdea,
   appendLeg,
   appendReservation,
   appendStop,
@@ -73,7 +84,13 @@ import {
   legOrder,
   moveLeg,
   moveStopToLeg,
+  attachIdeaToStop,
+  detachIdeaToShelf,
+  ideaShelf,
+  planIdeaOnGap,
   removeIdea,
+  removeShelfIdea,
+  setShelfIdeaFields,
   removeLeg,
   removeReservation,
   removeStop,
@@ -99,9 +116,10 @@ import {
   reorderFloating,
   type NavMap,
   type RouteMap,
+  type ShelfFilter,
   type TimelineGap,
 } from "@/lib/trip-logic";
-import type { Units } from "@rv-trip/core";
+import type { LatLng, Units } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { fullRange, monthDay } from "@/lib/trip-ui";
 import { useBooleanPref } from "@/lib/pref";
@@ -133,6 +151,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { MENU_ITEM, MENU_ITEM_WARN, MENU_SURFACE, MenuHint, RowMenu } from "./row-menu";
 import { Timeline } from "./Timeline";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
@@ -155,6 +180,7 @@ export function TripPlanner({
   nav = {},
   hasRig,
   units,
+  savedPlaces = [],
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -175,6 +201,13 @@ export function TripPlanner({
    * It reaches two places: every drive row's label, worded by core's
    * `driveLabel` inside `routeModel`, and the rail's 34px hero. */
   units: Units;
+  /**
+   * The account's Places library, read on the SAME server seam as the trip
+   * (trips/[id]/page.tsx) — the "Add from Places" entrance (#80 Q6 → A).
+   * Defaulted, so a caller that has no library in hand renders the panel empty
+   * rather than failing to render at all.
+   */
+  savedPlaces?: SavedPlace[];
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
@@ -210,6 +243,19 @@ export function TripPlanner({
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteType, setPromoteType] = useState<ReservationType>("activity");
   const [ideaNoteOpen, setIdeaNoteOpen] = useState<Set<string>>(new Set());
+  /** The shelf's pressed proximity chip (#80). `all` is the reset. */
+  const [shelfFilter, setShelfFilter] = useState<ShelfFilter>({ kind: "all" });
+  /** The "+ Add" branch that is open, as the kind of maybe it creates. `null`
+   * is closed; the fourth branch ("A stop") is the shipped draft-stop row. */
+  const [addIdeaCategory, setAddIdeaCategory] = useState<IdeaCategory | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [shelfDraft, setShelfDraft] = useState("");
+  const [shelfPicked, setShelfPicked] = useState<PickedPlace | null>(null);
+  /** The Add-from-Places panel — the library, filtered, one Add per row. */
+  const [placesPanelOpen, setPlacesPanelOpen] = useState(false);
+  /** The shelf row whose place picker is open — the same #69 entrance the stop
+   * sheet's idea card has, on the rail's card. */
+  const [locatingShelfIdeaId, setLocatingShelfIdeaId] = useState<string | null>(null);
   const [routeDrag, setRouteDrag] = useState<{
     legId: string;
     stopId: string;
@@ -251,6 +297,9 @@ export function TripPlanner({
   };
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
+  // The rail's first section. Pure, memoized on the trip and the pressed chip
+  // — the proximity pairs are ideas × located stops, so this stays bounded.
+  const shelf = useMemo(() => ideaShelf(trip, shelfFilter), [trip, shelfFilter]);
   const route = useMemo(
     () => routeModel(trip, routes, routingHash, nav, units),
     [trip, routes, routingHash, nav, units],
@@ -353,6 +402,214 @@ export function TripPlanner({
             next,
             `Couldn't undo — ${s.place.name} still has dates.`,
           );
+        },
+      },
+    });
+  };
+
+  // ── the idea shelf (#80) ─────────────────────────────────────────────────
+  //
+  // Four writes, all through the same persist()/undo path every other gesture
+  // here uses. The three DROPS have no dialog in front of them, so the toast is
+  // where each becomes reversible — the contract `doSchedule` above already
+  // holds.
+
+  /** One branch of "+ Add" opens the draft; opening it closes the other two
+   * surfaces a maybe can be created from. */
+  const openAddIdea = (category: IdeaCategory) => {
+    setDraftLegId(null);
+    setPlacesPanelOpen(false);
+    setShelfDraft("");
+    setShelfPicked(null);
+    setAddIdeaCategory(category);
+  };
+
+  /** The shelf's "+ Add" — one field plus an optional place, exactly like the
+   * sheet's, but with no stop in hand. */
+  const submitShelfIdea = async () => {
+    if (!addIdeaCategory) return;
+    const body = ideaDraftInput(
+      { tripId: trip.id, stopId: null, category: addIdeaCategory },
+      shelfDraft,
+      shelfPicked,
+    );
+    if (!body) return;
+    try {
+      const created = await tripApi.createIdea(body);
+      setTrip((t) => appendShelfIdea(t, created));
+      setShelfDraft("");
+      setShelfPicked(null);
+      setAddIdeaCategory(null);
+    } catch {
+      toast.error("Couldn't save that idea.");
+    }
+  };
+
+  /**
+   * "Add from Places" — the library row is COPIED into a trip idea (Q6 → A).
+   * One direction of travel: name, coordinates, the Google place id, the type
+   * as a category and the source note all come across, and NO `savedPlaceId`
+   * goes back — a link would re-create the dual-write the answer rejects, and
+   * the copy is yours to edit without touching the library.
+   */
+  const addIdeaFromPlace = async (p: SavedPlace) => {
+    try {
+      const created = await tripApi.createIdea({
+        tripId: trip.id,
+        stopId: null,
+        category: ideaCategoryOfType(p.type),
+        title: p.place.name,
+        status: "idea",
+        // The Google id travels on every path that learns a place (#80 Q7
+        // comment) — `place` carries all four columns together.
+        place: p.place,
+        rating: null,
+        notes: p.source,
+      });
+      setTrip((t) => appendShelfIdea(t, created));
+      toast.success(`Added ${p.place.name} to this trip's ideas`);
+    } catch {
+      toast.error(`Couldn't add ${p.place.name}.`);
+    }
+  };
+
+  /**
+   * Gesture 1 · a STAY-idea dropped on open days.
+   *
+   * It creates the stop immediately (Q3 → A) and links the idea to it: two
+   * writes, one gesture. The dates are `planIdeaOnGap` — the SAME rule
+   * `scheduleFloating` uses, so a drop on the Oct 18–24 span lands Oct 18–20 for
+   * an idea exactly as it does for a floating stop. The leg is the one owning
+   * the last stop, falling back to the last leg: the "goes on the end" rule
+   * every create here already follows.
+   */
+  const doPlanIdea = async (ideaId: string, gap: TimelineGap) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    if (!it) return;
+    const dates = planIdeaOnGap(trip, gap);
+    if (!dates) return;
+    const legId = legOrder(trip).at(-1);
+    if (!legId) return;
+    const undo = trip;
+    try {
+      const created = await tripApi.createStop({
+        legId,
+        place: it.place ?? { name: it.title, lat: null, lng: null, googlePlaceId: null },
+        arriveDate: dates.arriveDate,
+        departDate: dates.departDate,
+      });
+      const next = attachIdeaToStop(appendStop(trip, created), ideaId, created.id);
+      setTrip(next);
+      upgradeRoutes(next);
+      persist(
+        tripApi.updateIdea(ideaId, { stopId: created.id, status: "planned" }),
+        undo,
+        `Couldn't plan ${it.title} — it's back on the shelf.`,
+      );
+      toast.success(
+        `Planned ${it.title} · ${monthDay(dates.arriveDate)} – ${monthDay(dates.departDate)}`,
+        {
+          action: {
+            label: "Undo",
+            onClick: () => {
+              setTrip(undo);
+              void tripApi.deleteStop(created.id).catch(() => {
+                toast.error(`Couldn't undo — ${it.title} still has dates.`);
+              });
+            },
+          },
+        },
+      );
+    } catch {
+      toast.error(`Couldn't plan ${it.title} — nothing was created.`);
+    }
+  };
+
+  /** Gesture 2 · a DO/EAT idea dropped on a stop bar. It leaves the shelf and
+   * appears under that stop. Status is untouched: attaching is not planning. */
+  const doAttachIdea = (ideaId: string, stopId: string) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    const stop = byId.get(stopId);
+    if (!it || !stop) return;
+    const undo = trip;
+    setTrip(attachIdeaToStop(trip, ideaId, stopId));
+    persist(
+      tripApi.updateIdea(ideaId, { stopId }),
+      undo,
+      `Couldn't move ${it.title} — it's back on the shelf.`,
+    );
+    toast.success(`${it.title} → ${stop.place.name}`, {
+      action: {
+        label: "Undo",
+        onClick: () => doDetachIdea(ideaId),
+      },
+    });
+  };
+
+  /** Gesture 3 · an ATTACHED idea goes back to the shelf. Legal only now that
+   * `stop_id` is nullable, and it is an EXPLICIT null on the wire — absent
+   * would mean "leave the attachment alone". */
+  const doDetachIdea = (ideaId: string) => {
+    const it = allStops(trip)
+      .flatMap((st) => st.ideas)
+      .find((x) => x.id === ideaId);
+    if (!it) return;
+    const undo = trip;
+    setTrip(detachIdeaToShelf(trip, ideaId));
+    persist(
+      tripApi.updateIdea(ideaId, { stopId: null }),
+      undo,
+      `Couldn't move ${it.title} — it's back under its stop.`,
+    );
+  };
+
+  /** The shelf card's own leaf writes: the status pill and the delete. They go
+   * through the SAME endpoints the sheet's card uses — #80's whole ownership
+   * move is what makes them reach a row with a null stop_id at all. */
+  const cycleShelfIdeaStatus = (ideaId: string) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    if (!it) return;
+    const order: Idea["status"][] = ["idea", "planned", "done"];
+    const status = order[(order.indexOf(it.status) + 1) % 3]!;
+    const undo = trip;
+    setTrip(setShelfIdeaFields(trip, ideaId, { status }));
+    persist(
+      tripApi.updateIdea(ideaId, { status }),
+      undo,
+      `Couldn't change ${it.title} — put back the way it was.`,
+    );
+  };
+
+  /** The shelf row's Locate — the picker's choice, straight through the shipped
+   * `PATCH { place }`. `ideaPlace` is the same PickedPlace → Place mapper the
+   * sheet's card uses, so the free-text escape row stays a legal pick and the
+   * Google id travels whenever there is one (#80 Q7 comment). */
+  const doLocateShelfIdea = (ideaId: string, picked: PickedPlace) => {
+    const place = ideaPlace(picked);
+    const undo = trip;
+    setTrip(setShelfIdeaFields(trip, ideaId, { place }));
+    persist(
+      tripApi.updateIdea(ideaId, { place }),
+      undo,
+      "Couldn't save that place — the idea is back the way it was.",
+    );
+  };
+
+  const doDeleteShelfIdea = (ideaId: string) => {
+    const it = trip.ideas.find((i) => i.id === ideaId);
+    if (!it) return;
+    const undo = trip;
+    setTrip(removeShelfIdea(trip, ideaId));
+    persist(tripApi.deleteIdea(ideaId), undo, `Couldn't delete ${it.title} — the idea is back.`);
+    toast.success(`Deleted ${it.title}`, {
+      duration: UNDO_WINDOW_MS,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          void tripApi
+            .createIdea(ideaRestoreInput(it))
+            .then((created) => setTrip((t) => appendShelfIdea(t, created)))
+            .catch(() => toast.error(`Couldn't put ${it.title} back.`));
         },
       },
     });
@@ -701,7 +958,13 @@ export function TripPlanner({
     if (!selectedId) return;
     // The place is optional and the title is not: a place without a title is
     // not an idea, which is exactly what `ideaDraftInput` refuses.
-    const body = ideaDraftInput(selectedId, ideaDraft, ideaPicked);
+    // The sheet's form always has a stop in hand; the shelf's "+ Add" is the
+    // one with none (#80).
+    const body = ideaDraftInput(
+      { tripId: trip.id, stopId: selectedId },
+      ideaDraft,
+      ideaPicked,
+    );
     if (!body) return;
     const stopId = selectedId;
     try {
@@ -717,7 +980,7 @@ export function TripPlanner({
 
   const doDeleteIdea = (ideaId: string) => {
     const it = selectedStop?.ideas.find((x) => x.id === ideaId);
-    if (!it) return;
+    if (!it || it.stopId === null) return;
     if (promotingId === ideaId) setPromotingId(null);
     const undo = trip;
     setTrip(removeIdea(trip, it.stopId, ideaId));
@@ -733,7 +996,13 @@ export function TripPlanner({
   const restoreIdea = async (it: Idea) => {
     try {
       const created = await tripApi.createIdea(ideaRestoreInput(it));
-      setTrip((t) => appendIdea(t, it.stopId, created));
+      // An undone delete puts the row back where it WAS — a shelf idea comes
+      // back as a shelf idea, not as a fresh maybe under a stop.
+      setTrip((t) =>
+        created.stopId === null
+          ? appendShelfIdea(t, created)
+          : appendIdea(t, created.stopId, created),
+      );
     } catch {
       toast.error(`Couldn't put ${it.title} back.`);
     }
@@ -845,26 +1114,118 @@ export function TripPlanner({
               </ToggleTab>
             </div>
             <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
-            {/* The masthead has no leg in hand, so it appends to the LAST one —
-                the same "goes on the end" rule every create here follows. A
-                trip always has a leg: createTrip seeds "Leg 1". */}
-            <button
-              type="button"
-              onClick={() => {
-                const legId = legOrder(trip).at(-1);
-                if (legId) openDraftStop(legId);
-              }}
-              disabled={trip.legs.length === 0}
-              className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
-            >
-              <Plus className="size-4" />
-              Add stop
-            </button>
+            {/* ONE add verb that BRANCHES (#80 Q5 → C). The masthead used to
+                offer "Add stop" and nothing else, which made a stop the only
+                thing you could put on a trip; a maybe is the earlier thought,
+                so the three idea kinds come first and the stop is the fourth
+                item. It still has no leg in hand, so a stop appends to the LAST
+                one — the same "goes on the end" rule every create here follows.
+                A trip always has a leg: createTrip seeds "Leg 1". */}
+            <DropdownMenu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+              <DropdownMenuTrigger
+                disabled={trip.legs.length === 0}
+                className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
+              >
+                <Plus className="size-4" />
+                Add
+                <ChevronDown className="size-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className={MENU_SURFACE}>
+                <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("do")}>
+                  <Binoculars />
+                  Something to do
+                  <MenuHint>idea</MenuHint>
+                </DropdownMenuItem>
+                <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("eat")}>
+                  <Utensils />
+                  Somewhere to eat
+                  <MenuHint>idea</MenuHint>
+                </DropdownMenuItem>
+                <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("stay")}>
+                  <Tent />
+                  Somewhere to stay
+                  <MenuHint>idea</MenuHint>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className={MENU_ITEM}
+                  onSelect={() => {
+                    const legId = legOrder(trip).at(-1);
+                    if (legId) openDraftStop(legId);
+                  }}
+                >
+                  <MapPin />
+                  A stop
+                  <MenuHint>on the plan</MenuHint>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
+        {/* The shelf's "+ Add" draft and the Add-from-Places panel both open
+            ABOVE the two lenses: a maybe belongs to the trip, not to a lens. */}
+        {addIdeaCategory && (
+          <ShelfIdeaDraft
+            category={addIdeaCategory}
+            title={shelfDraft}
+            picked={shelfPicked}
+            near={nearOf(allStops(trip).at(-1)?.place, trip.homeBasePlace)}
+            onTitle={setShelfDraft}
+            onPicked={setShelfPicked}
+            onSave={() => void submitShelfIdea()}
+            onCancel={() => {
+              setAddIdeaCategory(null);
+              setShelfDraft("");
+              setShelfPicked(null);
+            }}
+          />
+        )}
+        {placesPanelOpen && (
+          <AddFromPlacesPanel
+            places={savedPlaces}
+            onAdd={(p) => void addIdeaFromPlace(p)}
+            onClose={() => setPlacesPanelOpen(false)}
+          />
+        )}
+
         {lens === "timeline" ? (
-          <Timeline model={timeline} onOpenStop={openStop} onSchedule={doSchedule} />
+          <Timeline
+            model={timeline}
+            shelf={shelf}
+            shelfFilter={shelfFilter}
+            onShelfFilter={setShelfFilter}
+            onOpenStop={openStop}
+            onCycleIdea={cycleShelfIdeaStatus}
+            onLocateIdea={(id) => setLocatingShelfIdeaId(id)}
+            ideaPicker={(it) =>
+              locatingShelfIdeaId === it.id ? (
+                <PlacePicker
+                  value={null}
+                  onChange={(picked) => {
+                    setLocatingShelfIdeaId(null);
+                    if (picked) doLocateShelfIdea(it.id, picked);
+                  }}
+                  near={nearOf(allStops(trip).at(-1)?.place, trip.homeBasePlace)}
+                />
+              ) : undefined
+            }
+            onSchedule={doSchedule}
+            onPlanIdea={(ideaId, gap) => void doPlanIdea(ideaId, gap)}
+            onAttachIdea={doAttachIdea}
+            onAddFromPlaces={() => setPlacesPanelOpen((v) => !v)}
+            ideaActions={(it) => (
+              <RowMenu label={`Actions for ${it.title}`}>
+                <DropdownMenuItem
+                  className={MENU_ITEM_WARN}
+                  onSelect={() => doDeleteShelfIdea(it.id)}
+                >
+                  <Trash2 />
+                  Delete
+                  <MenuHint>undo</MenuHint>
+                </DropdownMenuItem>
+              </RowMenu>
+            )}
+          />
         ) : (
           <RouteView
             legs={route}
@@ -961,6 +1322,7 @@ export function TripPlanner({
             onIdeaDraftChange: setIdeaDraft,
             onSubmitIdea: () => void submitIdea(),
             onDeleteIdea: doDeleteIdea,
+            onDetachIdea: doDetachIdea,
             onLocateIdea: (ideaId, picked) => {
               // The row's Locate does not geocode — the human already chose, so
               // the picked place is written straight through the idea PATCH.
@@ -1552,5 +1914,150 @@ function ToggleTab({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * The shelf's "+ Add" draft — one field plus the OPTIONAL place picker, the
+ * same two-part form the stop sheet's "Add idea" already is.
+ *
+ * It is a draft, not an idea: dismissing it writes nothing, exactly the way the
+ * draft-stop row works (#60). The heading says which of the three branches you
+ * pressed, so a menu choice is still legible once the menu is gone.
+ */
+function ShelfIdeaDraft({
+  category,
+  title,
+  picked,
+  near,
+  onTitle,
+  onPicked,
+  onSave,
+  onCancel,
+}: {
+  category: IdeaCategory;
+  title: string;
+  picked: PickedPlace | null;
+  near: LatLng | null;
+  onTitle: (v: string) => void;
+  onPicked: (p: PickedPlace | null) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+  const cm = ideaCategoryMeta(category);
+  const heading =
+    category === "stay"
+      ? "Somewhere to stay"
+      : category === "eat"
+        ? "Somewhere to eat"
+        : "Something to do";
+  return (
+    <div className="mb-5 flex flex-col gap-2.5 rounded-rv-card border border-dashed border-rv-border-hi bg-rv-surface p-4 shadow-rv-sm">
+      <div className="flex items-center gap-2">
+        <cm.Icon className="size-[18px]" style={{ color: cm.color }} />
+        <span className="text-[14px] font-bold text-rv-ink">{heading}</span>
+        <button
+          type="button"
+          onClick={onCancel}
+          aria-label="Discard this idea"
+          className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded-rv-sm border border-rv-border bg-transparent text-rv-ink-faded"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      <label className="flex flex-col gap-1">
+        <FieldLabel>Idea</FieldLabel>
+        <Input
+          value={title}
+          onChange={(e) => onTitle(e.target.value)}
+          placeholder="e.g. Coachland RV Park"
+        />
+      </label>
+      <div className="flex flex-col gap-1">
+        <FieldLabel>
+          Place{" "}
+          <span className="font-sans font-normal normal-case tracking-normal text-rv-ink-faded">
+            optional
+          </span>
+        </FieldLabel>
+        <PlacePicker value={picked} onChange={onPicked} near={near} />
+      </div>
+      <button
+        type="button"
+        onClick={onSave}
+        disabled={title.trim() === ""}
+        className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-accent-deep px-4 py-2 text-[13px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
+      >
+        <Plus className="size-4" />
+        Add to ideas
+      </button>
+    </div>
+  );
+}
+
+/**
+ * "Add from Places" (#80 Q6 → A) — the account's library, opened from the
+ * shelf head.
+ *
+ * Picking COPIES: one direction of travel, no dual-write, and the copy is yours
+ * to edit without touching the library. The library itself is a server prop
+ * (trips/[id]/page.tsx), so opening this panel costs no round-trip.
+ */
+function AddFromPlacesPanel({
+  places,
+  onAdd,
+  onClose,
+}: {
+  places: SavedPlace[];
+  onAdd: (p: SavedPlace) => void;
+  onClose: () => void;
+}) {
+  const want = places.filter((p) => p.status === "want");
+  return (
+    <div className="mb-5 rounded-rv-card border border-rv-border bg-rv-surface p-4 shadow-rv-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <Library className="size-[18px] text-rv-ink" />
+        <span className="text-[14px] font-bold text-rv-ink">From your Places</span>
+        <span className="font-mono text-[10.5px] text-rv-ink-faded">{want.length} saved</span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close your Places"
+          className="ml-auto inline-flex size-6 cursor-pointer items-center justify-center rounded-rv-sm border border-rv-border bg-transparent text-rv-ink-faded"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+      {want.length === 0 ? (
+        <p className="m-0 text-[13px] text-rv-ink-muted">
+          Nothing on the want shelf yet — save a place from /places and it shows up here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {want.map((p) => (
+            <div
+              key={p.id}
+              className="flex flex-wrap items-center gap-2 rounded-rv-md border border-rv-border-soft bg-rv-surface-alt px-2.5 py-2"
+            >
+              <CategoryTile type={p.type} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13.5px] text-rv-ink">{p.place.name}</div>
+                <div className="truncate font-mono text-[10.5px] text-rv-ink-faded">
+                  {[p.region, p.source && `“${p.source}”`].filter(Boolean).join(" · ") || " "}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onAdd(p)}
+                className="inline-flex cursor-pointer items-center gap-1 rounded-rv-md border border-rv-green bg-rv-green-soft px-2.5 py-1 text-[12px] font-semibold text-rv-green-ink"
+              >
+                <Plus className="size-3.5" />
+                Add
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

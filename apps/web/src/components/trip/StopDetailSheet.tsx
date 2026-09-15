@@ -8,6 +8,7 @@ import {
   Receipt,
   Plus,
   Check,
+  Lightbulb,
   Pencil,
   Trash2,
   CornerRightUp,
@@ -96,6 +97,10 @@ export interface StopLeafActions {
   onIdeaDraftChange: (v: string) => void;
   onSubmitIdea: () => void;
   onDeleteIdea: (ideaId: string) => void;
+  /** #80 gesture 3 — the attached idea goes BACK to the trip's shelf. The
+   * drag has no source here (an attached idea is not a shelf card), so the
+   * menu is its door; the write is the same `PATCH { stopId: null }`. */
+  onDetachIdea: (ideaId: string) => void;
 
   /** #69 · the row's Locate. Unlike the map's batch — which geocodes a title
    * server-side — this one lets the human choose, so the picked place is
@@ -504,6 +509,14 @@ export function StopDetailSheet({
                       }
                       actions={
                         <RowMenu label={`Actions for ${it.title}`}>
+                          <DropdownMenuItem
+                            className={MENU_ITEM}
+                            onSelect={() => leaves.onDetachIdea(it.id)}
+                          >
+                            <Lightbulb />
+                            Move to ideas
+                            <MenuHint>→ the shelf</MenuHint>
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             className={MENU_ITEM_WARN}
                             onSelect={() => leaves.onDeleteIdea(it.id)}

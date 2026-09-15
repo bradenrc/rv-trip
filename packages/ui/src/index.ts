@@ -19,7 +19,7 @@ export {
 } from "./Gantt";
 export { FloatingStopCard, AllScheduledCard } from "./FloatingStopCard";
 export { ReservationLineItem, IdeaLineItem } from "./RouteItems";
-export { MapPlaceholder, ReservationCard, IdeaCard } from "./DetailCards";
+export { MapPlaceholder, ReservationCard, IdeaCard, ShelfIdeaCard } from "./DetailCards";
 export { MapFrame } from "./MapFrame";
 export type { MapFrameState } from "./MapFrame";
 export {
