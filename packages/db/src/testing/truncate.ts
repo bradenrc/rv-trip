@@ -1,6 +1,9 @@
 import { sql } from "drizzle-orm";
 import { db } from "../index";
 import {
+  householdInvites,
+  householdMembers,
+  households,
   ideas,
   legs,
   places,
@@ -31,6 +34,6 @@ import {
  */
 export async function truncateAll(): Promise<void> {
   await db.execute(
-    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs}, ${routes}, ${places}, ${userPrefs} restart identity cascade`,
+    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${households}, ${householdMembers}, ${householdInvites} restart identity cascade`,
   );
 }

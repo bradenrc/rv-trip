@@ -50,6 +50,13 @@
       "when": 1789486674481,
       "tag": "0006_silly_vindicator",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789495664487,
+      "tag": "0007_households",
+      "breakpoints": true
     }
   ]
 }

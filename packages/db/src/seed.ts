@@ -2,13 +2,34 @@ import "./load-env";
 import { db, schema } from "./index";
 import { sql } from "drizzle-orm";
 
-const OWNER = "dev-user";
+/**
+ * The keyless dev tenant (#77 · docs/design/81 §2). From #77 on `owner_id` is a
+ * HOUSEHOLD id, not a person's — so the seed's rows belong to `dev-household`,
+ * the stable literal migration 0007's backfill also mints for `dev-user`, and
+ * `dev-user` is a member of it rather than an owner of rows.
+ *
+ * Stable and spelled out rather than generated: a keyless `getOwner()` has to
+ * be able to answer it without a database lookup and without a Clerk key, which
+ * is what keeps walks and the apps/web route tests key-free.
+ */
+const HOUSEHOLD = "dev-household";
+const MEMBER = "dev-user";
+const OWNER = HOUSEHOLD;
 
 async function main() {
   console.log("Seeding sample trip…");
 
   // Clean slate (dev only). Cascades handle children.
   await db.execute(sql`truncate table ${schema.trips} restart identity cascade`);
+
+  // The household the seeded rows belong to. `onConflictDoNothing` on both, so
+  // re-seeding never mints a second household and never trips `user_id`'s
+  // unique index — the tenancy survives a truncate that only clears trips.
+  await db.insert(schema.households).values({ id: HOUSEHOLD }).onConflictDoNothing();
+  await db
+    .insert(schema.householdMembers)
+    .values({ householdId: HOUSEHOLD, userId: MEMBER, role: "owner" })
+    .onConflictDoNothing();
 
   const [trip] = await db
     .insert(schema.trips)
