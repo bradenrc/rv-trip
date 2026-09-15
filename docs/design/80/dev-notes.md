@@ -551,3 +551,161 @@ dense number: the chip would then hide rows it is still toggling.
   - the Planning-now chip's density with a seeded shelf.
 - **Not run:** `pnpm db:seed` (the local dev DB is shared with other worktrees'
   walk servers), and no dev server was started.
+
+---
+
+# Rework round 2 — the qa verdict
+
+Five findings, all on the code from rounds 1–4. Nothing in the vetted design
+changed; nothing was re-implemented. Each fix below, and where it is tested.
+
+## FN-1 · the idea PATCH never proved the stop it attaches to
+
+`updateIdeaFields` scoped the write on the IDEA
+(`ideas.tripId in ownedTripIds`) and spread the patch straight into `.set()`.
+That proves the row being written is yours; it says **nothing** about the stop
+the body points at. So the very gesture #80 adds — `PATCH { stopId }` — let a
+hand-rolled request plant one of your ideas under a stop on someone else's
+trip: their `getTripById` renders it, and `deleteIdea` (scoped the same way)
+leaves them no way to remove it. `createIdea` had proved the pair since round 1
+(`assertStopInTrip`, mutations.ts:503); the attach path had not.
+
+- **`packages/db/src/mutations.ts:553-590`** — `updateIdeaFields` now branches.
+  A patch that names no stop, or an explicit `stopId: null` **detach**, stays
+  the single statement it has always been (`:574-577`). A patch that names a
+  stop opens a transaction (`:579`), reads the owned idea's `tripId`
+  (`:580-581`), and runs the same `assertStopInTrip` the create runs
+  (`:586`) before the update (`:587`). The proof and the write share one
+  transaction, so a refusal moves **no** column — not the status the same body
+  may have carried.
+- A foreign (or absent) idea is still the shipped silent no-op (`:585`): the
+  guard is about the TARGET, and there is no owned row to attach in the first
+  place. The 204-not-404 asymmetry pinned at the top of
+  `api/ideas/[id]/route.test.ts` is unchanged, and there is a test that says so.
+- **`apps/web/src/app/api/ideas/[id]/route.ts:28-35`** — "stop not found" is a
+  **404**, the same answer `POST /api/ideas` gives the same mistake. The catch
+  is narrow: anything else rethrows, because a database fault is not a missing
+  stop.
+- **Tests** — `api/ideas/[id]/route.test.ts:267` ("the stop it attaches to"),
+  five cases: a stop on another trip of the *same* owner (the pair, not the
+  tenancy); another owner's stop, with the victim's stop still holding only the
+  fixture's own idea; a whole-patch rollback (`{ stopId: <theirs>, status }`
+  moves neither); the legal attach still works; and the foreign-idea 204 no-op
+  is unchanged.
+- **Teeth (mutation-proved):** deleting `mutations.ts:586` REDs 3 of them
+  (`vitest run src/app/api/ideas` → 3 failed / 30 passed), restored after.
+
+## FN-2 · gesture 1's Undo destroyed the idea
+
+`ideas.stop_id` is `ON DELETE CASCADE` (schema.ts:133). The Undo deleted the
+stop the plan had just created **while the idea was still attached to it**, so
+the server removed the idea row while the client put it back on the shelf. The
+maybe looked restored and was gone on the next load.
+
+- **`apps/web/src/components/trip/TripPlanner.tsx:527-533`** — Undo now
+  **detaches first**: `PATCH { stopId: null, status: it.status }`, then
+  `deleteStop`. The status restored is the one the idea *had*, not a hardcoded
+  `"idea"` — the plan moved it to `"planned"`, and the undone tree already shows
+  the old one.
+- **`TripPlanner.tsx:508`** — the attach `persist(…)` is now **held** as
+  `attached` and Undo chains off it. Without that the detach could overtake the
+  attach on the wire inside the six-second window and the delete would cascade
+  anyway. This is the one thing I changed beyond the literal finding, and it is
+  the same bug: an ordering hazard on the same two writes.
+- **Tests, in two honest halves:**
+  - the DATABASE half, executed against real Postgres —
+    `api/ideas/[id]/route.test.ts:346` ("the plan-undo order (#80)"), **both**
+    arms: deleting the stop first cascades the idea to `null` (the hazard,
+    asserted as a fact), and detach-then-delete leaves the row on the shelf with
+    its status intact.
+  - the CLIENT half — `apps/web/src/components/trip/plan-undo.test.ts`, four
+    cases asserting `doPlanIdea`'s source: the detach precedes the delete, a
+    `.then(` chains them, and the restored status is `it.status`. **This is a
+    source-text test, not an executed one**, and it says so in its own docblock:
+    apps/web's vitest is `environment: "node"` with no jsdom and no
+    @testing-library/react, so the toast action cannot be clicked. It is the
+    same idiom `navigate-control.test.ts` already uses for a render it cannot
+    run. **qa should weigh it as weaker than an executed test** — it catches the
+    revert, not every way the order could be got wrong.
+  - **Teeth:** reverting `TripPlanner.tsx:527-533` to the bare
+    `void tripApi.deleteStop(created.id)` REDs 3 of the 4 (1 passed), restored
+    after.
+
+## CN-1 · the promote guard had no test — and the obvious test has no teeth
+
+`promoteIdeaToReservation`'s `if (idea.stopId === null) throw` (mutations.ts)
+was untestable **through the handler**: `reservations.stop_id` is NOT NULL, so
+deleting the guard still answers 404 — the insert just fails on the constraint
+and the route's blanket catch renders the identical body. I checked this rather
+than assuming it: with the guard removed, the HTTP-level test I first wrote
+stayed green.
+
+- **`api/ideas/[id]/promote/route.test.ts:56`** — three cases. Two at the
+  handler (a shelf idea 404s *and survives*, since promote deletes what it
+  promotes; and it books normally once dropped onto a stop), plus one that
+  calls `promoteIdeaToReservation` **directly** and asserts the mutation throws
+  `/^idea not found$/` — the only place the two paths differ. The direct-import
+  shape is the one `api/places/locate/route.test.ts` already uses for a
+  packages/db assertion (packages/db has no `test` script of its own — the same
+  runner constraint qa raised for i3).
+- **Teeth:** deleting the guard line now REDs that case with
+  `'null value in column "stop_id" of relation "reservations"…'`, restored
+  after.
+
+## CN-2 · `updateIdeaFields`' patch type did not declare its new columns
+
+`stopId` and `category` reached `.set()` only by being spread, so TypeScript
+stopped enforcing the function's own docblock rule.
+
+- **`packages/db/src/mutations.ts:564-565`** — both declared. The guard in FN-1
+  reads `patch.stopId` off the typed parameter rather than an `any`, so the
+  widening is load-bearing, not cosmetic.
+
+## CL · `shelf.ts` rebuilt the anchors per row, against its own docblock
+
+`matchesFilter` called `locatedStops(trip)` on every invocation, and `ideaShelf`
+invokes it once per (located stop × row) pair — so the anchors were walked
+O(stops² × ideas) times while the docblock claimed they were "resolved once
+here". Harmless at real trip sizes; the claim was simply false.
+
+- **`packages/core/src/planner/shelf.ts:100-112`** — a named `Anchor` interface
+  and `locatedStops(trip): Anchor[]`, with the discipline written down.
+- **`:122`** — `shelfIdeas(trip, anchors = locatedStops(trip))`: callers that
+  already have them pass them; the public single-argument signature is
+  unchanged.
+- **`:155`** — `matchesFilter(row, anchors, filter)` takes the anchors, not the
+  trip.
+- **`:176, :183, :208`** — `ideaShelf` resolves them **once** and hands the same
+  array to every row, every chip count and the visible filter. The docblock's
+  claim is now true, so it stays.
+- Pure refactor: packages/core's 925 tests cover it unchanged (the shelf suite
+  is `packages/core/src/planner/shelf.test.ts`).
+
+## Not addressed, and why
+
+The remaining verdict lines are `DD` (confirmations) and `FLAG`
+(render-required). Nothing in them asks for a code change, and I made none:
+
+- **FLAG · the two-payload HTML5 drag** (a stay idea lighting OpenSpans, a
+  do/eat idea lighting StopBars, the wrong target refusing) — still
+  render-required. Unchanged this round.
+- **FLAG · i4's map polish** (IdeaRing legibility, the `boundsCovers` refit,
+  spiderfy beside a stop) — still render-required. Unchanged this round.
+- **The shelf rail at 330px** and the Planning-now chip density — unchanged,
+  still for the walk.
+
+## What qa should check this round
+
+1. That `updateIdeaFields`' new transaction did not make the **detach** path
+   (`stopId: null`) slower or transactional — it is deliberately still the
+   single statement (`mutations.ts:574-577`), because there is nothing to prove.
+2. That the narrow rethrow in `api/ideas/[id]/route.ts:31-34` is narrow enough:
+   only the literal `"stop not found"` becomes a 404.
+3. That `plan-undo.test.ts` is read as the **source-text** test it announces
+   itself to be. The executed proof of the cascade is the Postgres pair at
+   `api/ideas/[id]/route.test.ts:346`; the client ordering is not executed
+   anywhere in this repo.
+4. Whether chaining Undo off the held `attached` promise (`TripPlanner.tsx:508`)
+   is in scope. I judged it part of the same FN — the finding is a write-order
+   bug and firing both unordered is the same bug with a race in front of it —
+   but it is one line beyond the literal fix.

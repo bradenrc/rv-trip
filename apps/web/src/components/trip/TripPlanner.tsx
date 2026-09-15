@@ -503,7 +503,9 @@ export function TripPlanner({
       const next = attachIdeaToStop(appendStop(trip, created), ideaId, created.id);
       setTrip(next);
       upgradeRoutes(next);
-      persist(
+      // Held, not just fired: Undo chains off it so the detach below can never
+      // overtake the attach on the wire.
+      const attached = persist(
         tripApi.updateIdea(ideaId, { stopId: created.id, status: "planned" }),
         undo,
         `Couldn't plan ${it.title} — it's back on the shelf.`,
@@ -515,9 +517,19 @@ export function TripPlanner({
             label: "Undo",
             onClick: () => {
               setTrip(undo);
-              void tripApi.deleteStop(created.id).catch(() => {
-                toast.error(`Couldn't undo — ${it.title} still has dates.`);
-              });
+              // DETACH FIRST, then delete. `ideas.stop_id` is ON DELETE CASCADE
+              // (packages/db/src/schema.ts:133), so deleting the stop this
+              // gesture created while the idea is still attached DESTROYS the
+              // idea — the rail would show it back for one session and it
+              // would be gone on the next load. The PATCH puts the row (and the
+              // status the plan moved to "planned") back where the undone tree
+              // already shows it; only then is the stop safe to remove.
+              void attached
+                .then(() => tripApi.updateIdea(ideaId, { stopId: null, status: it.status }))
+                .then(() => tripApi.deleteStop(created.id))
+                .catch(() => {
+                  toast.error(`Couldn't undo — ${it.title} still has dates.`);
+                });
             },
           },
         },

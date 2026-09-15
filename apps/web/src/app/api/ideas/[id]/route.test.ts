@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { DELETE, PATCH } from "@/app/api/ideas/[id]/route";
+import { DELETE as DELETE_STOP } from "@/app/api/stops/[id]/route";
 import { ctx, describeDb, req } from "@/test/db";
 
 /** §7 breadth, and the one asymmetry in the matrix — both in one file. */
@@ -247,5 +248,124 @@ describeDb("PATCH/DELETE /api/ideas/[id] — a shelf idea (#80)", () => {
     expect(row.placeName).toBe("Coachland RV Park");
     expect(row.lat).toBe(39.3438);
     expect(row.googlePlaceId).toBe("ChIJcoachland");
+  });
+});
+
+/**
+ * #80 rework · the PATCH proves the PAIR, not just the tenancy.
+ *
+ * The drop gesture this epic adds is the first write that lets the CLIENT name
+ * a stop on an existing idea, and the write is scoped on the IDEA
+ * (`ideas.tripId in ownedTripIds`) — which says nothing at all about the stop
+ * the body points at. Without a check on the target, a hand-rolled PATCH plants
+ * a row under a stop on someone else's trip: `getTripById` renders it, and
+ * `deleteIdea` (scoped the same way) leaves the victim no way to remove it.
+ * `schema.ts:134` states the invariant — "when stop_id is set, that stop's leg
+ * must belong to trip_id" — and `createIdea` already proves it with
+ * `assertStopInTrip`. These are the PATCH's half of that same proof.
+ */
+describeDb("PATCH /api/ideas/[id] — the stop it attaches to (#80)", () => {
+  it("refuses a stop on another trip of the SAME owner", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland" });
+    // Ownership is not the question here — the PAIR is.
+    const other = await fx.trip({ title: "Desert Southwest" });
+    const otherLeg = await fx.leg({ tripId: other.id });
+    const otherStop = await fx.stop({ legId: otherLeg.id });
+
+    const res = await PATCH(req({ stopId: otherStop.id }, "PATCH"), ctx(idea.id));
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "stop not found" });
+    expect((await read.idea(idea.id))!.stopId).toBeNull();
+  });
+
+  it("refuses ANOTHER owner's stop and plants nothing under it", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({
+      tripId: trip.id,
+      stopId: null,
+      title: "Injected by attacker",
+    });
+    const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
+
+    const res = await PATCH(req({ stopId: theirs.astoria.id }, "PATCH"), ctx(idea.id));
+
+    expect(res.status).toBe(404);
+    expect((await read.idea(idea.id))!.stopId).toBeNull();
+    expect(await read.countIdeas(theirs.astoria.id)).toBe(1); // the fixture's own
+  });
+
+  it("rolls the WHOLE patch back — a refused stop moves no other column either", async () => {
+    const { trip } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland" });
+    const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
+
+    await PATCH(req({ stopId: theirs.astoria.id, status: "planned" }, "PATCH"), ctx(idea.id));
+
+    const row = (await read.idea(idea.id))!;
+    expect(row.status).toBe("idea");
+    expect(row.stopId).toBeNull();
+  });
+
+  it("still takes a stop that IS on the idea's trip", async () => {
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland" });
+
+    const res = await PATCH(req({ stopId: astoria.id, status: "planned" }, "PATCH"), ctx(idea.id));
+
+    expect(res.status).toBe(204);
+    const row = (await read.idea(idea.id))!;
+    expect(row.stopId).toBe(astoria.id);
+    expect(row.status).toBe("planned");
+  });
+
+  it("keeps the shipped 204 no-op for another owner's idea, stop or no stop", async () => {
+    // The asymmetry pinned at the top of this file is unchanged by the guard:
+    // a foreign IDEA is still a silent 204, because the guard only fires once
+    // an owned idea has been found.
+    const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
+    const mine = await fx.pacificNorthwestLoop();
+
+    const res = await PATCH(req({ stopId: mine.astoria.id }, "PATCH"), ctx(theirs.idea.id));
+
+    expect(res.status).toBe(204);
+    expect((await read.idea(theirs.idea.id))!.stopId).toBe(theirs.astoria.id);
+  });
+});
+
+/**
+ * #80 rework · gesture 1's UNDO, as a sequence of real requests.
+ *
+ * `ideas.stop_id` is ON DELETE CASCADE (schema.ts:133), so "undo the plan" by
+ * deleting the stop the plan created DESTROYS the idea the plan attached — the
+ * shelf shows the row again until the next load, and then it is gone. The undo
+ * has to DETACH first. Both arms are here so the order is a tested fact rather
+ * than a comment.
+ */
+describeDb("the plan-undo order (#80)", () => {
+  it("deleting the stop FIRST cascades the idea away — the hazard", async () => {
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Coachland" });
+
+    const res = await DELETE_STOP(req(undefined, "DELETE"), ctx(astoria.id));
+
+    expect(res.status).toBe(204);
+    expect(await read.idea(idea.id)).toBeNull();
+  });
+
+  it("detaching first, THEN deleting the stop, leaves the idea on the shelf", async () => {
+    const { trip, astoria } = await fx.pacificNorthwestLoop();
+    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Coachland" });
+
+    const detach = await PATCH(req({ stopId: null, status: "idea" }, "PATCH"), ctx(idea.id));
+    const del = await DELETE_STOP(req(undefined, "DELETE"), ctx(astoria.id));
+
+    expect(detach.status).toBe(204);
+    expect(del.status).toBe(204);
+    const row = (await read.idea(idea.id))!;
+    expect(row).not.toBeNull();
+    expect(row.stopId).toBeNull();
+    expect(row.status).toBe("idea");
   });
 });

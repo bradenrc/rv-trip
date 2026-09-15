@@ -539,6 +539,16 @@ export async function createIdea(
  * A key the caller left out is a column left alone: the status pill, the stars
  * and the note each send one field, and none of them may disturb the place an
  * idea has been given.
+ *
+ * #80 adds `stopId` to that list, and with it the ONE thing the WHERE cannot
+ * prove. The scope `ideas.tripId in ownedTripIds` proves the row being written
+ * is yours; it says nothing about the stop the body points AT. So a bare spread
+ * would let a hand-rolled PATCH plant one of your ideas under a stop on someone
+ * else's trip — rendered by their `getTripById`, and undeletable by them,
+ * because `deleteIdea` is scoped the same way. `createIdea` already proves the
+ * pair with `assertStopInTrip` (schema.ts:134 states the invariant); an attach
+ * is the same write arriving later, so it gets the same proof, inside the same
+ * transaction as the update so a refusal moves no column at all.
  */
 export async function updateIdeaFields(
   owner: string,
@@ -551,15 +561,31 @@ export async function updateIdeaFields(
     lat?: number | null;
     lng?: number | null;
     googlePlaceId?: string | null;
+    stopId?: string | null;
+    category?: IdeaCategory;
   },
 ): Promise<void> {
   // An empty patch is a legal "nothing changed" on the wire, and drizzle throws
   // on `.set({})` — so the no-op is answered here rather than by a SQL error.
   if (Object.keys(patch).length === 0) return;
-  await db
-    .update(ideas)
-    .set(patch)
-    .where(and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner))));
+  const scope = and(eq(ideas.id, ideaId), inArray(ideas.tripId, ownedTripIds(owner)));
+  // A DETACH (`stopId: null`) names no stop, so there is nothing to prove and
+  // it stays the single statement every other field patch is.
+  const target = patch.stopId;
+  if (target === undefined || target === null) {
+    await db.update(ideas).set(patch).where(scope);
+    return;
+  }
+  await db.transaction(async (tx) => {
+    const owned = await tx.select({ tripId: ideas.tripId }).from(ideas).where(scope);
+    const mine = owned[0];
+    // A foreign (or absent) idea stays the shipped silent no-op this handler
+    // has always answered 204 to — the guard below is about the TARGET, and
+    // there is no owned row to attach in the first place.
+    if (!mine) return;
+    await assertStopInTrip(tx, mine.tripId, target);
+    await tx.update(ideas).set(patch).where(eq(ideas.id, ideaId));
+  });
 }
 
 /** The other leaf delete. Same undo toast, same absence of a cascade. */

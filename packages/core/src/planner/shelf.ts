@@ -96,9 +96,21 @@ function milesBetween(
   return mi < 10 ? Math.round(mi * 10) / 10 : Math.round(mi);
 }
 
+/** One stop that can anchor a distance. */
+interface Anchor {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+}
+
 /** The trip's stops that can anchor a distance — a coordless stop measures
- * nothing, which is the same honesty rule the map's pins already follow. */
-function locatedStops(trip: Trip) {
+ * nothing, which is the same honesty rule the map's pins already follow.
+ *
+ * Resolved ONCE per shelf and passed down, never rebuilt per row: `ideaShelf`
+ * asks the filter question once per (located stop × row) pair, so a call in
+ * there would walk every leg of the trip on each of them. */
+function locatedStops(trip: Trip): Anchor[] {
   return trip.legs
     .flatMap((l) => l.stops)
     .map((s) => ({ id: s.id, name: s.place.name, lat: s.place.lat, lng: s.place.lng }))
@@ -107,8 +119,7 @@ function locatedStops(trip: Trip) {
 
 /** The shelf rows: `stopId === null`, in group-then-sortOrder order. An idea
  * attached to a stop has ONE home and it is not this one. */
-export function shelfIdeas(trip: Trip): ShelfIdea[] {
-  const anchors = locatedStops(trip);
+export function shelfIdeas(trip: Trip, anchors: Anchor[] = locatedStops(trip)): ShelfIdea[] {
   return trip.ideas
     .filter((i) => i.stopId === null)
     .slice()
@@ -137,15 +148,18 @@ export function shelfIdeas(trip: Trip): ShelfIdea[] {
 }
 
 /** Is this row within the radius of that stop? A coordless row is within
- * nothing — it answers the "No place yet" chip instead. */
-function matchesFilter(row: ShelfIdea, trip: Trip, filter: ShelfFilter): boolean {
+ * nothing — it answers the "No place yet" chip instead.
+ *
+ * It takes the ANCHORS, not the trip: the caller already has them, and this is
+ * the function asked (located stops × rows) times. */
+function matchesFilter(row: ShelfIdea, anchors: Anchor[], filter: ShelfFilter): boolean {
   if (filter.kind === "all") return true;
   if (filter.kind === "coordless") {
     return row.idea.place === null || !hasCoords(row.idea.place);
   }
   const place = row.idea.place;
   if (!place || !hasCoords(place)) return false;
-  const stop = locatedStops(trip).find((s) => s.id === filter.stopId);
+  const stop = anchors.find((s) => s.id === filter.stopId);
   if (!stop) return false;
   return haversineMeters(place, stop) / METERS_PER_MILE <= NEAR_RADIUS_MI;
 }
@@ -159,15 +173,16 @@ function matchesFilter(row: ShelfIdea, trip: Trip, filter: ShelfFilter): boolean
  * discipline the route model already keeps.
  */
 export function ideaShelf(trip: Trip, filter: ShelfFilter = { kind: "all" }): IdeaShelf {
-  const rows = shelfIdeas(trip);
+  const anchors = locatedStops(trip);
+  const rows = shelfIdeas(trip, anchors);
   const total = rows.length;
   const coordless = rows.filter((r) => r.idea.place === null || !hasCoords(r.idea.place));
   const coordlessCount = coordless.length;
 
   const chips: ShelfChip[] = [];
-  for (const stop of locatedStops(trip)) {
+  for (const stop of anchors) {
     const count = rows.filter((r) =>
-      matchesFilter(r, trip, { kind: "near", stopId: stop.id }),
+      matchesFilter(r, anchors, { kind: "near", stopId: stop.id }),
     ).length;
     if (count > 0) {
       chips.push({
@@ -190,7 +205,7 @@ export function ideaShelf(trip: Trip, filter: ShelfFilter = { kind: "all" }): Id
     });
   }
 
-  const visible = rows.filter((r) => matchesFilter(r, trip, filter));
+  const visible = rows.filter((r) => matchesFilter(r, anchors, filter));
   const groups = SHELF_CATEGORY_ORDER.map((category) => ({
     category,
     label: SHELF_CATEGORY_LABEL[category],
