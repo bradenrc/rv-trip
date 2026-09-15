@@ -109,3 +109,122 @@ returns `DEV_OWNER` (`"dev-user"`), which is i2's dispatch. Items i2–i7 are se
 
 Both throwaway databases were dropped by their own check; `git status` shows only the files in
 the table above.
+
+---
+
+# Issue 81 · dev notes — item **i2 of 7** (`getOwner()` answers the household; `getActor()` answers the member)
+
+Scope of this dispatch: the tenancy seam only. **No file under `apps/web/src/app/**` is in the
+diff** — the 37 `await getOwner()` call sites are untouched, which is the whole argument for
+Q2 = A. Items i3–i7 are separate dispatches; nothing here renders, routes or migrates.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `apps/web/src/lib/owner.ts:14-15` | `DEV_OWNER` keeps its value `"dev-user"` — it is now the **person**, what `getActor()` answers |
+| `apps/web/src/lib/owner.ts:17-25` | new `DEV_HOUSEHOLD = "dev-household"` — the **tenant**, what a keyless `getOwner()` answers |
+| `apps/web/src/lib/owner.ts:50-54` | `getOwner()` → keyless returns `DEV_HOUSEHOLD`; keyed resolves `getActor()` through `ensureHouseholdForUser`. Still `Promise<string>`, still the same export name |
+| `apps/web/src/lib/owner.ts:66-71` | new `getActor(): Promise<string>` — the Clerk `userId`, or `DEV_OWNER` keyless. It inherits the old `getOwner()` body verbatim, including the "no session" throw |
+| `packages/db/src/mutations.ts:1` | `randomUUID` from `node:crypto` |
+| `packages/db/src/mutations.ts:46-53` | the file header's "`owner` is the Clerk userId" corrected — it is the household id from #77 on |
+| `packages/db/src/mutations.ts:850-908` | new tenancy section: `householdIdFor()` (private) + exported `ensureHouseholdForUser()` |
+| `packages/db/src/testing/fixtures.ts:31-40` | `DEV_OWNER` **value** → `"dev-household"` (name and every import site unchanged) |
+| `apps/web/src/lib/owner.test.ts` | new — 9 tests: 3 keyless (no database), 6 keyed against the real database |
+
+## Key decisions
+
+1. **The lookup lives in `packages/db`, not in `owner.ts`.** `apps/web` never touches drizzle
+   outside its tests — every route imports a named function from `@rv-trip/db` — so
+   `ensureHouseholdForUser()` is a mutation beside the ones i4 will add there
+   (`redeemHouseholdInvite`, `householdIsEmpty`, per plan i3/i4). `owner.ts` stays the single
+   seam: it is still the only place `apps/web` asks who the tenant is.
+
+2. **`@rv-trip/db` is imported DYNAMICALLY, and only on the keyed branch** (`owner.ts:52`).
+   `apps/web/src/proxy.ts:3` and `app/layout.tsx:9` import `clerkEnabled` from this module; a
+   static import would drag the pg pool — and `packages/db/src/index.ts:6-8`'s module-scope
+   `throw` on an unset `DATABASE_URL` — into the proxy bundle, which needs neither. The keyless
+   branch therefore never loads the database module at all (asserted: "writes nothing on the
+   keyless branch").
+
+3. **`getOwner()` is wrapped in React's `cache`** — the vet's MED "undecided cost of the seam".
+   It became a read-through-with-a-possible-write on a function called several times per request
+   (`api/places/[id]` in both PATCH and DELETE, `api/prefs/route.ts:22` and `:30`,
+   `trips/[id]/page.tsx:18` above every mutation under it), so the lookup is deduped **per
+   request**. Verified against `react@19.2.4`: with no dispatcher — a direct handler call in
+   vitest, or a non-React server path — `cache` calls straight through
+   (`node_modules/react/cjs/react.react-server.development.js:575-578`), so nothing is memoized
+   across tests or across requests, and a household joined in i4 is never served stale.
+
+4. **The lazy create is idempotent and race-safe without a transaction** — the vet's other MED.
+   SELECT; on a miss insert the household, then insert the member row with
+   `.onConflictDoNothing().returning()`. The `user_id` unique index (`household_members_user_idx`,
+   i1) is the arbiter: exactly one concurrent caller gets a row back. The loser **deletes the
+   household it just minted** — nothing references it, since the member row was never written —
+   and re-reads the winner's id. Both callers return the same string and no orphan household is
+   left behind (asserted: "settles two concurrent first sights on ONE household").
+
+5. **`fixtures.ts`'s `DEV_OWNER` changed VALUE, not name.** It is the string that goes in an
+   `owner_id` column, and that column now holds a household — so `"dev-household"` is simply what
+   it always meant. Keeping the name is what lets **every existing route test stay byte-for-byte
+   unchanged**, `api/prefs/route.test.ts` included, and still key-free. Nothing in `apps/web`'s
+   suite hard-codes `"dev-user"` (checked by grep); the four `"dev-user"` literals in
+   `packages/core` tests are plain fixture strings in pure-logic tests and are unaffected.
+
+6. **Bare `randomUUID()` for a new household id**, matching what 0007's backfill mints with
+   `gen_random_uuid()`. The wireframe's `hh_7fd2…` is sample data, not a prefix to ship (design
+   dev note 8) — a prefix here and none in the backfill would give one product two id shapes.
+
+7. **The keyed branch is tested with the suite's ONE `vi.mock`.** `#30`'s "zero mocks" rule is
+   about route handlers; the auth seam itself cannot be exercised without a key, and stubbing
+   `auth()` in this one file is precisely what keeps keys out of every other file. The keys are
+   set with `vi.stubEnv` and dropped in `afterEach` (`clerkEnabled()` is read per call, which
+   `owner.ts:6-7` already documents as the supported way to flip it).
+
+## Defaulted / flagged
+
+- **FLAG · the per-owner search rate limit is now per-HOUSEHOLD.**
+  `apps/web/src/app/api/places/search/route.ts:48` keys its 30-searches/60s token bucket on
+  `getOwner()`, so two co-pilots now share one budget instead of having one each. That follows
+  from the value change alone — the call site is untouched, as i2's acceptance requires. It is
+  arguably the right meaning (the quota protects one Google bill), but it IS a behaviour change
+  and the decision is not written anywhere in the design. If it should be per-person it is a
+  one-word swap to `getActor()` — deliberately **not** made here, because it would edit a call
+  site this item promises not to touch.
+- **FLAG · the walk needs a migrated + re-seeded database.** Keyless `getOwner()` now answers
+  `dev-household` while pre-0007 rows are still owned by `dev-user`, so a walk server pointed at
+  a database that has not had 0007 applied will render an **empty world** — trips, places, rig
+  and prefs all invisible. The fix is `pnpm db:migrate && pnpm db:seed` against that database.
+  I did **not** run it on the shared `localhost:5433` dev database: 0007 repoints `dev-user` →
+  `dev-household`, which would blank out every *other* issue's walk server still running pre-i2
+  code (i1's note, same reasoning, and the machine-conduct rule). **Operator-owned**, and it is
+  now due — i1 deferred it precisely until i2 landed.
+- `apps/mobile/src/api.ts:16` and `auth.ts:12` describe the keyless API as serving "the seeded
+  `dev-user`". Comments only, no code depends on it; left alone as out of this item's scope.
+- **No `getActor()` consumer exists yet** — it is exported and tested, and i5 is what passes it
+  into the four mutations. `lint`'s no-unused-exports is not configured, so nothing complains.
+
+## Claims for qa to check
+
+1. `git diff --name-only` contains **no path under `apps/web/src/app/`** — no call site was
+   edited, and `apps/web/src/app/api/prefs/route.test.ts` is not in the diff at all.
+2. `getOwner` is still exported with type `() => Promise<string>` (the `cache()` wrapper
+   preserves it — `tsc --noEmit` passes with all 37 call sites unchanged), and `getActor` is
+   exported alongside it.
+3. The keyless branch performs **zero** database work: no import of `@rv-trip/db` is evaluated
+   and no row is written (the "writes nothing on the keyless branch" test asserts both tables
+   are still empty afterwards).
+4. Nothing outside `apps/web/src/lib/owner.ts`, `packages/db/src/mutations.ts` and
+   `packages/db/src/testing/fixtures.ts` changed, plus the one new test file.
+
+## Checks actually run
+
+| command | result |
+| --- | --- |
+| `pnpm vitest run src/lib/owner.test.ts` (in `apps/web`, **before** the implementation) | `Tests 9 failed (9)` — RED, harness live (e.g. `getActor is not a function`) |
+| `pnpm vitest run src/lib/owner.test.ts` (after) | `Test Files 1 passed (1) · Tests 9 passed (9)` |
+| `pnpm turbo run lint typecheck test` (repo root) | `Tasks: 10 successful, 10 total` · `Test Files 27 passed (27) · Tests 177 passed (177)` |
+| `pnpm turbo run lint typecheck --force` (repo root, cache bypassed) | `Tasks: 7 successful, 7 total · Cached: 0 cached` |
+
+Not run: `pnpm db:migrate` / `pnpm db:seed` against the shared dev database (flagged above as
+operator-owned). The test suite creates and drops its own database per run.

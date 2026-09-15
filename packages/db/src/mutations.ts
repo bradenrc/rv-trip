@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { eq, and, inArray, isNull, max, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
@@ -10,6 +11,8 @@ import {
   routes,
   savedPlaces,
   userPrefs,
+  households,
+  householdMembers,
 } from "./schema";
 import type {
   Idea,
@@ -45,8 +48,11 @@ import {
 /**
  * Owner-scoped writes. Every mutation is constrained to resources belonging to
  * a trip the owner owns (via subquery), so a caller can never touch another
- * tenant's data even if they pass a foreign id. `owner` is the Clerk userId;
- * local dev passes the dev stub.
+ * tenant's data even if they pass a foreign id. `owner` is the HOUSEHOLD id
+ * (#77) — whatever `getOwner()` answered: a real household minted by
+ * `ensureHouseholdForUser` (end of this file) with Clerk on, and the stable
+ * `dev-household` without keys. It is NOT a Clerk user id any more; that is
+ * `getActor()`, and from #78 on the two are passed separately.
  */
 
 const ownedLegIds = (owner: string) =>
@@ -839,4 +845,64 @@ export async function putCachedNav(rows: CachedNavCheck[]): Promise<void> {
   await Promise.all(
     rows.map((row) => db.update(routes).set({ nav: row.nav }).where(eq(routes.key, row.key))),
   );
+}
+
+/* ── tenancy (#77) ──────────────────────────────────────────────────────── */
+
+/** The one lookup that matters: a person → the household that owns their rows.
+ * Rides `household_members_user_idx`, the unique index on `user_id`
+ * (schema.ts), so it is a single-row index scan however many households exist. */
+async function householdIdFor(userId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ householdId: householdMembers.householdId })
+    .from(householdMembers)
+    .where(eq(householdMembers.userId, userId))
+    .limit(1);
+  return row?.householdId ?? null;
+}
+
+/**
+ * Resolve a Clerk user id to the HOUSEHOLD id every `owner_id` column carries
+ * from #77 on, minting a 1-member household the first time this person is seen
+ * (docs/design/81 §2, plan item i2). This is what `getOwner()` returns, so it
+ * sits on the hot path of every read and every write — hence one indexed
+ * SELECT on the common path, and a write only on a user's very first request.
+ *
+ * Lazy-create rather than a Clerk webhook: a webhook is a second deployment
+ * surface and a race of its own (the first request can beat it), and there is
+ * nothing to create a household FROM until someone actually shows up.
+ *
+ * The race, spelled out, because the seam has no transaction around it and two
+ * of a new user's first requests really can arrive together: both miss the
+ * SELECT, both insert a household, and the member insert then decides — the
+ * `user_id` unique index lets exactly one through. The loser deletes the
+ * household it just minted (nothing references it: the member row it would
+ * have hung off was never written) and re-reads the winner's. So the outcome
+ * is the same row either way and no orphan household is left behind.
+ */
+export async function ensureHouseholdForUser(userId: string): Promise<string> {
+  const existing = await householdIdFor(userId);
+  if (existing) return existing;
+
+  // Bare uuid, the shape migration 0007's backfill mints with
+  // `gen_random_uuid()` — the `hh_…` in the wireframe is sample data, not a
+  // prefix to ship (docs/design/81 dev note 8).
+  const id = randomUUID();
+  await db.insert(households).values({ id });
+  const claimed = await db
+    .insert(householdMembers)
+    .values({ householdId: id, userId, role: "owner" })
+    .onConflictDoNothing()
+    .returning({ householdId: householdMembers.householdId });
+  if (claimed.length > 0) return id;
+
+  await db.delete(households).where(eq(households.id, id));
+  const settled = await householdIdFor(userId);
+  if (!settled) {
+    // The member insert was refused and yet no row exists: not a race, so
+    // something else is wrong (a partially applied 0007, a dropped index).
+    // Loud beats serving the wrong tenant's data.
+    throw new Error(`ensureHouseholdForUser: no household for ${userId} after a lost create`);
+  }
+  return settled;
 }
