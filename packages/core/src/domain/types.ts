@@ -42,6 +42,61 @@ export type IdeaCategory = z.infer<typeof ideaCategory>;
 /** 1-5 stars, or null when unrated. Seeds the memory layer ("what we loved"). */
 export const rating = z.number().int().min(1).max(5).nullable();
 
+/**
+ * The three fields a household shares a VOICE on (#78 · docs/design/81 §6) —
+ * the only ones a change is worth keeping. `notes` is the canonical spelling
+ * even though `saved_places` names its column `note`: one vocabulary on the
+ * wire, or the /places byline could never match the set it renders from (the
+ * mapping happens once, at the write site in packages/db).
+ */
+export const changeField = z.enum(["rating", "notes", "status"]);
+export type ChangeField = z.infer<typeof changeField>;
+
+/** The four things a change is logged against. */
+export const changeEntity = z.enum(["stop", "idea", "reservation", "savedPlace"]);
+export type ChangeEntity = z.infer<typeof changeEntity>;
+
+/**
+ * The ONE joined row the list read carries — "rated by Jess · Sep 12". It rides
+ * along on the thing that changed, so the glance answer costs no second fetch;
+ * the older changes behind it are `GET /api/history`, fetched only when the
+ * byline is opened.
+ *
+ * `memberName` is the best name the server has for the person: a real display
+ * name where the identity provider knows one, otherwise the member id itself.
+ * `at` is an instant (ISO 8601 with a zone), NOT one of this grammar's plain
+ * `YYYY-MM-DD` trip dates — an audit timestamp has a clock, a trip day does not.
+ */
+export const lastChange = z.object({
+  field: changeField,
+  memberName: z.string(),
+  at: z.string(),
+});
+export type LastChange = z.infer<typeof lastChange>;
+
+/**
+ * One line of the opened popover — the same row plus what it moved FROM and TO.
+ * `from`/`to` are text (a rating travels as its decimal digits) and NULL is a
+ * genuinely absent value, which is how "— → ★★★★" tells "cleared" from "never
+ * set".
+ */
+export const changeHistoryRow = z.object({
+  field: changeField,
+  from: z.string().nullable(),
+  to: z.string().nullable(),
+  memberName: z.string(),
+  at: z.string(),
+});
+export type ChangeHistoryRow = z.infer<typeof changeHistoryRow>;
+
+/**
+ * Every entity that carries a byline spells the field the same way: nullable
+ * with a `null` default, so a payload written before #78 — a cached bundle, a
+ * phone build on its own release cadence — still parses, and "nothing has ever
+ * been changed here" and "this server does not send it" are one state.
+ */
+const lastChangeField = lastChange.nullable().default(null);
+
 /** A place reference. Coords optional (a floating idea may just be a name);
  * googlePlaceId links to Google Places for details/reviews when available. */
 export const place = z.object({
@@ -64,6 +119,7 @@ export const reservation = z.object({
   cost: z.number().nonnegative().nullable().default(null),
   rating,
   notes: z.string().nullable().default(null),
+  lastChange: lastChangeField,
 });
 export type Reservation = z.infer<typeof reservation>;
 
@@ -84,6 +140,7 @@ export const idea = z.object({
   rating,
   notes: z.string().nullable().default(null),
   sortOrder: z.number().int(),
+  lastChange: lastChangeField,
 });
 export type Idea = z.infer<typeof idea>;
 
@@ -106,6 +163,7 @@ export const stop = z.object({
   notes: z.string().nullable().default(null),
   reservations: z.array(reservation).default([]),
   ideas: z.array(idea).default([]),
+  lastChange: lastChangeField,
 });
 export type Stop = z.infer<typeof stop>;
 
@@ -391,6 +449,7 @@ export const savedPlace = z.object({
   rating,
   tripId: z.string().nullable().default(null),
   tripName: z.string().nullable().default(null),
+  lastChange: lastChangeField,
 });
 export type SavedPlace = z.infer<typeof savedPlace>;
 

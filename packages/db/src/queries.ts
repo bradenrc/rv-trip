@@ -15,17 +15,23 @@ import {
   trips,
   legs,
   stops,
+  ideas,
+  reservations,
   savedPlaces,
   rigs,
   routes,
   userPrefs,
+  changeLog,
   households,
   householdMembers,
   householdInvites,
 } from "./schema";
 import type { HouseholdRole } from "./schema";
 import type {
+  ChangeEntity,
+  ChangeField,
   IsoDate,
+  LastChange,
   Trip,
   Leg,
   Stop,
@@ -74,12 +80,201 @@ type TripRow = NonNullable<
   Awaited<ReturnType<typeof db.query.trips.findFirst<{ with: typeof TRIP_WITH }>>>
 >;
 
+// ── the change log's read side ────────────────────────────────────────────
+//
+// #78 · docs/design/81 §6. Two reads over one table: the NEWEST row per entity,
+// joined onto a list read as `lastChange` ("rated by Jess · Sep 12"), and the
+// last five rows for ONE entity behind `GET /api/history` — fetched only when
+// the byline is opened, which is what keeps a row read to a single join.
+
+/** The joined rows by `entity:id` — what a mapper looks its own row up in. */
+export type LastChangeIndex = ReadonlyMap<string, LastChange>;
+
+const changeKey = (entity: ChangeEntity, entityId: string) => `${entity}:${entityId}`;
+
+/**
+ * The default every mapper falls back to: no log was joined, so nothing has a
+ * byline. Shared and never mutated — a create's `returning` row and the
+ * dashboard's summaries both map through here and neither pays for a query.
+ */
+const NO_CHANGES: LastChangeIndex = new Map();
+
+const lastChangeOf = (
+  index: LastChangeIndex,
+  entity: ChangeEntity,
+  entityId: string,
+): LastChange | null => index.get(changeKey(entity, entityId)) ?? null;
+
+/**
+ * The newest log row for every one of these entity ids, in ONE query.
+ *
+ * `DISTINCT ON (entity, entity_id)` with the matching ORDER BY is the join:
+ * Postgres keeps the first row of each group and the group is ordered
+ * `at desc, id desc`. The id tiebreak is load-bearing — two fields saved by one
+ * patch share `at` EXACTLY (the clock is the transaction's `now()`), and
+ * without it the byline would name an arbitrary one of the two.
+ *
+ * `household_id` is in the WHERE and not merely implied by the entity's own
+ * ownership path: `change_log` is the one table that carries the tenant on
+ * every row, and a row written under another household must never surface on
+ * this one's byline. The ids themselves are uuids from four different tables,
+ * so one `IN` list cannot collide across entities.
+ */
+async function lastChangesFor(
+  householdId: string,
+  entityIds: string[],
+): Promise<LastChangeIndex> {
+  if (entityIds.length === 0) return NO_CHANGES;
+  const rows = await db
+    .selectDistinctOn([changeLog.entity, changeLog.entityId], {
+      entity: changeLog.entity,
+      entityId: changeLog.entityId,
+      field: changeLog.field,
+      memberId: changeLog.memberId,
+      at: changeLog.at,
+    })
+    .from(changeLog)
+    .where(and(eq(changeLog.householdId, householdId), inArray(changeLog.entityId, entityIds)))
+    .orderBy(changeLog.entity, changeLog.entityId, desc(changeLog.at), desc(changeLog.id));
+  const index = new Map<string, LastChange>();
+  for (const r of rows) {
+    index.set(changeKey(r.entity, r.entityId), {
+      field: r.field,
+      // The best name this layer HAS. `household_members` stores a membership
+      // and nothing else — no name, no email — so a display name can only come
+      // from the identity provider, which packages/db deliberately cannot
+      // reach (apps/web/src/lib/members.ts is the one place that asks).
+      // `GET /api/history` resolves it there; this join falls back to the id.
+      memberName: r.memberId,
+      at: r.at.toISOString(),
+    });
+  }
+  return index;
+}
+
+/** Every id under a loaded trip that can carry a byline: the stops, their
+ * reservations and ideas, and the shelf ideas hanging off the trip itself. */
+function loggableIds(row: TripRow): string[] {
+  const ids: string[] = row.ideas.map((i) => i.id);
+  for (const leg of row.legs) {
+    for (const stop of leg.stops) {
+      ids.push(stop.id);
+      for (const r of stop.reservations) ids.push(r.id);
+      for (const i of stop.ideas) ids.push(i.id);
+    }
+  }
+  return ids;
+}
+
+/** One row of `GET /api/history`, as the DATABASE can answer it: the member is
+ * an id here, and the route turns it into a name (see `lastChangesFor`). */
+export interface ChangeHistoryEntry {
+  field: ChangeField;
+  from: string | null;
+  to: string | null;
+  memberId: string;
+  at: string;
+}
+
+/**
+ * Is this entity the household's? The four ownership paths, each the same one
+ * its write site scopes on — an idea through `trip_id` (#80: a shelf idea has
+ * no stop), a reservation through its stop, a saved place through its own
+ * `owner_id`.
+ */
+async function entityIsOwned(
+  householdId: string,
+  entity: ChangeEntity,
+  entityId: string,
+): Promise<boolean> {
+  switch (entity) {
+    case "stop": {
+      const rows = await db
+        .select({ id: stops.id })
+        .from(stops)
+        .innerJoin(legs, eq(stops.legId, legs.id))
+        .innerJoin(trips, eq(legs.tripId, trips.id))
+        .where(and(eq(stops.id, entityId), eq(trips.ownerId, householdId)));
+      return rows.length > 0;
+    }
+    case "idea": {
+      const rows = await db
+        .select({ id: ideas.id })
+        .from(ideas)
+        .innerJoin(trips, eq(ideas.tripId, trips.id))
+        .where(and(eq(ideas.id, entityId), eq(trips.ownerId, householdId)));
+      return rows.length > 0;
+    }
+    case "reservation": {
+      const rows = await db
+        .select({ id: reservations.id })
+        .from(reservations)
+        .innerJoin(stops, eq(reservations.stopId, stops.id))
+        .innerJoin(legs, eq(stops.legId, legs.id))
+        .innerJoin(trips, eq(legs.tripId, trips.id))
+        .where(and(eq(reservations.id, entityId), eq(trips.ownerId, householdId)));
+      return rows.length > 0;
+    }
+    case "savedPlace": {
+      const rows = await db
+        .select({ id: savedPlaces.id })
+        .from(savedPlaces)
+        .where(and(eq(savedPlaces.id, entityId), eq(savedPlaces.ownerId, householdId)));
+      return rows.length > 0;
+    }
+  }
+}
+
+/**
+ * The audit behind an opened byline: this entity's last `limit` changes, newest
+ * first. `null` — NOT an empty list — means the entity is not this household's,
+ * so the route can 404 it exactly as every other read does; an owned thing that
+ * has simply never been changed answers `[]`.
+ *
+ * The ownership check is a separate statement rather than a join onto the log,
+ * because those two answers have to stay distinguishable: filtering the log by
+ * the household alone would turn "not yours" into "no history", which would
+ * quietly confirm that someone else's id exists.
+ */
+export async function listChangeHistory(
+  householdId: string,
+  entity: ChangeEntity,
+  entityId: string,
+  limit = 5,
+): Promise<ChangeHistoryEntry[] | null> {
+  if (!(await entityIsOwned(householdId, entity, entityId))) return null;
+  const rows = await db
+    .select({
+      field: changeLog.field,
+      from: changeLog.from,
+      to: changeLog.to,
+      memberId: changeLog.memberId,
+      at: changeLog.at,
+    })
+    .from(changeLog)
+    .where(
+      and(
+        eq(changeLog.householdId, householdId),
+        eq(changeLog.entity, entity),
+        eq(changeLog.entityId, entityId),
+      ),
+    )
+    // Same tiebreak as the join above, and the same reason.
+    .orderBy(desc(changeLog.at), desc(changeLog.id))
+    .limit(limit);
+  return rows.map((r) => ({ ...r, at: r.at.toISOString() }));
+}
+
 /**
  * The one seam both `Trip` and `TripSummary` pass through — so status is
  * derived exactly once, here, and the two shapes can never disagree. `today` is
  * threaded in so every row of one listing is evaluated against the same date.
  */
-function mapTripRow(row: TripRow, today: IsoDate = todayIso()): Trip {
+function mapTripRow(
+  row: TripRow,
+  today: IsoDate = todayIso(),
+  last: LastChangeIndex = NO_CHANGES,
+): Trip {
   return {
     id: row.id,
     ownerId: row.ownerId,
@@ -103,8 +298,8 @@ function mapTripRow(row: TripRow, today: IsoDate = todayIso()): Trip {
     statusAuto: row.statusAuto,
     rating: row.rating,
     note: row.note,
-    legs: row.legs.map(mapLeg),
-    ideas: row.ideas.map(mapIdea),
+    legs: row.legs.map((l) => mapLeg(l, last)),
+    ideas: row.ideas.map((i) => mapIdea(i, last)),
   };
 }
 
@@ -113,7 +308,12 @@ export async function getTripById(ownerId: string, tripId: string): Promise<Trip
     where: and(eq(trips.ownerId, ownerId), eq(trips.id, tripId)),
     with: TRIP_WITH,
   });
-  return row ? mapTripRow(row) : null;
+  if (!row) return null;
+  // ONE extra query for the whole tree's bylines (#78 §6 read 1). It is joined
+  // here and not in `listTripsForOwner`/`listTripsWithStopsForOwner`: the
+  // dashboard throws the tree away inside `summarize()` and the map draws pins,
+  // so neither renders a byline and neither should pay for one.
+  return mapTripRow(row, todayIso(), await lastChangesFor(ownerId, loggableIds(row)));
 }
 
 /** Dashboard row — the shape is owned by @rv-trip/core so the API client can validate it. */
@@ -247,7 +447,10 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
     orderBy: [desc(savedPlaces.createdAt)],
     with: { trip: { columns: { title: true } } },
   });
-  return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null));
+  // The /places cards render a byline (§5), so the library read joins the log
+  // the same way the trip tree does — one query for the whole page.
+  const last = await lastChangesFor(ownerId, rows.map((r) => r.id));
+  return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null, last));
 }
 
 /**
@@ -297,6 +500,7 @@ export function mapSavedPlaceRow(
     tripId: string | null;
   },
   tripName: string | null,
+  last: LastChangeIndex = NO_CHANGES,
 ): SavedPlace {
   return {
     id: r.id,
@@ -310,6 +514,7 @@ export function mapSavedPlaceRow(
     rating: r.rating,
     tripId: r.tripId,
     tripName,
+    lastChange: lastChangeOf(last, "savedPlace", r.id),
   };
 }
 
@@ -317,19 +522,22 @@ function mapPlace(name: string, lat: number | null, lng: number | null, gid: str
   return { name, lat, lng, googlePlaceId: gid };
 }
 
-export function mapLeg(l: {
-  id: string;
-  tripId: string;
-  title: string;
-  sortOrder: number;
-  stops: MapStopRow[];
-}): Leg {
+export function mapLeg(
+  l: {
+    id: string;
+    tripId: string;
+    title: string;
+    sortOrder: number;
+    stops: MapStopRow[];
+  },
+  last: LastChangeIndex = NO_CHANGES,
+): Leg {
   return {
     id: l.id,
     tripId: l.tripId,
     title: l.title,
     sortOrder: l.sortOrder,
-    stops: l.stops.map(mapStop),
+    stops: l.stops.map((s) => mapStop(s, last)),
   };
 }
 
@@ -349,7 +557,7 @@ export interface MapStopRow {
   ideas: MapIdeaRow[];
 }
 
-export function mapStop(s: MapStopRow): Stop {
+export function mapStop(s: MapStopRow, last: LastChangeIndex = NO_CHANGES): Stop {
   return {
     id: s.id,
     legId: s.legId,
@@ -359,8 +567,9 @@ export function mapStop(s: MapStopRow): Stop {
     sortOrder: s.sortOrder,
     rating: s.rating,
     notes: s.notes,
-    reservations: s.reservations.map(mapReservation),
-    ideas: s.ideas.map(mapIdea),
+    reservations: s.reservations.map((r) => mapReservation(r, last)),
+    ideas: s.ideas.map((i) => mapIdea(i, last)),
+    lastChange: lastChangeOf(last, "stop", s.id),
   };
 }
 
@@ -380,7 +589,10 @@ interface MapReservationRow {
 
 /** Exported so a create/promote can hand its INSERT ... returning row back in
  * the core shape — the same seam the read path maps through. */
-export function mapReservation(r: MapReservationRow): Reservation {
+export function mapReservation(
+  r: MapReservationRow,
+  last: LastChangeIndex = NO_CHANGES,
+): Reservation {
   return {
     id: r.id,
     stopId: r.stopId,
@@ -393,6 +605,7 @@ export function mapReservation(r: MapReservationRow): Reservation {
     cost: r.cost === null ? null : Number(r.cost),
     rating: r.rating,
     notes: r.notes,
+    lastChange: lastChangeOf(last, "reservation", r.id),
   };
 }
 
@@ -414,7 +627,7 @@ interface MapIdeaRow {
 
 /** Exported for the same reason `mapReservation` is: `createIdea` returns the
  * row it just inserted, and the client splices exactly that shape. */
-export function mapIdea(i: MapIdeaRow): Idea {
+export function mapIdea(i: MapIdeaRow, last: LastChangeIndex = NO_CHANGES): Idea {
   return {
     id: i.id,
     tripId: i.tripId,
@@ -429,6 +642,7 @@ export function mapIdea(i: MapIdeaRow): Idea {
     rating: i.rating,
     notes: i.notes,
     sortOrder: i.sortOrder,
+    lastChange: lastChangeOf(last, "idea", i.id),
   };
 }
 

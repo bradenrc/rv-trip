@@ -60,6 +60,7 @@ function stop(partial: Partial<Stop> & Pick<Stop, "id" | "legId" | "sortOrder">)
     notes: null,
     reservations: [],
     ideas: [],
+    lastChange: null,
     ...partial,
   };
 }
@@ -183,6 +184,7 @@ function fixture(endDate = "2026-08-10"): Trip {
                 cost: 120,
                 rating: null,
                 notes: null,
+                lastChange: null,
               },
             ],
           }),
@@ -221,6 +223,7 @@ function fixture(endDate = "2026-08-10"): Trip {
                 rating: null,
                 notes: null,
                 sortOrder: 0,
+                lastChange: null,
               },
             ],
           }),
@@ -880,6 +883,7 @@ describe("reservation and idea tree mutations", () => {
       cost: 64,
       rating: null,
       notes: null,
+      lastChange: null,
       ...over,
     };
   }
@@ -895,6 +899,7 @@ describe("reservation and idea tree mutations", () => {
       rating: null,
       notes: null,
       sortOrder: 0,
+      lastChange: null,
       ...over,
     };
   }

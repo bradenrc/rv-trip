@@ -14,6 +14,7 @@ function mkStop(partial: Partial<Stop> & { id: string }): Stop {
     notes: partial.notes ?? null,
     reservations: [],
     ideas: [],
+    lastChange: null,
   };
 }
 

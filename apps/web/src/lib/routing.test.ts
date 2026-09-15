@@ -352,6 +352,7 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
             notes: null,
             reservations: [],
             ideas: [],
+            lastChange: null,
           },
           {
             id: "s2",
@@ -364,6 +365,7 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
             notes: null,
             reservations: [],
             ideas: [],
+            lastChange: null,
           },
         ],
       },

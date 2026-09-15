@@ -41,6 +41,7 @@ function stop(over: Partial<Stop> & { id: string }): Stop {
     notes: null,
     reservations: [],
     ideas: [],
+    lastChange: null,
     ...over,
   };
 }
@@ -56,6 +57,7 @@ function idea(over: Partial<Idea> & { id: string }): Idea {
     rating: null,
     notes: null,
     sortOrder: 0,
+    lastChange: null,
     ...over,
   };
 }

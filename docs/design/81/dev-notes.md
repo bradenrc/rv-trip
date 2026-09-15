@@ -722,3 +722,153 @@ diff. `lastChange` on the wire and `GET /api/history` are **i6**; `ChangeByline`
 
 Machine conduct: no server was started and no process was killed by this item. The test harness
 created and dropped its own database; `localhost:5433` was never written to.
+
+---
+
+# Issue 81 · dev notes — item **i6 of 7** (`lastChange` on the wire + `GET /api/history`)
+
+Scope of this dispatch: the log's two READS. i5 wrote rows nothing could see; this item puts
+the newest one on the wire and opens the five-row audit behind it. Nothing renders — no file
+under `packages/ui` or `apps/web/src/components/**` is in the diff except two test fixtures.
+`ChangeByline` and its four mounts are **i7**.
+
+## What changed
+
+| file:line | what |
+| --- | --- |
+| `packages/core/src/domain/types.ts:52` | `changeField` — the zod twin of the pgEnum (`rating \| notes \| status`) |
+| `packages/core/src/domain/types.ts:56` | `changeEntity` — `stop \| idea \| reservation \| savedPlace` |
+| `packages/core/src/domain/types.ts:70-77` | `lastChange` — `{ field, memberName, at }`, the one joined row |
+| `packages/core/src/domain/types.ts:83-90` | `changeHistoryRow` — the same plus `from`/`to`, one line of the popover |
+| `packages/core/src/domain/types.ts:98` | `lastChangeField` — `lastChange.nullable().default(null)`, spelled once and used four times |
+| `packages/core/src/domain/types.ts:122, 143, 166, 452` | the field on `reservation`, `idea`, `stop` and `savedPlace` |
+| `packages/core/src/api-client/schemas.ts:79-83` | `reservationRowSchema` transform gains `lastChange: null` — a CREATE has no history, and the client splices this shape straight into its trip |
+| `packages/db/src/queries.ts:83-266` | the whole change-log read section (below) |
+| `packages/db/src/queries.ts:91` | `LastChangeIndex` — `ReadonlyMap<"entity:id", LastChange>` |
+| `packages/db/src/queries.ts:123-155` | `lastChangesFor()` — ONE `DISTINCT ON (entity, entity_id)` query for a whole page |
+| `packages/db/src/queries.ts:157-168` | `loggableIds()` — every id under a loaded trip that can carry a byline |
+| `packages/db/src/queries.ts:185-232` | `entityIsOwned()` — the four ownership paths |
+| `packages/db/src/queries.ts:239-266` | `listChangeHistory()` — ≤ `limit` rows newest first, or `null` for "not yours" |
+| `packages/db/src/queries.ts:273-277, 306-317` | `mapTripRow` takes the index; `getTripById` joins it |
+| `packages/db/src/queries.ts:444-454` | `listSavedPlacesForOwner` joins it for the /places cards |
+| `packages/db/src/queries.ts:486-518, 525-541, 560-573, 592-609, 630-646` | `mapSavedPlaceRow` / `mapLeg` / `mapStop` / `mapReservation` / `mapIdea` each take an OPTIONAL index and fill `lastChange` |
+| `apps/web/src/app/api/history/route.ts` | new — `GET ?entity=&id=`, ≤ 5 rows, `getOwner()`-scoped, names resolved through `describePeople` |
+| `apps/web/src/test/history.test.ts` | new — 17 tests against the real handlers and the real database |
+| `packages/core/src/domain/types.test.ts:202-378` | new — 6 tests: a pre-#78 trip still parses, and the two new shapes |
+| 15 test files (core, apps/web) | 36 × `lastChange: null` on typed `Stop`/`Idea`/`Reservation`/`SavedPlace` literals — see "the cost of a required field" below |
+
+## Key decisions
+
+1. **One query per page, not one per row.** `lastChangesFor` is a single
+   `SELECT DISTINCT ON (entity, entity_id) … ORDER BY entity, entity_id, at DESC, id DESC`
+   over an `IN` list of every id on the page — the whole trip tree (stops, their reservations
+   and ideas, and the shelf ideas) or the whole Places library. i5's `(entity, entity_id, at)`
+   index is what it is meant to read through (I did NOT run `EXPLAIN`, so the plan itself is
+   unverified — the shape is one query either way). The `id DESC` tiebreak is i5's flag made good: two
+   fields saved by one patch share `at` EXACTLY (the clock is the transaction's `now()`), so
+   without it the byline would name an arbitrary one of the two.
+
+2. **The join is on the two reads that RENDER a byline, and nowhere else.** `getTripById` (the
+   stop sheet, the idea cards, the reservations) and `listSavedPlacesForOwner` (the /places
+   cards) — the two surfaces §5 draws. `listTripsForOwner` throws the tree away inside
+   `summarize()` and `listTripsWithStopsForOwner` feeds the map's pins; neither shows a byline,
+   so neither pays for the query. Their payloads carry `lastChange: null`, which parses and
+   renders identically — flagged below, because "null" there means "not asked", not "never
+   changed".
+
+3. **`memberName` falls back to the member id in `packages/db`, and is RESOLVED in the route.**
+   `household_members` stores a membership and nothing else — no name, no email (i3's finding) —
+   so a display name can only come from Clerk's Backend API, which `apps/web/src/lib/members.ts`
+   is the one place to ask. `GET /api/history` asks it (≤ 5 ids, forgiving, keyless → nobody is
+   asked and the id stands in). The joined `lastChange` cannot: it is assembled inside
+   `packages/db`, which must not learn about Clerk. **This is the one seam i7 inherits** — see
+   the flag.
+
+4. **404 and `[]` stay different answers.** `listChangeHistory` returns `null` for an entity that
+   is not the household's and `[]` for one of theirs that has never changed. Filtering the log by
+   the household alone would collapse the two, and a 200 `[]` on a stranger's id quietly confirms
+   that the id exists. The ownership check is therefore its own statement, on the same path each
+   entity's WRITE scopes on — an idea through `trip_id` (#80: a shelf idea has no stop), a
+   reservation through its stop, a saved place through its own `owner_id`.
+
+5. **A malformed `?id=` is a 400, not a 404.** i5's flag was that a non-uuid reaches a `uuid`
+   column and 500s at the driver. `api/places/[id]` answers 404 for that, but there the id is
+   part of the PATH — a URL that cannot name a row. Here it is a query STRING, so a bad one is a
+   bad request, which is also what `api/places/search` answers for an unparseable query. The 404
+   is kept for the thing it means: a well-formed id that is not this household's.
+
+6. **`at` crosses the wire as an ISO instant, not a plain date.** The repo's date rule
+   (`YYYY-MM-DD`, no timezone) is about TRIP days, which have no clock. An audit timestamp has
+   one, and `change_log.at` is `timestamptz`; `toISOString()` is the one conversion, in
+   `lastChangesFor`/`listChangeHistory`.
+
+7. **The cost of a required field, paid deliberately.** `lastChange` is `nullable().default(null)`,
+   so every payload already in flight still PARSES (the acceptance test) — but zod's output type
+   makes the key required, so every hand-written `Stop`/`Idea`/`Reservation`/`SavedPlace` literal
+   in TypeScript had to name it. That is 36 fixture literals across 15 test files plus one
+   production line (`reservationRowSchema`). The alternative — `.optional()` without a default —
+   would have made the parsed value `undefined` instead of `null` and pushed a `?? null` into
+   every reader, including i7's. The repo's precedent is `tripSummary.milesEstimated`: required on
+   purpose, so nobody can construct a row that is silently missing the fact. Each fixture edit is
+   a one-line `lastChange: null` and nothing else; in the builders that end with `...over`, the
+   default is placed BEFORE the spread so a caller can still override it.
+
+## Defaulted / flagged
+
+- **FLAG · i7 inherits the byline's NAME.** With Clerk on, `stop.lastChange.memberName` is the
+  Clerk user id, because `packages/db` cannot ask the identity provider (decision 3). Keyless —
+  every walk, the whole route suite — it is `dev-user`, which reads fine. `GET /api/history`
+  already answers real names, so an opened popover and the closed line beside it can disagree in
+  a keyed deploy. Fixing it means resolving names at the apps/web read boundary
+  (`api/trips/[id]`, `trips/[id]/page.tsx`, `api/places`, `places/page.tsx`, `map/page.tsx`) with
+  `describePeople`, which is a file set i6's scope does not name — so it is **explicitly handed
+  to i7 or its own item**, not silently dropped.
+- **FLAG · the map and the dashboard send `lastChange: null` without asking** (decision 2). No
+  byline is mounted on either surface today. If i7 ever mounts one there, the join has to be
+  added to `listTripsWithStopsForOwner` too, or the line will always be missing.
+- **FLAG · a PATCH still answers 204, so the byline updates on the next READ.** None of the four
+  mutations returns the row it just changed (i5), so a client that has just rated a stop will not
+  see "rated by you · today" until it refetches. That is the shipped write contract, not
+  something i6 changed — noting it so the walk does not read it as a bug.
+- **Defaulted · no api-client method for `/api/history`.** `packages/core/src/api-client` gains
+  nothing: the popover is a web-only surface in §5 and i7's component fetches it directly. The
+  phone parses `lastChange` through the existing `trip` schema and needs no new call.
+- **Defaulted · the five-row limit is the route's, not the query's.** `listChangeHistory` takes a
+  `limit` (default 5) and the handler passes `HISTORY_LIMIT = 5`, so "older changes aren't kept"
+  stays one constant beside the copy that says it.
+- **The shared dev database at `localhost:5433` was NOT migrated or touched.** i6 adds no
+  migration — it only reads 0008's table — but that database is still behind on 0007/0008 (the
+  lag i1/i2/i4/i5 all flagged, rv-trip#65). `pnpm db:migrate` against it stays **operator-owned**.
+  Every check below ran against the suite's own throwaway database, which it creates and drops.
+
+## Claims for qa to check
+
+1. **No payload breaks.** `trip.parse` of a pre-#78 tree (no `lastChange` anywhere) succeeds and
+   yields `null` on the stop, the reservation, the attached idea and the shelf idea — the first
+   test in `types.test.ts`'s new block, and the reason the field is `.default(null)`.
+2. **The route never trusts the caller for tenancy.** The only inputs are `entity` and `id`; a
+   `?household=` parameter is ignored (asserted) and the household comes from `getOwner()`.
+3. **`[]` and 404 are distinguishable** — an owned, never-changed stop answers `200 []`; another
+   household's stop answers `404 {"error":"not found"}`; a well-formed id that is no row at all
+   also 404s.
+4. **The join is household-scoped as well as entity-scoped**: a `change_log` row stamped with
+   another household but pointing at MY stop is invisible both on the byline and in the history
+   (two tests).
+5. **The diff adds no migration and no mutation.** `packages/db/src/mutations.ts`,
+   `packages/db/src/schema.ts` and `packages/db/drizzle/` are untouched; the only production
+   files changed are `types.ts`, `schemas.ts`, `queries.ts` and the new route.
+
+## Checks actually run
+
+| command | result |
+| --- | --- |
+| `pnpm vitest run src/domain/types.test.ts` (in `packages/core`, **before** the schema) | `Tests 5 failed \| 18 passed (23)` — RED |
+| `pnpm vitest run src/test/history.test.ts` (in `apps/web`, **before** the route) | `Failed to load url @/app/api/history/route … Does the file exist?` — RED, harness live |
+| `pnpm vitest run src/test/history.test.ts` (after) | `Test Files 1 passed (1) · Tests 17 passed (17)` |
+| `pnpm typecheck` (in `packages/core`, after the field landed) | `32 errors` — 2 in `api-client/index.ts` (production: the create response) and 30 fixture literals; `apps/web` then reported 5 more. Each fixed with one line (decision 7) |
+| `pnpm turbo run lint typecheck test --force` (repo root, uncached) | `Tasks: 10 successful, 10 total · Cached: 0 cached` · `@rv-trip/web:test Test Files 36 passed (36) · Tests 268 passed (268)` · `@rv-trip/core:test 946 passed` · `@rv-trip/ui:test 26 passed` |
+| `pnpm turbo run typecheck --filter=@rv-trip/mobile --force` | `Tasks: 1 successful` — the phone's own tsc over the widened `trip` schema |
+| `pnpm --filter @rv-trip/web build` | `✓ Compiled successfully`; `ƒ /api/history` in the route table |
+
+The suite's own throwaway database is created and dropped by the harness; `localhost:5433` was
+never read or written. No server was started and no process was killed by this item.
