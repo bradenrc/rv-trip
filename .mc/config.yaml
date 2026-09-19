@@ -37,6 +37,16 @@ dispatch: orchestrator # worker gates interrupt at dispatch; the runner session 
 # `next dev` on an allocated port against the shared docker Postgres, walk.json for the glass.
 walk:
   gate: walk
+  # mc-dev #152: the engine derives each slice's surfaces from the fold's journaled
+  # files_changed through this map (prefix segments, repo-relative). Multi-claim is correct
+  # here by design: an apps/web/src/app/api route IS both web and api. packages/core is the
+  # shared platform-neutral core — listed under web today (rv has no native walk arm yet);
+  # revisit when one exists.
+  surface_paths:
+    web: ["apps/web", "packages/ui", "packages/core"]
+    native: ["apps/mobile"]
+    api: ["apps/web/src/app/api"]
+    schema: ["packages/db/drizzle", "packages/db/src/schema.ts"]
   web:
     up: 'bash scripts/mc-walk-env.sh standup {issue} --branch {branch}'
     url: 'http://localhost:{port}/' # informational — the live URL comes from .mc/walk/{issue}.json
