@@ -39,6 +39,7 @@ const KALALOCH_DETAILS: PlaceDetails = {
   userRatingCount: 812,
   websiteUri: "https://www.fs.usda.gov/olympic",
   nationalPhoneNumber: "(360) 962-2271",
+  googleMapsUri: "https://maps.google.com/?cid=10281119596374313554",
 };
 
 /** Answers with the fixture and records what it was asked. */

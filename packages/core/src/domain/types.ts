@@ -470,6 +470,10 @@ export const placeEnrichment = z.object({
   userRatingCount: z.number().int().nullable().default(null),
   websiteUri: z.string().nullable().default(null),
   nationalPhoneNumber: z.string().nullable().default(null),
+  // #91. `.default(null)` is load-bearing here: a row cached BEFORE the
+  // `google_maps_uri` column existed must still PARSE (a hit with no link),
+  // never fail into a hard miss that re-bills Google for what we already hold.
+  googleMapsUri: z.string().nullable().default(null),
 });
 export type PlaceEnrichment = z.infer<typeof placeEnrichment>;
 

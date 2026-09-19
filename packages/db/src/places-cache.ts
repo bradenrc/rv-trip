@@ -9,8 +9,8 @@ import { places } from "./schema";
  * `LocateStore` / `dbLocateStore` already split.
  *
  * Not owner-scoped: the row has no owner. A place's rating, review count,
- * website and phone are the same facts for everybody, which is what makes one
- * shared 30-day row honest.
+ * website, phone and canonical map page are the same facts for everybody, which
+ * is what makes one shared 30-day row honest.
  *
  * The TTL is NOT applied here. `detailsPlacesEnvelope` owns it, against its own
  * injectable clock, so the freshness rule is unit-tested in core rather than
@@ -34,6 +34,7 @@ export function dbPlacesCache(): PlacesCacheStore {
         userRatingCount: row.userRatingCount,
         websiteUri: row.websiteUri,
         nationalPhoneNumber: row.nationalPhoneNumber,
+        googleMapsUri: row.googleMapsUri,
       });
       if (!parsed.success) return null;
       const e = parsed.data;
@@ -50,6 +51,7 @@ export function dbPlacesCache(): PlacesCacheStore {
           userRatingCount: e.userRatingCount,
           websiteUri: e.websiteUri,
           nationalPhoneNumber: e.nationalPhoneNumber,
+          googleMapsUri: e.googleMapsUri,
         } satisfies PlaceDetails,
         fetchedAt: row.fetchedAt,
       };
@@ -65,6 +67,7 @@ export function dbPlacesCache(): PlacesCacheStore {
           userRatingCount: details.userRatingCount,
           websiteUri: details.websiteUri,
           nationalPhoneNumber: details.nationalPhoneNumber,
+          googleMapsUri: details.googleMapsUri,
         })
         // Upsert on the key, so a stale row is refreshed in place (there is no
         // sweeper). `fetched_at` comes from the DATABASE clock on both paths —
@@ -78,6 +81,7 @@ export function dbPlacesCache(): PlacesCacheStore {
             userRatingCount: sql`excluded.user_rating_count`,
             websiteUri: sql`excluded.website_uri`,
             nationalPhoneNumber: sql`excluded.national_phone_number`,
+            googleMapsUri: sql`excluded.google_maps_uri`,
             fetchedAt: sql`now()`,
           },
         });

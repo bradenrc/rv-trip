@@ -123,15 +123,16 @@ describe("response mapping", () => {
       location: { lat: 47.6118, lng: -124.3762 },
       rating: 4.4,
       address: "156954 US-101, Forks, WA 98331",
-      // The three details-only fields are always PRESENT, and null when Google
+      // The four details-only fields are always PRESENT, and null when Google
       // did not send them (#82 §7②) — the whole point of the mapper fork.
       userRatingCount: null,
       websiteUri: null,
       nationalPhoneNumber: null,
+      googleMapsUri: null,
     });
   });
 
-  it("carries the three G-line fields through instead of dropping them (#82)", () => {
+  it("carries the four G-line fields through instead of dropping them (#82, #91)", () => {
     expect(
       parseDetailsResponse({
         id: "ChIJN1t_tDeuEmsRUsoyG83frY4",
@@ -140,6 +141,7 @@ describe("response mapping", () => {
         userRatingCount: 812,
         websiteUri: "https://koa.com/campgrounds/astoria/",
         nationalPhoneNumber: "(503) 325-0013",
+        googleMapsUri: "https://maps.google.com/?cid=10281119596374313554",
       }),
     ).toEqual({
       googlePlaceId: "ChIJN1t_tDeuEmsRUsoyG83frY4",
@@ -150,16 +152,17 @@ describe("response mapping", () => {
       userRatingCount: 812,
       websiteUri: "https://koa.com/campgrounds/astoria/",
       nationalPhoneNumber: "(503) 325-0013",
+      googleMapsUri: "https://maps.google.com/?cid=10281119596374313554",
     });
   });
 
-  it("still drops a row with no id or no name, three extra fields or not", () => {
+  it("still drops a row with no id or no name, four extra fields or not", () => {
     expect(parseDetailsResponse({ displayName: { text: "Nameless id" }, userRatingCount: 9 })).toBeNull();
     expect(parseDetailsResponse({ id: "ChIJ_no_name", websiteUri: "https://x.test" })).toBeNull();
   });
 
-  it("the masks FORK — the Enterprise fields are on details and NOT on search", () => {
-    for (const field of ["userRatingCount", "websiteUri", "nationalPhoneNumber"]) {
+  it("the masks FORK — the details-only fields are on details and NOT on search", () => {
+    for (const field of ["userRatingCount", "websiteUri", "nationalPhoneNumber", "googleMapsUri"]) {
       expect(DETAILS_FIELD_MASK.split(",")).toContain(field);
       expect(SEARCH_FIELD_MASK).not.toContain(field);
     }

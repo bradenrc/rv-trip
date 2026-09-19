@@ -5,6 +5,7 @@ import {
   savedPlaceCreate,
   savedPlacePatch,
   normalizeSavedPlacePatch,
+  placeEnrichment,
   stop,
   trip,
   tripSummary,
@@ -374,5 +375,37 @@ describe("lastChange — the one joined row the byline reads", () => {
         at: "2026-08-30T15:00:00Z",
       }).from,
     ).toBeNull();
+  });
+});
+
+// The cache READ grammar for the `places` table. #91 adds `googleMapsUri` to
+// it, and the `.default(null)` on that field is load-bearing: a row written
+// before the column existed must still PARSE (a cache hit without the link),
+// never fail and become a hard miss that re-bills Google.
+describe("placeEnrichment — the cached Google row (#82 Q3 → A, #91)", () => {
+  const ROW = {
+    googlePlaceId: "ChIJN1t_tDeuEmsRUsoyG83frY4",
+    name: "Astoria/Warrenton KOA",
+    rating: 4.6,
+    userRatingCount: 812,
+    websiteUri: "https://koa.com/campgrounds/astoria/",
+    nationalPhoneNumber: "(503) 325-0013",
+  };
+
+  it("carries googleMapsUri through when the column holds one", () => {
+    expect(
+      placeEnrichment.parse({
+        ...ROW,
+        googleMapsUri: "https://maps.google.com/?cid=10281119596374313554",
+      }).googleMapsUri,
+    ).toBe("https://maps.google.com/?cid=10281119596374313554");
+  });
+
+  it("defaults a pre-#91 row's missing googleMapsUri to null instead of failing", () => {
+    const parsed = placeEnrichment.safeParse(ROW);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.googleMapsUri).toBeNull();
+    // A NULL column reads the same way — the link is absent, the row is a hit.
+    expect(placeEnrichment.parse({ ...ROW, googleMapsUri: null }).googleMapsUri).toBeNull();
   });
 });

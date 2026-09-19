@@ -38,12 +38,18 @@ const PLACE_FIELDS = ["id", "displayName", "location", "rating", "formattedAddre
  * `nationalPhoneNumber` are Enterprise-SKU fields; on `places:searchText` they
  * would bill on EVERY RESULT of every keystroke-driven search. Details only —
  * one call, one pick, and search keeps its cheap five.
+ *
+ * `googleMapsUri` (#91) joins the DETAILS side of the fork for the second
+ * reason rather than the first: it is not an Enterprise-SKU field, but it has
+ * no home on `PlaceSummary` and the picker has nothing to do with it, so
+ * requesting it per search result would be data we have no place to put.
  */
 const DETAILS_FIELDS = [
   ...PLACE_FIELDS,
   "userRatingCount",
   "websiteUri",
   "nationalPhoneNumber",
+  "googleMapsUri",
 ] as const;
 
 export const DETAILS_FIELD_MASK = DETAILS_FIELDS.join(",");
@@ -131,6 +137,7 @@ interface GooglePlace {
   userRatingCount?: number;
   websiteUri?: string;
   nationalPhoneNumber?: string;
+  googleMapsUri?: string;
 }
 
 /** Text Search wraps its hits in `places`, and omits the key entirely on none. */
@@ -149,8 +156,8 @@ export function parseDetailsResponse(body: unknown): PlaceDetails | null {
 /**
  * The details mapper WRAPS the search mapper rather than replacing it (#82
  * §7②). Widening `toPlaceSummary` in place is exactly what would re-couple the
- * two paths — and silently drop the three fields on the floor if it were left
- * alone, which is the trap this fork exists to disarm.
+ * two paths — and silently drop the four details-only fields on the floor if it
+ * were left alone, which is the trap this fork exists to disarm.
  */
 function toPlaceDetails(place: GooglePlace | null | undefined): PlaceDetails | null {
   // The same id/name guard, decided once and in one place.
@@ -161,6 +168,7 @@ function toPlaceDetails(place: GooglePlace | null | undefined): PlaceDetails | n
     userRatingCount: typeof place?.userRatingCount === "number" ? place.userRatingCount : null,
     websiteUri: place?.websiteUri ?? null,
     nationalPhoneNumber: place?.nationalPhoneNumber ?? null,
+    googleMapsUri: place?.googleMapsUri ?? null,
   };
 }
 

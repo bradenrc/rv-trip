@@ -65,19 +65,24 @@ export interface PlaceSummary {
 }
 
 /**
- * What a DETAILS call answers with (#82 §7①) — `PlaceSummary` plus the three
- * fields the quiet Google line renders.
+ * What a DETAILS call answers with (#82 §7①, #91) — `PlaceSummary` plus the
+ * four fields the quiet Google line renders.
  *
- * A separate type rather than three more fields on `PlaceSummary`, because one
- * type served both calls and both mappers: the three below are Enterprise-SKU
- * fields, and widening `PlaceSummary` would push them onto `places:searchText`,
- * billed per result of every keystroke-driven search. It EXTENDS `PlaceSummary`,
- * so every existing `details()` caller still typechecks unchanged.
+ * A separate type rather than four more fields on `PlaceSummary`, because one
+ * type served both calls and both mappers: the first three below are
+ * Enterprise-SKU fields, and widening `PlaceSummary` would push them onto
+ * `places:searchText`, billed per result of every keystroke-driven search.
+ * `googleMapsUri` (#91) is NOT an Enterprise-SKU field — it lives here because
+ * the search path has nothing to do with it, not because of billing. It EXTENDS
+ * `PlaceSummary`, so every existing `details()` caller still typechecks
+ * unchanged.
  */
 export interface PlaceDetails extends PlaceSummary {
   userRatingCount: number | null;
   websiteUri: string | null;
   nationalPhoneNumber: string | null;
+  /** Google's own canonical place page — never a URL we assemble. */
+  googleMapsUri: string | null;
 }
 
 /** Place search + details/reviews. Implemented by Google Places in prod. */

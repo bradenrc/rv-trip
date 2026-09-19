@@ -14,7 +14,7 @@ import { tripApi } from "@/lib/trip-api";
  * directly — the key never leaves the server), on expand, once per open.
  *
  * Four states, and three of them render NOTHING:
- *   ① located + a fresh cached row → `G ★ 4.6 · 812 · website · call`
+ *   ① located + a fresh cached row → `G ★ 4.6 · 812 · website · call · map`
  *   ② located, nothing cached yet  → `G — checking…`
  *   ③ never located (no google_place_id) → no line, and no request made
  *   ④ no GOOGLE_API_KEY (local, CI, every walk) → the degraded envelope, and
@@ -93,6 +93,19 @@ export function GoogleLine({ googlePlaceId }: { googlePlaceId?: string | null })
             className="text-rv-accent no-underline"
           >
             call
+          </a>
+        </>
+      )}
+      {place.googleMapsUri && (
+        <>
+          <span>·</span>
+          <a
+            href={place.googleMapsUri}
+            target="_blank"
+            rel="noreferrer"
+            className="text-rv-accent no-underline"
+          >
+            map
           </a>
         </>
       )}
