@@ -1,0 +1,237 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, describe, expect, it } from "vitest";
+
+/**
+ * `derive_code_sha` in `scripts/mc-walk-env.sh` (issue #86).
+ *
+ * mc-dev's walk-staleness belt judges a hand-stood walk env on exactly one key
+ * — `sha` in `.mc/walk/<issue>.json`, "what dev built". When the standup's
+ * `rev-parse "$branch"` misses, that key used to ship as `""`; the belt reads
+ * `""` as absent, falls back to `walked_head` (the as-it-will-land MERGE
+ * commit) and respins the operator's stack. The fix is a named ladder plus an
+ * honest `null`, and this is its harness.
+ *
+ * Why here, and why shelling out: `packages/core` is where this repo's pure
+ * logic is tested, it has no `vitest.config` so a new `src/*.test.ts` is picked
+ * up with no config change, and `node:child_process` needs no new dependency.
+ * The shell function is not importable, so the script exposes an un-advertised
+ * `__derive-sha <worktree> [regfile] [known]` verb that is exactly this seam —
+ * that is the whole reason the derivation became a callable function rather
+ * than inline standup steps.
+ *
+ * Rules held here (all six rows of the design's contract table):
+ *
+ *   seed     `known` non-empty wins outright; the ladder must not run.
+ *   rule 1   a prior entry whose `walked_head` is still this tree's HEAD →
+ *            carry its `sha`.
+ *   rule 2   HEAD committed by `mc-walk-env@localhost` AND `HEAD^2` exists →
+ *            `HEAD^1`. Gated on merge PROVENANCE, never merge shape.
+ *   refusal  the same merge SHAPE with a foreign committer falls through to
+ *            rule 3 — the ship gate merges main INTO a branch, so a foreign
+ *            merge tip's `^1` is the PRE-merge commit and unwrapping it would
+ *            read STALE against the fold.
+ *   rule 3   otherwise → HEAD (the pre-derivation behaviour).
+ *   terminal HEAD unreadable → `none` with an empty sha; the caller writes
+ *            `null`.
+ *
+ * Each case asserts the RULE as well as the sha: landing on the right sha via
+ * the wrong rung is the bug wearing a disguise.
+ *
+ * Hermetic by construction — every fixture is a local `git init` under the OS
+ * temp dir. No clone, no fetch, no `origin`, no real registry file, and no
+ * `standup`. Every commit pins its own identity (`-c user.email/user.name`):
+ * CI checks out with no git identity configured, so a fixture that leaned on an
+ * ambient one would red there with "Please tell me who you are".
+ *
+ * What this cannot assert: that a real `standup` writes a parseable
+ * `.mc/walk/<issue>.json`. The heredoc is not reachable without booting a dev
+ * server — that stays the walk gate's job.
+ */
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const SCRIPT = join(REPO, "scripts/mc-walk-env.sh");
+
+/** The identity `refresh_walk_tree` commits its as-it-will-land merge under. */
+const SCRIPT_IDENTITY = "mc-walk-env@localhost";
+/** Anyone else — a human, or the ship gate. The fixtures' default. */
+const HUMAN_IDENTITY = "someone@else.example";
+
+const fixtures: string[] = [];
+afterAll(() => {
+  for (const dir of fixtures) rmSync(dir, { recursive: true, force: true });
+});
+
+/**
+ * git, with every ambient-environment escape hatch closed: a pinned identity
+ * (CI has none), a pinned default branch name (git warns without one), no
+ * signing (a global `commit.gpgsign` would abort every fixture commit) and no
+ * hooks (the same guard `refresh_walk_tree` uses at :121).
+ */
+function gitAs(cwd: string, email: string, ...args: string[]): string {
+  return execFileSync(
+    "git",
+    [
+      "-c",
+      `user.email=${email}`,
+      "-c",
+      "user.name=mc-walk-env-test",
+      "-c",
+      "init.defaultBranch=main",
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      ...args,
+    ],
+    { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  ).trim();
+}
+
+const git = (cwd: string, ...args: string[]) => gitAs(cwd, HUMAN_IDENTITY, ...args);
+
+/** An empty throwaway directory, cleaned up after the file. */
+function tempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "mc-walk-env-"));
+  fixtures.push(dir);
+  return dir;
+}
+
+/** An empty throwaway git repo. */
+function newRepo(): string {
+  const dir = tempDir();
+  git(dir, "init", "-q");
+  return dir;
+}
+
+/** Commit one file; returns the new HEAD sha. */
+function commit(dir: string, name: string, email = HUMAN_IDENTITY): string {
+  writeFileSync(join(dir, name), `${name}\n`);
+  gitAs(dir, email, "add", name);
+  gitAs(dir, email, "commit", "-q", "-m", name);
+  return gitAs(dir, email, "rev-parse", "HEAD");
+}
+
+/**
+ * A detached tree whose HEAD is a real merge commit — the `checkout --detach
+ * <branch>` + `merge <other>` shape `refresh_walk_tree` produces. Deliberately
+ * divergent so the merge can never fast-forward.
+ *
+ * Returns the tree, the merge's sha and its first parent (the code tip rule 2
+ * unwraps to).
+ */
+function mergeTree(mergedBy: string): { dir: string; merge: string; firstParent: string } {
+  const dir = newRepo();
+  commit(dir, "base");
+  git(dir, "branch", "feature");
+  commit(dir, "sibling-on-main");
+  git(dir, "checkout", "-q", "feature");
+  const firstParent = commit(dir, "the-slice");
+  git(dir, "checkout", "-q", "--detach", "feature");
+  gitAs(dir, mergedBy, "merge", "--no-edit", "-q", "main");
+  const merge = git(dir, "rev-parse", "HEAD");
+  expect(git(dir, "rev-parse", "HEAD^1"), "fixture must be a real merge").toBe(firstParent);
+  expect(git(dir, "log", "-1", "--format=%ce", "HEAD")).toBe(mergedBy);
+  return { dir, merge, firstParent };
+}
+
+/** Run the ladder. Returns the `<rule>\t<sha>` pair, split. */
+function deriveCodeSha(worktree: string, regfile = "", known = ""): [string, string] {
+  const out = execFileSync("bash", [SCRIPT, "__derive-sha", worktree, regfile, known], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(out.split("\n").filter(Boolean), "stdout is exactly one line").toHaveLength(1);
+  const [rule = "", sha = ""] = out.trim().split("\t");
+  return [rule, sha];
+}
+
+/** A prior `.mc/walk/<issue>.json`, written somewhere that is not the registry. */
+function priorEntry(walkedHead: string, sha: string): string {
+  const path = join(tempDir(), "prior.json");
+  writeFileSync(path, `${JSON.stringify({ slug: "86", walked_head: walkedHead, sha }, null, 2)}\n`);
+  return path;
+}
+
+describe("seed — a known sha short-circuits the ladder", () => {
+  it("keeps the standup's own rev-parse answer and never reads the tree", () => {
+    const dir = newRepo();
+    const head = commit(dir, "a");
+    const known = "0123456789abcdef0123456789abcdef01234567";
+
+    expect(deriveCodeSha(dir, "", known)).toEqual(["branch", known]);
+    // …and the ladder really did not run: HEAD would have answered differently.
+    expect(head).not.toBe(known);
+  });
+});
+
+describe("rule 1 — carry a prior entry the tree has not moved past", () => {
+  it("carries entry.sha when walked_head still equals HEAD", () => {
+    const dir = newRepo();
+    const code = commit(dir, "a");
+    const walkedHead = commit(dir, "b");
+
+    // The recorded sha is deliberately NOT the head: carrying it is the only
+    // way the right answer can come out.
+    expect(deriveCodeSha(dir, priorEntry(walkedHead, code))).toEqual(["carry", code]);
+  });
+
+  it("does not carry when the tree has moved on — walked_head no longer matches", () => {
+    const dir = newRepo();
+    const stale = commit(dir, "a");
+    const head = commit(dir, "b");
+
+    expect(deriveCodeSha(dir, priorEntry(stale, stale))).toEqual(["head", head]);
+  });
+
+  it("ignores a missing or unreadable regfile instead of dying", () => {
+    const dir = newRepo();
+    const head = commit(dir, "a");
+
+    const absent = join(tempDir(), "no-such-entry.json");
+    expect(deriveCodeSha(dir, absent)).toEqual(["head", head]);
+
+    const corrupt = join(tempDir(), "corrupt.json");
+    writeFileSync(corrupt, "{ this is not json");
+    expect(deriveCodeSha(dir, corrupt)).toEqual(["head", head]);
+  });
+});
+
+describe("rule 2 — unwrap a merge the script itself made", () => {
+  it("answers HEAD^1 when the committer is mc-walk-env@localhost", () => {
+    const { dir, firstParent } = mergeTree(SCRIPT_IDENTITY);
+
+    expect(deriveCodeSha(dir)).toEqual(["unwrap", firstParent]);
+  });
+});
+
+describe("refusal — provenance, not shape", () => {
+  it("falls through to rule 3 on a foreign merge tip, ^1 notwithstanding", () => {
+    // The origin/feat/27-migrations shape: the ship gate merges main INTO the
+    // branch, so ^1 is the PRE-merge commit. Recording it would read STALE.
+    const { dir, merge, firstParent } = mergeTree(HUMAN_IDENTITY);
+
+    expect(deriveCodeSha(dir)).toEqual(["head", merge]);
+    expect(merge).not.toBe(firstParent);
+  });
+});
+
+describe("rule 3 — the tree head is the code commit", () => {
+  it("answers HEAD for a plain detached checkout with no record", () => {
+    const dir = newRepo();
+    const head = commit(dir, "a");
+    git(dir, "checkout", "-q", "--detach", "HEAD");
+
+    expect(deriveCodeSha(dir)).toEqual(["head", head]);
+  });
+});
+
+describe("terminal — an honest null beats a wrong sha", () => {
+  it("answers `none` with an empty sha when HEAD cannot be read", () => {
+    // Not a git repo at all — the same answer an empty one (no commits) gives.
+    expect(deriveCodeSha(tempDir())).toEqual(["none", ""]);
+  });
+});
