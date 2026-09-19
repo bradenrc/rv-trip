@@ -98,9 +98,12 @@ standard) so you judge the design against the same authority it was built from. 
 
 **Survey-fidelity check (every wireframe, before anything else):** diff the wireframe
 report's resolved answer set against the survey verdict carried in your brief's feedback
-block, value for value. Any **non-null** answer that differs is an automatic fail routed
-back to wireframe — the human's pick is binding (#60 shipped the wrong Q5 exactly this
-way). A "⚠ defaulted" note is legitimate only where the survey value was null.
+block, value for value — **every question, including non-material (`data-material="0"`)
+ones**. Any **non-null** answer that differs is an automatic fail routed back to wireframe
+— the human's pick is binding (#60 shipped the wrong Q5 this way; #82's q6 was substituted
+on a non-material question WITH a false fidelity claim in the report, so diff the ARTIFACT's
+rendered resolutions, not the report's self-description). A "⚠ defaulted" note is
+legitimate only where the survey value was null.
 
 6. **Runtime-risk flag:** never certify a third-party component / portal / provider-key
    vector as "confirmed working" on static analysis alone — flag it **"render-required at

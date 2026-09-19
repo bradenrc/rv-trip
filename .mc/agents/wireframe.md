@@ -100,9 +100,12 @@ option cards, no survey questions.** You are past
 the deciding; you are drawing the decided thing (the textarea is the re-work channel, not a
 question).
 
-**A NON-NULL survey answer is BINDING.** The human picked it; you build it — even when your
-own read prefers the ★recommended option, and even when the pick costs more. Substituting
-the ★ for a non-null answer is a contract violation (it shipped the wrong Q5 on #60). If
+**A NON-NULL survey answer is BINDING — every question, material or not.** The human
+picked it; you build it — even when your own read prefers the ★recommended option, even
+when the pick costs more, and **even on a `data-material="0"` question**: material-ness
+gates the survey UI, it never grades an answer down to advisory (#82's q6 was substituted
+exactly this way, after #60's Q5). Read the answers from the brief's FEEDBACK BLOCK, never
+from the mock's ★ marks. Substituting the ★ for a non-null answer is a contract violation. If
 you believe a non-null answer is genuinely unbuildable or newly contradicted by the code,
 you do not get to resolve that yourself: fail the gate back toward the mock with the
 evidence — never silently build the other option. Your report's answer set must equal the
