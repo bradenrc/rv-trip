@@ -4,15 +4,18 @@
 #   standup <issue> --branch <branch>   The walk-gate auto-standup: dedicated worktree from
 #                                       the code branch MERGED WITH FRESH main (mc-dev #95 —
 #                                       the operator walks the slice as it will land), pnpm
-#                                       install, `next dev` on a free port against the shared
-#                                       docker Postgres, and a .mc/walk/<issue>.json registry
+#                                       install, `next dev` on a free port against the walk's
+#                                       database, and a .mc/walk/<issue>.json registry
 #                                       entry (the URL the glass Walk link reads).
 #   down --slug <issue>                 Kill the walk's next-dev, remove the registry entry.
 #
+# WHICH DATABASE: the shared docker Postgres, unless mc-dev stood an isolated one up for this
+# slice and handed it over as MC_WALK_DB_URL (#154/#155 · `engine_db_url` below · the
+# `walk.compose` block in .mc/config.yaml). Only a schema-touching slice earns one; every
+# other walk is on the shared backend exactly as before.
+#
 # Deliberately NOT here yet (btrip grew these over months — add when a walk actually needs
-# them): per-walk isolated DB, api/metro ports, reload-in-place, queueing, standup locks.
-# The shared docker Postgres is the btrip "shared backend" pattern: fine while walks are
-# serial; revisit if two walks ever need diverging schemas at once.
+# them): api/metro ports, reload-in-place, queueing, standup locks.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,6 +37,108 @@ dotenv_db_url() { # echo DATABASE_URL out of a dotenv file (last wins, quotes st
   [ -n "$val" ] || return 1
   printf '%s\n' "$val"
 }
+
+# ── the engine's per-walk database (mc-dev #154 · seeded template #155) ────────────────
+# A schema-touching slice gets its OWN Postgres: mc-dev stands the `walk.compose` tier up in
+# its own compose project and exports the assembled DSN into this script's environment as
+# MC_WALK_DB_URL (it resolves the host port late, which is legal only because rv-trip
+# declares no `api` service — see .mc/config.yaml walk.compose). Consuming it here is the
+# whole of this script's side of that contract; nothing else about a walk changes.
+#
+# ABSENT ⇒ BYTE-IDENTICAL. No MC_WALK_DB_URL, or MC_WALK_ISOLATION=shared, and this answers
+# `off` before touching anything — the standup derives its DSN exactly as it always has.
+
+db_hostport() { # <dsn> → "<host>\t<port>"; rc 1 when the DSN carries neither
+  # python3, not a shell regex: the script already depends on it (json_str, the down sweep),
+  # and a URL parser is the one thing that reads `postgres://u:p@h:p/db` the same way the
+  # driver will.
+  python3 - "$1" <<'PY' 2>/dev/null
+import sys
+from urllib.parse import urlsplit
+
+u = urlsplit(sys.argv[1])
+if not (u.hostname and u.port):
+    raise SystemExit(1)
+sys.stdout.write(f"{u.hostname}\t{u.port}")
+PY
+}
+
+tcp_wait() { # <host> <port> <attempts> — bounded connect probe, ~1s apart
+  # BOUNDED TWICE: a per-attempt connect timeout AND an attempt count, because the failure
+  # this guards is a db container that never came up and a standup that hangs on it is worse
+  # than one that falls back loudly. A TCP accept is not "postgres is ready to answer
+  # queries" and does not claim to be — mc-dev already gated its own `up --wait` on the
+  # healthcheck in .mc/config.yaml; this rung only asks whether that tier is still standing.
+  python3 - "$1" "$2" "$3" <<'PY'
+import socket
+import sys
+import time
+
+host, port, tries = sys.argv[1], int(sys.argv[2]), max(1, int(sys.argv[3]))
+for attempt in range(tries):
+    try:
+        socket.create_connection((host, port), timeout=2).close()
+        raise SystemExit(0)
+    except OSError:
+        if attempt + 1 < tries:
+            time.sleep(1)
+raise SystemExit(1)
+PY
+}
+
+engine_db_url() { # [attempts] → one line, "<rule>\t<dsn>"
+  #   off          nothing to consume — the standup's own derivation runs, unchanged
+  #   isolated     the engine's db answered on its published port — use it
+  #   unreachable  MC_WALK_DB_URL is set and nothing answered. NEVER SILENT: the caller says
+  #                so in the standup output AND in walk.json, then falls back on purpose. A
+  #                walk on the shared db that the operator KNOWS is shared beats no walk at
+  #                all; a walk on the shared db that PRESENTS as isolated is the bug the
+  #                whole tier exists to remove.
+  local dsn="${MC_WALK_DB_URL:-}" hostport host port
+  if [ -z "$dsn" ] || [ "${MC_WALK_ISOLATION:-}" = shared ]; then
+    printf 'off\t\n'
+    return 0
+  fi
+  hostport="$(db_hostport "$dsn")" || hostport=""
+  if [ -z "$hostport" ]; then
+    printf 'unreachable\t%s\n' "$dsn"
+    return 0
+  fi
+  host="${hostport%%$'\t'*}"
+  port="${hostport#*$'\t'}"
+  if tcp_wait "$host" "$port" "${1:-15}"; then
+    printf 'isolated\t%s\n' "$dsn"
+  else
+    printf 'unreachable\t%s\n' "$dsn"
+  fi
+}
+
+db_decision() { # <issue> → sets db_url/db_source/db_note; dies on schema+unreachable
+  local issue="$1"
+  db_source=shared db_note=""
+  engine="$(engine_db_url)"
+  db_url=""
+  case "${engine%%$'\t'*}" in
+  isolated)
+    db_url="${engine#*$'\t'}"
+    db_source=isolated
+    echo "  · db ← mc-dev walk.compose (isolated${MC_WALK_COMPOSE_PROJECT:+, project $MC_WALK_COMPOSE_PROJECT})"
+    ;;
+  unreachable)
+    # On the SCHEMA tier a fallback is not a degradation, it is the disaster the tier
+    # exists to prevent: this walk's migrations would run on the shared database. And the
+    # standup runs detached (stderr goes to a log nobody watches), so a note alone never
+    # reaches the operator at decision time — the review proved both halves. Refuse.
+    if [ "${MC_WALK_ISOLATION:-}" = "schema" ]; then
+      die "isolated db NOT reachable — MC_WALK_DB_URL was set (${engine#*$'\t'}) but nothing answered. REFUSING to stand a schema walk on the SHARED database (its migrations would run there). Stand the tier up with \`mc walk-up . $issue\` and re-run the standup." 1
+    fi
+    db_source=shared-fallback
+    db_note="isolated db NOT reachable — MC_WALK_DB_URL was set (${engine#*$'\t'}) but nothing answered, so this walk is on the SHARED database. Stand the tier up with \`mc walk-up . $issue\` and re-run the standup."
+    echo "  ⚠ $db_note" >&2
+    ;;
+  esac
+}
+
 
 free_port() { # first free port from 3980 (issue-rotated so consecutive walks don't share an origin)
   # NOT 3200, and not a fixed number (rv-trip#14): with walks serial, a fixed base means
@@ -298,9 +403,15 @@ standup)
   done
   # …and belt-and-braces: hand `next dev` a DATABASE_URL through the environment,
   # so a walk can never boot into packages/db's "DATABASE_URL is not set" throw.
-  # Order: the caller's env, apps/web's env files, the repo-root ones, .env.example
-  # (whose value is the docker-compose Postgres this script starts below anyway).
-  db_url="${DATABASE_URL:-}"
+  # Order: the engine's isolated db (when this slice earned one), then the caller's env,
+  # apps/web's env files, the repo-root ones, .env.example (whose value is the
+  # docker-compose Postgres this script starts below anyway).
+  # THE ENGINE'S ISOLATED DB FIRST (#154/#155), ahead of the caller's own DATABASE_URL: on an
+  # isolated walk the ambient one IS the shared database, so preferring it would be exactly
+  # the silent-wrong-backend bug the tier was built to remove. `db_source` rides into
+  # walk.json so the answer is a recorded fact rather than a line that scrolled past.
+  db_decision "$issue"
+  if [ -z "$db_url" ]; then db_url="${DATABASE_URL:-}"; fi
   if [ -z "$db_url" ]; then
     for f in "$wt/apps/web/.env.local" "$wt/apps/web/.env" "$wt/.env.local" "$wt/.env" "$ROOT/.env.example"; do
       db_url="$(dotenv_db_url "$f")" || db_url=""
@@ -309,17 +420,33 @@ standup)
   fi
   [ -n "$db_url" ] || die "standup $issue: no DATABASE_URL — set one in .env or apps/web/.env.local"
   export DATABASE_URL="$db_url"
+  if [ "$db_source" = isolated ]; then
+    # drizzle.config.ts and baseline.ts both PREFER DATABASE_URL_UNPOOLED (Neon's DDL
+    # connection) and dotenv reads it out of the worktree's own .env — which this standup
+    # just copied in. Without this pin, `db migrate` below would apply the slice's migrations
+    # to whatever that file names while every page served the isolated db. Only on the
+    # isolated path: exporting it on the shared one would change today's behaviour.
+    export DATABASE_URL_UNPOOLED="$db_url"
+  fi
   (cd "$wt" && pnpm install --frozen-lockfile >"$WALK_DIR/$issue-install.log" 2>&1) ||
     die "standup $issue: pnpm install failed — see .mc/walk/$issue-install.log"
-  (cd "$ROOT" && docker compose up -d >>"$WALK_DIR/$issue-standup.log" 2>&1) || true
+  # The SHARED docker Postgres, and only when this walk is actually on it. An isolated walk's
+  # db is mc-dev's compose project, already stood up and already probed by engine_db_url —
+  # starting rv-trip-db for it would be an idle container, and waiting on rv-trip-db's
+  # readiness would be 30s spent asking the wrong database whether it is up.
+  if [ "$db_source" = isolated ]; then
+    echo "  · shared docker Postgres left alone — this walk owns its database"
+  else
+    (cd "$ROOT" && docker compose up -d >>"$WALK_DIR/$issue-standup.log" 2>&1) || true
 
-  # Migrations BEFORE the server (#65): a walk DB behind on migrations answers 500 on
-  # every page, so the standup dies at the health gate looking like a web bug. Wait for
-  # Postgres, then apply this worktree's migrations to the shared walk DB.
-  for _ in $(seq 1 15); do
-    docker exec rv-trip-db pg_isready -U rvtrip -d rvtrip >/dev/null 2>&1 && break
-    sleep 2
-  done
+    # Migrations BEFORE the server (#65): a walk DB behind on migrations answers 500 on
+    # every page, so the standup dies at the health gate looking like a web bug. Wait for
+    # Postgres, then apply this worktree's migrations to the shared walk DB.
+    for _ in $(seq 1 15); do
+      docker exec rv-trip-db pg_isready -U rvtrip -d rvtrip >/dev/null 2>&1 && break
+      sleep 2
+    done
+  fi
   (cd "$wt" && pnpm --filter @rv-trip/db migrate >>"$WALK_DIR/$issue-standup.log" 2>&1) ||
     die "standup $issue: db migrate failed — see .mc/walk/$issue-standup.log"
 
@@ -389,6 +516,14 @@ standup)
   if [ -n "$WALK_MERGED_MAIN_SHA" ]; then merged_main_sha_json="$(json_str "$WALK_MERGED_MAIN_SHA")"; fi
   merge_note_json=null
   if [ -n "$WALK_MERGE_NOTE" ]; then merge_note_json="$(json_str "$WALK_MERGE_NOTE")"; fi
+  # WHICH DATABASE THIS WALK IS ON, recorded (#154/#155). `db_note` is null on both honest
+  # answers (`isolated`, `shared`) and carries the fallback's reason on `shared-fallback`.
+  # These two keys are OURS, not part of mc-dev's glass contract — the glass projects a fixed
+  # key set and will not render them today — but the engine OVERLAYS this entry rather than
+  # replacing it, so they survive every later write and an operator (or an agent) reading
+  # .mc/walk/<issue>.json can see which backend the walk was approved against.
+  db_note_json=null
+  if [ -n "$db_note" ]; then db_note_json="$(json_str "$db_note")"; fi
 
   cat >"$WALK_DIR/$issue.json" <<EOF
 {
@@ -403,14 +538,19 @@ standup)
   "merged_main": $WALK_MERGED_MAIN,
   "merged_main_sha": $merged_main_sha_json,
   "merge_note": $merge_note_json,
+  "db_source": "$db_source",
+  "db_note": $db_note_json,
   "pids": { "web": $pid },
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+  # The db is named on the LAST line too, not only at :db above — the standup's tail is what
+  # an operator actually reads, and "which database did I just approve this against" is the
+  # question the isolated tier exists to make answerable.
   if [ "$WALK_MERGED_MAIN" = true ]; then
-    echo "walk up: $issue → http://localhost:$port (branch $branch + main, pid $pid)"
+    echo "walk up: $issue → http://localhost:$port (branch $branch + main, db $db_source, pid $pid)"
   else
-    echo "walk up: $issue → http://localhost:$port (branch $branch TIP ONLY — see merge_note, pid $pid)"
+    echo "walk up: $issue → http://localhost:$port (branch $branch TIP ONLY — see merge_note, db $db_source, pid $pid)"
   fi
   ;;
 
@@ -462,6 +602,21 @@ __derive-sha)
   # in a temp dir read this repo's live walk state and make rule 1 fire on real state.
   dwt="${1:?usage: __derive-sha <worktree> [regfile] [known-sha]}"
   derive_code_sha "$dwt" "${3:-}" "${2:-}"
+  ;;
+
+__db-decision)
+  # Test door for the standup's db decision incl. the schema-tier refusal (review F2).
+  issue="${2:-0}"
+  db_decision "$issue"
+  printf '%s\t%s\n' "$db_source" "$db_url"
+  exit 0
+  ;;
+__engine-db-url)
+  # Un-advertised, for the same reason as __derive-sha: the seam that decides WHICH database
+  # a walk runs against has to be drivable without a compose project and without a standup.
+  # `attempts` is explicit so the harness can ask for one (packages/core/src/
+  # mc-walk-env-db.test.ts); the standup passes its own patience.
+  engine_db_url "${1:-15}"
   ;;
 
 *)
