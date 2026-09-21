@@ -25,6 +25,7 @@ const KOA: PlaceDetails = {
   userRatingCount: 812,
   websiteUri: "https://koa.com/campgrounds/astoria/",
   nationalPhoneNumber: "(503) 325-0013",
+  googleMapsUri: "https://maps.google.com/?cid=10281119596374313554",
 };
 
 describeDb("GET /api/places/details/[id]", () => {
@@ -47,6 +48,7 @@ describeDb("GET /api/places/details/[id]", () => {
           userRatingCount: 812,
           websiteUri: "https://koa.com/campgrounds/astoria/",
           nationalPhoneNumber: "(503) 325-0013",
+          googleMapsUri: "https://maps.google.com/?cid=10281119596374313554",
         },
       ],
       degraded: false,
@@ -61,11 +63,19 @@ describeDb("GET /api/places/details/[id]", () => {
 
   it("upserts on the key rather than growing a second row", async () => {
     await dbPlacesCache().put(KOA);
-    await dbPlacesCache().put({ ...KOA, rating: 4.7, userRatingCount: 913 });
+    await dbPlacesCache().put({
+      ...KOA,
+      rating: 4.7,
+      userRatingCount: 913,
+      // A column left out of the upsert `set` is never refreshed — it would be
+      // pinned to whatever the FIRST write said, forever (#91 touchpoint 8).
+      googleMapsUri: "https://maps.google.com/?cid=99999999999999999",
+    });
 
     const hit = await dbPlacesCache().get(KOA.googlePlaceId);
     expect(hit?.details.rating).toBe(4.7);
     expect(hit?.details.userRatingCount).toBe(913);
+    expect(hit?.details.googleMapsUri).toBe("https://maps.google.com/?cid=99999999999999999");
 
     const res = await GET(req(undefined, "GET"), ctx(KOA.googlePlaceId));
     const body = (await res.json()) as { results: unknown[] };
@@ -86,6 +96,7 @@ describeDb("GET /api/places/details/[id]", () => {
       userRatingCount: null,
       websiteUri: null,
       nationalPhoneNumber: null,
+      googleMapsUri: null,
     };
     await dbPlacesCache().put(bare);
     const hit = await dbPlacesCache().get("ChIJ_bare");

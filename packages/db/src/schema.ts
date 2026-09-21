@@ -312,6 +312,8 @@ export const places = pgTable(
     userRatingCount: integer("user_rating_count"),
     websiteUri: text("website_uri"),
     nationalPhoneNumber: text("national_phone_number"),
+    /** Google's own canonical place page (#91) — never a URL we assemble. */
+    googleMapsUri: text("google_maps_uri"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("places_fetched_at_idx").on(t.fetchedAt)],

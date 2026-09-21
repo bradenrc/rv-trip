@@ -13,7 +13,8 @@ import { placesProvider } from "@/lib/places";
  * there. The logic is unit tested in packages/core's `detailsPlacesEnvelope`.
  *
  * Since #82 the answer is a `PlaceDetails` — `PlaceSummary` plus the rating
- * count, the website and the phone the research pad's quiet G-line renders —
+ * count, the website, the phone and (since #91) the canonical Google Maps page
+ * the research pad's quiet G-line renders —
  * and it is read through the 30-day `places` cache first, so a second open of
  * the same row costs nothing. The cache is NOT owner-scoped: a real-world
  * place is not anybody's. This route is the G-line's only consumer; the picker
