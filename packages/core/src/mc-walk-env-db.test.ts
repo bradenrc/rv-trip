@@ -153,3 +153,40 @@ describe("unreachable — set but not answering, and said so", () => {
     ]);
   });
 });
+
+describe("the standup's decision — the schema-tier refusal (mc-dev #154 review F2)", () => {
+  /** Run the decision seam; returns [rc, stdout, stderr]. */
+  function dbDecision(env: Record<string, string>): [number, string, string] {
+    try {
+      const out = execFileSync("bash", [SCRIPT, "__db-decision", "7"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env },
+      });
+      return [0, out, ""];
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return [err.status ?? 1, err.stdout ?? "", err.stderr ?? ""];
+    }
+  }
+
+  it("REFUSES a schema walk whose isolated db is unreachable — never the shared fallback", async () => {
+    const port = await closedPort();
+    const [rc, , stderr] = dbDecision({
+      MC_WALK_ISOLATION: "schema",
+      MC_WALK_DB_URL: `postgres://rvtrip:rvtrip@localhost:${port}/rvtrip`,
+    });
+    expect(rc, "a schema walk on the shared db is the disaster, not a degradation").not.toBe(0);
+    expect(stderr).toContain("REFUSING");
+    expect(stderr).toContain("mc walk-up");
+  });
+
+  it("still falls back explicitly when no isolation tier claims schema", async () => {
+    const port = await closedPort();
+    const [rc, out] = dbDecision({
+      MC_WALK_DB_URL: `postgres://rvtrip:rvtrip@localhost:${port}/rvtrip`,
+    });
+    expect(rc).toBe(0);
+    expect(out.split("\t")[0]).toBe("shared-fallback");
+  });
+});

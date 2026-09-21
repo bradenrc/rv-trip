@@ -144,7 +144,10 @@ walk:
         # and it is the biggest thing in the tree), and `.env*` — drizzle.config.ts reads
         # ../../.env and would prefer a Neon `DATABASE_URL_UNPOOLED` out of it. busybox tar
         # supports `--exclude` (verified on node:24-alpine).
-        - "tar -C /host -cf - --exclude=node_modules --exclude=.git --exclude='.env*' --exclude=.next --exclude=.turbo --exclude=pgdata . | tar -C /src -xf -"
+        # `.claude` is the walk-worktree home — 11 live trees incl. a CocoaPods forest;
+        # measured: without this exclude the DEFAULT build (source = the engine clone)
+        # streams 3.0 GB through the ro-bind; with it, 27.7 MB. `.mc` is registry/journal.
+        - "tar -C /host -cf - --exclude=node_modules --exclude=.git --exclude='.env*' --exclude=.next --exclude=.turbo --exclude=pgdata --exclude=.claude --exclude=.mc . | tar -C /src -xf -"
         # `corepack pnpm` on EVERY verb, not `corepack enable` once: enabling writes shims
         # into the image's /usr/local/bin, and each verb is its own `run --rm` container, so
         # verb 3 met `sh: pnpm: not found` (measured, not guessed). Filtered on purpose —

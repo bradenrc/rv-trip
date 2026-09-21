@@ -113,6 +113,33 @@ engine_db_url() { # [attempts] → one line, "<rule>\t<dsn>"
   fi
 }
 
+db_decision() { # <issue> → sets db_url/db_source/db_note; dies on schema+unreachable
+  local issue="$1"
+  db_source=shared db_note=""
+  engine="$(engine_db_url)"
+  db_url=""
+  case "${engine%%$'\t'*}" in
+  isolated)
+    db_url="${engine#*$'\t'}"
+    db_source=isolated
+    echo "  · db ← mc-dev walk.compose (isolated${MC_WALK_COMPOSE_PROJECT:+, project $MC_WALK_COMPOSE_PROJECT})"
+    ;;
+  unreachable)
+    # On the SCHEMA tier a fallback is not a degradation, it is the disaster the tier
+    # exists to prevent: this walk's migrations would run on the shared database. And the
+    # standup runs detached (stderr goes to a log nobody watches), so a note alone never
+    # reaches the operator at decision time — the review proved both halves. Refuse.
+    if [ "${MC_WALK_ISOLATION:-}" = "schema" ]; then
+      die "isolated db NOT reachable — MC_WALK_DB_URL was set (${engine#*$'\t'}) but nothing answered. REFUSING to stand a schema walk on the SHARED database (its migrations would run there). Stand the tier up with \`mc walk-up . $issue\` and re-run the standup." 1
+    fi
+    db_source=shared-fallback
+    db_note="isolated db NOT reachable — MC_WALK_DB_URL was set (${engine#*$'\t'}) but nothing answered, so this walk is on the SHARED database. Stand the tier up with \`mc walk-up . $issue\` and re-run the standup."
+    echo "  ⚠ $db_note" >&2
+    ;;
+  esac
+}
+
+
 free_port() { # first free port from 3980 (issue-rotated so consecutive walks don't share an origin)
   # NOT 3200, and not a fixed number (rv-trip#14): with walks serial, a fixed base means
   # every walk reuses one browser origin forever, inheriting whatever state any earlier
@@ -383,21 +410,7 @@ standup)
   # isolated walk the ambient one IS the shared database, so preferring it would be exactly
   # the silent-wrong-backend bug the tier was built to remove. `db_source` rides into
   # walk.json so the answer is a recorded fact rather than a line that scrolled past.
-  db_source=shared db_note=""
-  engine="$(engine_db_url)"
-  db_url=""
-  case "${engine%%$'\t'*}" in
-  isolated)
-    db_url="${engine#*$'\t'}"
-    db_source=isolated
-    echo "  · db ← mc-dev walk.compose (isolated${MC_WALK_COMPOSE_PROJECT:+, project $MC_WALK_COMPOSE_PROJECT})"
-    ;;
-  unreachable)
-    db_source=shared-fallback
-    db_note="isolated db NOT reachable — MC_WALK_DB_URL was set (${engine#*$'\t'}) but nothing answered, so this walk is on the SHARED database: a schema change here migrates everyone's data. Stand the tier up with \`mc walk-up . $issue\` and re-run the standup."
-    echo "  ⚠ $db_note" >&2
-    ;;
-  esac
+  db_decision "$issue"
   if [ -z "$db_url" ]; then db_url="${DATABASE_URL:-}"; fi
   if [ -z "$db_url" ]; then
     for f in "$wt/apps/web/.env.local" "$wt/apps/web/.env" "$wt/.env.local" "$wt/.env" "$ROOT/.env.example"; do
@@ -591,6 +604,13 @@ __derive-sha)
   derive_code_sha "$dwt" "${3:-}" "${2:-}"
   ;;
 
+__db-decision)
+  # Test door for the standup's db decision incl. the schema-tier refusal (review F2).
+  issue="${2:-0}"
+  db_decision "$issue"
+  printf '%s\t%s\n' "$db_source" "$db_url"
+  exit 0
+  ;;
 __engine-db-url)
   # Un-advertised, for the same reason as __derive-sha: the seam that decides WHICH database
   # a walk runs against has to be drivable without a compose project and without a standup.
