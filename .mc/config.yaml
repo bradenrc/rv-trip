@@ -65,6 +65,9 @@ walk:
   # `shared`, instead of raising a refusal on every route-handler slice we ship, and only a
   # `schema` surface raises the tier to a database of our own.
   compose:
+    # Distinct prefix: the template volume is <prefix>-template, and btrip adopts the same
+    # engine on this machine — the default `mc-walk` would collide the two templates.
+    project_prefix: mc-walk-rv
     db_port_base: 15500 # + (issue % port_span=100) → 15500-15599; btrip holds no span here
     # HOST-SHAPED, and legal ONLY on the api-less shape: with no `api` service, nothing in the
     # generated compose file consumes this DSN — the thing that has to be pointed at the
