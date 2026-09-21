@@ -164,6 +164,94 @@ refresh_walk_tree() { # <worktree> <branch> → 0 as-it-will-land, 1 fell back t
   return 1
 }
 
+# ── `sha` derivation (#86 · ported from btrip's cmd_up, ~/temp/btrip/scripts/mc-walk-env.sh:806-845) ──
+# mc-dev's walk-staleness belt judges a hand-stood env on exactly ONE key: `sha` in
+# .mc/walk/<issue>.json, "what dev built". When `rev-parse "$branch"` above misses (a
+# renamed/deleted branch, a remote-only name) WALK_SHA is empty, this script writes
+# "sha": "" — and the belt's entry_code_sha falls back to `walked_head`, which on a tree a
+# standup built is the as-it-will-land MERGE commit, not the code commit. The env then reads
+# STALE, the glass says "don't walk this", and the next walk-gate entry respins the
+# operator's stack out from under them. So derive it instead, and when even that can't
+# answer write a literal null (the belt's honest "unknown") rather than a lie.
+#
+# The derivation is a NAMED function rather than inline standup steps so the decision is
+# testable without the procedure (#86 Q1 = B) — packages/core/src/mc-walk-env.test.ts drives
+# it through the `__derive-sha` verb below.
+#
+# stdout is exactly one machine-readable line, `<rule>\t<sha>`, NOT a human log line: the
+# caller reads it through a command substitution, and a subshell cannot hand a variable
+# back, so the provenance line (#86 Q5 = A) is the CALLER's to render. `sha` is empty only
+# on the `none` row.
+#
+# Every rung is an `if … then … fi` and the function ends with an explicit printf +
+# `return 0`. btrip ends rule 3 with `[ -z "$X" ] && X=…` and gets away with it because more
+# statements follow in its function; HERE the derivation IS the function, so a false test as
+# the last statement would return 1 and `x="$(derive_code_sha …)"` under `set -euo pipefail`
+# (:16) would kill the whole standup. Same lesson as :205-207.
+#
+# No `jq` — there is none in this repo; rule 1 reads the prior entry with python3, the same
+# idiom as json_str (:51) and `down`'s port reader (:321).
+derive_code_sha() { # <worktree> <known-sha|""> <regfile|""> → one line on stdout: <rule>\t<sha>
+  local wt="$1" known="${2:-}" rf="${3:-}"
+  local head="" prior="" prior_head="" prior_sha="" parent=""
+
+  # seed · the standup's own `rev-parse <branch>` is still the best answer when it worked.
+  if [ -n "$known" ]; then
+    printf '%s\t%s\n' branch "$known"
+    return 0
+  fi
+
+  # Read HEAD from the TREE, never $WALK_HEAD: :130 sets WALK_HEAD="$WALK_SHA", so on the
+  # empty-WALK_SHA path that variable is blank while the tree's real HEAD is not. Doing its
+  # own rev-parse is also what makes `__derive-sha` standalone.
+  head="$(git -C "$wt" rev-parse HEAD 2>/dev/null || printf '')"
+  if [ -z "$head" ]; then
+    # terminal · no tree, no commits. Say so; the caller writes `null` and the belt answers
+    # "unknown" (no badge), which fires a cheap standup instead of respinning a good env.
+    printf '%s\t%s\n' none ""
+    return 0
+  fi
+
+  # rule 1 · carry. A prior entry whose walked_head is still this tree's HEAD describes the
+  # same build, so the standup's own record is still true — carry it rather than re-guess.
+  # `regfile` is an explicit positional with NO default: a default of "$WALK_DIR/$issue.json"
+  # would let a test run from a temp fixture read this repo's live walk state. Absent ⇒ rule
+  # 1 has no source and simply does not fire. The carry cannot launder a freeze either —
+  # mc-dev's freeze POPS walked_head when it re-points a tree, and walked_head is the match
+  # key.
+  if [ -n "$rf" ] && [ -e "$rf" ]; then
+    prior="$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print("%s\t%s" % (d.get("walked_head") or "", d.get("sha") or ""))' "$rf" 2>/dev/null || true)"
+    prior_head="${prior%%$'\t'*}"
+    prior_sha="${prior#*$'\t'}"
+    if [ -n "$prior_sha" ] && [ "$prior_head" = "$head" ]; then
+      printf '%s\t%s\n' carry "$prior_sha"
+      return 0
+    fi
+  fi
+
+  # rule 2 · unwrap — gated on merge PROVENANCE, never merge shape. refresh_walk_tree builds
+  # as-it-will-land by `checkout --detach <branch>` (:121) then merging origin/main INTO it
+  # under its own identity (:147-149), so a merge head IT made has the code tip as HEAD^1. A
+  # merge anyone ELSE made proves nothing about parent order: the ship gate merges main INTO
+  # the branch, so a branch tip can itself be a merge whose ^1 is the PRE-merge commit
+  # (origin/feat/27-migrations is exactly that shape in this clone). Unwrapping that would
+  # read STALE against the fold and respin the very env this derivation protects.
+  if [ "$(git -C "$wt" log -1 --format=%ce HEAD 2>/dev/null || printf '')" = "mc-walk-env@localhost" ] &&
+    git -C "$wt" rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
+    parent="$(git -C "$wt" rev-parse HEAD^1 2>/dev/null || printf '')"
+    if [ -n "$parent" ]; then
+      printf '%s\t%s\n' unwrap "$parent"
+      return 0
+    fi
+  fi
+
+  # rule 3 · the tree head IS the code commit. The pre-derivation behaviour, deliberately
+  # unchanged — every unrecognised shape (and refresh's fast-forward case, where the merge at
+  # :147 moves nothing) lands here and is never worse than today.
+  printf '%s\t%s\n' head "$head"
+  return 0
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -270,8 +358,31 @@ standup)
     die "standup $issue: web on :$port not serving 200 after ~60s — see .mc/walk/$issue-web.log"
   fi
 
+  # Derive `sha` (#86). HERE and nowhere else: the tree's HEAD is only final once
+  # refresh_walk_tree's merge has taken or been aborted, and the heredoc below overwrites the
+  # very prior entry rule 1 reads. This encode block is the one window that satisfies both.
+  derived="$(derive_code_sha "$wt" "$WALK_SHA" "$WALK_DIR/$issue.json")"
+  sha_rule="${derived%%$'\t'*}"
+  CODE_SHA="${derived#*$'\t'}"
+  # Which rung answered — a stale badge raises exactly that question and today nothing
+  # records it. The standup's own "  · …" idiom (:154); the `none` row is the only one that
+  # warns, matching how refresh_walk_tree separates progress from warnings (:127, :136, :163).
+  # merge_note stays untouched: that is the REVIEWER-facing "is this as it will land" string
+  # the glass renders, and sha provenance is an operator/debug fact.
+  case "$sha_rule" in
+  branch) echo "  · sha ← branch (rev-parse $branch → ${CODE_SHA:0:7})" ;;
+  carry) echo "  · sha ← rule 1 · carry (prior entry, walked_head unchanged → ${CODE_SHA:0:7})" ;;
+  unwrap) echo "  · sha ← rule 2 · unwrap (merge by mc-walk-env, ^1 → ${CODE_SHA:0:7})" ;;
+  head) echo "  · sha ← rule 3 · head (no record, no script-merge → ${CODE_SHA:0:7})" ;;
+  *) echo "  ⚠ sha ← none (tree head unreadable — writing null; the belt will fire a standup)" >&2 ;;
+  esac
+
   # The as-it-will-land facts, JSON-encoded OUTSIDE the heredoc: `null` and `true`/`false`
   # are bare literals, and only a real encoder can be trusted with the note's git paths.
+  # `sha` joins its three already-encoded siblings here (#86 Q3 = A): written raw it could
+  # only ever be a STRING, and "" is the value the belt misreads as absent.
+  sha_json=null
+  if [ -n "$CODE_SHA" ]; then sha_json="$(json_str "$CODE_SHA")"; fi
   walked_head_json=null
   if [ -n "$WALK_HEAD" ]; then walked_head_json="$(json_str "$WALK_HEAD")"; fi
   merged_main_sha_json=null
@@ -287,7 +398,7 @@ standup)
   "web_port": $port,
   "branch": "$branch",
   "worktree": "$wt",
-  "sha": "$WALK_SHA",
+  "sha": $sha_json,
   "walked_head": $walked_head_json,
   "merged_main": $WALK_MERGED_MAIN,
   "merged_main_sha": $merged_main_sha_json,
@@ -337,6 +448,20 @@ down)
     done
   fi
   echo "walk down: $slug (registry entry removed; worktree kept for the ship)"
+  ;;
+
+__derive-sha)
+  # Un-advertised (#86): the harness's handle on the ladder, so all six rows of the contract
+  # can be driven over throwaway git fixtures without running a standup. It exists for
+  # packages/core/src/mc-walk-env.test.ts and is deliberately absent from the die() wording
+  # below.
+  #
+  # `regfile` and `known` are explicit and default to EMPTY — never to
+  # "$WALK_DIR/$issue.json". mkdir -p "$WALK_DIR" (:20) runs for every verb including this
+  # one, which is a benign no-op; a defaulted regfile would not be — it would let a fixture
+  # in a temp dir read this repo's live walk state and make rule 1 fire on real state.
+  dwt="${1:?usage: __derive-sha <worktree> [regfile] [known-sha]}"
+  derive_code_sha "$dwt" "${3:-}" "${2:-}"
   ;;
 
 *)
