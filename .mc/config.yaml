@@ -51,6 +51,120 @@ walk:
     up: 'bash scripts/mc-walk-env.sh standup {issue} --branch {branch}'
     url: 'http://localhost:{port}/' # informational — the live URL comes from .mc/walk/{issue}.json
     down: 'bash scripts/mc-walk-env.sh down --slug {issue}'
+  # --- the isolated backend tier (mc-dev #154 · seeded template #155) ---------------------
+  # A schema-touching slice gets its OWN Postgres, in its own compose project
+  # (`mc-walk-<issue>`), cloned in seconds from a template volume that was migrated + seeded
+  # ONCE by `mc walk-template .`. Every other slice stays on the shared docker Postgres and no
+  # docker process is ever spawned for it — absent config is this whole feature's off switch,
+  # and declaring it changes nothing for the tiers that don't reach it.
+  #
+  # DB-ONLY, AND THE OMISSION IS THE STATEMENT. rv-trip's api routes live INSIDE the next app
+  # (apps/web/src/app/api), so there is no api container to isolate — the web arm's `up`
+  # already restands that code at the slice's commit. Declaring `db` and NOT `api` is how the
+  # engine is told so (walk_compose._isolation): an `api` surface then leaves the tier
+  # `shared`, instead of raising a refusal on every route-handler slice we ship, and only a
+  # `schema` surface raises the tier to a database of our own.
+  compose:
+    db_port_base: 15500 # + (issue % port_span=100) → 15500-15599; btrip holds no span here
+    # HOST-SHAPED, and legal ONLY on the api-less shape: with no `api` service, nothing in the
+    # generated compose file consumes this DSN — the thing that has to be pointed at the
+    # walk's database is a HOST process (`next dev`). So the engine resolves `{db_port}` late
+    # and hands the assembled DSN to scripts/mc-walk-env.sh as MC_WALK_DB_URL. Adding an `api`
+    # service later would make this a LOAD-TIME error, by design: that DSN is rendered into
+    # the compose file in one substitution pass, so the placeholder would land verbatim in a
+    # container's DATABASE_URL.
+    walk_db_url: 'postgres://rvtrip:rvtrip@localhost:{db_port}/rvtrip'
+    db:
+      image: postgres:18-alpine # the same major the repo-root docker-compose.yml runs
+      environment:
+        POSTGRES_USER: rvtrip
+        POSTGRES_PASSWORD: rvtrip
+        POSTGRES_DB: rvtrip
+      ports: ['{db_port}:5432']
+      # PG18+ images want the mount at /var/lib/postgresql — the data lives in a
+      # version-specific subdir UNDER it — not /var/lib/postgresql/data. Same mount as
+      # docker-compose.yml, and the path the seeded template's clone fills.
+      volumes: ['walk_db:/var/lib/postgresql']
+      # TCP, never the bare-socket `pg_isready -U rvtrip` docker-compose.yml uses. The
+      # postgres image runs a TEMPORARY server during initdb with `listen_addresses=''`, so a
+      # socket check reports ready on a server that is about to be shut down and replaced —
+      # and on a FRESH template volume that window is exactly when the seed verbs fire.
+      healthcheck:
+        test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U rvtrip -d rvtrip']
+        interval: 5s
+        timeout: 5s
+        retries: 10
+    volumes:
+      walk_db: {} # compose scopes it per project; the engine clones the template into it
+      # The seed container's own workspace — the reason the host tree can be mounted
+      # READ-ONLY below. A side volume of the throwaway template project only: `mc
+      # walk-template`'s teardown (`down -v`) reaps it, and it never reaches a walk's compose
+      # file because only the `db` service is rendered there.
+      seed_src: {}
+    seed:
+      volume: walk_db
+      service:
+        image: node:24-alpine # the repo's own major — .nvmrc 24, package.json engines >=20
+        working_dir: /src
+        volumes:
+          # READ-ONLY, then copied. `{worktree}` here is the SOURCE TREE the template is built
+          # from — the engine's own clone. A writable bind would have `pnpm install` replace
+          # that clone's node_modules with linux binaries (drizzle-kit and tsx ship a native
+          # esbuild; the host's darwin build cannot execute here), breaking the machine's own
+          # dev tree. The copy also has to SURVIVE BETWEEN VERBS: each verb is its own
+          # `docker compose run --rm` container, so an anonymous volume would be discarded
+          # with the first one and the install would be gone by the migrate.
+          - '{worktree}:/host:ro'
+          - 'seed_src:/src'
+        environment:
+          # IN-NETWORK AND HARD-CODED, not `{db_url}`: on this api-less shape `{db_url}` is
+          # `walk_db_url`, written from a host process's point of view and carrying a
+          # `{db_port}` the TEMPLATE render has nothing to resolve (a template has no issue),
+          # so it would arrive here as `@localhost:{db_port}/`. The template project's db
+          # service is named `db`, and that is the spelling that resolves.
+          DATABASE_URL: 'postgres://rvtrip:rvtrip@db:5432/rvtrip'
+          # drizzle.config.ts and baseline.ts both PREFER DATABASE_URL_UNPOOLED (Neon's DDL
+          # connection). Pinned to the same in-network db so a stray one can never point the
+          # template build's migrations at a real database.
+          DATABASE_URL_UNPOOLED: 'postgres://rvtrip:rvtrip@db:5432/rvtrip'
+          # ON THE PERSISTED VOLUME, so corepack downloads pnpm 9.12.0 (package.json's
+          # `packageManager` pin) ONCE. Its default home is under /root, which is image-local
+          # — and every verb below is its own `run --rm` container, so each one would pay the
+          # download again.
+          COREPACK_HOME: /src/.corepack
+        depends_on:
+          db:
+            condition: service_healthy
+      run:
+        # A clean tree, then a clean install. `tar` rather than `cp -a` for the excludes, and
+        # each one is load-bearing: node_modules (host binaries), .git (nothing here reads it
+        # and it is the biggest thing in the tree), and `.env*` — drizzle.config.ts reads
+        # ../../.env and would prefer a Neon `DATABASE_URL_UNPOOLED` out of it. busybox tar
+        # supports `--exclude` (verified on node:24-alpine).
+        - "tar -C /host -cf - --exclude=node_modules --exclude=.git --exclude='.env*' --exclude=.next --exclude=.turbo --exclude=pgdata . | tar -C /src -xf -"
+        # `corepack pnpm` on EVERY verb, not `corepack enable` once: enabling writes shims
+        # into the image's /usr/local/bin, and each verb is its own `run --rm` container, so
+        # verb 3 met `sh: pnpm: not found` (measured, not guessed). Filtered on purpose —
+        # `@rv-trip/db...` is the db package PLUS its dependencies, which is everything
+        # migrate + seed touch; a full workspace install would also build apps/mobile's expo
+        # tree for no benefit here.
+        - 'corepack pnpm install --frozen-lockfile --filter "@rv-trip/db..."'
+        # THE REAL VERBS — root package.json's `db:migrate` / `db:seed`, spelled as the
+        # filters they delegate to. CI runs this same pair against an empty database
+        # (.github/workflows/ci.yml, "db · migrate · seed · drift check"), and the seed is
+        # keyless (packages/db/src/seed.ts mints `dev-household`/`dev-user`), so a template
+        # built from it needs no Clerk key and no re-login.
+        - 'corepack pnpm --filter @rv-trip/db migrate'
+        - 'corepack pnpm --filter @rv-trip/db seed'
+      # WHAT THE TEMPLATE IS STAMPED WITH: file CONTENT under these prefixes, hashed with the
+      # seed spec itself, so a template built before a migration or a seed edit reads STALE
+      # rather than silently serving the wrong schema — or the wrong data, which is the half a
+      # migration head would miss. Superset of `surface_paths.schema` on purpose: a seed.ts
+      # edit does not need to raise a slice's TIER, but it does make this volume stale.
+      stamp_paths:
+        - packages/db/drizzle
+        - packages/db/src/schema.ts
+        - packages/db/src/seed.ts
 
 # --- Stage agents (engine-native .md briefs, dispatched as mc-dev workers) ---
 # Same seven-agent shape as btrip. Design authority here is ds-bundle/ (tokens + guidelines +
