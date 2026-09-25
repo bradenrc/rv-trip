@@ -52,8 +52,9 @@ export const rating = z.number().int().min(1).max(5).nullable();
 export const changeField = z.enum(["rating", "notes", "status"]);
 export type ChangeField = z.infer<typeof changeField>;
 
-/** The four things a change is logged against. */
-export const changeEntity = z.enum(["stop", "idea", "reservation", "savedPlace"]);
+/** The four things a change is logged against. `save` was `savedPlace` before
+ * the W0 reset (#110 §5) — the table it names is now `saves`. */
+export const changeEntity = z.enum(["stop", "idea", "reservation", "save"]);
 export type ChangeEntity = z.infer<typeof changeEntity>;
 
 /**
@@ -107,9 +108,38 @@ export const place = z.object({
 });
 export type Place = z.infer<typeof place>;
 
+/**
+ * How a hop between two stops is travelled (#110 · Q1 A). Mode lives on the
+ * SEGMENT, never on a stop or a day: HERE routing and the RV-safety corridor key
+ * off `drive` only. `train` is a later wave.
+ */
+export const travelMode = z.enum(["drive", "fly", "ferry"]);
+export type TravelMode = z.infer<typeof travelMode>;
+
+/** A trip's lodging default (#110 §5, Q7 A) — a default, never a constraint. */
+export const lodgingKind = z.enum(["hotel", "friends", "airbnb", "campground"]);
+export type LodgingKind = z.infer<typeof lodgingKind>;
+
+/**
+ * An INSTANT (ISO 8601 with a zone), as a timed segment or a flight carries it.
+ * Unlike `isoDate` this has a clock; its IANA zone travels beside it
+ * (`departTz`, `startsTz`, …) so a local wall clock and a local DATE can be
+ * recovered (`localDate`, segments.ts).
+ */
+const instant = z.string().nullable().default(null);
+/** An IANA zone name ("America/Boise"), or null when the instant is untimed. */
+const ianaZone = z.string().nullable().default(null);
+
+/**
+ * A reservation hangs on EXACTLY ONE parent (#110 Q2 A): a stop (lodging, a
+ * tour) or a travel segment (a flight, a ferry ticket). The database enforces
+ * it with `CHECK num_nonnulls(stop_id, segment_id) = 1`; `stop.reservations`
+ * carries only the stop-attached rows and `segment.reservations` the rest.
+ */
 export const reservation = z.object({
   id: z.string(),
-  stopId: z.string(),
+  stopId: z.string().nullable(),
+  segmentId: z.string().nullable().default(null),
   ideaId: z.string().nullable().default(null),
   type: reservationType,
   name: z.string().min(1),
@@ -119,6 +149,12 @@ export const reservation = z.object({
   cost: z.number().nonnegative().nullable().default(null),
   rating,
   notes: z.string().nullable().default(null),
+  /** A transport booking's clock (#110 §6): when it leaves and lands, each in
+   * its own zone. Lodging keeps the day-grain `checkIn`/`checkOut`. */
+  startsAt: instant,
+  endsAt: instant,
+  startsTz: ianaZone,
+  endsTz: ianaZone,
   lastChange: lastChangeField,
 });
 export type Reservation = z.infer<typeof reservation>;
@@ -177,6 +213,31 @@ export const leg = z.object({
 });
 export type Leg = z.infer<typeof leg>;
 
+/**
+ * One hop of the journey (#110 · Q1 A): every adjacent pair of the route
+ * sequence has a row, plus home → first stop when the trip has a home base.
+ * `fromStopId === null` is the home base; `toStopId === null` is home. The row
+ * set is kept dense by `reconcileSegments` (segments.ts) — never hand-edited.
+ *
+ * Timed (`departAt` + `arriveAt`) or untimed. A timed segment is travel on
+ * every LOCAL date it touches (Q4 B); an untimed one borrows its day from the
+ * stop it arrives at (derive-days.ts).
+ */
+export const segment = z.object({
+  id: z.string(),
+  tripId: z.string(),
+  fromStopId: z.string().nullable(),
+  toStopId: z.string().nullable(),
+  mode: travelMode,
+  departAt: instant,
+  arriveAt: instant,
+  departTz: ianaZone,
+  arriveTz: ianaZone,
+  sortOrder: z.number().int(),
+  reservations: z.array(reservation).default([]),
+});
+export type Segment = z.infer<typeof segment>;
+
 export const tripStatus = z.enum(["planning", "upcoming", "complete"]);
 export type TripStatus = z.infer<typeof tripStatus>;
 
@@ -204,7 +265,16 @@ export const trip = z.object({
   statusAuto: z.boolean().default(true),
   rating: rating,
   note: z.string().nullable().default(null),
+  /**
+   * The trip's three plain DEFAULTS (#110 Q7 A) — never constraints. A newly
+   * reconciled segment takes `defaultMode`; W0 stores and seeds the other two.
+   */
+  defaultMode: travelMode.default("drive"),
+  lodgingDefault: lodgingKind.nullable().default(null),
+  rigOn: z.boolean().default(true),
   legs: z.array(leg).default([]),
+  /** Every hop of the journey, by `sortOrder` (#110 Q1 A). */
+  segments: z.array(segment).default([]),
   /**
    * The idea SHELF (#80) — the trip's unattached maybes, the rows whose
    * `stopId` is null. It sits beside `legs`, not inside it, because that is

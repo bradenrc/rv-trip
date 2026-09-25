@@ -5,71 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1788929216263,
-      "tag": "0000_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1789099041064,
-      "tag": "0001_route_cache",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1789102252407,
-      "tag": "0002_route_nav",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1789347947697,
-      "tag": "0003_user_prefs",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1789396424153,
-      "tag": "0004_home_base_place",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "7",
-      "when": 1789434260292,
-      "tag": "0005_parched_frank_castle",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "7",
-      "when": 1789486674481,
-      "tag": "0006_silly_vindicator",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1789495664487,
-      "tag": "0007_households",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1789499489051,
-      "tag": "0008_change_log",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1789847278247,
-      "tag": "0009_old_ender_wiggin",
+      "when": 1790346498719,
+      "tag": "0000_v2",
       "breakpoints": true
     }
   ]

@@ -95,6 +95,12 @@ describe("createApiClient", () => {
       cost: 42.5,
       rating: null,
       notes: null,
+      // Every W0 create is stop-attached (#110 Q2 A): the segment half is empty.
+      segmentId: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
       // A create carries no history: the byline is joined on the READ path
       // (#78 §6), so a just-made row comes back with `lastChange: null`.
       lastChange: null,

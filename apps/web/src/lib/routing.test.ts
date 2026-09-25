@@ -333,7 +333,11 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
     statusAuto: true,
     rating: null,
     note: null,
+    defaultMode: "drive" as const,
+    lodgingDefault: null,
+    rigOn: true,
     ideas: [],
+    segments: [],
     legs: [
       {
         id: "l1",
@@ -381,6 +385,34 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
     expect(nav).toEqual({}); // …and no verdict was bought
     expect(seam.navCalls).toEqual([]);
     expect(seam.navReads).toEqual([]);
+  });
+
+  it("routes DRIVEN hops only — a flown pair is never sent to the vendor (#110 §6)", async () => {
+    const { routeTrip } = await freshRouting();
+    const flown = {
+      ...trip,
+      segments: [
+        {
+          id: "seg1",
+          tripId: "t1",
+          fromStopId: "s1",
+          toStopId: "s2",
+          mode: "fly" as const,
+          departAt: null,
+          arriveAt: null,
+          departTz: null,
+          arriveTz: null,
+          sortOrder: 0,
+          reservations: [],
+        },
+      ],
+    };
+
+    const { routes, nav } = await routeTrip(flown, null, { nav: true });
+
+    expect(routes).toEqual({});
+    expect(nav).toEqual({});
+    expect(seam.navCalls).toEqual([]);
   });
 
   it("resolves the verdict with it — this is what the trip page calls", async () => {

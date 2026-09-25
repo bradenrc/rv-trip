@@ -26,7 +26,7 @@ async function main() {
     process.exit(2);
   }
   const from = flag === "--from" && fromArg ? fromArg : "dev-household";
-  const tables = [schema.trips, schema.savedPlaces, schema.rigs, schema.userPrefs] as const;
+  const tables = [schema.trips, schema.saves, schema.rigs, schema.userPrefs] as const;
   for (const t of tables) {
     // `ownerId`, not `id`: user_prefs has no surrogate key — its owner IS the
     // primary key — and it is the one column all four tables share.

@@ -330,6 +330,10 @@ describe("routeSummary — the rail counts the stops it cannot draw", () => {
         ],
       },
     ],
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    segments: [],
   });
 
   it("counts them, and names them for Locate", () => {

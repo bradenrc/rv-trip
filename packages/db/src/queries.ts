@@ -2,8 +2,8 @@ import { eq, and, asc, desc, gt, inArray, isNull, sql } from "drizzle-orm";
 import {
   deriveDays,
   deriveTripStatus,
+  drivePairs,
   homeBasePlaceOf,
-  orderedPairs,
   routeCacheKey,
   routeSummary,
   routingHash,
@@ -17,7 +17,8 @@ import {
   stops,
   ideas,
   reservations,
-  savedPlaces,
+  saves,
+  travelSegments,
   rigs,
   routes,
   userPrefs,
@@ -39,6 +40,7 @@ import type {
   Idea,
   Place,
   SavedPlace,
+  Segment,
   PlaceSuggestion,
   NavCheck,
   RigProfile,
@@ -61,11 +63,18 @@ const TRIP_WITH = {
       stops: {
         orderBy: (s, { asc }) => [asc(s.sortOrder)],
         with: {
+          // The `stop` relation joins on `stop_id`, so this is exactly the
+          // STOP-attached rows (#110 Q2 A); a flight arrives on its segment.
           reservations: true,
           ideas: { orderBy: (i, { asc }) => [asc(i.sortOrder)] },
         },
       },
     },
+  },
+  // The journey's hops (#110 §6), with the paperwork that hangs on them.
+  segments: {
+    orderBy: (s, { asc }) => [asc(s.sortOrder)],
+    with: { reservations: true },
   },
   // The SHELF (#80): the trip's UNATTACHED ideas. `stop_id IS NULL` is what
   // keeps one row in one place — an attached idea already arrives under its
@@ -156,6 +165,7 @@ async function lastChangesFor(
  * reservations and ideas, and the shelf ideas hanging off the trip itself. */
 function loggableIds(row: TripRow): string[] {
   const ids: string[] = row.ideas.map((i) => i.id);
+  for (const seg of row.segments) for (const r of seg.reservations) ids.push(r.id);
   for (const leg of row.legs) {
     for (const stop of leg.stops) {
       ids.push(stop.id);
@@ -206,20 +216,28 @@ async function entityIsOwned(
       return rows.length > 0;
     }
     case "reservation": {
-      const rows = await db
+      // Two parents since #110 (Q2 A): a stop, or a travel segment.
+      const viaStop = await db
         .select({ id: reservations.id })
         .from(reservations)
         .innerJoin(stops, eq(reservations.stopId, stops.id))
         .innerJoin(legs, eq(stops.legId, legs.id))
         .innerJoin(trips, eq(legs.tripId, trips.id))
         .where(and(eq(reservations.id, entityId), eq(trips.ownerId, householdId)));
-      return rows.length > 0;
+      if (viaStop.length > 0) return true;
+      const viaSegment = await db
+        .select({ id: reservations.id })
+        .from(reservations)
+        .innerJoin(travelSegments, eq(reservations.segmentId, travelSegments.id))
+        .innerJoin(trips, eq(travelSegments.tripId, trips.id))
+        .where(and(eq(reservations.id, entityId), eq(trips.ownerId, householdId)));
+      return viaSegment.length > 0;
     }
-    case "savedPlace": {
+    case "save": {
       const rows = await db
-        .select({ id: savedPlaces.id })
-        .from(savedPlaces)
-        .where(and(eq(savedPlaces.id, entityId), eq(savedPlaces.ownerId, householdId)));
+        .select({ id: saves.id })
+        .from(saves)
+        .where(and(eq(saves.id, entityId), eq(saves.ownerId, householdId)));
       return rows.length > 0;
     }
   }
@@ -298,8 +316,46 @@ function mapTripRow(
     statusAuto: row.statusAuto,
     rating: row.rating,
     note: row.note,
+    defaultMode: row.defaultMode,
+    lodgingDefault: row.lodgingDefault,
+    rigOn: row.rigOn,
     legs: row.legs.map((l) => mapLeg(l, last)),
     ideas: row.ideas.map((i) => mapIdea(i, last)),
+    segments: row.segments.map((s) => mapSegment(s, last)),
+  };
+}
+
+/** A timestamptz column, as the ISO instant the wire carries. */
+const instant = (d: Date | null): string | null => (d === null ? null : d.toISOString());
+
+export interface MapSegmentRow {
+  id: string;
+  tripId: string;
+  fromStopId: string | null;
+  toStopId: string | null;
+  mode: Segment["mode"];
+  departAt: Date | null;
+  arriveAt: Date | null;
+  departTz: string | null;
+  arriveTz: string | null;
+  sortOrder: number;
+  reservations: MapReservationRow[];
+}
+
+/** One hop (#110 §6) and the paperwork on it. */
+export function mapSegment(s: MapSegmentRow, last: LastChangeIndex = NO_CHANGES): Segment {
+  return {
+    id: s.id,
+    tripId: s.tripId,
+    fromStopId: s.fromStopId,
+    toStopId: s.toStopId,
+    mode: s.mode,
+    departAt: instant(s.departAt),
+    arriveAt: instant(s.arriveAt),
+    departTz: s.departTz,
+    arriveTz: s.arriveTz,
+    sortOrder: s.sortOrder,
+    reservations: s.reservations.map((r) => mapReservation(r, last)),
   };
 }
 
@@ -340,8 +396,9 @@ export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]>
   const today = todayIso();
   const mapped = rows.map((r) => mapTripRow(r, today));
   const hash = await routingHash(rig);
+  // Driven hops only (#110 §6): a flight has no road in the cache.
   const keys = mapped.flatMap((trip) =>
-    orderedPairs(trip).map((p) => routeCacheKey(p.from, p.to, hash)),
+    drivePairs(trip).map((p) => routeCacheKey(p.from, p.to, hash)),
   );
   const routes = await getCachedRoutes(keys);
   return mapped.map((trip) => summarize(trip, routes, hash));
@@ -376,12 +433,12 @@ function summarize(
   hash: string,
 ): TripSummary {
   const stops = trip.legs.flatMap((l) => l.stops);
-  const { days } = deriveDays(trip, stops);
+  const { days } = deriveDays(trip, stops, trip.segments);
   const open = days.filter((d) => d.kind === "empty").length;
   const summary = routeSummary(trip, routes, hash);
   // Honest when it is guessing: a single missed key means the total carries at
   // least one straight-line estimate, and the card says so beside the number.
-  const milesEstimated = orderedPairs(trip).some(
+  const milesEstimated = drivePairs(trip).some(
     (p) => !routes[routeCacheKey(p.from, p.to, hash)],
   );
   return {
@@ -442,9 +499,9 @@ export async function getStopDateContext(
  * second round-trip. `tripName` is denormalized from the visited-on trip.
  */
 export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPlace[]> {
-  const rows = await db.query.savedPlaces.findMany({
-    where: eq(savedPlaces.ownerId, ownerId),
-    orderBy: [desc(savedPlaces.createdAt)],
+  const rows = await db.query.saves.findMany({
+    where: eq(saves.ownerId, ownerId),
+    orderBy: [desc(saves.createdAt)],
     with: { trip: { columns: { title: true } } },
   });
   // The /places cards render a byline (§5), so the library read joins the log
@@ -478,7 +535,7 @@ export async function listSuggestionCandidatesForOwner(
 }
 
 /**
- * The saved_places row → `SavedPlace` seam: flat place columns in, the nested
+ * The `saves` row → `SavedPlace` seam: flat place columns in, the nested
  * `place` the clients read out. Shared with the write path (mutations.ts) so a
  * created or patched row comes back in exactly the shape the library renders —
  * `tripName` is joined on read and passed in, never stored on the row.
@@ -514,7 +571,7 @@ export function mapSavedPlaceRow(
     rating: r.rating,
     tripId: r.tripId,
     tripName,
-    lastChange: lastChangeOf(last, "savedPlace", r.id),
+    lastChange: lastChangeOf(last, "save", r.id),
   };
 }
 
@@ -575,7 +632,8 @@ export function mapStop(s: MapStopRow, last: LastChangeIndex = NO_CHANGES): Stop
 
 interface MapReservationRow {
   id: string;
-  stopId: string;
+  stopId: string | null;
+  segmentId: string | null;
   ideaId: string | null;
   type: Reservation["type"];
   name: string;
@@ -585,6 +643,10 @@ interface MapReservationRow {
   cost: string | null;
   rating: number | null;
   notes: string | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  startsTz: string | null;
+  endsTz: string | null;
 }
 
 /** Exported so a create/promote can hand its INSERT ... returning row back in
@@ -596,6 +658,7 @@ export function mapReservation(
   return {
     id: r.id,
     stopId: r.stopId,
+    segmentId: r.segmentId,
     ideaId: r.ideaId,
     type: r.type,
     name: r.name,
@@ -605,6 +668,10 @@ export function mapReservation(
     cost: r.cost === null ? null : Number(r.cost),
     rating: r.rating,
     notes: r.notes,
+    startsAt: instant(r.startsAt),
+    endsAt: instant(r.endsAt),
+    startsTz: r.startsTz,
+    endsTz: r.endsTz,
     lastChange: lastChangeOf(last, "reservation", r.id),
   };
 }

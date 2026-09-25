@@ -27,10 +27,10 @@ import { ctx, describeDb, req } from "@/test/db";
 const DB_SRC = fileURLToPath(new URL("../../../../packages/db/src", import.meta.url));
 const DRIZZLE_DIR = fileURLToPath(new URL("../../../../packages/db/drizzle", import.meta.url));
 
-/** The 0008 migration's text, found by prefix — drizzle names the suffix. */
-function migration0008(): string {
-  const file = readdirSync(DRIZZLE_DIR).find((f) => f.startsWith("0008_") && f.endsWith(".sql"));
-  if (!file) throw new Error(`no 0008_*.sql in ${DRIZZLE_DIR}`);
+/** The ONE migration since the W0 reset (#110 §5): 0008's table lives in 0000_v2. */
+function migrationV2(): string {
+  const file = readdirSync(DRIZZLE_DIR).find((f) => f.startsWith("0000_") && f.endsWith(".sql"));
+  if (!file) throw new Error(`no 0000_*.sql in ${DRIZZLE_DIR}`);
   return readFileSync(`${DRIZZLE_DIR}/${file}`, "utf8");
 }
 
@@ -42,15 +42,11 @@ async function logged(entityId?: string) {
   return mine.sort((a, b) => a.field.localeCompare(b.field));
 }
 
-describe("migration 0008 (no database needed)", () => {
-  it("creates change_log and nothing else", () => {
-    const text = migration0008();
-
+describe("the v2 migration (no database needed)", () => {
+  it("creates change_log, logging against the four entities — `save` was `savedPlace`", () => {
+    const text = migrationV2();
     expect(text).toMatch(/CREATE TABLE "change_log"/);
-    // #78 rides #77's member id and adds ONE table. A migration that also
-    // altered a shipped table would be a second, unreviewed change riding along.
-    expect(text.match(/CREATE TABLE/g)).toHaveLength(1);
-    expect(text).not.toMatch(/ALTER TABLE/i);
+    expect(text).toContain(`CREATE TYPE "public"."change_entity" AS ENUM('stop', 'idea', 'reservation', 'save')`);
   });
 });
 
@@ -216,7 +212,7 @@ describeDb("change_log · saved places", () => {
 
     expect(res.status).toBe(204);
     expect(await logged(place.id)).toMatchObject([
-      { entity: "savedPlace", field: "notes", from: null, to: "Riverfront sites 41–48" },
+      { entity: "save", field: "notes", from: null, to: "Riverfront sites 41–48" },
     ]);
   });
 

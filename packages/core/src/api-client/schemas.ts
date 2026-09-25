@@ -79,6 +79,13 @@ export const reservationRowSchema = z
     cost: r.cost == null ? null : Number(r.cost),
     rating: r.rating ?? null,
     notes: r.notes ?? null,
+    // Every create in W0 is STOP-attached (#110 Q2 A — a segment's flights are
+    // seeded, not yet added from the app, #112), so the segment half is empty.
+    segmentId: null,
+    startsAt: null,
+    endsAt: null,
+    startsTz: null,
+    endsTz: null,
     // A row that was just CREATED has no history yet, and the create response
     // carries none (#78 §6: the byline is joined on the READ path). The client
     // splices this shape straight into its trip, so the field has to be there.

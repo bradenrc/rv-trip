@@ -59,8 +59,8 @@ describe("the generated migration", () => {
     expect(creators).toHaveLength(1);
   });
 
-  it("is the next migration in sequence", () => {
-    expect(creators[0]).toMatch(/^0003_/);
+  it("is the one v2 migration (#110 §5 — the W0 reset regenerated the set)", () => {
+    expect(creators[0]).toMatch(/^0000_v2/);
   });
 
   it("makes owner_id the PRIMARY KEY", () => {
@@ -82,9 +82,9 @@ describe("the generated migration", () => {
     );
   });
 
-  it("creates nothing else — one table, no enum, no index", () => {
+  it("gives user_prefs no index of its own — owner_id is the key", () => {
     const sql = read(`${DRIZZLE}/${creators[0]}`);
-    expect(sql.match(/CREATE /g) ?? []).toHaveLength(1);
+    expect(sql).not.toMatch(/CREATE (UNIQUE )?INDEX "[^"]*" ON "user_prefs"/);
   });
 
   it("is registered in the journal under its own file name", () => {
@@ -94,7 +94,7 @@ describe("the generated migration", () => {
     const tag = creators[0]!.replace(/\.sql$/, "");
     const entry = journal.entries.find((e) => e.tag === tag);
     expect(entry, `no journal entry tagged ${tag}`).toBeTruthy();
-    expect(entry!.idx).toBe(3);
+    expect(entry!.idx).toBe(0);
     // Every journal entry has a file, and every file has a journal entry.
     expect(journal.entries.map((e) => `${e.tag}.sql`).sort()).toEqual([...files].sort());
     expect(readdirSync(join(REPO, DRIZZLE, "meta"))).toContain(`${entry!.idx.toString().padStart(4, "0")}_snapshot.json`);
@@ -133,11 +133,12 @@ describe("packages/db/src/schema.ts — userPrefs", () => {
 
   it("adds no pgEnum — a preference vocabulary must not need an ALTER TYPE", () => {
     // The six the base sha already had: reservation_type, idea_status,
-    // trip_status, saved_place_status, rig_type, route_source — plus
-    // idea_category (#80) and change_entity + change_field (#78), which ARE
-    // vocabularies the product speaks. A preference is not, and that is what
-    // this guard is about.
-    expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(9);
+    // trip_status, save_status (was saved_place_status), rig_type, route_source
+    // — plus idea_category (#80), change_entity + change_field (#78) and
+    // travel_mode + lodging_kind + save_anchor (#110), which ARE vocabularies
+    // the product speaks. A preference is not, and that is what this guard is
+    // about.
+    expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(12);
     for (const name of ["theme", "units", "map_style", "track_costs"])
       expect(code(schema)).not.toContain(`pgEnum("${name}"`);
   });

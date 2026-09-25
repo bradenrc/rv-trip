@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { savedPlaceCreate } from "@rv-trip/core";
-import { createSavedPlace, listSavedPlacesForOwner } from "@rv-trip/db";
+import { createSave, listSavedPlacesForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 
 /** The Places library, both shelves — `SavedPlace[]`. */
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const saved = await createSavedPlace(await getOwner(), parsed.data);
+    const saved = await createSave(await getOwner(), parsed.data);
     return NextResponse.json(saved, { status: 201 });
   } catch {
     // The only guarded input is `tripId` — a trip this owner does not own.

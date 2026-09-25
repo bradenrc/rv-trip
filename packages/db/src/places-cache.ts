@@ -45,7 +45,7 @@ export function dbPlacesCache(): PlacesCacheStore {
           rating: e.rating,
           // The cache remembers only what the G-line renders; a caller that
           // needs coordinates or a formatted address asks the row that owns
-          // them (stops / ideas / saved_places), never this one.
+          // them (stops / ideas / saves), never this one.
           location: null,
           address: null,
           userRatingCount: e.userRatingCount,

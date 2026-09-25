@@ -151,7 +151,8 @@ export function reservationDraftPatch(
   r: Reservation,
   d: ReservationDraft,
 ): ReservationPatchInput | null {
-  const next = reservationDraftInput(r.stopId, d);
+  // Only the validation is borrowed here — a PATCH never carries the parent.
+  const next = reservationDraftInput(r.stopId ?? "", d);
   if (next === null) return null;
   const patch: ReservationPatchInput = {};
   if (next.type !== r.type) patch.type = next.type;
@@ -172,7 +173,10 @@ export function reservationDraftPatch(
  */
 export function reservationRestoreInput(r: Reservation): ReservationCreateInput {
   return {
-    stopId: r.stopId,
+    // Only a STOP's reservations are listed (and so deletable) anywhere in W0;
+    // a segment-attached row (#110 Q2 A) has no create path yet, so its "" is
+    // refused at the boundary rather than re-parented onto a guessed stop.
+    stopId: r.stopId ?? "",
     type: r.type,
     name: r.name,
     checkIn: r.checkIn,

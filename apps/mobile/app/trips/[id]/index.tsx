@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import type { RouteDrive, RouteRow as RouteRowModel } from "@rv-trip/core";
+import type { RouteDrive, RouteRow as RouteRowModel, TravelMode } from "@rv-trip/core";
 import {
   dayKindColor,
   fullRange,
@@ -161,10 +161,20 @@ export default function TripScreen() {
                             height: 18,
                             borderRadius: 3,
                             backgroundColor: dayKindColor(cell.kind),
-                            borderWidth: cell.kind === "drive" ? 1 : 0,
+                            borderWidth: cell.kind === "travel" ? 1 : 0,
                             borderColor: C.borderHi,
+                            alignItems: "center",
+                            justifyContent: "center",
                           }}
-                        />
+                        >
+                          {/* #110 §3: fly/ferry days carry a text glyph — native's
+                              own idiom (the drive row prints 🚐 as text). */}
+                          {modeGlyph(cell.mode) && (
+                            <Text style={{ fontSize: 9, lineHeight: 10, color: C.inkMuted }}>
+                              {modeGlyph(cell.mode)}
+                            </Text>
+                          )}
+                        </View>
                         <Text style={{ fontFamily: F.mono, fontSize: 8, color: label.weekStart ? C.ink : C.inkSubtle }}>
                           {label.letter}
                         </Text>
@@ -173,9 +183,11 @@ export default function TripScreen() {
                   })}
                 </View>
               </ScrollView>
-              <View style={{ flexDirection: "row", gap: 12 }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
                 <Legend color={C.green} label="Stay" />
                 <Legend color={C.navy} label="Drive" outlined />
+                <Legend color={C.navy} label="Fly" outlined glyph="✈" />
+                <Legend color={C.navy} label="Ferry" outlined glyph="⛴" />
                 <Legend color={C.navySoft} label="Open" />
               </View>
             </Card>
@@ -309,10 +321,38 @@ function Drive({ drive }: { drive: RouteDrive }) {
   );
 }
 
-function Legend({ color, label, outlined }: { color: string; label: string; outlined?: boolean }) {
+/** The text glyph a travel day carries — none for a drive (plain navy). */
+function modeGlyph(mode: TravelMode | undefined): string | null {
+  return mode === "fly" ? "✈" : mode === "ferry" ? "⛴" : null;
+}
+
+function Legend({
+  color,
+  label,
+  outlined,
+  glyph,
+}: {
+  color: string;
+  label: string;
+  outlined?: boolean;
+  glyph?: string;
+}) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-      <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, borderWidth: outlined ? 1 : 0, borderColor: C.borderHi }} />
+      <View
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: 2,
+          backgroundColor: color,
+          borderWidth: outlined ? 1 : 0,
+          borderColor: C.borderHi,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {glyph && <Text style={{ fontSize: 7, lineHeight: 8, color: C.inkMuted }}>{glyph}</Text>}
+      </View>
       <Text style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaded }}>{label}</Text>
     </View>
   );

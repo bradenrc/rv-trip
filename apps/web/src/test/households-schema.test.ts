@@ -22,37 +22,23 @@ import { describeDb } from "@/test/db";
 
 const DRIZZLE_DIR = fileURLToPath(new URL("../../../../packages/db/drizzle", import.meta.url));
 
-/** The 0007 migration's text, found by prefix — drizzle names the suffix. */
-function migration0007(): string {
-  const file = readdirSync(DRIZZLE_DIR).find((f) => f.startsWith("0007_") && f.endsWith(".sql"));
-  if (!file) throw new Error(`no 0007_*.sql in ${DRIZZLE_DIR}`);
+/**
+ * The ONE migration since the W0 reset (#110 §5, Q8 A): 0007's tables are in
+ * 0000_v2 now, and its owner-id backfill is gone with the data it moved —
+ * the reset carries nothing over.
+ */
+function migrationV2(): string {
+  const file = readdirSync(DRIZZLE_DIR).find((f) => f.startsWith("0000_") && f.endsWith(".sql"));
+  if (!file) throw new Error(`no 0000_*.sql in ${DRIZZLE_DIR}`);
   return readFileSync(`${DRIZZLE_DIR}/${file}`, "utf8");
 }
 
-describe("migration 0007 (no database needed)", () => {
-  it("adds the three tables and touches no owner_id column", () => {
-    const text = migration0007();
-
+describe("the v2 migration (no database needed)", () => {
+  it("creates the three tenancy tables", () => {
+    const text = migrationV2();
     expect(text).toMatch(/CREATE TABLE "households"/);
     expect(text).toMatch(/CREATE TABLE "household_members"/);
     expect(text).toMatch(/CREATE TABLE "household_invites"/);
-
-    // Q2 = A: the repoint is a value swap. Not one ALTER on the four tables
-    // that carry owner_id — an ALTER here would be the answer the survey
-    // rejected, and on Neon it would rewrite every one of them.
-    for (const table of ["trips", "saved_places", "rigs", "user_prefs"]) {
-      expect(text).not.toMatch(new RegExp(`ALTER TABLE\\s+"?(?:public"?\\.")?${table}"`, "i"));
-    }
-  });
-
-  it("repoints all four owner columns in the backfill", () => {
-    const text = migration0007();
-
-    // reown.ts re-owned THREE tables; the backfill needs FOUR, or a migrated
-    // account loses its saved preferences (docs/design/81 §2).
-    for (const table of ["trips", "saved_places", "rigs", "user_prefs"]) {
-      expect(text).toMatch(new RegExp(`UPDATE ${table} SET owner_id`, "i"));
-    }
   });
 });
 

@@ -1,6 +1,8 @@
 import "./load-env";
 import { db, schema } from "./index";
 import { sql } from "drizzle-orm";
+import { seedTrips } from "@rv-trip/core/seeds";
+import type { Trip } from "@rv-trip/core";
 
 /**
  * The keyless dev tenant (#77 · docs/design/81 §2). From #77 on `owner_id` is a
@@ -17,7 +19,7 @@ const MEMBER = "dev-user";
 const OWNER = HOUSEHOLD;
 
 async function main() {
-  console.log("Seeding sample trip…");
+  console.log("Seeding sample trips…");
 
   // Clean slate (dev only). Cascades handle children.
   await db.execute(sql`truncate table ${schema.trips} restart identity cascade`);
@@ -31,277 +33,23 @@ async function main() {
     .values({ householdId: HOUSEHOLD, userId: MEMBER, role: "owner" })
     .onConflictDoNothing();
 
-  const [trip] = await db
-    .insert(schema.trips)
-    .values({
-      ownerId: OWNER,
-      title: "Pacific Northwest Loop",
-      homeBase: "Boise, ID",
-      startDate: "2026-08-01",
-      endDate: "2026-08-28",
-      status: "planning",
-      // Pinned: the demo trip's dates have passed, and deriveTripStatus would
-      // otherwise read it as complete. The whole app is built around it being
-      // the trip you are planning, so the seed makes that a manual choice.
-      statusAuto: false,
-    })
-    .returning();
-
-  const [legCoast, legMountains] = await db
-    .insert(schema.legs)
-    .values([
-      { tripId: trip!.id, title: "Oregon Coast", sortOrder: 0 },
-      { tripId: trip!.id, title: "Cascades & Home", sortOrder: 1 },
-    ])
-    .returning();
-
-  // Scheduled stops (with dates) + one floating stop (no dates -> route only).
-  const [astoria, newport, bend, floatingCrater] = await db
-    .insert(schema.stops)
-    .values([
-      {
-        legId: legCoast!.id,
-        placeName: "Astoria, OR",
-        lat: 46.1879,
-        lng: -123.8313,
-        arriveDate: "2026-08-02",
-        departDate: "2026-08-05",
-        sortOrder: 0,
-        rating: 5,
-        notes: "Loved the riverwalk. Book the same RV park next time.",
-      },
-      {
-        legId: legCoast!.id,
-        placeName: "Newport, OR",
-        lat: 44.6365,
-        lng: -124.053,
-        arriveDate: "2026-08-05",
-        departDate: "2026-08-09",
-        sortOrder: 1,
-        rating: 4,
-        notes: null,
-      },
-      {
-        legId: legMountains!.id,
-        placeName: "Bend, OR",
-        lat: 44.0582,
-        lng: -121.3153,
-        arriveDate: "2026-08-12",
-        departDate: "2026-08-16",
-        sortOrder: 0,
-        rating: null,
-        notes: null,
-      },
-      {
-        legId: legMountains!.id,
-        placeName: "Crater Lake NP",
-        lat: 42.9446,
-        lng: -122.109,
-        arriveDate: null,
-        departDate: null,
-        sortOrder: 1,
-        rating: null,
-        notes: "Maybe on the way home if we have time — take it as it comes.",
-      },
-    ])
-    .returning();
-
-  await db.insert(schema.reservations).values([
-    {
-      stopId: astoria!.id,
-      type: "campground",
-      name: "Astoria/Warrenton KOA",
-      checkIn: "2026-08-02",
-      checkOut: "2026-08-05",
-      confirmationNumber: "KOA-88213",
-      cost: "204.00",
-      rating: 5,
-      notes: "Full hookups, site A12 backs to the trees.",
-    },
-    {
-      stopId: newport!.id,
-      type: "campground",
-      name: "South Beach State Park",
-      checkIn: "2026-08-05",
-      checkOut: "2026-08-09",
-      confirmationNumber: "ORP-40192",
-      cost: "160.00",
-      rating: 4,
-      notes: null,
-    },
-    {
-      stopId: astoria!.id,
-      type: "tour",
-      name: "Columbia River Maritime Museum",
-      checkIn: "2026-08-03",
-      checkOut: null,
-      confirmationNumber: null,
-      cost: "38.00",
-      rating: null,
-      notes: null,
-    },
-  ]);
-
-  await db.insert(schema.ideas).values([
-    {
-      tripId: trip!.id,
-      stopId: newport!.id,
-      title: "Oregon Coast Aquarium",
-      category: "do",
-      status: "planned",
-      rating: null,
-      notes: "Half day. Go early to beat crowds.",
-      sortOrder: 0,
-    },
-    {
-      tripId: trip!.id,
-      stopId: newport!.id,
-      title: "Rogue Ales brewery lunch",
-      category: "eat",
-      status: "idea",
-      rating: null,
-      notes: null,
-      sortOrder: 1,
-    },
-    {
-      tripId: trip!.id,
-      stopId: bend!.id,
-      title: "Deschutes River float",
-      category: "do",
-      status: "idea",
-      rating: null,
-      notes: null,
-      sortOrder: 0,
-    },
-    {
-      tripId: trip!.id,
-      stopId: floatingCrater!.id,
-      title: "Rim Drive scenic loop",
-      category: "do",
-      status: "idea",
-      rating: null,
-      notes: null,
-      sortOrder: 0,
-    },
-    // The SHELF (#80): maybes that belong to the trip and to no stop yet — one
-    // of each kind, so the rail has something real to render on a fresh seed.
-    {
-      tripId: trip!.id,
-      stopId: null,
-      title: "Cape Kiwanda tide pools",
-      category: "do",
-      status: "idea",
-      placeName: "Cape Kiwanda State Natural Area",
-      lat: 45.2151,
-      lng: -123.9743,
-      rating: null,
-      notes: null,
-      sortOrder: 0,
-    },
-    {
-      tripId: trip!.id,
-      stopId: null,
-      title: "Local Ocean Seafoods",
-      category: "eat",
-      status: "idea",
-      placeName: "Local Ocean Seafoods",
-      lat: 44.6299,
-      lng: -124.0534,
-      rating: null,
-      notes: null,
-      sortOrder: 1,
-    },
-    {
-      tripId: trip!.id,
-      stopId: null,
-      title: "Hot springs south of Bend",
-      category: "stay",
-      status: "idea",
-      rating: null,
-      notes: null,
-      sortOrder: 2,
-    },
-  ]);
-
-  // ── more trips across the dashboard's statuses ───────────────────────────
-  await addTrip(
-    {
-      title: "Desert Southwest Winter",
-      homeBase: "Boise, ID",
-      startDate: "2026-01-06",
-      endDate: "2026-03-30",
-      status: "upcoming",
-    },
-    [
-      {
-        title: "Utah",
-        stops: [
-          { placeName: "Moab, UT", lat: 38.5733, lng: -109.5498, arriveDate: "2026-01-10", departDate: "2026-01-20" },
-          { placeName: "Zion NP", lat: 37.2982, lng: -113.0263, arriveDate: null, departDate: null },
-        ],
-      },
-      {
-        title: "Arizona",
-        stops: [
-          { placeName: "Sedona, AZ", lat: 34.8697, lng: -111.761, arriveDate: "2026-01-25", departDate: "2026-02-05" },
-          { placeName: "Tucson, AZ", lat: 32.2226, lng: -110.9747, arriveDate: "2026-02-10", departDate: "2026-03-01" },
-        ],
-      },
-    ],
-  );
-
-  const coastTrip = await addTrip(
-    {
-      title: "Oregon Coast Weekend",
-      homeBase: "Boise, ID",
-      startDate: "2025-05-23",
-      endDate: "2025-05-26",
-      status: "complete",
-      rating: 5,
-      note: "South Beach yurts booked early next time — sunset walks were the whole trip.",
-    },
-    [
-      {
-        title: "Coast",
-        stops: [
-          { placeName: "Newport, OR", lat: 44.6365, lng: -124.053, arriveDate: "2025-05-23", departDate: "2025-05-26" },
-        ],
-      },
-    ],
-  );
-
-  const ystoneTrip = await addTrip(
-    {
-      title: "Yellowstone & Tetons",
-      homeBase: "Boise, ID",
-      startDate: "2024-09-08",
-      endDate: "2024-09-19",
-      status: "complete",
-      rating: 4,
-      note: "Fishing Bridge RV park is the only full-hookup in-park — worth the early reservation.",
-    },
-    [
-      {
-        title: "Yellowstone",
-        stops: [
-          { placeName: "Fishing Bridge, WY", lat: 44.5647, lng: -110.3735, arriveDate: "2024-09-08", departDate: "2024-09-14" },
-        ],
-      },
-      {
-        title: "Tetons",
-        stops: [
-          { placeName: "Jackson, WY", lat: 43.4799, lng: -110.7624, arriveDate: "2024-09-15", departDate: "2024-09-19" },
-        ],
-      },
-    ],
-  );
+  // The trips are PURE DATA in @rv-trip/core/seeds (#110 §7) — the same objects
+  // the core tests assert day by day and check for zero segment conflicts. Here
+  // each local id ("stp_conchal", "seg_out") is mapped to the uuid its insert
+  // returns.
+  const ids = new Map<string, string>();
+  const trips = seedTrips();
+  for (const t of trips) await writeTrip(t, ids);
+  await db.execute(sql`delete from ${schema.saves} where ${schema.saves.ownerId} = ${OWNER}`);
 
   // ── Places library: the cross-trip queue + archive ────────────────────────
   // "want" carries a source (where the tip came from); "been" carries a rating
   // and the trip it was visited on.
-  await db.insert(schema.savedPlaces).values([
+  await db.insert(schema.saves).values([
     {
       ownerId: OWNER,
+      // Every library row carries lat/lng and no Place ID → a pin (#110 §5).
+      anchor: "pin",
       name: "Kalaloch Campground",
       region: "Olympic NP, WA",
       lat: 47.6118,
@@ -313,6 +61,7 @@ async function main() {
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "Sunny's Smokehouse",
       region: "Bend, OR",
       lat: 44.0582,
@@ -324,6 +73,7 @@ async function main() {
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "Crater Lake Rim Drive",
       region: "Crater Lake NP, OR",
       lat: 42.9446,
@@ -335,6 +85,7 @@ async function main() {
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "Flying J — Ontario",
       region: "Ontario, OR",
       lat: 44.0266,
@@ -346,6 +97,7 @@ async function main() {
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "South Beach State Park",
       region: "Newport, OR",
       lat: 44.6094,
@@ -353,11 +105,12 @@ async function main() {
       type: "campground",
       status: "been",
       rating: 5,
-      tripId: coastTrip.id,
+      tripId: ids.get("trip_coast")!,
       note: "Yurts are the move — book early next time. Sunset walks were the whole trip.",
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "Local Ocean Seafoods",
       region: "Newport, OR",
       lat: 44.6297,
@@ -365,11 +118,12 @@ async function main() {
       type: "dining",
       status: "been",
       rating: 5,
-      tripId: coastTrip.id,
+      tripId: ids.get("trip_coast")!,
       note: "Bayfront, watch the boats. Go before 6 or wait an hour.",
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "Fishing Bridge RV Park",
       region: "Yellowstone NP, WY",
       lat: 44.5647,
@@ -377,11 +131,12 @@ async function main() {
       type: "campground",
       status: "been",
       rating: 4,
-      tripId: ystoneTrip.id,
+      tripId: ids.get("trip_ystone")!,
       note: "Only full-hookup in-park. Worth the early reservation; tight but level.",
     },
     {
       ownerId: OWNER,
+      anchor: "pin",
       name: "Old Faithful Loop",
       region: "Yellowstone NP, WY",
       lat: 44.4605,
@@ -389,46 +144,128 @@ async function main() {
       type: "activity",
       status: "been",
       rating: 4,
-      tripId: ystoneTrip.id,
+      tripId: ids.get("trip_ystone")!,
       note: "Beat the crowd — first eruption after opening. Biscuit Basin boardwalk was quieter.",
     },
   ]);
 
-  console.log(`Seeded ${trip!.title} + 3 more trips + 8 saved places.`);
+  console.log(`Seeded ${trips.length} trips + 8 saves.`);
   process.exit(0);
 }
 
-type SeedStop = {
-  placeName: string;
-  lat: number | null;
-  lng: number | null;
-  arriveDate: string | null;
-  departDate: string | null;
-};
-async function addTrip(
-  t: {
-    title: string;
-    homeBase: string;
-    startDate: string;
-    endDate: string;
-    status: "planning" | "upcoming" | "complete";
-    rating?: number;
-    note?: string;
-  },
-  legs: { title: string; stops: SeedStop[] }[],
-) {
-  const [trip] = await db.insert(schema.trips).values({ ownerId: OWNER, ...t }).returning();
-  for (let li = 0; li < legs.length; li++) {
+const instant = (v: string | null) => (v === null ? null : new Date(v));
+
+/** One seed trip, top to bottom: trip → legs → stops → segments → paperwork. */
+async function writeTrip(t: Trip, ids: Map<string, string>) {
+  const [trip] = await db
+    .insert(schema.trips)
+    .values({
+      ownerId: OWNER,
+      title: t.title,
+      homeBase: t.homeBase,
+      startDate: t.startDate,
+      endDate: t.endDate,
+      status: t.status,
+      statusAuto: t.statusAuto,
+      rating: t.rating,
+      note: t.note,
+      defaultMode: t.defaultMode,
+      lodgingDefault: t.lodgingDefault,
+      rigOn: t.rigOn,
+    })
+    .returning();
+  ids.set(t.id, trip!.id);
+  const id = (local: string | null) => (local === null ? null : ids.get(local)!);
+
+  for (const l of t.legs) {
     const [leg] = await db
       .insert(schema.legs)
-      .values({ tripId: trip!.id, title: legs[li]!.title, sortOrder: li })
+      .values({ tripId: trip!.id, title: l.title, sortOrder: l.sortOrder })
       .returning();
-    const stops = legs[li]!.stops;
-    if (stops.length) {
-      await db.insert(schema.stops).values(stops.map((s, i) => ({ legId: leg!.id, sortOrder: i, ...s })));
+    ids.set(l.id, leg!.id);
+    for (const s of l.stops) {
+      const [stop] = await db
+        .insert(schema.stops)
+        .values({
+          legId: leg!.id,
+          placeName: s.place.name,
+          lat: s.place.lat,
+          lng: s.place.lng,
+          googlePlaceId: s.place.googlePlaceId,
+          arriveDate: s.arriveDate,
+          departDate: s.departDate,
+          sortOrder: s.sortOrder,
+          rating: s.rating,
+          notes: s.notes,
+        })
+        .returning();
+      ids.set(s.id, stop!.id);
     }
   }
-  return trip!;
+
+  for (const seg of t.segments) {
+    const [row] = await db
+      .insert(schema.travelSegments)
+      .values({
+        tripId: trip!.id,
+        fromStopId: id(seg.fromStopId),
+        toStopId: id(seg.toStopId),
+        mode: seg.mode,
+        departAt: instant(seg.departAt),
+        arriveAt: instant(seg.arriveAt),
+        departTz: seg.departTz,
+        arriveTz: seg.arriveTz,
+        sortOrder: seg.sortOrder,
+      })
+      .returning();
+    ids.set(seg.id, row!.id);
+  }
+
+  const stops = t.legs.flatMap((l) => l.stops);
+  const paperwork = [
+    ...stops.flatMap((s) => s.reservations),
+    ...t.segments.flatMap((s) => s.reservations),
+  ];
+  if (paperwork.length > 0) {
+    await db.insert(schema.reservations).values(
+      paperwork.map((r) => ({
+        stopId: id(r.stopId),
+        segmentId: id(r.segmentId),
+        type: r.type,
+        name: r.name,
+        checkIn: r.checkIn,
+        checkOut: r.checkOut,
+        confirmationNumber: r.confirmationNumber,
+        cost: r.cost === null ? null : r.cost.toFixed(2),
+        rating: r.rating,
+        notes: r.notes,
+        startsAt: instant(r.startsAt),
+        endsAt: instant(r.endsAt),
+        startsTz: r.startsTz,
+        endsTz: r.endsTz,
+      })),
+    );
+  }
+
+  const ideas = [...stops.flatMap((s) => s.ideas), ...t.ideas];
+  if (ideas.length > 0) {
+    await db.insert(schema.ideas).values(
+      ideas.map((i) => ({
+        tripId: trip!.id,
+        stopId: id(i.stopId),
+        title: i.title,
+        category: i.category,
+        status: i.status,
+        placeName: i.place?.name ?? null,
+        lat: i.place?.lat ?? null,
+        lng: i.place?.lng ?? null,
+        googlePlaceId: i.place?.googlePlaceId ?? null,
+        rating: i.rating,
+        notes: i.notes,
+        sortOrder: i.sortOrder,
+      })),
+    );
+  }
 }
 
 main().catch((err) => {

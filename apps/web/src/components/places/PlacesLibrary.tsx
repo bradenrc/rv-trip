@@ -130,7 +130,7 @@ export function PlacesLibrary({
         byline={
           <ChangeBylinePopover
             last={p.lastChange}
-            entity="savedPlace"
+            entity="save"
             entityId={p.id}
             name={p.place.name}
           />

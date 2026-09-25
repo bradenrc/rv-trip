@@ -110,6 +110,10 @@ function seedTrip(): Trip {
         ],
       },
     ],
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    segments: [],
   };
 }
 
