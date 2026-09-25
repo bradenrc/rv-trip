@@ -105,3 +105,42 @@ identity before the ladder ever runs, so a broken fixture reds as a fixture, not
   tests, not by the standup — which is the whole argument for Q1 = B.
 - `apps/web`'s route-handler suite reported `10 passed | 26 skipped` — it self-skips without a
   `DATABASE_URL`, which is pre-existing and unrelated to this slice (nothing here touches a route).
+
+## Re-dispatch (2026-09-25) — what was left after #92
+
+The re-dispatch brief said rv's script had no derivation. That was already false on
+`origin/main @ d76c9c4`: #92 (`8a0f1d7`) landed `derive_code_sha`, the `__derive-sha` door and
+the eight-case harness. Probing HEAD's `__derive-sha` shows a script merge unwraps, a foreign
+merge is refused and a plain tree answers `head`. So this pass only closes what #92 left open:
+
+1. **The QA CN, never fixed.** The terminal rung read `git rev-parse HEAD`, which in a repo with
+   no commits prints the literal `HEAD` before it fails. The ladder answered `head\tHEAD`, not
+   the signed `none` row. Fix: `rev-parse -q --verify HEAD`. New case: a commit-less repo
+   answers `none`.
+2. **Rule 2 is only as good as the producer's stamp, and nothing tested the producer.** The
+   rule-2 fixture was hand-rolled: the test wrote a merge under the constant itself. btrip builds
+   that fixture through its real `__refresh-tree`. The rv port now has the same door
+   (`__refresh-tree <root> <worktree> <branch>`, where `root` is explicit and never defaults to
+   live refs) and a "producer" block of five cases: the real merge unwraps to the branch tip; the
+   stamp survives an ambient identity (two shapes); a no-op merge falls to rule 3; a ship-gate
+   merge tip is refused.
+3. **The stamp could be displaced.** `-c user.email=mc-walk-env@localhost` loses to an ambient
+   `GIT_COMMITTER_EMAIL`, and to a `committer.email` at any config level (git 2.55, both
+   reproduced). Either one makes the refresh's merge look foreign. Rule 2 then refuses it and
+   the ladder records the **merge head** as `sha`, the #86 misread. Fix: the identity now rides
+   `GIT_{AUTHOR,COMMITTER}_{NAME,EMAIL}` env vars, which outrank every config level. The writer
+   and rule 2 both read one pair of names, `WALK_MERGE_NAME` / `WALK_MERGE_EMAIL`. The value
+   itself is unchanged, because earlier standups' trees carry it.
+
+rv-trip merge-identity facts, from the live clone: none of the nine recorded standup merges made
+a merge commit. Each one merged a main the branch already contained. The object store holds
+zero commits by `mc-walk-env@localhost`. So rule 2 is wired correctly but has never had a live
+input here. `origin/feat/27-migrations` (tip `0b9d812`, committer idryfly) is the foreign shape,
+and the ladder refuses it.
+
+Red evidence is in `/tmp/86-red.txt`:
+- HEAD's script: 6 red / 8 green. The six are the `head\tHEAD` case plus the missing door.
+- Door present, identity still set via `-c`: the ambient cases red, and the probe records the
+  merge head.
+- Mutation, drifting only the writer's email: 3 producer cases red, and all 8 pre-existing cases
+  stay green.

@@ -179,6 +179,13 @@ json_str() { # JSON-encode $1 — the merge note carries git-reported paths (quo
 #   WALK_MERGE_NOTE       one line: what happened, in the reviewer's terms
 WALK_SHA="" WALK_HEAD="" WALK_MERGED_MAIN=false WALK_MERGED_MAIN_SHA="" WALK_MERGE_NOTE=""
 
+# The identity every as-it-will-land merge is committed under — and the one fact rule 2 of
+# derive_code_sha gates on (merge PROVENANCE, not merge shape). Writer and reader both read
+# these names so the two cannot drift apart. The value is load-bearing history too: trees
+# merged by earlier standups carry it, so it must not change.
+WALK_MERGE_NAME=mc-walk-env
+WALK_MERGE_EMAIL=mc-walk-env@localhost
+
 abort_merge_hard() { # <worktree> <known-good-sha-or-empty>
   # `merge --abort` can itself fail to take (a wedged index, a half-written MERGE_HEAD from
   # a standup the OOM killer took). When it doesn't, MERGE_HEAD survives with the conflict
@@ -248,10 +255,16 @@ refresh_walk_tree() { # <worktree> <branch> → 0 as-it-will-land, 1 fell back t
     return 1
   fi
   # Identity is passed inline: a detached walk tree has no committer configured of its own,
-  # and a merge commit without one aborts ("please tell me who you are").
-  if git -c core.hooksPath=/dev/null -C "$wt" \
-    -c user.email=mc-walk-env@localhost -c user.name=mc-walk-env \
-    merge --no-edit origin/main >/dev/null 2>&1; then
+  # and a merge commit without one aborts ("please tell me who you are"). It rides the
+  # ENVIRONMENT, not `-c user.email`, because this committer is the provenance rule 2 of
+  # derive_code_sha reads — and `-c user.email` loses to an ambient GIT_COMMITTER_EMAIL and to
+  # a `committer.email` at any config level (#86, both reproduced). Either one stamped this
+  # merge as someone else's, rule 2 refused it as foreign, and the ladder recorded the MERGE
+  # head as `sha` — the exact misread #86 exists to prevent. The env vars outrank every config
+  # level, so the stamp is unconditional.
+  if GIT_AUTHOR_NAME="$WALK_MERGE_NAME" GIT_AUTHOR_EMAIL="$WALK_MERGE_EMAIL" \
+    GIT_COMMITTER_NAME="$WALK_MERGE_NAME" GIT_COMMITTER_EMAIL="$WALK_MERGE_EMAIL" \
+    git -c core.hooksPath=/dev/null -C "$wt" merge --no-edit origin/main >/dev/null 2>&1; then
     WALK_HEAD="$(git -C "$wt" rev-parse HEAD 2>/dev/null || printf '')"
     WALK_MERGED_MAIN=true
     WALK_MERGED_MAIN_SHA="$main_sha"
@@ -308,8 +321,11 @@ derive_code_sha() { # <worktree> <known-sha|""> <regfile|""> → one line on std
 
   # Read HEAD from the TREE, never $WALK_HEAD: :130 sets WALK_HEAD="$WALK_SHA", so on the
   # empty-WALK_SHA path that variable is blank while the tree's real HEAD is not. Doing its
-  # own rev-parse is also what makes `__derive-sha` standalone.
-  head="$(git -C "$wt" rev-parse HEAD 2>/dev/null || printf '')"
+  # own rev-parse is also what makes `__derive-sha` standalone. `-q --verify`, not a bare
+  # `rev-parse HEAD`: in a repo with no commits yet the bare form PRINTS the literal `HEAD`
+  # on stdout before failing, so the `|| printf ''` never blanks it and the ladder answered
+  # `head\tHEAD` — a rule-3 provenance line over `"sha": "HEAD"` (#86 QA, finding CN).
+  head="$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null || printf '')"
   if [ -z "$head" ]; then
     # terminal · no tree, no commits. Say so; the caller writes `null` and the belt answers
     # "unknown" (no badge), which fires a cheap standup instead of respinning a good env.
@@ -335,13 +351,14 @@ derive_code_sha() { # <worktree> <known-sha|""> <regfile|""> → one line on std
   fi
 
   # rule 2 · unwrap — gated on merge PROVENANCE, never merge shape. refresh_walk_tree builds
-  # as-it-will-land by `checkout --detach <branch>` (:121) then merging origin/main INTO it
-  # under its own identity (:147-149), so a merge head IT made has the code tip as HEAD^1. A
-  # merge anyone ELSE made proves nothing about parent order: the ship gate merges main INTO
-  # the branch, so a branch tip can itself be a merge whose ^1 is the PRE-merge commit
+  # as-it-will-land by `checkout --detach <branch>` then merging origin/main INTO it under
+  # $WALK_MERGE_EMAIL (stamped via the environment, so no ambient identity can displace it),
+  # so a merge head IT made has the code tip as HEAD^1. A merge anyone ELSE made proves
+  # nothing about parent order: the ship gate merges main INTO the branch, so a branch tip
+  # can itself be a merge whose ^1 is the PRE-merge commit
   # (origin/feat/27-migrations is exactly that shape in this clone). Unwrapping that would
   # read STALE against the fold and respin the very env this derivation protects.
-  if [ "$(git -C "$wt" log -1 --format=%ce HEAD 2>/dev/null || printf '')" = "mc-walk-env@localhost" ] &&
+  if [ "$(git -C "$wt" log -1 --format=%ce HEAD 2>/dev/null || printf '')" = "$WALK_MERGE_EMAIL" ] &&
     git -C "$wt" rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
     parent="$(git -C "$wt" rev-parse HEAD^1 2>/dev/null || printf '')"
     if [ -n "$parent" ]; then
@@ -602,6 +619,26 @@ __derive-sha)
   # in a temp dir read this repo's live walk state and make rule 1 fire on real state.
   dwt="${1:?usage: __derive-sha <worktree> [regfile] [known-sha]}"
   derive_code_sha "$dwt" "${3:-}" "${2:-}"
+  ;;
+
+__refresh-tree)
+  # Un-advertised (#86), the __derive-sha idiom one step upstream: rule 2 is only as good as
+  # the stamp refresh_walk_tree puts on its merge, and a hand-rolled fixture merge cannot
+  # prove the real one carries it. This drives the REAL producer over a throwaway fixture, so
+  # the harness can hand what it leaves straight to __derive-sha.
+  #
+  # `root` is an explicit positional, never defaulted: refresh_walk_tree reads the branch off
+  # $ROOT, and the default is THIS repo — a fixture's branch name would resolve against live
+  # refs. Reassigned here only, after the load-time `mkdir -p "$WALK_DIR"` (the same benign
+  # no-op every verb pays), so no production verb ever sees it.
+  #
+  # stdout is exactly one line, `<merged_main>\t<sha>\t<walked_head>\t<merged_main_sha>`; the
+  # refresh's own progress and warnings go to stderr.
+  ROOT="${1:?usage: __refresh-tree <root> <worktree> <branch>}"
+  rwt="${2:?usage: __refresh-tree <root> <worktree> <branch>}"
+  rbranch="${3:?usage: __refresh-tree <root> <worktree> <branch>}"
+  refresh_walk_tree "$rwt" "$rbranch" >&2 || true
+  printf '%s\t%s\t%s\t%s\n' "$WALK_MERGED_MAIN" "$WALK_SHA" "$WALK_HEAD" "$WALK_MERGED_MAIN_SHA"
   ;;
 
 __db-decision)
