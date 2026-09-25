@@ -211,7 +211,7 @@ refresh_walk_tree() { # <worktree> <branch> → 0 as-it-will-land, 1 fell back t
   # is a lie the moment dev pushes again. `walked_head` carries what the reviewer is
   # actually looking at; that split is exactly what the two fields are for.
   WALK_SHA="$(git -C "$ROOT" rev-parse "$branch" 2>/dev/null || printf '')"
-  WALK_HEAD="$(git -C "$wt" rev-parse HEAD 2>/dev/null || printf '')"
+  WALK_HEAD="$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null || printf '')"
 
   # A standup killed mid-merge leaves MERGE_HEAD behind, and then every later checkout in
   # this tree fails. Clear it before touching anything.
@@ -264,8 +264,8 @@ refresh_walk_tree() { # <worktree> <branch> → 0 as-it-will-land, 1 fell back t
   # level, so the stamp is unconditional.
   if GIT_AUTHOR_NAME="$WALK_MERGE_NAME" GIT_AUTHOR_EMAIL="$WALK_MERGE_EMAIL" \
     GIT_COMMITTER_NAME="$WALK_MERGE_NAME" GIT_COMMITTER_EMAIL="$WALK_MERGE_EMAIL" \
-    git -c core.hooksPath=/dev/null -C "$wt" merge --no-edit origin/main >/dev/null 2>&1; then
-    WALK_HEAD="$(git -C "$wt" rev-parse HEAD 2>/dev/null || printf '')"
+    git -c core.hooksPath=/dev/null -C "$wt" merge --no-edit --no-gpg-sign origin/main >/dev/null 2>&1; then
+    WALK_HEAD="$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null || printf '')"
     WALK_MERGED_MAIN=true
     WALK_MERGED_MAIN_SHA="$main_sha"
     WALK_MERGE_NOTE="merged origin/main ${main_sha:0:7}"
@@ -358,7 +358,7 @@ derive_code_sha() { # <worktree> <known-sha|""> <regfile|""> → one line on std
   # can itself be a merge whose ^1 is the PRE-merge commit
   # (origin/feat/27-migrations is exactly that shape in this clone). Unwrapping that would
   # read STALE against the fold and respin the very env this derivation protects.
-  if [ "$(git -C "$wt" log -1 --format=%ce HEAD 2>/dev/null || printf '')" = "$WALK_MERGE_EMAIL" ] &&
+  if [ "$(git -C "$wt" -c log.showSignature=false log -1 --format=%ce HEAD 2>/dev/null || printf '')" = "$WALK_MERGE_EMAIL" ] &&
     git -C "$wt" rev-parse -q --verify HEAD^2 >/dev/null 2>&1; then
     parent="$(git -C "$wt" rev-parse HEAD^1 2>/dev/null || printf '')"
     if [ -n "$parent" ]; then
