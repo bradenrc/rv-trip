@@ -63,6 +63,7 @@ const SAVED: SavedPlace = {
   areaLabel: null,
   destination: null,
   suggestedPlace: null,
+  createdAt: null,
 };
 
 describe("regionFromAddress", () => {
@@ -270,6 +271,37 @@ describe("applySavedPlacePatch — the island's echo of the write", () => {
   it("keeps the joined trip name when the patch does not name a trip", () => {
     const been = { ...SAVED, status: "been" as const, tripId: TRIP_ID, tripName: "Coast" };
     expect(applySavedPlacePatch(been, { note: "Again." }).tripName).toBe("Coast");
+  });
+
+  // #111 i2 · Q3 A
+  const NOTE: SavedPlace = {
+    ...SAVED,
+    place: { name: "chandel", lat: 43.0512, lng: -124.329, googlePlaceId: null },
+    anchor: "area",
+    areaLabel: "Bandon, OR",
+    suggestedPlace: {
+      name: "El Chandelier",
+      googlePlaceId: "ChIJchandelier",
+      lat: 43.37,
+      lng: -124.21,
+      subline: "Restaurant · Coos Bay, OR",
+    },
+  };
+
+  it("dismiss clears the suggestion and nothing else", () => {
+    const next = applySavedPlacePatch(NOTE, { suggestedPlace: null });
+    expect(next.suggestedPlace).toBeNull();
+    expect(next.place).toEqual(NOTE.place);
+    expect(next.anchor).toBe("area");
+  });
+
+  it("the upgrade copies the suggestion onto the row: place anchor, no label, no suggestion", () => {
+    const next = applySavedPlacePatch(NOTE, { upgradeToSuggested: true });
+    expect(next.place).toEqual({ name: "El Chandelier", lat: 43.37, lng: -124.21, googlePlaceId: "ChIJchandelier" });
+    expect(next.anchor).toBe("place");
+    expect(next.areaLabel).toBeNull();
+    expect(next.suggestedPlace).toBeNull();
+    expect(next.source).toBe(NOTE.source);
   });
 });
 

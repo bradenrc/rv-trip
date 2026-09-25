@@ -22,11 +22,13 @@ export async function POST(req: Request) {
   }
   // The destination is resolved HERE, where the provider is (#111): packages/db
   // holds no key, so the route hands `createSave` the live resolver — the stub
-  // without GOOGLE_API_KEY, which anchors nothing.
+  // without GOOGLE_API_KEY, which anchors nothing — and the text search an
+  // offline note's place suggestion comes from (i2 · Q3 A; the stub finds none).
   const { provider } = placesProvider();
   try {
     const { saved, replayed } = await createSave(await getOwner(), parsed.data, {
       resolveDestination: (lat, lng) => provider.resolveDestination(lat, lng),
+      searchPlaces: (query, near) => provider.search(query, near),
     });
     // A replayed `clientId` is the phone re-sending a capture that already
     // landed: 200 with the row that exists, never a second row.

@@ -131,6 +131,37 @@ describe("savedPlacePatch — the partial PATCH /api/places/:id body", () => {
     expect(savedPlacePatch.safeParse({ type: "brewery" }).success).toBe(false);
     expect(savedPlacePatch.safeParse({ name: "" }).success).toBe(false);
   });
+
+  // #111 i2 · Q3 A — the two suggestion actions are PATCH keys, never create keys.
+  it("accepts the upgrade and the dismiss, and nothing else under those keys", () => {
+    expect(savedPlacePatch.parse({ upgradeToSuggested: true })).toEqual({ upgradeToSuggested: true });
+    expect(savedPlacePatch.parse({ suggestedPlace: null })).toEqual({ suggestedPlace: null });
+    expect(savedPlacePatch.safeParse({ upgradeToSuggested: false }).success).toBe(false);
+    // A client may clear the suggestion, never write one.
+    expect(
+      savedPlacePatch.safeParse({ suggestedPlace: { name: "x", googlePlaceId: "g" } }).success,
+    ).toBe(false);
+  });
+
+  it("strips the suggestion keys from a create body", () => {
+    const parsed = savedPlaceCreate.parse({ name: "chandel", upgradeToSuggested: true, suggestedPlace: null });
+    expect("upgradeToSuggested" in parsed).toBe(false);
+    expect("suggestedPlace" in parsed).toBe(false);
+  });
+});
+
+describe("savedPlace read shape — createdAt (#111 i2)", () => {
+  it("defaults createdAt to null for a payload from an older server", () => {
+    const p = savedPlace.parse({
+      id: "s1",
+      ownerId: "o",
+      place: { name: "x", lat: null, lng: null, googlePlaceId: null },
+      type: "other",
+      rating: null,
+      lastChange: null,
+    });
+    expect(p.createdAt).toBeNull();
+  });
 });
 
 describe("normalizeSavedPlacePatch — graduation clears the tip's source", () => {

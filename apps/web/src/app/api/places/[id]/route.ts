@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { normalizeSavedPlacePatch, savedPlacePatch } from "@rv-trip/core";
-import { deleteSavedPlace, updateSavedPlaceFields } from "@rv-trip/db";
+import { NO_SUGGESTION, deleteSavedPlace, updateSavedPlaceFields } from "@rv-trip/db";
 import { getActor, getOwner } from "@/lib/owner";
+import { placesProvider } from "@/lib/places";
 
 /**
  * One library row (docs/design/41 §3). PATCH is the edit sheet, the graduation
@@ -14,6 +15,12 @@ import { getActor, getOwner } from "@/lib/owner";
  *
  * `ctx.params` is a Promise in Next 16 and must be awaited (the shipped pattern
  * is api/stops/[id]/route.ts).
+ *
+ * #111 i2 · Q3 A: PATCH also takes `{ upgradeToSuggested: true }` (the save
+ * becomes its suggested place and its destination is re-resolved — through the
+ * provider resolved HERE, as POST does) and `{ suggestedPlace: null }`
+ * (Dismiss). Still 204 with no body, so a client refetches for the new
+ * destination. An upgrade on a save with no suggestion is a 409.
  */
 
 /** A malformed id can never be a row, and `uuid` columns reject it at the
@@ -29,6 +36,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
+  const { provider } = placesProvider();
   let updated: boolean;
   try {
     updated = await updateSavedPlaceFields(
@@ -36,8 +44,12 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       id,
       normalizeSavedPlacePatch(parsed.data),
       await getActor(),
+      { resolveDestination: (lat, lng) => provider.resolveDestination(lat, lng) },
     );
-  } catch {
+  } catch (e) {
+    if (e instanceof Error && e.message === NO_SUGGESTION) {
+      return NextResponse.json({ error: NO_SUGGESTION }, { status: 409 });
+    }
     return NextResponse.json({ error: "trip not found" }, { status: 404 });
   }
   if (!updated) {

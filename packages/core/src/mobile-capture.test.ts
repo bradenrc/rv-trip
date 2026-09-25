@@ -95,7 +95,35 @@ describe("capture · the queue runtime", () => {
     expect(runtime).toContain("if (e instanceof ApiError) return { status: e.status };");
   });
 
-  it("the Saves placeholder shows the waiting count", () => {
+  it("the Saves tab shows the waiting count", () => {
     expect(saves).toContain("queuedToast(queue.length)");
+  });
+});
+
+// ── #111 i2 · the Saves tab, read as source ────────────────────────────────
+
+const store = read("src/store.ts");
+
+describe("saves · the tab renders core's shelves", () => {
+  it("groups through savesShelves and draws each row's line through saveRowLine", () => {
+    expect(saves).toContain("savesShelves(saves, status)");
+    expect(saves).toContain("saveRowLine(s)");
+    expect(saves).toContain("shelfCounts(saves)");
+  });
+
+  it("draws Unanchored after the regions, with the wireframe's note", () => {
+    expect(saves.indexOf("regions.map")).toBeLessThan(saves.indexOf(">Unanchored<"));
+    expect(saves).toContain("Unanchored saves have no town within 25 mi. They still");
+  });
+
+  it("wires the strip: tap upgrades, Dismiss clears — then refetches", () => {
+    expect(saves).toContain("patchSave(save.id, { upgradeToSuggested: true })");
+    expect(saves).toContain("patchSave(save.id, { suggestedPlace: null })");
+    expect(store).toContain("await api.places.patch(id, patch);");
+    expect(store).toMatch(/finally \{\s*await loadSaves\(\);/);
+  });
+
+  it("shows Stars on a Been there row", () => {
+    expect(saves).toMatch(/s\.status === "been" && s\.rating \? \(\s*<Stars value=\{s\.rating\}/);
   });
 });

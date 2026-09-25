@@ -357,6 +357,7 @@ describe("buildMapModel — the third pin kind", () => {
           areaLabel: null,
           destination: null,
           suggestedPlace: null,
+          createdAt: null,
         },
       ],
       {},

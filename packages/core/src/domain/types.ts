@@ -565,6 +565,10 @@ export const savedPlace = z.object({
   /** Null = unanchored: no locality within 25 mi, or no provider key. */
   destination: saveDestination.nullable().default(null),
   suggestedPlace: suggestedPlace.nullable().default(null),
+  /** When the save was captured (`saves.created_at`, ISO) — the Saves tab's
+   * newest-first order inside a destination (#111 i2). Null from a server that
+   * predates it. */
+  createdAt: z.string().nullable().default(null),
 });
 export type SavedPlace = z.infer<typeof savedPlace>;
 
@@ -671,6 +675,18 @@ export type SavedPlaceCreateInput = z.input<typeof savedPlaceCreate>;
  */
 export const savedPlacePatch = savedPlaceFields
   .partial()
+  .extend({
+    /**
+     * #111 Q3 A, "tap the strip": the save becomes its `suggested_place` — the
+     * name, Place ID and point are copied, the anchor goes area → place, the
+     * destination is re-resolved and the suggestion is cleared. PATCH-only: it
+     * is an action on a row that exists, never a create field.
+     */
+    upgradeToSuggested: z.literal(true).optional(),
+    /** Dismiss: `null` is the only value a client may write. The server is the
+     * one that fills it (createSave's offline text search). */
+    suggestedPlace: z.null().optional(),
+  })
   .refine((p) => Object.keys(p).length > 0, {
     message: "patch must name at least one field",
   });

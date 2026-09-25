@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import type { ResolvedDestination } from "@rv-trip/core";
+import type { PlaceSummary, ResolvedDestination } from "@rv-trip/core";
 import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { POST } from "@/app/api/places/route";
 import { describeDb, req } from "@/test/db";
@@ -12,12 +12,18 @@ import { describeDb, req } from "@/test/db";
 const resolver = vi.hoisted(() => ({
   calls: [] as [number, number][],
   answer: null as ResolvedDestination | null | "throw",
+  searches: [] as [string, { lat: number; lng: number } | undefined][],
+  hits: [] as PlaceSummary[] | "throw",
 }));
 vi.mock("@/lib/places", () => ({
   placesProvider: () => ({
     configured: true,
     provider: {
-      search: async () => [],
+      search: async (query: string, near?: { lat: number; lng: number }) => {
+        resolver.searches.push([query, near]);
+        if (resolver.hits === "throw") throw new Error("Google search → 500");
+        return resolver.hits;
+      },
       details: async () => null,
       resolveDestination: async (lat: number, lng: number) => {
         resolver.calls.push([lat, lng]);
@@ -36,9 +42,11 @@ const BANDON: ResolvedDestination = {
   lng: -124.4084,
 };
 
-function reset(answer: ResolvedDestination | null | "throw" = null) {
+function reset(answer: ResolvedDestination | null | "throw" = null, hits: PlaceSummary[] | "throw" = []) {
   resolver.calls = [];
   resolver.answer = answer;
+  resolver.searches = [];
+  resolver.hits = hits;
 }
 
 /** §7 breadth: `saved_places` is account-scoped, but attaching one to another
@@ -199,5 +207,72 @@ describeDb("POST /api/places — capture (#111)", () => {
     expect(res.status).toBe(201);
     expect(resolver.calls).toEqual([]);
     expect((await res.json()).destination).toBeNull();
+  });
+});
+
+// ── #111 i2 · Q3 A: an offline note earns a place suggestion ──────────────
+
+const EL_CHANDELIER: PlaceSummary = {
+  googlePlaceId: "ChIJchandelier",
+  name: "El Chandelier",
+  location: { lat: 43.3665, lng: -124.2179 },
+  rating: 4.6,
+  address: "Coos Bay, OR",
+  primaryType: "restaurant",
+  primaryTypeDisplayName: "Restaurant",
+};
+
+const OFFLINE_NOTE = {
+  clientId: "cap_note_chandel",
+  capturedAt: "2026-09-25T17:12:00-07:00",
+  anchor: "area",
+  capturedOffline: true,
+  lat: 43.0512,
+  lng: -124.329,
+  name: "chandel",
+  type: "other",
+  status: "want",
+};
+
+describeDb("POST /api/places — the offline suggestion (#111 i2)", () => {
+  it("searches the note's words near where it was typed and stores the TOP hit", async () => {
+    reset(BANDON, [EL_CHANDELIER, { ...EL_CHANDELIER, name: "Chandler's", googlePlaceId: "g2" }]);
+    const res = await POST(req(OFFLINE_NOTE));
+    expect(res.status).toBe(201);
+    const saved = await res.json();
+    const want = {
+      name: "El Chandelier",
+      googlePlaceId: "ChIJchandelier",
+      lat: 43.3665,
+      lng: -124.2179,
+      subline: "Restaurant · Coos Bay, OR",
+    };
+    expect(resolver.searches).toEqual([["chandel", { lat: 43.0512, lng: -124.329 }]]);
+    expect(saved.suggestedPlace).toEqual(want);
+    expect((await read.savedPlace(saved.id))!.suggestedPlace).toEqual(want);
+    // Still an area note in Bandon until the user takes it.
+    expect(saved.anchor).toBe("area");
+    expect(saved.destination.name).toBe("Bandon, OR");
+  });
+
+  it("does not search for a note typed ONLINE, nor for an offline pin", async () => {
+    reset(BANDON, [EL_CHANDELIER]);
+    const online = await (await POST(req({ ...OFFLINE_NOTE, capturedOffline: false }))).json();
+    const pin = await (
+      await POST(req({ ...OFFLINE_NOTE, clientId: "cap_pin", anchor: "pin", name: "great BLM camp spot" }))
+    ).json();
+    expect(resolver.searches).toEqual([]);
+    expect(online.suggestedPlace).toBeNull();
+    expect(pin.suggestedPlace).toBeNull();
+  });
+
+  it("still saves, with no suggestion, when the search finds nothing or fails", async () => {
+    reset(BANDON, []);
+    expect((await (await POST(req(OFFLINE_NOTE))).json()).suggestedPlace).toBeNull();
+    reset(BANDON, "throw");
+    const res = await POST(req({ ...OFFLINE_NOTE, clientId: "cap_second" }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).suggestedPlace).toBeNull();
+    expect(await read.countSavedPlaces(DEV_OWNER)).toBe(2);
   });
 });

@@ -6,6 +6,7 @@ import type {
   Reservation,
   SavedPlace,
   SavedPlaceCreateInput,
+  SavedPlacePatch,
   TripSummary,
 } from "../domain/types";
 import type { RigProfile, RigProfileInput } from "../domain/rig";
@@ -128,6 +129,11 @@ export interface ApiClient {
     /** The shipped search proxy. A throttled 429 still answers the degraded
      * envelope rather than throwing — its body IS that envelope. */
     search(q: string, near?: LatLng): Promise<PlacesSearchEnvelope>;
+    /** PATCH /api/places/:id → 204. On the Saves tab (#111 i2) it carries
+     * `{ upgradeToSuggested: true }` (tap the strip) or `{ suggestedPlace: null }`
+     * (Dismiss). No body comes back: refetch `list()` for the re-resolved
+     * destination. */
+    patch(id: string, patch: SavedPlacePatch): Promise<void>;
     /** DELETE /api/places/:id — the capture toast's Undo. */
     remove(id: string): Promise<void>;
   };
@@ -215,6 +221,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
           throw e;
         }
       },
+      patch: (id, patch) =>
+        voidResult(request("PATCH", `/api/places/${encodeURIComponent(id)}`, patch)),
       remove: (id) => voidResult(request("DELETE", `/api/places/${encodeURIComponent(id)}`)),
     },
     destinations: {

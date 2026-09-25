@@ -28,7 +28,9 @@ import type {
   IdeaCategory,
   IdeaStatus,
   IsoDate,
+  LatLng,
   NavCheck,
+  PlaceSummary,
   RigProfile,
   RigProfileInput,
   ResolvedDestination,
@@ -43,7 +45,12 @@ import type {
   SegmentDateConflict,
   SegmentTrip,
 } from "@rv-trip/core";
-import { diffSegments, newSegmentDateConflicts, reconcileSegments } from "@rv-trip/core";
+import {
+  diffSegments,
+  newSegmentDateConflicts,
+  reconcileSegments,
+  suggestedPlaceFromSearch,
+} from "@rv-trip/core";
 import {
   getHouseholdInvite,
   mapIdea,
@@ -1153,6 +1160,18 @@ export function saveAnchorOf(input: {
  */
 export type DestinationResolver = (lat: number, lng: number) => Promise<ResolvedDestination | null>;
 
+/**
+ * A Places text search near a point — `PlacesProvider.search` handed in by the
+ * ROUTE, like the resolver. Used for exactly one thing: the Q3 A offer on an
+ * offline note (#111 i2).
+ */
+export type PlacesSearcher = (query: string, near: LatLng) => Promise<PlaceSummary[]>;
+
+export interface SaveDeps {
+  resolveDestination?: DestinationResolver;
+  searchPlaces?: PlacesSearcher;
+}
+
 export interface CreateSaveResult {
   saved: SavedPlace;
   /** True when `clientId` matched a row this owner already has (answer 200). */
@@ -1181,6 +1200,27 @@ async function resolveQuietly(
   if (!resolve || lat == null || lng == null) return null;
   try {
     return await resolve(lat, lng);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Q3 A offer (#111 i2): an AREA note typed with no signal is searched for
+ * by its words near where it was typed, and the top hit is stored as
+ * `suggested_place`. Only then — a note typed online was already offered the
+ * Google rows and chose the note on purpose. No point, no searcher, no hit or
+ * a failed search: no suggestion, and the save is written all the same.
+ */
+async function suggestQuietly(
+  search: PlacesSearcher | undefined,
+  input: Pick<SavedPlaceCreate, "name" | "lat" | "lng" | "capturedOffline">,
+  anchor: SavedPlace["anchor"],
+) {
+  if (!search || !input.capturedOffline || anchor !== "area") return null;
+  if (input.lat == null || input.lng == null) return null;
+  try {
+    return suggestedPlaceFromSearch(await search(input.name, { lat: input.lat, lng: input.lng }));
   } catch {
     return null;
   }
@@ -1226,11 +1266,13 @@ async function upsertDestination(owner: string, d: ResolvedDestination) {
  * - **The destination is resolved** from the save's point when there is one and
  *   the route handed in a resolver. An area save's `areaLabel` falls back to
  *   the destination's name ("Bend, OR"), then to `region` (the W0 rule).
+ * - **An offline area note earns a place suggestion** (Q3 A, i2): see
+ *   `suggestQuietly`.
  */
 export async function createSave(
   owner: string,
   input: SavedPlaceCreate,
-  deps: { resolveDestination?: DestinationResolver } = {},
+  deps: SaveDeps = {},
 ): Promise<CreateSaveResult> {
   if (input.clientId) {
     const existing = await saveByClientId(owner, input.clientId);
@@ -1242,14 +1284,17 @@ export async function createSave(
     capturedAt,
     anchor: explicitAnchor,
     areaLabel: explicitLabel,
-    // Read by i2's offline place suggestion; there is no column for it.
+    // Read by suggestQuietly below; there is no column for it.
     capturedOffline,
     ...fields
   } = input;
   void capturedOffline;
   const anchor = explicitAnchor ?? saveAnchorOf(input).anchor;
 
-  const resolved = await resolveQuietly(deps.resolveDestination, input.lat, input.lng);
+  const [resolved, suggestedPlace] = await Promise.all([
+    resolveQuietly(deps.resolveDestination, input.lat, input.lng),
+    suggestQuietly(deps.searchPlaces, input, anchor),
+  ]);
   const destination = resolved ? await upsertDestination(owner, resolved) : null;
   const areaLabel =
     anchor === "area" ? (explicitLabel ?? destination?.name ?? input.region ?? null) : null;
@@ -1263,6 +1308,7 @@ export async function createSave(
       areaLabel,
       clientId: clientId ?? null,
       destinationId: destination?.id ?? null,
+      suggestedPlace,
       ...(capturedAt ? { createdAt: new Date(capturedAt) } : {}),
     })
     .onConflictDoNothing({ target: [saves.ownerId, saves.clientId] })
@@ -1297,14 +1343,63 @@ const SAVED_PLACE_COLUMNS = { notes: "note" } as const;
  * so the want → been graduation is a shared-voice change like any other and is
  * logged as one.
  */
+/** Thrown by an upgrade on a save that has no suggestion to take (→ 409). */
+export const NO_SUGGESTION = "no suggestion";
+
+/**
+ * The columns `upgradeToSuggested` writes (#111 i2 · Q3 A): the suggestion's
+ * name, Place ID and point, the anchor area → place, and the destination
+ * RE-RESOLVED from the new point. When the resolver answers nothing (no key,
+ * a Google failure, nothing within 25 mi) the save keeps the destination it
+ * had — the suggestion was searched for near that very point, so the town it
+ * was typed in is still the honest answer. Null when the row is not this
+ * owner's; throws NO_SUGGESTION when there is nothing to take.
+ */
+async function upgradeColumns(
+  owner: string,
+  scope: ReturnType<typeof and>,
+  resolve: DestinationResolver | undefined,
+) {
+  const [row] = await db
+    .select({ suggestedPlace: saves.suggestedPlace, destinationId: saves.destinationId })
+    .from(saves)
+    .where(scope);
+  if (!row) return null;
+  const sp = row.suggestedPlace;
+  if (!sp) throw new Error(NO_SUGGESTION);
+  const resolved = await resolveQuietly(resolve, sp.lat, sp.lng);
+  const destination = resolved ? await upsertDestination(owner, resolved) : null;
+  return {
+    name: sp.name,
+    googlePlaceId: sp.googlePlaceId,
+    lat: sp.lat,
+    lng: sp.lng,
+    anchor: "place" as const,
+    areaLabel: null,
+    destinationId: destination?.id ?? row.destinationId,
+    suggestedPlace: null,
+  };
+}
+
 export async function updateSavedPlaceFields(
   owner: string,
   placeId: string,
-  patch: SavedPlacePatch,
+  input: SavedPlacePatch,
   actor: string,
+  deps: Pick<SaveDeps, "resolveDestination"> = {},
 ): Promise<boolean> {
-  if (patch.tripId !== undefined) await ownedTripTitle(owner, patch.tripId);
+  const { upgradeToSuggested, suggestedPlace, ...fields } = input;
+  if (fields.tripId !== undefined) await ownedTripTitle(owner, fields.tripId);
   const scope = and(eq(saves.id, placeId), eq(saves.ownerId, owner));
+  // The two suggestion actions are not columns: they become the columns they
+  // write, applied over whatever else the body named.
+  let patch: Partial<typeof saves.$inferInsert> = { ...fields };
+  if (suggestedPlace === null) patch.suggestedPlace = null;
+  if (upgradeToSuggested) {
+    const up = await upgradeColumns(owner, scope, deps.resolveDestination);
+    if (!up) return false;
+    patch = { ...patch, ...up };
+  }
   if (!logs(patch, SAVED_PLACE_COLUMNS)) {
     const rows = await db
       .update(saves)

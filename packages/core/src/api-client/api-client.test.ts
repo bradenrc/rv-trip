@@ -269,6 +269,22 @@ describe("createApiClient — capture (#111)", () => {
     await expect(api429.places.search("chandel")).resolves.toEqual(limited);
   });
 
+  it("PATCHes the Saves tab's upgrade and dismiss, answering nothing (#111 i2)", async () => {
+    const f = fakeFetch(204);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.places.patch("s 1", { upgradeToSuggested: true })).resolves.toBeUndefined();
+    await api.places.patch("s1", { suggestedPlace: null });
+    expect(f.calls[0]!.url).toBe("http://x/api/places/s%201");
+    expect(f.calls[0]!.init.method).toBe("PATCH");
+    expect(JSON.parse(f.calls[0]!.init.body as string)).toEqual({ upgradeToSuggested: true });
+    expect(JSON.parse(f.calls[1]!.init.body as string)).toEqual({ suggestedPlace: null });
+  });
+
+  it("throws ApiError 409 when there was no suggestion to take", async () => {
+    const api = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(409, { error: "no suggestion" }).fn });
+    await expect(api.places.patch("s1", { upgradeToSuggested: true })).rejects.toMatchObject({ status: 409 });
+  });
+
   it("DELETEs a save for Undo", async () => {
     const f = fakeFetch(204);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });

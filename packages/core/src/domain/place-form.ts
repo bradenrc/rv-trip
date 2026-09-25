@@ -208,8 +208,24 @@ export function applySavedPlacePatch(
 ): SavedPlace {
   const keep = <T>(v: T | undefined, current: T): T => (v === undefined ? current : v);
   const status = keep(patch.status, p.status);
+  // #111 Q3 A: the upgrade copies the suggestion onto the row, the way the
+  // server does. The re-resolved destination is the server's alone — a
+  // client refetches for it (PATCH answers 204, no body).
+  const up = patch.upgradeToSuggested && p.suggestedPlace ? p.suggestedPlace : null;
+  if (up) {
+    const upgraded = applySavedPlacePatch(p, {
+      ...patch,
+      upgradeToSuggested: undefined,
+      name: up.name,
+      googlePlaceId: up.googlePlaceId,
+      lat: up.lat,
+      lng: up.lng,
+    }, tripName);
+    return { ...upgraded, anchor: "place", areaLabel: null, suggestedPlace: null };
+  }
   return {
     ...p,
+    suggestedPlace: patch.suggestedPlace === null ? null : p.suggestedPlace,
     place: {
       name: keep(patch.name, p.place.name),
       lat: keep(patch.lat, p.place.lat),

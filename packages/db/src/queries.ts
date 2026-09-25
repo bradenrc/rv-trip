@@ -559,6 +559,8 @@ export function mapSavedPlaceRow(
     anchor: SavedPlace["anchor"];
     areaLabel: string | null;
     suggestedPlace: SavedPlace["suggestedPlace"];
+    /** Absent reads as null, for a caller that selected columns (#111 i2). */
+    createdAt?: Date | null;
     /** The joined `destinations` row (#111) — null when unanchored. Absent
      * (undefined) reads as null too, for a caller that did not join it. */
     destination?: SaveDestinationRow | null;
@@ -583,6 +585,7 @@ export function mapSavedPlaceRow(
     areaLabel: r.areaLabel,
     destination: r.destination ? mapSaveDestination(r.destination) : null,
     suggestedPlace: r.suggestedPlace ?? null,
+    createdAt: r.createdAt ? r.createdAt.toISOString() : null,
   };
 }
 

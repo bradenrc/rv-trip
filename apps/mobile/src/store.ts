@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import type { Trip, TripSummary } from "@rv-trip/core";
+import type { SavedPlace, SavedPlacePatch, Trip, TripSummary } from "@rv-trip/core";
+import { applySavedPlacePatch } from "@rv-trip/core";
 import type { TripBundle } from "@rv-trip/core/api-client";
 import { api } from "./api";
 
@@ -11,11 +12,13 @@ import { api } from "./api";
  */
 interface State {
   trips: TripSummary[] | null;
+  /** The Saves tab's library, both shelves (#111 i2). */
+  saves: SavedPlace[] | null;
   bundles: Record<string, TripBundle>;
   errors: Record<string, string>;
 }
 
-let state: State = { trips: null, bundles: {}, errors: {} };
+let state: State = { trips: null, saves: null, bundles: {}, errors: {} };
 const listeners = new Set<() => void>();
 
 function set(next: State) {
@@ -72,4 +75,43 @@ export function useBundle(id: string) {
   }, [id, bundle]);
   const reload = useCallback(() => loadBundle(id), [id]);
   return { bundle, error, reload };
+}
+
+// ── Saves (#111 i2) ──────────────────────────────────────────────────────────
+
+export async function loadSaves(): Promise<void> {
+  try {
+    const saves = await api.places.list();
+    set({ ...state, saves, errors: { ...state.errors, saves: "" } });
+  } catch (e) {
+    set({ ...state, errors: { ...state.errors, saves: message(e) } });
+  }
+}
+
+/**
+ * PATCH a save — the suggestion strip's upgrade and Dismiss. The row changes
+ * at once through the web's own echo (`applySavedPlacePatch`); the PATCH
+ * answers 204 with no body, so the library is then refetched for what only
+ * the server knows (the upgrade's re-resolved destination). A refused write
+ * is undone by the same refetch.
+ */
+export async function patchSave(id: string, patch: SavedPlacePatch): Promise<void> {
+  if (state.saves) {
+    set({ ...state, saves: state.saves.map((s) => (s.id === id ? applySavedPlacePatch(s, patch) : s)) });
+  }
+  try {
+    await api.places.patch(id, patch);
+  } finally {
+    await loadSaves();
+  }
+}
+
+export function useSaves() {
+  const saves = useSyncExternalStore(subscribe, () => state.saves);
+  const error = useSyncExternalStore(subscribe, () => state.errors.saves ?? "");
+  useEffect(() => {
+    if (saves === null) void loadSaves();
+  }, [saves]);
+  const reload = useCallback(() => loadSaves(), []);
+  return { saves, error, reload };
 }

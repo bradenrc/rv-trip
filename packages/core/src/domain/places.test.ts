@@ -318,6 +318,7 @@ const libraryRow = (name: string, lat: number | null, lng: number | null): Saved
   areaLabel: null,
   destination: null,
   suggestedPlace: null,
+  createdAt: null,
 });
 
 describe("buildSuggestionShelf", () => {

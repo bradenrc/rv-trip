@@ -148,3 +148,145 @@ Item 1 of 4 (plan.json `i1`, issues #100 · #101). Built against the signed wire
   web (`Tests 293 passed`, run against real Postgres on :5433 and not skipped), ui (`Tests 42 passed`), the mobile
   and db typechecks, and lint.
 - `npx drizzle-kit generate` (packages/db) → `No schema changes, nothing to migrate`.
+
+---
+
+# #111 · i2 — Saves tab: destination shelves, region headers, and the offline-text upgrade
+
+Item 2 of 4 (plan.json `i2`, #101). Built against the signed wireframe (`452aa81:docs/design/111/index.html`,
+"The Saves tab" and "Contracts"). No schema change, so there's no migration: `saves.suggested_place`,
+`destinations.region/lat/lng` all landed in i1.
+
+## What changed
+
+### Core (packages/core)
+- `capture/shelves.ts` (new; exported from `index.ts`):
+  - `savesShelves(saves, status)` (`:58`) returns `{ regions: [{ region, count, destinations: [{ destination, saves }] }], unanchored }`.
+    Regions are ordered by count descending, with ties broken by region name. Destinations are alphabetical
+    (`localeCompare`, base sensitivity) and grouped by destination **id**. Saves are newest first by `createdAt`,
+    and a null `createdAt` sorts last. `destination: null` goes to `unanchored`, also newest first.
+  - `shelfCounts` (`:85`) gives the segment counts.
+  - `saveRowLine` (`:114`) builds the row's second line. `source` wins ("Heard from Jane & Rick"). Otherwise it
+    uses the anchor: pin gives "pin · 43.0500, −124.3300" (the i1 `formatCoords`); area gives
+    "note · Bandon area"; place gives "Restaurant · Bend, OR".
+  - `suggestedPlaceFromSearch` (`:131`) takes the top hit, with the capture sheet's `placeRowSubline`.
+  - `suggestionStrip` (`:145`) returns the copy "Did you mean {name}?", the subline, and "Dismiss".
+- `domain/types.ts:571`: the read shape `savedPlace` gains `createdAt` (ISO, nullable, defaulted).
+  `:676` `savedPlacePatch` gains `upgradeToSuggested: z.literal(true)` and `suggestedPlace: z.null()`, both
+  optional and **PATCH-only** (`savedPlaceCreate` strips them; a test covers this). A client can clear a
+  suggestion but can never write one (400).
+- `domain/place-form.ts:214`: `applySavedPlacePatch` also echoes a dismiss (suggestion goes to null) and an
+  upgrade (copies name, place ID and point; anchor becomes place; label and suggestion go to null). The
+  destination is left for the refetch.
+- api-client `places.patch(id, patch)` (`api-client/index.ts:224`) resolves to void on a 204. A 409 throws
+  `ApiError`.
+- `seeds/saves.ts` (new): `seedDestinations()` and `seedSaves()` as pure data (re-exported from `seeds/index.ts`),
+  judged in `seeds/seeds.test.ts`.
+
+### DB (packages/db)
+- `mutations.ts:1170` `SaveDeps { resolveDestination?, searchPlaces? }`.
+- `:1215` `suggestQuietly`: for **`capturedOffline` + anchor `area` + a point**, it runs a text search for the
+  save's name near the capture point and stores the top hit in `saves.suggested_place`. With no searcher, no
+  hits, or a thrown error, there's no suggestion, and the save is still written. It runs in parallel with the
+  resolver (`:1296`).
+- `:1347` `NO_SUGGESTION`, `:1358` `upgradeColumns`, `:1384` `updateSavedPlaceFields(owner, id, patch, actor, deps)`:
+  - the two suggestion keys are split off before `.set()`;
+  - `suggestedPlace: null` becomes the column write;
+  - `upgradeToSuggested` reads the row's suggestion (owner-scoped) and copies name, `googlePlaceId`, lat and lng.
+    It sets anchor `place` and `areaLabel` null, **re-resolves the destination from the suggestion's point**
+    through the injected resolver (then upserts it), and clears `suggested_place`. With no suggestion it throws
+    `NO_SUGGESTION`.
+- `queries.ts:588`: `mapSavedPlaceRow` carries `createdAt`.
+- `seed.ts`: saves and destinations are now written from `@rv-trip/core/seeds`. The seed deletes the household's
+  destinations and re-inserts them, then inserts the saves with `destination_id`, `suggested_place` and
+  `created_at`.
+- `testing/fixtures.ts`: `fx.savedPlace` accepts `anchor`, `areaLabel`, `destinationId` and `suggestedPlace`.
+  There's a new `fx.destination`.
+
+### Web API (apps/web)
+- `api/places/route.ts:31`: POST also injects `searchPlaces: provider.search`. The stub returns `[]`, so no
+  suggestion is made when there's no key.
+- `api/places/[id]/route.ts:47`: PATCH resolves `placesProvider()` and injects its `resolveDestination`. It still
+  answers **204 with no body**. `NO_SUGGESTION` answers **409** (`:51`). Every other throw keeps the shipped
+  "trip not found" 404.
+
+### Phone (apps/mobile)
+- `src/store.ts:82` `loadSaves`, `:98` `patchSave` (an optimistic `applySavedPlacePatch`, then the PATCH, then
+  **always refetch**, because the 204 carries no destination), and `:109` `useSaves`.
+- `app/(tabs)/saves.tsx` replaces the i1 placeholder:
+  - the header;
+  - the amber queue line (kept from i1);
+  - the wireframe's `.seg` (a full-width two-half control on border-hi, the chosen half on navy-soft, mono
+    counts);
+  - region `.grp` headers;
+  - `.dest` headings with a mono count;
+  - `.rows` blocks (a 26 px `CategoryTile`, the name at 13/700, the mono line from `saveRowLine`, and `Stars` at
+    10 in rv-accent on Been rows);
+  - the rv-info `.suggest` strip after the rows block for each save with a suggestion (tapping the strip
+    upgrades, the inner "Dismiss" dismisses);
+  - Unanchored last, with the dashed `.outside` note, whose copy is verbatim.
+  - The list reloads on focus, when the queue drains, and on pull-to-refresh.
+
+## Vet findings in scope for i2, and how each was addressed
+- **MED: schema split.** `upgradeToSuggested` and `suggestedPlace` are explicit PATCH-only keys on
+  `savedPlacePatch`. `updateSavedPlaceFields` splits them off, so they never reach `.set()` raw. The capture keys
+  are still stripped from PATCH (i1). "PATCH answers 204, refetch": `patchSave` always calls `loadSaves()`
+  afterwards.
+- **MED: createdAt ordering.** I took the first option: `createdAt` was added to `savedPlace` and to
+  `mapSavedPlaceRow`, so `savesShelves` sorts on the real value and doesn't depend on the list query's order.
+- **MED: layering.** The offline text search is injected (`SaveDeps.searchPlaces`) from the route, like the
+  resolver. packages/db has no provider.
+- **MED: illustrative numbers.** The unit fixture is exactly the wireframe's Want list (Oregon 8, Costa Rica 1,
+  Unanchored 2 = 11). I also seeded the drawn Bandon and Bend saves that the plan's seed list left out, so the
+  walk's Want count is 11 and the strip has a row to show (see below). The i3 frame counts are not walk
+  expectations here.
+- The HIGH finding on destination coordinates was i1's. The upgrade path uses those coordinates: it stores the
+  new destination's lat and lng through the same upsert.
+
+## Decisions, defaults, and flags for the walk and qa
+- **Seed reshaped to the wireframe** (the walk sees Want **11** and Been **4**):
+  - added: Fort Stevens, Nehalem Bay, Beverly Beach (Jane & Rick), Cape Lookout (Marcy), El Chandelier/San José
+    (Marcy), "great BLM camp spot" (Bandon pin), "chandel" (Bandon area note **with the El Chandelier
+    suggestion**), "taco truck Dana said" (Bend note), and the Alvord pin (unanchored);
+  - kept: Kalaloch (unanchored), Sunny's (Bend), and the four been saves;
+  - **removed** Crater Lake Rim Drive and Flying J (Ontario), which would have made the drawn 11 into 13;
+  - Old Faithful anchors to "West Yellowstone, MT · Montana" (19 mi away). Fishing Bridge is unanchored.
+  - Destinations use `seed_loc_*` place IDs, and the suggestion uses `seed_place_el_chandelier_coos_bay`
+    (the seed has no key). **Upgrading "chandel" at walk copies that fake ID onto the row.** With no key the
+    re-resolve returns null, so the save stays under Bandon, OR and moves to the place anchor. That's expected
+    in a keyless walk.
+- **Sunny's row reads "Heard from Forum tip"**, not the wireframe's "Restaurant · Bend, OR". The seed keeps its
+  real source and pin anchor rather than inventing a Place ID. The "Restaurant · Bend, OR" form comes from
+  `saveRowLine` for any place-anchored save with no source, and is unit-tested.
+- **Upgrade with no destination back** (no key, a Google error, or nothing within 25 mi): the save **keeps its
+  current destination**, because the suggestion was searched for near that point. This is a default; qa should
+  check it's acceptable.
+- **Upgrade keeps `type`.** `suggested_place` has no type (design shape {name, googlePlaceId, lat, lng, subline}),
+  so an upgraded "chandel" keeps the Other tile.
+- **Invented copy/marks:** "Place" is the kind word for `other` in the place line. The strip glyph is ✦ (the kit
+  has no spark icon). There's no empty-shelf copy: an empty shelf shows only the segment. The Been row's
+  second line is the Stars **instead of** the anchor line; I couldn't find a Been frame to confirm this against.
+- **Tiles:** the kit's two-letter `CategoryTile` is used, so notes and pins show "··" rather than the
+  wireframe's note or pin glyph.
+- A strip is drawn **after its destination's rows block**, as the wireframe draws it (outside the bordered
+  block), rather than inside the row.
+- The 409 for an upgrade with nothing to take is new; the design doesn't specify it.
+- **Claims for qa to check:**
+  - an offline area note POSTed with lat/lng stores the top hit and answers it in the 201;
+  - an online note or an offline pin triggers no search;
+  - `{upgradeToSuggested:true}` gives anchor place, the Place ID and point, a re-resolved destination and a
+    null suggestion;
+  - `{suggestedPlace:null}` clears only the suggestion;
+  - the seed's Want shelf reads Oregon 8 (Bandon, Bend, Nehalem, Newport, Tillamook, Warrenton), then
+    Costa Rica 1, then Unanchored 2.
+- **Render-required at walk:** the whole `saves.tsx` screen (fonts and spacing against the pixel target, the
+  dashed border on iOS, nested Pressable Dismiss inside the strip), and reload-on-focus.
+
+## Checks run (i2)
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. That covers core
+  (`Tests 1106 passed`), web (`Tests 303 passed`, against real Postgres on :5433), ui (`Tests 42 passed`), and
+  the mobile and db typechecks.
+- Seed smoke test on a throwaway DB. I ran `createTestDatabase()` (`rvtrip_test_t1k`), then `tsx src/seed.ts`,
+  which printed `Seeded 6 trips + 15 saves.`. A psql readback showed Oregon 8 / Costa Rica 1 / Unanchored 2 on
+  Want, 4 Been, and one suggestion on "chandel". I dropped the DB afterwards.
+- No `drizzle-kit generate` this item: no schema change.

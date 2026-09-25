@@ -1,7 +1,7 @@
 import "./load-env";
 import { db, schema } from "./index";
 import { sql } from "drizzle-orm";
-import { seedTrips } from "@rv-trip/core/seeds";
+import { seedDestinations, seedSaves, seedTrips } from "@rv-trip/core/seeds";
 import type { Trip } from "@rv-trip/core";
 
 /**
@@ -41,115 +41,53 @@ async function main() {
   const trips = seedTrips();
   for (const t of trips) await writeTrip(t, ids);
   await db.execute(sql`delete from ${schema.saves} where ${schema.saves.ownerId} = ${OWNER}`);
+  await db.execute(
+    sql`delete from ${schema.destinations} where ${schema.destinations.ownerId} = ${OWNER}`,
+  );
 
-  // ── Places library: the cross-trip queue + archive ────────────────────────
-  // "want" carries a source (where the tip came from); "been" carries a rating
-  // and the trip it was visited on.
-  await db.insert(schema.saves).values([
-    {
+  // ── Saves: the cross-trip queue + archive, grouped by destination (#111 i2) ─
+  // PURE DATA in @rv-trip/core/seeds (saves.ts), judged in seeds.test.ts — the
+  // walk's Saves tab. Destinations first, so each save can point at its row.
+  const destIds = new Map<string, string>();
+  const dests = await db
+    .insert(schema.destinations)
+    .values(
+      seedDestinations().map((d) => ({
+        ownerId: OWNER,
+        googlePlaceId: d.googlePlaceId,
+        name: d.name,
+        region: d.region,
+        lat: d.lat,
+        lng: d.lng,
+      })),
+    )
+    .returning();
+  for (const d of seedDestinations()) {
+    destIds.set(d.key, dests.find((r) => r.googlePlaceId === d.googlePlaceId)!.id);
+  }
+  const saves = seedSaves();
+  await db.insert(schema.saves).values(
+    saves.map((s) => ({
       ownerId: OWNER,
-      // Every library row carries lat/lng and no Place ID → a pin (#110 §5).
-      anchor: "pin",
-      name: "Kalaloch Campground",
-      region: "Olympic NP, WA",
-      lat: 47.6118,
-      lng: -124.3762,
-      type: "campground",
-      status: "want",
-      source: "Jane & Rick",
-      note: "Bluff sites right over the beach — they said book site A15 for the sunset.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "Sunny's Smokehouse",
-      region: "Bend, OR",
-      lat: 44.0582,
-      lng: -121.3153,
-      type: "dining",
-      status: "want",
-      source: "Forum tip",
-      note: "Brisket sells out by 2pm. Big lot, easy pull-through parking for the rig.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "Crater Lake Rim Drive",
-      region: "Crater Lake NP, OR",
-      lat: 42.9446,
-      lng: -122.1090,
-      type: "activity",
-      status: "want",
-      source: "Marcy",
-      note: "Do it clockwise early; east rim closes late season. Watanabe overlook is the one.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "Flying J — Ontario",
-      region: "Ontario, OR",
-      lat: 44.0266,
-      lng: -116.9629,
-      type: "transport",
-      status: "want",
-      source: "Range planning",
-      note: "Good midpoint fuel + dump on the I-84 run west. Wide lanes.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "South Beach State Park",
-      region: "Newport, OR",
-      lat: 44.6094,
-      lng: -124.0631,
-      type: "campground",
-      status: "been",
-      rating: 5,
-      tripId: ids.get("trip_coast")!,
-      note: "Yurts are the move — book early next time. Sunset walks were the whole trip.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "Local Ocean Seafoods",
-      region: "Newport, OR",
-      lat: 44.6297,
-      lng: -124.0526,
-      type: "dining",
-      status: "been",
-      rating: 5,
-      tripId: ids.get("trip_coast")!,
-      note: "Bayfront, watch the boats. Go before 6 or wait an hour.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "Fishing Bridge RV Park",
-      region: "Yellowstone NP, WY",
-      lat: 44.5647,
-      lng: -110.3735,
-      type: "campground",
-      status: "been",
-      rating: 4,
-      tripId: ids.get("trip_ystone")!,
-      note: "Only full-hookup in-park. Worth the early reservation; tight but level.",
-    },
-    {
-      ownerId: OWNER,
-      anchor: "pin",
-      name: "Old Faithful Loop",
-      region: "Yellowstone NP, WY",
-      lat: 44.4605,
-      lng: -110.8281,
-      type: "activity",
-      status: "been",
-      rating: 4,
-      tripId: ids.get("trip_ystone")!,
-      note: "Beat the crowd — first eruption after opening. Biscuit Basin boardwalk was quieter.",
-    },
-  ]);
+      name: s.name,
+      region: s.region,
+      anchor: s.anchor,
+      areaLabel: s.areaLabel,
+      lat: s.lat,
+      lng: s.lng,
+      destinationId: s.destination === null ? null : destIds.get(s.destination)!,
+      type: s.type,
+      status: s.status,
+      source: s.source,
+      rating: s.rating,
+      tripId: s.trip === null ? null : ids.get(s.trip)!,
+      note: s.note,
+      suggestedPlace: s.suggestedPlace,
+      createdAt: new Date(s.createdAt),
+    })),
+  );
 
-  console.log(`Seeded ${trips.length} trips + 8 saves.`);
+  console.log(`Seeded ${trips.length} trips + ${saves.length} saves.`);
   process.exit(0);
 }
 
