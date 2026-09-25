@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { orderedStops, orderedPairs, routeCacheKey } from "./route-order";
+import { orderedStops, orderedPairs, drivePairs, routeCacheKey } from "./route-order";
+import { reconcileSegments } from "./segments";
 import type { Trip, Stop } from "./types";
 
 function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
@@ -81,6 +82,10 @@ function seedTrip(): Trip {
         ],
       },
     ],
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    segments: [],
   };
 }
 
@@ -151,6 +156,34 @@ describe("orderedPairs", () => {
     const trip = seedTrip();
     trip.legs = [{ ...trip.legs[0]!, stops: [trip.legs[0]!.stops[0]!] }];
     expect(orderedPairs(trip)).toEqual([]);
+  });
+});
+
+describe("pair modes + drivePairs (#110 §6)", () => {
+  it("reads each pair's mode off its segment", () => {
+    const trip = seedTrip();
+    trip.segments = reconcileSegments(trip).map((s) =>
+      s.fromStopId === "newport" ? { ...s, mode: "ferry" as const } : s,
+    );
+    expect(orderedPairs(trip).map((p) => p.mode)).toEqual(["drive", "ferry", "drive"]);
+  });
+
+  it("falls back to the trip's default mode for a pair with no row yet", () => {
+    const trip = { ...seedTrip(), defaultMode: "fly" as const, segments: [] };
+    expect(orderedPairs(trip).every((p) => p.mode === "fly")).toBe(true);
+    expect(drivePairs(trip)).toEqual([]);
+  });
+
+  it("drivePairs keeps only the driven hops — map arcs keep them all", () => {
+    const trip = seedTrip();
+    trip.segments = reconcileSegments(trip).map((s) =>
+      s.fromStopId === "astoria" ? { ...s, mode: "fly" as const } : s,
+    );
+    expect(drivePairs(trip).map((p) => [p.fromStopId, p.toStopId])).toEqual([
+      ["newport", "bend"],
+      ["bend", "crater"],
+    ]);
+    expect(orderedPairs(trip)).toHaveLength(3);
   });
 });
 

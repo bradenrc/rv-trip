@@ -11,7 +11,9 @@ import {
   reservations,
   rigs,
   routes,
-  savedPlaces,
+  saves,
+  travelSegments,
+  destinations,
   stops,
   trips,
   userPrefs,
@@ -35,6 +37,6 @@ import {
  */
 export async function truncateAll(): Promise<void> {
   await db.execute(
-    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${savedPlaces}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${changeLog}, ${households}, ${householdMembers}, ${householdInvites} restart identity cascade`,
+    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${saves}, ${travelSegments}, ${destinations}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${changeLog}, ${households}, ${householdMembers}, ${householdInvites} restart identity cascade`,
   );
 }

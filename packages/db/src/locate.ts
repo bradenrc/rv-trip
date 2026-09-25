@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { LocateRow, LocateStore, LocateTarget, PlaceSummary } from "@rv-trip/core";
 import { db } from "./index";
-import { ideas, legs, savedPlaces, stops, trips } from "./schema";
+import { ideas, legs, saves, stops, trips } from "./schema";
 
 /**
  * The database half of Locate (docs/design/41 §6). The decision tree — the cap,
@@ -28,7 +28,7 @@ import { ideas, legs, savedPlaces, stops, trips } from "./schema";
 /** A stop is coordless when either half of the pair is missing — the same test
  * `hasCoords` makes in the domain. */
 const coordlessStop = or(isNull(stops.lat), isNull(stops.lng));
-const coordlessPlace = or(isNull(savedPlaces.lat), isNull(savedPlaces.lng));
+const coordlessPlace = or(isNull(saves.lat), isNull(saves.lng));
 const coordlessIdea = or(isNull(ideas.lat), isNull(ideas.lng));
 
 /** The leg-through-trip owner scope, mirrored from mutations.ts (which keeps
@@ -63,9 +63,9 @@ async function loadStops(owner: string, ids: string[]): Promise<LocateTarget[]> 
 async function loadPlaces(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
   const rows = await db
-    .select({ id: savedPlaces.id, name: savedPlaces.name, region: savedPlaces.region })
-    .from(savedPlaces)
-    .where(and(eq(savedPlaces.ownerId, owner), inArray(savedPlaces.id, ids), coordlessPlace));
+    .select({ id: saves.id, name: saves.name, region: saves.region })
+    .from(saves)
+    .where(and(eq(saves.ownerId, owner), inArray(saves.id, ids), coordlessPlace));
   return rows.map((r) => ({ kind: "place" as const, id: r.id, name: r.name, region: r.region }));
 }
 
@@ -124,9 +124,9 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
       .innerJoin(trips, eq(legs.tripId, trips.id))
       .where(and(eq(trips.ownerId, owner), coordlessStop)),
     db
-      .select({ id: savedPlaces.id, name: savedPlaces.name, region: savedPlaces.region })
-      .from(savedPlaces)
-      .where(and(eq(savedPlaces.ownerId, owner), coordlessPlace)),
+      .select({ id: saves.id, name: saves.name, region: saves.region })
+      .from(saves)
+      .where(and(eq(saves.ownerId, owner), coordlessPlace)),
     db
       .select({ id: ideas.id, name: ideaSearchText })
       .from(ideas)
@@ -171,14 +171,14 @@ async function setSavedPlaceCoords(
   found: PlaceSummary,
 ): Promise<boolean> {
   const rows = await db
-    .update(savedPlaces)
+    .update(saves)
     .set({
       lat: found.location!.lat,
       lng: found.location!.lng,
       googlePlaceId: found.googlePlaceId,
     })
-    .where(and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner)))
-    .returning({ id: savedPlaces.id });
+    .where(and(eq(saves.id, placeId), eq(saves.ownerId, owner)))
+    .returning({ id: saves.id });
   return rows.length > 0;
 }
 

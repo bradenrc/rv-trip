@@ -6,7 +6,8 @@ import {
   reservations,
   rigs,
   routes,
-  savedPlaces,
+  saves,
+  travelSegments,
   stops,
   trips,
   userPrefs,
@@ -46,8 +47,9 @@ export type LegRow = typeof legs.$inferSelect;
 export type StopRow = typeof stops.$inferSelect;
 export type IdeaRow = typeof ideas.$inferSelect;
 export type ReservationRow = typeof reservations.$inferSelect;
-export type SavedPlaceRow = typeof savedPlaces.$inferSelect;
+export type SavedPlaceRow = typeof saves.$inferSelect;
 export type RigRow = typeof rigs.$inferSelect;
+export type SegmentRow = typeof travelSegments.$inferSelect;
 export type RouteRow = typeof routes.$inferSelect;
 export type UserPrefsRow = typeof userPrefs.$inferSelect;
 
@@ -261,7 +263,7 @@ async function insertReservation(
 
 async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceRow> {
   const [row] = await db
-    .insert(savedPlaces)
+    .insert(saves)
     .values({
       ownerId: p.owner ?? DEV_OWNER,
       name: p.name ?? "Cape Lookout State Park",
@@ -269,6 +271,14 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
       lat: p.lat ?? null,
       lng: p.lng ?? null,
       googlePlaceId: p.googlePlaceId ?? null,
+      // The W0 anchor rule createSave applies (#110 §5).
+      anchor: p.googlePlaceId ? "place" : p.lat != null && p.lng != null ? "pin" : "area",
+      areaLabel:
+        p.googlePlaceId || (p.lat != null && p.lng != null)
+          ? null
+          : p.region === undefined
+            ? "Tillamook, OR"
+            : p.region,
       type: p.type ?? "campground",
       status: p.status ?? "want",
       note: p.note ?? null,
@@ -370,6 +380,37 @@ async function ageCachedRoute(key: string, days: number): Promise<void> {
     .where(eq(routes.key, key));
 }
 
+/** A travel segment (#110). Fixtures write stops directly, so a trip built
+ * here has NO hops until a mutation reconciles it — this is how a test plants
+ * a timed one (a flight) to reconcile or conflict against. */
+async function insertSegment(p: {
+  tripId: string;
+  fromStopId: string | null;
+  toStopId: string | null;
+  mode?: "drive" | "fly" | "ferry";
+  departAt?: string | null;
+  arriveAt?: string | null;
+  departTz?: string | null;
+  arriveTz?: string | null;
+  sortOrder?: number;
+}): Promise<SegmentRow> {
+  const [row] = await db
+    .insert(travelSegments)
+    .values({
+      tripId: p.tripId,
+      fromStopId: p.fromStopId,
+      toStopId: p.toStopId,
+      mode: p.mode ?? "drive",
+      departAt: p.departAt ? new Date(p.departAt) : null,
+      arriveAt: p.arriveAt ? new Date(p.arriveAt) : null,
+      departTz: p.departTz ?? null,
+      arriveTz: p.arriveTz ?? null,
+      sortOrder: p.sortOrder ?? 0,
+    })
+    .returning();
+  return row!;
+}
+
 /** A `user_prefs` row. Every preference is optional — omitting one is the
  * "never chosen" null the product default falls back to. */
 async function insertPrefs(p: {
@@ -402,6 +443,7 @@ export const fx = {
   idea: insertIdea,
   reservation: insertReservation,
   savedPlace: insertSavedPlace,
+  segment: insertSegment,
   rig: insertRig,
   pacificNorthwestLoop,
 };
@@ -432,8 +474,16 @@ export const read = {
     const [row] = await db.select().from(reservations).where(eq(reservations.id, id));
     return row ?? null;
   },
+  /** A trip's hops, in journey order. */
+  async segments(tripId: string): Promise<SegmentRow[]> {
+    return db
+      .select()
+      .from(travelSegments)
+      .where(eq(travelSegments.tripId, tripId))
+      .orderBy(asc(travelSegments.sortOrder));
+  },
   async savedPlace(id: string): Promise<SavedPlaceRow | null> {
-    const [row] = await db.select().from(savedPlaces).where(eq(savedPlaces.id, id));
+    const [row] = await db.select().from(saves).where(eq(saves.id, id));
     return row ?? null;
   },
   /** The ROW, not the payload: `RigProfile` carries no timestamp (C3), so the
@@ -500,8 +550,8 @@ export const read = {
   async countSavedPlaces(owner: string): Promise<number> {
     const [row] = await db
       .select({ n: count() })
-      .from(savedPlaces)
-      .where(eq(savedPlaces.ownerId, owner));
+      .from(saves)
+      .where(eq(saves.ownerId, owner));
     return Number(row!.n);
   },
   async countRigs(owner: string): Promise<number> {

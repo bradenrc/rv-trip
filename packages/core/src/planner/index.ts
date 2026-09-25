@@ -11,8 +11,10 @@ import {
   type IsoDate,
   type Place,
   type ReservationType,
+  type TravelMode,
 } from "../domain/types";
-import { orderedLegStops, orderedPairs, routeCacheKey, type OrderedPair } from "../domain/route-order";
+import { drivePairs, orderedLegStops, routeCacheKey, type OrderedPair } from "../domain/route-order";
+import { withReconciledSegments } from "../domain/segments";
 import { hasCoords } from "../domain/bounds";
 import { NO_ROUTING_HASH } from "../domain/rig";
 import { DEFAULT_UNITS, type Units } from "../domain/units";
@@ -64,6 +66,12 @@ export interface TimelineBar {
   resCount: number;
   ideaCount: number;
   showMeta: boolean;
+  /**
+   * How the stop was ARRIVED at — its inbound segment's mode (#110 §2). `null`
+   * when nothing arrives (Greece's first Athens: no home base, no hop in), so
+   * the bar draws no navy edge.
+   */
+  arriveMode: TravelMode | null;
 }
 export interface TimelineLeg {
   id: string;
@@ -82,8 +90,16 @@ export interface FloatingStop {
   ideaCount: number;
   firstIdea: string | null;
 }
+/** One rhythm cell. `mode` is set on travel days only — the web centres a
+ * Plane/Ship on fly/ferry, native a ✈/⛴ text glyph. */
+export interface RhythmCell {
+  kind: DayKind;
+  color: string;
+  title: string;
+  mode?: TravelMode;
+}
 export interface TimelineModel {
-  rhythm: { kind: DayKind; color: string; title: string }[];
+  rhythm: RhythmCell[];
   ruler: { letter: string; label: string; weekStart: boolean }[];
   legs: TimelineLeg[];
   gaps: TimelineGap[];
@@ -98,33 +114,46 @@ export interface TimelineModel {
 /** The web paints the rhythm strip with these CSS variables; the native app
  * reads `kind` instead. Both are carried so neither client re-derives it. */
 const KIND_COLOR: Record<DayKind, string> = {
-  drive: "var(--color-rv-navy)",
+  travel: "var(--color-rv-navy)",
   stay: "var(--color-rv-green)",
   empty: "var(--color-rv-navy-soft)",
 };
 
+const MODE_LABEL: Record<TravelMode, string> = { drive: "Drive", fly: "Fly", ferry: "Ferry" };
+
 export function timelineModel(trip: Trip): TimelineModel {
   const stops = allStops(trip);
   const byId = stopMap(trip);
-  const { days, unscheduledStopIds } = deriveDays(trip, stops);
+  const { days, unscheduledStopIds } = deriveDays(trip, stops, trip.segments);
 
+  // A travel day belongs to the stop it ARRIVES at (the run rule below), so a
+  // day bound for home belongs to no stop and ends the bar before it.
   const cols = days.map((c, i) => ({
     index: i + 1,
     date: c.date,
     kind: c.kind as DayKind,
-    stopId: c.kind === "stay" ? c.stopId! : c.kind === "drive" ? c.toStopId! : null,
+    mode: c.mode,
+    stopId: c.kind === "stay" ? c.stopId! : c.kind === "travel" ? (c.toStopId ?? null) : null,
   }));
 
-  const rhythm = cols.map((c) => {
+  const rhythm = cols.map((c): RhythmCell => {
     const stop = c.stopId ? byId.get(c.stopId) : null;
-    const title =
-      c.kind === "drive"
-        ? `Drive → ${stop?.place.name ?? ""}`
-        : c.kind === "stay"
-          ? `Stay · ${stop?.place.name ?? ""}`
-          : "Open";
+    if (c.kind === "travel") {
+      const mode = c.mode ?? "drive";
+      return {
+        kind: c.kind,
+        color: KIND_COLOR[c.kind],
+        title: `${c.date} — ${MODE_LABEL[mode]} → ${stop ? stop.place.name : "home"}`,
+        mode,
+      };
+    }
+    const title = c.kind === "stay" ? `Stay · ${stop?.place.name ?? ""}` : "Open";
     return { kind: c.kind, color: KIND_COLOR[c.kind], title: `${c.date} — ${title}` };
   });
+
+  const arriveModeOf = new Map(
+    trip.segments.flatMap((s) => (s.toStopId === null ? [] : [[s.toStopId, s.mode] as const])),
+  );
 
   const ruler = cols.map((c, i) => {
     const day = Number(c.date.slice(8));
@@ -168,6 +197,7 @@ export function timelineModel(trip: Trip): TimelineModel {
           resCount,
           ideaCount,
           showMeta: rating > 0 || resCount > 0 || ideaCount > 0,
+          arriveMode: arriveModeOf.get(s.stopId) ?? null,
         };
       }),
   }));
@@ -434,7 +464,9 @@ function resolveDrives(
   // an emptied leg in between means the crossing is not always i → i + 1.
   const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
   const all: RouteDrive[] = [];
-  for (const pair of orderedPairs(trip)) {
+  // DRIVEN pairs only (#110 §6): a flight or a ferry has no road to route, no
+  // corridor to check and no miles on the rail.
+  for (const pair of drivePairs(trip)) {
     const drive = toDrive(pair, routes, routingHash, nav, units);
     all.push(drive);
     if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
@@ -540,7 +572,7 @@ export function routeSummary(
 ): RouteSummary {
   const stops = allStops(trip);
   const stopCost = (s: Stop) => s.reservations.reduce((x, r) => x + (r.cost ?? 0), 0);
-  const { days } = deriveDays(trip, stops);
+  const { days } = deriveDays(trip, stops, trip.segments);
   const openCount = days.filter((d) => d.kind === "empty").length;
   let gapCount = 0;
   days.forEach((d, i) => {
@@ -767,7 +799,7 @@ export function scheduleFloating(
 ): Trip {
   const dates = spanDates(trip, gap, nights);
   if (!dates) return trip;
-  return updateStop(trip, stopId, (s) => ({ ...s, ...dates }));
+  return withReconciledSegments(updateStop(trip, stopId, (s) => ({ ...s, ...dates })));
 }
 
 /** The dates a drop lands on, or null when there is nothing to land on. */
@@ -782,7 +814,7 @@ export interface PlannedDates {
  * and falls back to the trip's longest open run.
  */
 function spanDates(trip: Trip, gap: TimelineGap | null, nights: number): PlannedDates | null {
-  const { days } = deriveDays(trip, allStops(trip));
+  const { days } = deriveDays(trip, allStops(trip), trip.segments);
 
   let start: number;
   let runLen: number;
@@ -828,7 +860,7 @@ export function reorderFloating(
   targetId: string,
 ): Trip {
   if (draggedId === targetId) return trip;
-  return mapLegs(trip, (l) => {
+  return withReconciledSegments(mapLegs(trip, (l) => {
     if (l.id !== legId) return l;
     const scheduled = l.stops
       .filter(isScheduled)
@@ -846,11 +878,16 @@ export function reorderFloating(
       ...l,
       stops: l.stops.map((s) => ({ ...s, sortOrder: orderedIds.indexOf(s.id) })),
     };
-  });
+  }));
 }
 
 
 // ── leg + stop structure (pure; return a new Trip) ─────────────────────────
+//
+// Every helper here that can change the ROUTE SEQUENCE also re-runs
+// `reconcileSegments` (#110 §6) — the same function the server persists in the
+// same transaction — so the optimistic rhythm never paints a stale hop, and a
+// new hop is born in the trip's default mode exactly as the server will write it.
 //
 // The row menus in the route lens. A CREATE is the one write with nothing to
 // be optimistic about — only the server can mint the id — so the two `append`
@@ -865,8 +902,8 @@ export function appendLeg(trip: Trip, leg: Leg): Trip {
 
 /** Splice the stop `POST /api/stops` just created into the leg it belongs to. */
 export function appendStop(trip: Trip, stop: Stop): Trip {
-  return mapLegs(trip, (l) =>
-    l.id === stop.legId ? { ...l, stops: [...l.stops, stop] } : l,
+  return withReconciledSegments(
+    mapLegs(trip, (l) => (l.id === stop.legId ? { ...l, stops: [...l.stops, stop] } : l)),
   );
 }
 
@@ -911,12 +948,14 @@ export function setStopPlace(trip: Trip, stopId: string, place: Place): Trip {
 
 /** Delete a leg. Its stops go with it, the way the FK cascade does server-side. */
 export function removeLeg(trip: Trip, legId: string): Trip {
-  return { ...trip, legs: trip.legs.filter((l) => l.id !== legId) };
+  return withReconciledSegments({ ...trip, legs: trip.legs.filter((l) => l.id !== legId) });
 }
 
 /** Delete a stop. Its reservations and ideas go with it. */
 export function removeStop(trip: Trip, stopId: string): Trip {
-  return mapLegs(trip, (l) => ({ ...l, stops: l.stops.filter((s) => s.id !== stopId) }));
+  return withReconciledSegments(
+    mapLegs(trip, (l) => ({ ...l, stops: l.stops.filter((s) => s.id !== stopId) })),
+  );
 }
 
 /** The leg ids in render order — the whole new order `reorder` POSTs. */
@@ -942,7 +981,10 @@ export function moveLeg(trip: Trip, legId: string, delta: -1 | 1): Trip {
   const from = order.indexOf(legId);
   const [moved] = order.splice(from, 1);
   order.splice(from + delta, 0, moved!);
-  return { ...trip, legs: trip.legs.map((l) => ({ ...l, sortOrder: order.indexOf(l.id) })) };
+  return withReconciledSegments({
+    ...trip,
+    legs: trip.legs.map((l) => ({ ...l, sortOrder: order.indexOf(l.id) })),
+  });
 }
 
 /**
@@ -958,11 +1000,13 @@ export function moveStopToLeg(trip: Trip, stopId: string, legId: string): Trip {
     ?.stops.reduce((n, s) => Math.max(n, s.sortOrder), -1);
   if (highest === undefined) return trip;
   const moved: Stop = { ...moving, legId, sortOrder: highest + 1 };
-  return mapLegs(trip, (l) => {
-    if (l.id === moving.legId) return { ...l, stops: l.stops.filter((s) => s.id !== stopId) };
-    if (l.id === legId) return { ...l, stops: [...l.stops, moved] };
-    return l;
-  });
+  return withReconciledSegments(
+    mapLegs(trip, (l) => {
+      if (l.id === moving.legId) return { ...l, stops: l.stops.filter((s) => s.id !== stopId) };
+      if (l.id === legId) return { ...l, stops: [...l.stops, moved] };
+      return l;
+    }),
+  );
 }
 
 /** The stop-dates dialog, and "Unschedule" — which is both dates going null. */
@@ -972,5 +1016,7 @@ export function setStopDates(
   arriveDate: IsoDate | null,
   departDate: IsoDate | null,
 ): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate }));
+  return withReconciledSegments(
+    updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate })),
+  );
 }

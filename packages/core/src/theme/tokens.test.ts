@@ -74,7 +74,7 @@ describe("RV tokens", () => {
 
   it("paint the rhythm like the web", () => {
     expect(dayKindColor("stay")).toBe(RV.green);
-    expect(dayKindColor("drive")).toBe(RV.navy);
+    expect(dayKindColor("travel")).toBe(RV.navy);
     expect(dayKindColor("empty")).toBe(RV.navySoft);
   });
 });

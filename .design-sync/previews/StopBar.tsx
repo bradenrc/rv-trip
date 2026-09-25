@@ -13,3 +13,13 @@ export const Minimal = () => (
     <StopBar name="Bend, OR" range="Aug 12–16" rating={0} resCount={0} ideaCount={1} startCol={12} span={3} />
   </SwimLane>
 );
+
+// #110 §2: arriveMode. Fly/ferry keep the navy edge and add a glyph before the
+// range; null (nothing arrived — no home base) draws no edge.
+export const ArrivedBy = () => (
+  <SwimLane kicker="Greece" name="Athens & the Cyclades" columns={11}>
+    <StopBar name="Athens" range="May 10–12" rating={0} resCount={1} ideaCount={0} startCol={1} span={2} arriveMode={null} />
+    <StopBar name="Mykonos" range="May 12–16" rating={0} resCount={1} ideaCount={0} startCol={3} span={4} arriveMode="fly" />
+    <StopBar name="Naxos" range="May 16–19" rating={0} resCount={1} ideaCount={0} startCol={7} span={3} arriveMode="ferry" />
+  </SwimLane>
+);

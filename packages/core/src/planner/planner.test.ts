@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Idea, Leg, Reservation, Trip, Stop } from "../domain/types";
+import { withReconciledSegments } from "../domain/segments";
 import { orderedLegStops, orderedPairs, routeCacheKey } from "../domain/route-order";
 import { estimateRoute, type RouteResult } from "../providers/index";
 import { driveMiles } from "../providers/route-format";
@@ -72,7 +73,7 @@ function stop(partial: Partial<Stop> & Pick<Stop, "id" | "legId" | "sortOrder">)
  * rather than a shape invented for them.
  */
 function seedTrip(): Trip {
-  return {
+  return withReconciledSegments({
     id: "seed",
     ownerId: "o",
     title: "Pacific Northwest Loop",
@@ -133,7 +134,11 @@ function seedTrip(): Trip {
         ],
       },
     ],
-  };
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    segments: [],
+  });
 }
 
 /** Crater Lake's [arrive, depart] after a drop. */
@@ -143,7 +148,7 @@ function crater(trip: Trip): (string | null)[] {
 }
 
 function fixture(endDate = "2026-08-10"): Trip {
-  return {
+  return withReconciledSegments({
     id: "t",
     ownerId: "o",
     title: "Ten days",
@@ -184,6 +189,11 @@ function fixture(endDate = "2026-08-10"): Trip {
                 cost: 120,
                 rating: null,
                 notes: null,
+                segmentId: null,
+                startsAt: null,
+                endsAt: null,
+                startsTz: null,
+                endsTz: null,
                 lastChange: null,
               },
             ],
@@ -237,7 +247,11 @@ function fixture(endDate = "2026-08-10"): Trip {
         ],
       },
     ],
-  };
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    segments: [],
+  });
 }
 
 describe("timelineModel", () => {
@@ -245,9 +259,36 @@ describe("timelineModel", () => {
 
   it("has one rhythm cell per trip day, classified", () => {
     expect(m.rhythm).toHaveLength(10);
+    // No home base, so nothing arrives at S1: its first day is a stay (#110 §4).
     expect(m.rhythm.map((c) => c.kind)).toEqual([
-      "empty", "drive", "stay", "drive", "stay", "stay", "empty", "drive", "stay", "empty",
+      "empty", "stay", "stay", "travel", "stay", "stay", "empty", "travel", "stay", "empty",
     ]);
+    expect(m.rhythm[3]).toMatchObject({ mode: "drive", title: "2026-08-04 — Drive → S2" });
+    expect(m.rhythm[1]!.mode).toBeUndefined();
+  });
+
+  it("gives each bar the mode it was arrived by — null when nothing arrives", () => {
+    expect(m.legs.flatMap((l) => l.bars.map((b) => [b.stopId, b.arriveMode]))).toEqual([
+      ["S1", null],
+      ["S2", "drive"],
+      ["S3", "drive"],
+    ]);
+  });
+
+  it("names a fly/ferry day by its mode and a → home day as home", () => {
+    const t = fixture();
+    const s2 = t.segments.find((s) => s.toStopId === "S2")!;
+    const flown: Trip = {
+      ...t,
+      segments: [
+        ...t.segments.map((s) => (s.id === s2.id ? { ...s, mode: "ferry" as const } : s)),
+        { ...s2, id: "home", fromStopId: "S3", toStopId: null, mode: "fly", sortOrder: 99 },
+      ],
+    };
+    const r = timelineModel(flown).rhythm;
+    expect(r[3]).toMatchObject({ kind: "travel", mode: "ferry", title: "2026-08-04 — Ferry → S2" });
+    expect(r[8]).toMatchObject({ kind: "travel", mode: "fly", title: "2026-08-09 — Fly → home" });
+    expect(r[8]!.color).toBe("var(--color-rv-navy)");
   });
 
   it("turns contiguous same-stop runs into bars (1-based columns)", () => {
@@ -288,6 +329,20 @@ describe("routeModel", () => {
     expect(legs[0]!.rows.map((r) => r.drive !== null)).toEqual([true, false]);
     // S3→S4 is a drive (both have coords); S4→S5 is not (S5 has none).
     expect(legs[1]!.rows.map((r) => r.drive !== null)).toEqual([true, false, false]);
+  });
+
+  it("routes DRIVE pairs only — a flown hop has no connector, no rail miles (#110 §6)", () => {
+    const t = fixture();
+    const flown: Trip = {
+      ...t,
+      segments: t.segments.map((s) => (s.fromStopId === "S1" && s.toStopId === "S2" ? { ...s, mode: "fly" as const } : s)),
+    };
+    const legs = routeModel(flown);
+    expect(legs[0]!.rows.map((r) => r.drive !== null)).toEqual([false, false]);
+    // The rail is still exactly the connectors you can see: two, not three.
+    expect(routeSummary(flown).driveMiles).toBe(
+      legs.flatMap((l) => [...l.rows.map((r) => r.drive), l.outboundDrive]).reduce((a, d) => a + (d?.miles ?? 0), 0),
+    );
   });
 
   it("hangs the leg-crossing drive on the leg it leaves, with its seam label", () => {
@@ -799,6 +854,19 @@ describe("leg and stop structure mutations", () => {
     expect(next.legs[1]!.stops.map((s) => s.id)).toEqual(["S3", "S5"]);
   });
 
+  it("every structural helper re-reconciles the hops, so the rhythm never paints a stale one", () => {
+    const hops = (t: Trip) => t.segments.map((s) => `${s.fromStopId}>${s.toStopId}`);
+    expect(hops(fixture())).toEqual(["S1>S2", "S2>S3", "S3>S4", "S4>S5"]);
+    expect(hops(removeStop(fixture(), "S4"))).toEqual(["S1>S2", "S2>S3", "S3>S5"]);
+    expect(hops(removeLeg(fixture(), "A"))).toEqual(["S3>S4", "S4>S5"]);
+    expect(hops(moveLeg(fixture(), "B", -1))).toEqual(["S3>S4", "S4>S5", "S5>S1", "S1>S2"]);
+    expect(hops(setStopDates(fixture(), "S1", null, null))).toEqual(["S2>S1", "S1>S3", "S3>S4", "S4>S5"]);
+    // A kept hop keeps its row: the ferry survives an unrelated edit.
+    const t = fixture();
+    const ferried: Trip = { ...t, segments: t.segments.map((s, i) => (i === 0 ? { ...s, mode: "ferry" as const } : s)) };
+    expect(removeStop(ferried, "S4").segments[0]).toMatchObject({ id: t.segments[0]!.id, mode: "ferry" });
+  });
+
   it("legOrder is the whole new order the reorder POST sends", () => {
     expect(legOrder(fixture())).toEqual(["A", "B"]);
     expect(legOrder(moveLeg(fixture(), "B", -1))).toEqual(["B", "A"]);
@@ -883,6 +951,11 @@ describe("reservation and idea tree mutations", () => {
       cost: 64,
       rating: null,
       notes: null,
+      segmentId: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
       lastChange: null,
       ...over,
     };

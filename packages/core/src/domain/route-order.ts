@@ -1,4 +1,4 @@
-import { isScheduled, type Stop, type Trip } from "./types";
+import { isScheduled, type IsoDate, type Stop, type TravelMode, type Trip } from "./types";
 
 /**
  * ONE trip-wide ordered sequence, and the adjacent pairs it implies.
@@ -18,6 +18,18 @@ export interface PairPoint {
   lng: number;
 }
 
+/**
+ * The fields the route SEQUENCE is a function of. A domain `Stop` satisfies it;
+ * so does the bare row packages/db reconciles segments from (#110).
+ */
+export interface RouteStop {
+  id: string;
+  legId: string;
+  arriveDate: IsoDate | null;
+  departDate: IsoDate | null;
+  sortOrder: number;
+}
+
 export interface OrderedPair {
   fromStopId: string;
   toStopId: string;
@@ -27,19 +39,27 @@ export interface OrderedPair {
   to: PairPoint;
   /** The pair crosses from one leg into the next — drawn under a hairline rule. */
   legBoundary: boolean;
+  /**
+   * How the hop is travelled — its segment's mode (#110 §6). A pair with no row
+   * yet (an optimistic edit the server has not reconciled) reads the trip's
+   * `defaultMode`, which is exactly the mode `reconcileSegments` would give it.
+   */
+  mode: TravelMode;
 }
 
 /** Legs by sortOrder; within a leg, scheduled by arrival date then floating by sortOrder. */
-export function orderedStops(trip: Trip): Stop[] {
+export function orderedStops<S extends RouteStop>(trip: {
+  legs: { sortOrder: number; stops: S[] }[];
+}): S[] {
   return [...trip.legs]
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .flatMap((leg) => orderedLegStops(leg.stops));
 }
 
-export function orderedLegStops(stops: Stop[]): Stop[] {
+export function orderedLegStops<S extends RouteStop>(stops: S[]): S[] {
   const scheduled = stops
-    .filter(isScheduled)
-    .sort((a, b) => a.arriveDate.localeCompare(b.arriveDate));
+    .filter((s) => isScheduled(s))
+    .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
   const floating = stops
     .filter((s) => !isScheduled(s))
     .sort((a, b) => a.sortOrder - b.sortOrder);
@@ -57,6 +77,9 @@ export function orderedLegStops(stops: Stop[]): Stop[] {
  */
 export function orderedPairs(trip: Trip): OrderedPair[] {
   const ordered = orderedStops(trip);
+  const modes = new Map(
+    trip.segments.map((s) => [`${s.fromStopId ?? ""}|${s.toStopId ?? ""}`, s.mode] as const),
+  );
   const pairs: OrderedPair[] = [];
   for (let i = 0; i < ordered.length - 1; i++) {
     const from = ordered[i]!;
@@ -72,9 +95,20 @@ export function orderedPairs(trip: Trip): OrderedPair[] {
       from: a,
       to: b,
       legBoundary: from.legId !== to.legId,
+      mode: modes.get(`${from.id}|${to.id}`) ?? trip.defaultMode,
     });
   }
   return pairs;
+}
+
+/**
+ * The pairs that are DRIVEN (#110 §6) — the only ones anything pays or measures
+ * a road for: HERE routing, the corridor check, the drive rail and the miles
+ * summary. Map arcs keep `orderedPairs`, so a flight still draws its straight
+ * no-route arc.
+ */
+export function drivePairs(trip: Trip): OrderedPair[] {
+  return orderedPairs(trip).filter((p) => p.mode === "drive");
 }
 
 function point(stop: Stop): PairPoint | null {

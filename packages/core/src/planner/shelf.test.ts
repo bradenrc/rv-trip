@@ -83,6 +83,10 @@ function fixture(ideas: Idea[], stops: Stop[] = [stop({ id: "S1" })]): Trip {
     note: null,
     ideas,
     legs: [{ id: "L1", tripId: "T1", title: "Tahoe North", sortOrder: 0, stops }],
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    segments: [],
   };
 }
 

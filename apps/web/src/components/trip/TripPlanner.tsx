@@ -32,7 +32,8 @@ import {
   locateToastMessage,
   legCascadeCounts,
   nextLegTitle,
-  orderedPairs,
+  drivePairs,
+  withReconciledSegments,
   orphanedStopsMessage,
   reservationDraft,
   reservationDraftInput,
@@ -925,7 +926,9 @@ export function TripPlanner({
     const patch = tripSettingsPatch(trip, draft);
     if (Object.keys(patch).length === 0) return;
     const undo = trip;
-    setTrip({ ...trip, ...patch });
+    // A home base set or cleared adds or drops the home → first hop; the server
+    // reconciles in the same write, so the optimistic trip does too (#110 §6).
+    setTrip(withReconciledSegments({ ...trip, ...patch }));
     persist(
       tripApi.updateTrip(trip.id, patch),
       undo,
@@ -988,13 +991,15 @@ export function TripPlanner({
       return;
     }
     const r = selectedStop?.reservations.find((x) => x.id === formTarget);
-    if (!r) return;
+    if (!r || !selectedStop) return;
     const patch = reservationDraftPatch(r, form);
     if (patch === null) return;
     setFormTarget(null);
     if (Object.keys(patch).length === 0) return;
     const undo = trip;
-    setTrip(setReservationFields(trip, r.stopId, r.id, patch));
+    // The sheet lists only its stop's reservations (#110 Q2 A), so the row's
+    // parent IS the open stop.
+    setTrip(setReservationFields(trip, selectedStop.id, r.id, patch));
     persist(
       tripApi.updateReservation(r.id, patch),
       undo,
@@ -1004,10 +1009,10 @@ export function TripPlanner({
 
   const doDeleteReservation = (resId: string) => {
     const r = selectedStop?.reservations.find((x) => x.id === resId);
-    if (!r) return;
+    if (!r || !selectedStop) return;
     if (formTarget === resId) setFormTarget(null);
     const undo = trip;
-    const next = removeReservation(trip, r.stopId, resId);
+    const next = removeReservation(trip, selectedStop.id, resId);
     setTrip(next);
     persist(
       tripApi.deleteReservation(resId),
@@ -1027,7 +1032,8 @@ export function TripPlanner({
   const restoreReservation = async (r: Reservation) => {
     try {
       const row = await tripApi.createReservation(reservationRestoreInput(r));
-      setTrip((t) => appendReservation(t, r.stopId, row));
+      // The re-POSTed row is stop-attached by construction.
+      setTrip((t) => (row.stopId ? appendReservation(t, row.stopId, row) : t));
     } catch {
       toast.error(`Couldn't put ${r.name} back.`);
     }
@@ -1111,7 +1117,8 @@ export function TripPlanner({
    * screen and is honestly labelled.
    */
   const upgradeRoutes = (next: Trip) => {
-    const missing = orderedPairs(next).filter(
+    // Driven hops only (#110 §6): a flight has no road to fetch.
+    const missing = drivePairs(next).filter(
       (p) => !routes[routeCacheKey(p.from, p.to, routingHash)],
     );
     if (missing.length === 0) return;

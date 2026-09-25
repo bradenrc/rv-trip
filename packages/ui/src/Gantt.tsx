@@ -1,4 +1,5 @@
-import { Star, Tent, Lightbulb } from "lucide-react";
+import { Star, Tent, Lightbulb, Plane, Ship } from "lucide-react";
+import type { TravelMode } from "@rv-trip/core";
 
 /**
  * The month-at-a-glance gantt primitives. Each is a self-contained, labeled row
@@ -23,8 +24,29 @@ function cols(n: number) {
   return `repeat(${n}, minmax(0, 1fr))`;
 }
 
-/** The one-line colored day-kind bar — the whole trip's rhythm at a glance. */
-export function RhythmStrip({ cells }: { cells: { color: string; title: string }[] }) {
+/**
+ * The mode glyph a fly/ferry day or arrival carries (#110 §2). A drive — the
+ * common case — draws none: plain navy already means "moving by road".
+ */
+function ModeGlyph({ mode, className }: { mode: TravelMode | null | undefined; className: string }) {
+  if (mode === "fly") return <Plane aria-hidden className={className} />;
+  if (mode === "ferry") return <Ship aria-hidden className={className} />;
+  return null;
+}
+
+/**
+ * The one-line colored day-kind bar — the whole trip's rhythm at a glance.
+ *
+ * `mode` is optional and additive (#110 §2): a fly/ferry cell centres a 12px
+ * Plane/Ship. The cell becomes a `dark` chrome island (the TripPlanner lens
+ * toggle precedent) so `text-rv-ink-muted` reads slate-300 on navy in BOTH
+ * halves — light ink-muted is slate-600 and would vanish on navy.
+ */
+export function RhythmStrip({
+  cells,
+}: {
+  cells: { color: string; title: string; mode?: TravelMode }[];
+}) {
   return (
     <div className="mb-1.5 flex items-center">
       <div className={`${gutter} font-mono text-[12px] uppercase tracking-[0.1em] text-rv-ink-faded`}>
@@ -34,9 +56,21 @@ export function RhythmStrip({ cells }: { cells: { color: string; title: string }
         className="grid h-[26px] flex-1 overflow-hidden rounded-rv-sm border border-rv-border"
         style={{ gridTemplateColumns: cols(cells.length) }}
       >
-        {cells.map((c, i) => (
-          <div key={i} title={c.title} style={{ background: c.color }} />
-        ))}
+        {cells.map((c, i) =>
+          c.mode === "fly" || c.mode === "ferry" ? (
+            <div
+              key={i}
+              title={c.title}
+              data-mode={c.mode}
+              className="dark flex items-center justify-center text-rv-ink-muted"
+              style={{ background: c.color }}
+            >
+              <ModeGlyph mode={c.mode} className="size-3 flex-none" />
+            </div>
+          ) : (
+            <div key={i} title={c.title} style={{ background: c.color }} />
+          ),
+        )}
       </div>
     </div>
   );
@@ -110,7 +144,12 @@ export function SwimLane({
 
 /**
  * A scheduled stop as a gantt bar, positioned by grid-column. Navy left edge
- * = the arrival/drive-in day. Meta chips show rating, reservation and idea counts.
+ * = the arrival day. Meta chips show rating, reservation and idea counts.
+ *
+ * `arriveMode` (#110 §2) is optional: `undefined` keeps the navy edge every
+ * shipped caller draws; `null` means nothing arrived (no inbound segment), so
+ * no edge; `fly`/`ferry` keep the edge and put a 10px Plane/Ship before the
+ * range, in the range's own `text-rv-green`.
  *
  * It is ALSO a drop target (#80): a do/eat idea dragged off the shelf lands on
  * a stop rather than on open days — an open span is not a stop, so there is
@@ -126,6 +165,7 @@ export function StopBar({
   ideaCount,
   startCol,
   span,
+  arriveMode,
   compact = false,
   active = false,
   onClick,
@@ -139,6 +179,8 @@ export function StopBar({
   ideaCount: number;
   startCol: number;
   span: number;
+  /** How the stop was arrived at; `null` = nothing arrived (no edge). */
+  arriveMode?: TravelMode | null;
   /** tighter padding/gap for the Compact & Dense timeline densities */
   compact?: boolean;
   /** Lit because the thing being dragged can land here. */
@@ -159,9 +201,14 @@ export function StopBar({
       } ${compact ? "gap-[2px] p-[6px_8px_6px_12px]" : "gap-[3px] p-[8px_9px_8px_13px]"}`}
       style={{ gridColumn: `${startCol} / span ${span}`, gridRow: 1 }}
     >
-      <span className="absolute inset-y-0 left-0 w-1 rounded-l-rv-sm bg-rv-navy" />
+      {arriveMode !== null && (
+        <span className="absolute inset-y-0 left-0 w-1 rounded-l-rv-sm bg-rv-navy" />
+      )}
       <span className="text-[13px] font-bold leading-tight text-rv-green-ink text-pretty">{name}</span>
-      <span className="font-mono text-[9px] text-rv-green">{range}</span>
+      <span className="inline-flex items-center gap-1 font-mono text-[9px] text-rv-green">
+        <ModeGlyph mode={arriveMode} className="size-2.5 flex-none" />
+        {range}
+      </span>
       {showMeta && (
         <div className="mt-auto flex flex-wrap items-center gap-[5px]">
           {rating > 0 && (
@@ -238,11 +285,23 @@ export function OpenLane({ columns, children }: { columns: number; children: Rea
   );
 }
 
-/** The drive/stay/open + navy-edge key. */
+/** A navy day swatch holding its mode glyph — the rhythm cell, in miniature. */
+function ModeSwatch({ mode }: { mode: TravelMode }) {
+  return (
+    <span className="dark inline-flex h-3 w-4 items-center justify-center rounded-[2px] bg-rv-navy text-rv-ink-muted">
+      <ModeGlyph mode={mode} className="size-2.5" />
+    </span>
+  );
+}
+
+/** The drive/fly/ferry/stay/open + navy-edge key. Static: every trip shows all
+ * six keys (#110 §2). */
 export function GanttLegend() {
   return (
     <div className="mt-5 flex flex-wrap items-center gap-[18px] border-t border-rv-border-soft pt-4 text-[12px] text-rv-ink-faded">
       <Item swatch={<span className="h-3 w-4 rounded-[2px] bg-rv-navy" />}>Drive day</Item>
+      <Item swatch={<ModeSwatch mode="fly" />}>Fly day</Item>
+      <Item swatch={<ModeSwatch mode="ferry" />}>Ferry day</Item>
       <Item swatch={<span className="h-3 w-4 rounded-[2px] bg-rv-green" />}>Stay day</Item>
       <Item
         swatch={<span className="h-3 w-4 rounded-[2px] border border-dashed border-rv-border-hi bg-rv-navy-soft" />}
@@ -250,7 +309,7 @@ export function GanttLegend() {
         Open — needs a plan
       </Item>
       <Item swatch={<span className="h-3.5 w-1 rounded-[2px] bg-rv-navy" />}>
-        Navy edge = arrival / drive-in
+        Navy edge = arrival
       </Item>
     </div>
   );

@@ -39,6 +39,11 @@ function res(over: Partial<Reservation> = {}): Reservation {
     cost: 64,
     rating: 4,
     notes: "Sit outside.",
+    segmentId: null,
+    startsAt: null,
+    endsAt: null,
+    startsTz: null,
+    endsTz: null,
     lastChange: null,
     ...over,
   };

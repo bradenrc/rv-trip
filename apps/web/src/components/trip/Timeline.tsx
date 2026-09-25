@@ -140,6 +140,7 @@ export function Timeline({
                       ideaCount={b.ideaCount}
                       startCol={b.startCol}
                       span={b.span}
+                      arriveMode={b.arriveMode}
                       compact
                       active={stopActive}
                       onClick={() => onOpenStop(b.stopId)}

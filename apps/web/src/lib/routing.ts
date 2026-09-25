@@ -2,7 +2,7 @@ import {
   NO_ROUTING_HASH,
   StubRoutingProvider,
   decodeFlexiblePolyline,
-  orderedPairs,
+  drivePairs,
   routeCacheKey,
   routingHash,
   type LatLng,
@@ -231,7 +231,7 @@ export async function routeTrip(
   options: { nav?: boolean } = {},
 ): Promise<{ routes: RouteMap; routingHash: string; nav: NavMap }> {
   const hash = rig ? await routingHash(rig) : NO_ROUTING_HASH;
-  const pairs = orderedPairs(trip);
+  const pairs = drivePairs(trip); // driven hops only (#110 §6)
   const routes = await routePairs(pairs, rig, hash);
   const nav = options.nav ? await navPairs(pairs, routes, hash) : {};
   return { routes, routingHash: hash, nav };
