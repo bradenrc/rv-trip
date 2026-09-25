@@ -107,6 +107,7 @@ function mkTrip(
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     ideas: [],
     segments: [],
     ...t,
@@ -256,6 +257,7 @@ export function pnwTrip(): Trip {
     defaultMode: "drive",
     lodgingDefault: "campground",
     rigOn: true,
+    surfaceRadiusMi: null,
     legs: [
       leg("leg_coast", T, "Oregon Coast", 0, [astoria, newport]),
       leg("leg_mountains", T, "Cascades & Home", 1, [bend, crater]),
@@ -337,6 +339,7 @@ export function costaRicaTrip(): Trip {
     defaultMode: "fly",
     lodgingDefault: "hotel",
     rigOn: false,
+    surfaceRadiusMi: null,
     legs: [leg("leg_guanacaste", T, "Guanacaste", 0, [conchal])],
   });
   return withSegments(trip, named(["seg_out"]), (segs) => [
@@ -457,6 +460,7 @@ export function greeceTrip(): Trip {
     defaultMode: "fly",
     lodgingDefault: "hotel",
     rigOn: false,
+    surfaceRadiusMi: null,
     legs: [
       leg("leg_athens", T, "Athens", 0, [athens1]),
       leg("leg_cyclades", T, "Cyclades", 1, [mykonos, naxos]),

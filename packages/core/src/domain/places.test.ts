@@ -246,6 +246,7 @@ function pnwLoop(status: Trip["status"]): Trip {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     segments: [],
   };
 }

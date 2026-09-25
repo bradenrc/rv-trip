@@ -8,6 +8,7 @@ import {
   routeSummary,
   routingHash,
   suggestionsFromTrips,
+  surfaceRadiusMi,
   todayIso,
 } from "@rv-trip/core";
 import { db } from "./index";
@@ -18,6 +19,7 @@ import {
   ideas,
   reservations,
   saves,
+  tripDismissedSaves,
   travelSegments,
   rigs,
   routes,
@@ -320,6 +322,9 @@ function mapTripRow(
     defaultMode: row.defaultMode,
     lodgingDefault: row.lodgingDefault,
     rigOn: row.rigOn,
+    // A smallint on the way out; the CHECK only ever lets the four chips in,
+    // and anything else (a hand-edited row) reads as "never picked".
+    surfaceRadiusMi: surfaceRadiusMi.nullable().catch(null).parse(row.surfaceRadiusMi),
     legs: row.legs.map((l) => mapLeg(l, last)),
     ideas: row.ideas.map((i) => mapIdea(i, last)),
     segments: row.segments.map((s) => mapSegment(s, last)),
@@ -509,6 +514,20 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
   // the same way the trip tree does — one query for the whole page.
   const last = await lastChangesFor(ownerId, rows.map((r) => r.id));
   return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null, last));
+}
+
+/**
+ * The saves this trip's banner was dismissed for (#111 Q6 A) — what
+ * `nearbySaves` leaves out. Owner-scoped through the trip: a foreign trip id
+ * reads as no dismissals, never as someone else's.
+ */
+export async function listDismissedSaveIds(ownerId: string, tripId: string): Promise<string[]> {
+  const rows = await db
+    .select({ saveId: tripDismissedSaves.saveId })
+    .from(tripDismissedSaves)
+    .innerJoin(trips, eq(trips.id, tripDismissedSaves.tripId))
+    .where(and(eq(tripDismissedSaves.tripId, tripId), eq(trips.ownerId, ownerId)));
+  return rows.map((r) => r.saveId);
 }
 
 /**

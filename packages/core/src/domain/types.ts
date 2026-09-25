@@ -238,6 +238,21 @@ export const segment = z.object({
 });
 export type Segment = z.infer<typeof segment>;
 
+/**
+ * The per-trip surfacing radius (#111 Q7 B): the review sheet's four chips.
+ * A LITERAL union, so a hand-rolled 75 is a 400 at the boundary rather than a
+ * CHECK violation deeper in (`trips_surface_radius_mi_ck`, schema.ts). Null =
+ * never chosen, which reads as `NEAR_RADIUS_MI` (planner/shelf.ts).
+ */
+export const SURFACE_RADII = [25, 50, 100, 200] as const;
+export const surfaceRadiusMi = z.union([
+  z.literal(25),
+  z.literal(50),
+  z.literal(100),
+  z.literal(200),
+]);
+export type SurfaceRadiusMi = z.infer<typeof surfaceRadiusMi>;
+
 export const tripStatus = z.enum(["planning", "upcoming", "complete"]);
 export type TripStatus = z.infer<typeof tripStatus>;
 
@@ -272,6 +287,9 @@ export const trip = z.object({
   defaultMode: travelMode.default("drive"),
   lodgingDefault: lodgingKind.nullable().default(null),
   rigOn: z.boolean().default(true),
+  /** How far from a stop a save may sit and still surface on this trip
+   * (#111 Q7 B · `trips.surface_radius_mi`). Null → the 50 mi default. */
+  surfaceRadiusMi: surfaceRadiusMi.nullable().default(null),
   legs: z.array(leg).default([]),
   /** Every hop of the journey, by `sortOrder` (#110 Q1 A). */
   segments: z.array(segment).default([]),
@@ -319,6 +337,9 @@ export const tripPatchInput = trip
     statusAuto: true,
     rating: true,
     note: true,
+    // #111 i3: the review sheet's radius chips. Explicit for the same reason
+    // as `homeBasePlace` above — `.pick()` drops an unlisted key silently.
+    surfaceRadiusMi: true,
   })
   .partial();
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
@@ -701,6 +722,57 @@ export type SavedPlacePatch = z.infer<typeof savedPlacePatch>;
 export function normalizeSavedPlacePatch(patch: SavedPlacePatch): SavedPlacePatch {
   return patch.status === "been" ? { ...patch, source: null } : patch;
 }
+
+/**
+ * `GET /api/trips/:id/nearby-saves` (#111 i3 · docs/design/111 "Contracts"):
+ * the saves within the trip's radius of a located stop, nearest first, and the
+ * next ring out. Computed by `nearbySaves` (planner/nearby-saves.ts).
+ *
+ * Each item carries the save's `place` as well as the design's display fields:
+ * Add copies the place into a trip idea (`POST /api/ideas`), and without it
+ * the phone would have to join `saveId` back against the whole library.
+ */
+export const nearbySave = z.object({
+  saveId: z.string(),
+  name: z.string(),
+  type: reservationType,
+  status: savedPlaceStatus,
+  rating,
+  source: z.string().nullable(),
+  /** The save's OWN place — its own coordinates, never the destination's it
+   * was measured from, so the idea it becomes is exactly the save. */
+  place,
+  nearestStop: z.object({ id: z.string(), name: z.string() }),
+  /** At the shelf's precision: one decimal under 10 mi, whole miles above. */
+  distanceMi: z.number(),
+});
+export type NearbySave = z.infer<typeof nearbySave>;
+
+export const nearbySavesBeyond = z.object({
+  /** The next chip out (25 → 50 → 100 → 200). */
+  radiusMi: surfaceRadiusMi,
+  /** Saves past the current radius but inside that ring. */
+  count: z.number().int().positive(),
+  /** One decimal, always ("50.3 mi"). */
+  nearestMi: z.number(),
+  nearestName: z.string(),
+});
+export type NearbySavesBeyond = z.infer<typeof nearbySavesBeyond>;
+
+export const nearbySavesResponse = z.object({
+  radiusMi: z.number().int().positive(),
+  items: z.array(nearbySave),
+  /** Null at 200 mi (there is no next ring) and when the next ring is empty. */
+  beyond: nearbySavesBeyond.nullable(),
+});
+export type NearbySaves = z.infer<typeof nearbySavesResponse>;
+
+/** `POST /api/trips/:id/dismissed-saves` — the banner's Dismiss: every save
+ * currently surfaced, remembered for this trip (Q6 A). */
+export const dismissSavesInput = z.object({
+  saveIds: z.array(z.string().uuid()).min(1).max(500),
+});
+export type DismissSavesInput = z.infer<typeof dismissSavesInput>;
 
 /** A stop is "scheduled" iff it has both dates. */
 export function isScheduled(

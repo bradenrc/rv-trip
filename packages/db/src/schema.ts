@@ -109,10 +109,18 @@ export const trips = pgTable(
     defaultMode: travelMode("default_mode").notNull().default("drive"),
     lodgingDefault: lodgingKind("lodging_default"),
     rigOn: boolean("rig_on").notNull().default(true),
+    // #111 Q7 B: how far from a stop a save may sit and still surface on this
+    // trip — the review sheet's four chips. Null = never picked, which reads as
+    // core's NEAR_RADIUS_MI (50). The CHECK mirrors core's `surfaceRadiusMi`
+    // literal union, so a value the grammar would refuse can't land either.
+    surfaceRadiusMi: smallint("surface_radius_mi"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("trips_owner_idx").on(t.ownerId)],
+  (t) => [
+    index("trips_owner_idx").on(t.ownerId),
+    check("trips_surface_radius_mi_ck", sql`${t.surfaceRadiusMi} IN (25, 50, 100, 200)`),
+  ],
 );
 
 export const legs = pgTable(
@@ -326,6 +334,26 @@ export const saves = pgTable(
     index("saves_owner_idx").on(t.ownerId),
     unique("saves_owner_client_uq").on(t.ownerId, t.clientId),
   ],
+);
+
+/**
+ * The saves a trip's banner was DISMISSED for (#111 Q6 A): Dismiss records
+ * every save surfaced at that moment, per trip, so the banner comes back only
+ * when a NEW save matches. Both sides cascade — a deleted trip or a deleted
+ * save takes its dismissals with it. No owner column: the trip is the
+ * ownership root, and every read and write proves it first.
+ */
+export const tripDismissedSaves = pgTable(
+  "trip_dismissed_saves",
+  {
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    saveId: uuid("save_id")
+      .notNull()
+      .references(() => saves.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.tripId, t.saveId] })],
 );
 
 /**

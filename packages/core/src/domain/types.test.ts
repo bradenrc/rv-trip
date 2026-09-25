@@ -488,3 +488,21 @@ describe("savedPlaceCreate — capture fields (#111)", () => {
     expect(row).toMatchObject({ anchor: "area", areaLabel: null, destination: null, suggestedPlace: null });
   });
 });
+
+describe("#111 i3 · surfaceRadiusMi — the trip's surfacing radius", () => {
+  it("tripPatchInput carries 25/50/100/200 and null, and rejects 75", async () => {
+    const { tripPatchInput, trip, dismissSavesInput } = await import("./types");
+    for (const r of [25, 50, 100, 200, null]) {
+      expect(tripPatchInput.parse({ surfaceRadiusMi: r })).toEqual({ surfaceRadiusMi: r });
+    }
+    expect(tripPatchInput.safeParse({ surfaceRadiusMi: 75 }).success).toBe(false);
+    expect(tripPatchInput.safeParse({ surfaceRadiusMi: "50" }).success).toBe(false);
+    // Absent stays absent — a title edit never resets the radius.
+    expect(tripPatchInput.parse({ title: "x" })).toEqual({ title: "x" });
+    // The read shape defaults it, so an older server's payload still parses.
+    const t = trip.parse({ id: "t", ownerId: "o", title: "T", startDate: "2027-07-01", endDate: "2027-07-02", rating: null });
+    expect(t.surfaceRadiusMi).toBeNull();
+    expect(dismissSavesInput.safeParse({ saveIds: [] }).success).toBe(false);
+    expect(dismissSavesInput.safeParse({ saveIds: ["not-a-uuid"] }).success).toBe(false);
+  });
+});

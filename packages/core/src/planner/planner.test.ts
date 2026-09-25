@@ -137,6 +137,7 @@ function seedTrip(): Trip {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     segments: [],
   });
 }
@@ -250,6 +251,7 @@ function fixture(endDate = "2026-08-10"): Trip {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     segments: [],
   });
 }

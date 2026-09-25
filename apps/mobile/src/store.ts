@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
-import type { SavedPlace, SavedPlacePatch, Trip, TripSummary } from "@rv-trip/core";
-import { applySavedPlacePatch } from "@rv-trip/core";
+import type {
+  NearbySave,
+  NearbySaves,
+  SavedPlace,
+  SavedPlacePatch,
+  SurfaceRadiusMi,
+  Trip,
+  TripSummary,
+} from "@rv-trip/core";
+import { appendShelfIdea, applySavedPlacePatch, nearbyIdeaBody } from "@rv-trip/core";
 import type { TripBundle } from "@rv-trip/core/api-client";
 import { api } from "./api";
 
@@ -15,10 +23,12 @@ interface State {
   /** The Saves tab's library, both shelves (#111 i2). */
   saves: SavedPlace[] | null;
   bundles: Record<string, TripBundle>;
+  /** Each trip's nearby saves (#111 i3) — the banner and the review sheet. */
+  nearby: Record<string, NearbySaves>;
   errors: Record<string, string>;
 }
 
-let state: State = { trips: null, saves: null, bundles: {}, errors: {} };
+let state: State = { trips: null, saves: null, bundles: {}, nearby: {}, errors: {} };
 const listeners = new Set<() => void>();
 
 function set(next: State) {
@@ -114,4 +124,61 @@ export function useSaves() {
   }, [saves]);
   const reload = useCallback(() => loadSaves(), []);
   return { saves, error, reload };
+}
+
+// ── Trip surfacing (#111 i3) ─────────────────────────────────────────────────
+
+/** Refetch a trip's nearby saves. A failure leaves the last answer (or none)
+ * in place: the banner is a suggestion, never an error screen. */
+export async function loadNearby(tripId: string): Promise<void> {
+  try {
+    const nearby = await api.trips.nearbySaves(tripId);
+    set({ ...state, nearby: { ...state.nearby, [tripId]: nearby } });
+  } catch {
+    // quiet — no banner
+  }
+}
+
+export function useNearby(tripId: string) {
+  const nearby = useSyncExternalStore(subscribe, () => state.nearby[tripId] ?? null);
+  useEffect(() => {
+    void loadNearby(tripId);
+  }, [tripId]);
+  const reload = useCallback(() => loadNearby(tripId), [tripId]);
+  return { nearby, reload };
+}
+
+/**
+ * The banner's Dismiss: every save surfaced right now is remembered as
+ * dismissed for this trip. The banner hides at once; the POST is then
+ * confirmed by a refetch (which also restores it if the write was refused).
+ */
+export async function dismissNearby(tripId: string, saveIds: string[]): Promise<void> {
+  const current = state.nearby[tripId];
+  if (current) {
+    set({ ...state, nearby: { ...state.nearby, [tripId]: { ...current, items: [] } } });
+  }
+  try {
+    await api.trips.dismissSaves(tripId, saveIds);
+  } finally {
+    await loadNearby(tripId);
+  }
+}
+
+/** A radius chip: the trip's `surface_radius_mi`, then the list at that radius. */
+export async function setSurfaceRadius(tripId: string, radius: SurfaceRadiusMi): Promise<void> {
+  updateTrip(tripId, (t) => ({ ...t, surfaceRadiusMi: radius }));
+  try {
+    await api.trips.patch(tripId, { surfaceRadiusMi: radius });
+  } finally {
+    await loadNearby(tripId);
+  }
+}
+
+/** Add: copy the save into the trip's ideas (`POST /api/ideas`) and splice the
+ * 201's idea onto the shelf the Route lens draws. Throws on a refusal so the
+ * sheet can put its Add button back. */
+export async function addNearbyIdea(tripId: string, item: NearbySave): Promise<void> {
+  const created = await api.ideas.create(nearbyIdeaBody(tripId, item));
+  updateTrip(tripId, (t) => appendShelfIdea(t, created));
 }

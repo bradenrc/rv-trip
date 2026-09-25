@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { trip, tripSummary, savedPlace, reservation } from "../domain/types";
+import { trip, tripSummary, savedPlace, reservation, idea, nearbySavesResponse } from "../domain/types";
 import { rigProfile } from "../domain/rig";
 
 /**
@@ -43,6 +43,13 @@ export const savedPlaceListSchema = z.array(savedPlace);
 /** `POST /api/places` — the created row (201) or, on a replayed clientId, the
  * row that already existed (200). One shape either way (#111). */
 export const savedPlaceSchema = savedPlace;
+
+/** `GET /api/trips/:id/nearby-saves` (#111 i3) — core's `nearbySaves` result. */
+export const nearbySavesSchema = nearbySavesResponse;
+
+/** `POST /api/ideas` → 201: the created idea, already in the domain shape
+ * (`createIdea` returns `mapIdea` of the inserted row). */
+export const ideaSchema = idea;
 
 const latLngSchema = z.object({ lat: z.number(), lng: z.number() });
 

@@ -10,6 +10,7 @@ import {
   rigs,
   routes,
   saves,
+  tripDismissedSaves,
   destinations,
   travelSegments,
   userPrefs,
@@ -38,6 +39,7 @@ import type {
   SavedPlace,
   SavedPlaceCreate,
   SavedPlacePatch,
+  SurfaceRadiusMi,
   TripStatus,
   UserPrefs,
   UserPrefsPatch,
@@ -361,6 +363,8 @@ export async function updateTripFields(
     statusAuto?: boolean;
     rating?: number | null;
     note?: string | null;
+    /** #111 i3 — the review sheet's radius chip (core's `surfaceRadiusMi`). */
+    surfaceRadiusMi?: SurfaceRadiusMi | null;
   },
 ): Promise<boolean> {
   const scope = and(eq(trips.id, tripId), eq(trips.ownerId, owner));
@@ -390,6 +394,40 @@ export async function updateTripFields(
     .where(scope)
     .returning({ id: trips.id });
   return updated.length > 0;
+}
+
+/**
+ * The banner's Dismiss (#111 Q6 A): remember these saves as dismissed for this
+ * trip. Idempotent — a save dismissed twice is one row (`ON CONFLICT DO
+ * NOTHING` on the (trip, save) key).
+ *
+ * The trip must be the caller's (false → the handler's 404), and only the
+ * caller's own saves are recorded: an id that is not one of their saves is
+ * dropped rather than planted against their trip.
+ */
+export async function dismissSavesForTrip(
+  owner: string,
+  tripId: string,
+  saveIds: string[],
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const owned = await tx
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(eq(trips.id, tripId), eq(trips.ownerId, owner)));
+    if (!owned.length) return false;
+    if (saveIds.length === 0) return true;
+    const mine = await tx
+      .select({ id: saves.id })
+      .from(saves)
+      .where(and(eq(saves.ownerId, owner), inArray(saves.id, saveIds)));
+    if (mine.length === 0) return true;
+    await tx
+      .insert(tripDismissedSaves)
+      .values(mine.map((s) => ({ tripId, saveId: s.id })))
+      .onConflictDoNothing();
+    return true;
+  });
 }
 
 export async function deleteTrip(owner: string, tripId: string): Promise<boolean> {

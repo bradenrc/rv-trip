@@ -86,6 +86,7 @@ function fixture(ideas: Idea[], stops: Stop[] = [stop({ id: "S1" })]): Trip {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     segments: [],
   };
 }

@@ -15,6 +15,13 @@
       "when": 1790355294478,
       "tag": "0001_w1_capture",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790358019285,
+      "tag": "0002_w1_surfacing",
+      "breakpoints": true
     }
   ]
 }

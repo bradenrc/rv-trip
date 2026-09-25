@@ -21,7 +21,8 @@ import {
   tripStopPins,
 } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
-import { useBundle } from "../../../../../src/store";
+import { IdeasSection, NearbyBanner, NearbySheet } from "../../../../../src/nearby";
+import { dismissNearby, useBundle, useNearby } from "../../../../../src/store";
 import { C, F, R } from "../../../../../src/theme";
 import {
   Button,
@@ -56,6 +57,9 @@ export default function TripScreen() {
   const [lens, setLens] = useState<Lens>("route");
   const [mode, setMode] = useStyleMode();
   const router = useRouter();
+  // Trip surfacing (#111 i3): the saves near this trip, and the review sheet.
+  const { nearby, reload: reloadNearby } = useNearby(id);
+  const [reviewing, setReviewing] = useState(false);
 
   // The same two models the web planner renders — from @rv-trip/core/planner.
   const timeline = useMemo(() => (bundle ? timelineModel(bundle.trip) : null), [bundle]);
@@ -97,9 +101,10 @@ export default function TripScreen() {
   const { trip } = bundle;
   const refresh = async () => {
     setRefreshing(true);
-    await reload();
+    await Promise.all([reload(), reloadNearby()]);
     setRefreshing(false);
   };
+  const surfaced = nearby && nearby.items.length > 0 ? nearby : null;
 
   return (
     <>
@@ -146,6 +151,23 @@ export default function TripScreen() {
             contentContainerStyle={styles.content}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
           >
+            {/* Trip surfacing (#111 i3) — at the top of the Route lens, above
+                the stop rows: the banner (only while a save is surfaced) and
+                the compact Ideas shelf. */}
+            {surfaced && (
+              <NearbyBanner
+                nearby={surfaced}
+                onOpen={() => setReviewing(true)}
+                onDismiss={() =>
+                  void dismissNearby(
+                    trip.id,
+                    surfaced.items.map((i) => i.saveId),
+                  ).catch(() => {})
+                }
+              />
+            )}
+            <IdeasSection trip={trip} />
+
             {/* Day strip — the rhythm of the trip, one cell per day */}
             <Card style={{ padding: 10, gap: 6 }}>
               <Kicker>Rhythm</Kicker>
@@ -244,6 +266,18 @@ export default function TripScreen() {
           </ScrollView>
         )}
       </View>
+      {nearby && (
+        <NearbySheet
+          tripId={trip.id}
+          nearby={nearby}
+          visible={reviewing}
+          onClose={() => {
+            setReviewing(false);
+            // What was added drops out of the next read (isAlreadySaved).
+            void reloadNearby();
+          }}
+        />
+      )}
     </>
   );
 }

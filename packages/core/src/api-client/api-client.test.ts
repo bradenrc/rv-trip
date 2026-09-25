@@ -303,3 +303,87 @@ describe("createApiClient — capture (#111)", () => {
     expect(await none.destinations.resolve({ lat: 42.53, lng: -118.53 })).toBeNull();
   });
 });
+
+describe("createApiClient — trip surfacing (#111 i3)", () => {
+  const item = {
+    saveId: "s1",
+    name: "Fort Stevens State Park",
+    type: "campground",
+    status: "want",
+    rating: null,
+    source: "Jane & Rick",
+    place: { name: "Fort Stevens State Park", lat: 46.2045, lng: -123.958, googlePlaceId: null },
+    nearestStop: { id: "st1", name: "Astoria, OR" },
+    distanceMi: 6.2,
+  };
+
+  it("GETs the nearby saves and validates them", async () => {
+    const body = {
+      radiusMi: 50,
+      items: [item],
+      beyond: { radiusMi: 100, count: 1, nearestMi: 50.3, nearestName: "Cape Lookout State Park" },
+    };
+    const f = fakeFetch(200, body);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.trips.nearbySaves("t 1")).resolves.toEqual(body);
+    expect(f.calls[0]!.url).toBe("http://x/api/trips/t%201/nearby-saves");
+    expect(f.calls[0]!.init.method).toBe("GET");
+  });
+
+  it("refuses a nearby item with no place — the Add path needs it", async () => {
+    const { place: _omit, ...noPlace } = item;
+    const f = fakeFetch(200, { radiusMi: 50, items: [noPlace], beyond: null });
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.trips.nearbySaves("t1")).rejects.toBeInstanceOf(ZodError);
+  });
+
+  it("POSTs the dismissal and resolves void on 204", async () => {
+    const f = fakeFetch(204);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.trips.dismissSaves("t1", ["a", "b"])).resolves.toBeUndefined();
+    expect(f.calls[0]!.url).toBe("http://x/api/trips/t1/dismissed-saves");
+    expect(f.calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(f.calls[0]!.init.body as string)).toEqual({ saveIds: ["a", "b"] });
+  });
+
+  it("PATCHes the trip's radius", async () => {
+    const f = fakeFetch(204);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.trips.patch("t1", { surfaceRadiusMi: 100 })).resolves.toBeUndefined();
+    expect(f.calls[0]!.url).toBe("http://x/api/trips/t1");
+    expect(f.calls[0]!.init.method).toBe("PATCH");
+    expect(JSON.parse(f.calls[0]!.init.body as string)).toEqual({ surfaceRadiusMi: 100 });
+  });
+
+  it("POSTs an idea and reads back the created Idea", async () => {
+    const created = {
+      id: "i1",
+      tripId: "t1",
+      stopId: null,
+      title: "Fort Stevens State Park",
+      category: "stay",
+      status: "idea",
+      place: item.place,
+      rating: null,
+      notes: "Jane & Rick",
+      sortOrder: 0,
+      lastChange: null,
+    };
+    const f = fakeFetch(201, created);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const body = {
+      tripId: "t1",
+      stopId: null,
+      category: "stay" as const,
+      title: "Fort Stevens State Park",
+      status: "idea" as const,
+      place: item.place,
+      rating: null,
+      notes: "Jane & Rick",
+    };
+    await expect(api.ideas.create(body)).resolves.toEqual(created);
+    expect(f.calls[0]!.url).toBe("http://x/api/ideas");
+    expect(f.calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(f.calls[0]!.init.body as string)).toEqual(body);
+  });
+});

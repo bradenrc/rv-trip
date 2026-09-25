@@ -110,6 +110,7 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     segments: [],
   };
 }

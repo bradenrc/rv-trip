@@ -336,6 +336,7 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
     defaultMode: "drive" as const,
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     ideas: [],
     segments: [],
     legs: [

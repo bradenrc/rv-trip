@@ -2,11 +2,15 @@ import type { z } from "zod";
 import type {
   IsoDate,
   ReservationType,
+  Idea,
+  IdeaCreateInput,
   IdeaStatus,
+  NearbySaves,
   Reservation,
   SavedPlace,
   SavedPlaceCreateInput,
   SavedPlacePatch,
+  TripPatchInput,
   TripSummary,
 } from "../domain/types";
 import type { RigProfile, RigProfileInput } from "../domain/rig";
@@ -14,6 +18,8 @@ import type { LatLng, ResolvedDestination, RouteResult } from "../providers/inde
 import {
   tripBundleSchema,
   tripSummaryListSchema,
+  nearbySavesSchema,
+  ideaSchema,
   savedPlaceListSchema,
   savedPlaceSchema,
   placesEnvelopeSchema,
@@ -119,6 +125,13 @@ export interface ApiClient {
   trips: {
     list(): Promise<TripSummary[]>;
     get(id: string): Promise<TripBundle>;
+    /** PATCH /api/trips/:id → 204. The review sheet's radius chips send
+     * `{ surfaceRadiusMi }` (#111 i3). */
+    patch(id: string, patch: TripPatchInput): Promise<void>;
+    /** The saves near this trip, at the trip's own radius (#111 i3). */
+    nearbySaves(id: string): Promise<NearbySaves>;
+    /** The banner's Dismiss: remember these saves as dismissed for this trip. */
+    dismissSaves(id: string, saveIds: string[]): Promise<void>;
   };
   places: {
     list(): Promise<SavedPlace[]>;
@@ -153,6 +166,9 @@ export interface ApiClient {
     patch(id: string, patch: ReservationPatch): Promise<void>;
   };
   ideas: {
+    /** POST /api/ideas → 201 Idea. The review sheet's Add copies a save
+     * (`nearbyIdeaBody`, #111 i3). */
+    create(input: IdeaCreateInput): Promise<Idea>;
     patch(id: string, patch: IdeaPatch): Promise<void>;
     promote(id: string): Promise<Reservation>;
   };
@@ -207,6 +223,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     trips: {
       list: () => parsed(tripSummaryListSchema, request("GET", "/api/trips")),
       get: (id) => parsed(tripBundleSchema, request("GET", `/api/trips/${encodeURIComponent(id)}`)),
+      patch: (id, patch) => voidResult(request("PATCH", `/api/trips/${encodeURIComponent(id)}`, patch)),
+      nearbySaves: (id) =>
+        parsed(nearbySavesSchema, request("GET", `/api/trips/${encodeURIComponent(id)}/nearby-saves`)),
+      dismissSaves: (id, saveIds) =>
+        voidResult(
+          request("POST", `/api/trips/${encodeURIComponent(id)}/dismissed-saves`, { saveIds }),
+        ),
     },
     places: {
       list: () => parsed(savedPlaceListSchema, request("GET", "/api/places")),
@@ -249,6 +272,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         voidResult(request("PATCH", `/api/reservations/${encodeURIComponent(id)}`, patch)),
     },
     ideas: {
+      create: (input) => parsed(ideaSchema, request("POST", "/api/ideas", input)),
       patch: (id, patch) => voidResult(request("PATCH", `/api/ideas/${encodeURIComponent(id)}`, patch)),
       promote: (id) =>
         parsed(reservationRowSchema, request("POST", `/api/ideas/${encodeURIComponent(id)}/promote`)),

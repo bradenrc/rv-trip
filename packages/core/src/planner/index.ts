@@ -46,6 +46,8 @@ export * from "./map-arcs";
 export * from "./map-pins";
 /** The trip's idea shelf — the side rail's model (#80 i1). */
 export * from "./shelf";
+/** Trip surfacing — the saves near a trip (#111 i3). */
+export * from "./nearby-saves";
 
 export function allStops(trip: Trip): Stop[] {
   return trip.legs.flatMap((l) => l.stops);

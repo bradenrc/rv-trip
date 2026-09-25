@@ -9,6 +9,7 @@ import {
   rigs,
   routes,
   saves,
+  tripDismissedSaves,
   travelSegments,
   stops,
   trips,
@@ -520,6 +521,14 @@ export const read = {
   async savedPlace(id: string): Promise<SavedPlaceRow | null> {
     const [row] = await db.select().from(saves).where(eq(saves.id, id));
     return row ?? null;
+  },
+  /** A trip's dismissed save ids (#111 i3), sorted — the ROWS. */
+  async dismissedSaveIds(tripId: string): Promise<string[]> {
+    const rows = await db
+      .select({ saveId: tripDismissedSaves.saveId })
+      .from(tripDismissedSaves)
+      .where(eq(tripDismissedSaves.tripId, tripId));
+    return rows.map((r) => r.saveId).sort();
   },
   /** An owner's destinations rows (#111), oldest first. */
   async destinations(owner: string): Promise<(typeof destinations.$inferSelect)[]> {
