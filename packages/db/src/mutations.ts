@@ -10,6 +10,7 @@ import {
   rigs,
   routes,
   saves,
+  destinations,
   travelSegments,
   userPrefs,
   changeLog,
@@ -30,6 +31,7 @@ import type {
   NavCheck,
   RigProfile,
   RigProfileInput,
+  ResolvedDestination,
   RouteResult,
   SavedPlace,
   SavedPlaceCreate,
@@ -50,6 +52,7 @@ import {
   mapStop,
   mapPrefsRow,
   mapRigRow,
+  mapSaveDestination,
   mapSavedPlaceRow,
 } from "./queries";
 
@@ -1142,13 +1145,140 @@ export function saveAnchorOf(input: {
   return { anchor: "area", areaLabel: input.region };
 }
 
-export async function createSave(owner: string, input: SavedPlaceCreate): Promise<SavedPlace> {
+/**
+ * Reverse-geocodes a point to its locality — `PlacesProvider.resolveDestination`
+ * handed in by the ROUTE (#111). packages/db holds no provider and no key: the
+ * web resolves which provider is live (`apps/web/src/lib/places.ts`) and passes
+ * its method here, the same way `api/places/locate` hands `locatePlaces` one.
+ */
+export type DestinationResolver = (lat: number, lng: number) => Promise<ResolvedDestination | null>;
+
+export interface CreateSaveResult {
+  saved: SavedPlace;
+  /** True when `clientId` matched a row this owner already has (answer 200). */
+  replayed: boolean;
+}
+
+/** An owner's save by its phone client id, destination joined, or null. */
+async function saveByClientId(owner: string, clientId: string): Promise<SavedPlace | null> {
+  const row = await db.query.saves.findFirst({
+    where: and(eq(saves.ownerId, owner), eq(saves.clientId, clientId)),
+    with: { trip: { columns: { title: true } }, destination: true },
+  });
+  return row ? mapSavedPlaceRow(row, row.trip?.title ?? null) : null;
+}
+
+/**
+ * The resolver's answer, or null — never a failed save. No key (the stub), a
+ * Google outage, a refused Geocoding API: the save is still written, with a
+ * null destination (docs/design/111 "One resolver").
+ */
+async function resolveQuietly(
+  resolve: DestinationResolver | undefined,
+  lat: number | null,
+  lng: number | null,
+): Promise<ResolvedDestination | null> {
+  if (!resolve || lat == null || lng == null) return null;
+  try {
+    return await resolve(lat, lng);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One destinations row per (household, locality place id) — created on first
+ * use, REUSED after (the unique is `destinations_owner_place_uq`). The name,
+ * region and point are refreshed from the resolver on every hit, so a row
+ * written before `region` existed picks its header up the next time it is used.
+ */
+async function upsertDestination(owner: string, d: ResolvedDestination) {
+  const [row] = await db
+    .insert(destinations)
+    .values({
+      ownerId: owner,
+      googlePlaceId: d.googlePlaceId,
+      name: d.name,
+      region: d.region,
+      lat: d.lat,
+      lng: d.lng,
+    })
+    .onConflictDoUpdate({
+      target: [destinations.ownerId, destinations.googlePlaceId],
+      set: { name: d.name, region: d.region, lat: d.lat, lng: d.lng },
+    })
+    .returning();
+  return row!;
+}
+
+/**
+ * Save a place (docs/design/41 §3), extended for capture (#111):
+ *
+ * - **Idempotent on `clientId`.** A phone replaying a queued capture whose
+ *   first POST landed but whose answer was lost gets the row that exists, with
+ *   `replayed: true`, and no second row. Checked first, and again on the
+ *   insert's `ON CONFLICT` so two concurrent replays cannot both write.
+ * - **An explicit `anchor` wins** over `saveAnchorOf`, which would file an area
+ *   note that carries the phone's location as a pin. The derivation stays the
+ *   fallback for the web and older callers.
+ * - **`capturedAt` is `created_at`** when sent — a queued save flushed hours
+ *   later still sorts where it was captured.
+ * - **The destination is resolved** from the save's point when there is one and
+ *   the route handed in a resolver. An area save's `areaLabel` falls back to
+ *   the destination's name ("Bend, OR"), then to `region` (the W0 rule).
+ */
+export async function createSave(
+  owner: string,
+  input: SavedPlaceCreate,
+  deps: { resolveDestination?: DestinationResolver } = {},
+): Promise<CreateSaveResult> {
+  if (input.clientId) {
+    const existing = await saveByClientId(owner, input.clientId);
+    if (existing) return { saved: existing, replayed: true };
+  }
   const tripName = await ownedTripTitle(owner, input.tripId);
+  const {
+    clientId,
+    capturedAt,
+    anchor: explicitAnchor,
+    areaLabel: explicitLabel,
+    // Read by i2's offline place suggestion; there is no column for it.
+    capturedOffline,
+    ...fields
+  } = input;
+  void capturedOffline;
+  const anchor = explicitAnchor ?? saveAnchorOf(input).anchor;
+
+  const resolved = await resolveQuietly(deps.resolveDestination, input.lat, input.lng);
+  const destination = resolved ? await upsertDestination(owner, resolved) : null;
+  const areaLabel =
+    anchor === "area" ? (explicitLabel ?? destination?.name ?? input.region ?? null) : null;
+
   const [row] = await db
     .insert(saves)
-    .values({ ownerId: owner, ...input, ...saveAnchorOf(input) })
+    .values({
+      ownerId: owner,
+      ...fields,
+      anchor,
+      areaLabel,
+      clientId: clientId ?? null,
+      destinationId: destination?.id ?? null,
+      ...(capturedAt ? { createdAt: new Date(capturedAt) } : {}),
+    })
+    .onConflictDoNothing({ target: [saves.ownerId, saves.clientId] })
     .returning();
-  return mapSavedPlaceRow(row!, tripName);
+  if (!row) {
+    // Lost the race to a concurrent replay of the same capture.
+    const existing = await saveByClientId(owner, clientId!);
+    return { saved: existing!, replayed: true };
+  }
+  return {
+    saved: {
+      ...mapSavedPlaceRow(row, tripName),
+      destination: destination ? mapSaveDestination(destination) : null,
+    },
+    replayed: false,
+  };
 }
 
 /**

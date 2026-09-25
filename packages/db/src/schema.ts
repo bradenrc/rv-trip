@@ -18,7 +18,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
-import type { NavCheck, RouteResult } from "@rv-trip/core";
+import type { NavCheck, RouteResult, SuggestedPlace } from "@rv-trip/core";
 
 /**
  * Relational schema for the trip grammar. Mirrors @rv-trip/core/domain.
@@ -263,6 +263,12 @@ export const destinations = pgTable(
     ownerId: text("owner_id").notNull(),
     googlePlaceId: text("google_place_id").notNull(),
     name: text("name").notNull(),
+    // The Saves tab's region HEADER (#111 Q4 B): the state's long name in the
+    // US ("Oregon"), the country elsewhere ("Costa Rica"). A header only — not
+    // a table. Written by the same resolver that names the row.
+    region: text("region"),
+    // The LOCALITY's own point (#111): what an area save with no coordinates
+    // of its own is measured from when a trip looks for nearby saves.
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -304,9 +310,22 @@ export const saves = pgTable(
     // "been" shelf only.
     rating: smallint("rating"),
     tripId: uuid("trip_id").references(() => trips.id, { onDelete: "set null" }),
+    // #111 capture: the phone's `cap_…` id, minted when the capture is queued.
+    // The save is idempotent on it — a replayed POST finds this row instead of
+    // writing a second one. Null for every web save; Postgres treats NULLs as
+    // distinct, so the unique below constrains only the phone's ids.
+    clientId: text("client_id"),
+    // #111 Q3 A: the top Places hit for an offline note's text, offered as a
+    // one-tap upgrade. Null once taken or dismissed (i2 writes it).
+    suggestedPlace: jsonb("suggested_place").$type<SuggestedPlace>(),
+    // When the capture HAPPENED — the body's `capturedAt` when the phone sends
+    // one (a queued save may reach us hours later), else now.
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("saves_owner_idx").on(t.ownerId)],
+  (t) => [
+    index("saves_owner_idx").on(t.ownerId),
+    unique("saves_owner_client_uq").on(t.ownerId, t.clientId),
+  ],
 );
 
 /**

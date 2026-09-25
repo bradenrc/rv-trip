@@ -1,14 +1,26 @@
 import type { z } from "zod";
-import type { IsoDate, ReservationType, IdeaStatus, Reservation, SavedPlace, TripSummary } from "../domain/types";
+import type {
+  IsoDate,
+  ReservationType,
+  IdeaStatus,
+  Reservation,
+  SavedPlace,
+  SavedPlaceCreateInput,
+  TripSummary,
+} from "../domain/types";
 import type { RigProfile, RigProfileInput } from "../domain/rig";
-import type { LatLng, RouteResult } from "../providers/index";
+import type { LatLng, ResolvedDestination, RouteResult } from "../providers/index";
 import {
   tripBundleSchema,
   tripSummaryListSchema,
   savedPlaceListSchema,
+  savedPlaceSchema,
+  placesEnvelopeSchema,
+  resolvedDestinationSchema,
   rigResponseSchema,
   routePairsResponseSchema,
   reservationRowSchema,
+  type PlacesSearchEnvelope,
   type TripBundle,
 } from "./schemas";
 
@@ -109,6 +121,19 @@ export interface ApiClient {
   };
   places: {
     list(): Promise<SavedPlace[]>;
+    /** POST /api/places. 201 new or 200 on a replayed `clientId` — the same
+     * row either way (#111). A non-2xx throws `ApiError` with its status, which
+     * is what the phone's capture queue keeps or drops on. */
+    create(body: SavedPlaceCreateInput): Promise<SavedPlace>;
+    /** The shipped search proxy. A throttled 429 still answers the degraded
+     * envelope rather than throwing — its body IS that envelope. */
+    search(q: string, near?: LatLng): Promise<PlacesSearchEnvelope>;
+    /** DELETE /api/places/:id — the capture toast's Undo. */
+    remove(id: string): Promise<void>;
+  };
+  destinations: {
+    /** The locality a point is in, or null (#111). */
+    resolve(near: LatLng): Promise<ResolvedDestination | null>;
   };
   rig: {
     get(): Promise<RigProfile | null>;
@@ -179,6 +204,25 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     },
     places: {
       list: () => parsed(savedPlaceListSchema, request("GET", "/api/places")),
+      create: (body) => parsed(savedPlaceSchema, request("POST", "/api/places", body)),
+      search: async (q, near) => {
+        const qs = new URLSearchParams({ q });
+        if (near) qs.set("near", `${near.lat},${near.lng}`);
+        try {
+          return await parsed(placesEnvelopeSchema, request("GET", `/api/places/search?${qs}`));
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 429) return placesEnvelopeSchema.parse(e.body);
+          throw e;
+        }
+      },
+      remove: (id) => voidResult(request("DELETE", `/api/places/${encodeURIComponent(id)}`)),
+    },
+    destinations: {
+      resolve: (near) =>
+        parsed(
+          resolvedDestinationSchema,
+          request("GET", `/api/destinations/resolve?near=${near.lat},${near.lng}`),
+        ),
     },
     rig: {
       get: () => parsed(rigResponseSchema, request("GET", "/api/rig")),

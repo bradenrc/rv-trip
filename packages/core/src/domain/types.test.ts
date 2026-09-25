@@ -409,3 +409,51 @@ describe("placeEnrichment — the cached Google row (#82 Q3 → A, #91)", () => 
     expect(placeEnrichment.parse({ ...ROW, googleMapsUri: null }).googleMapsUri).toBeNull();
   });
 });
+
+// ── #111 · the capture half of the create body, and only of the create ────
+
+describe("savedPlaceCreate — capture fields (#111)", () => {
+  const CAPTURE = {
+    clientId: "cap_01JBX7Q2M4",
+    capturedAt: "2026-09-25T17:10:04-07:00",
+    anchor: "pin",
+    capturedOffline: false,
+    lat: 43.05,
+    lng: -124.33,
+    areaLabel: null,
+    name: "great BLM camp spot",
+    type: "campground",
+    status: "want",
+    source: null,
+    note: null,
+  };
+
+  it("accepts the wireframe's capture body and keeps its capture keys", () => {
+    const parsed = savedPlaceCreate.parse(CAPTURE);
+    expect(parsed).toMatchObject({ clientId: "cap_01JBX7Q2M4", anchor: "pin", capturedOffline: false });
+  });
+
+  it("refuses a pin with no point, a place with no id, and a capturedAt that is not an instant", () => {
+    expect(savedPlaceCreate.safeParse({ name: "x", anchor: "pin" }).success).toBe(false);
+    expect(savedPlaceCreate.safeParse({ name: "x", anchor: "place" }).success).toBe(false);
+    expect(savedPlaceCreate.safeParse({ name: "x", capturedAt: "2026-09-25" }).success).toBe(false);
+    expect(savedPlaceCreate.safeParse({ name: "x", anchor: "area" }).success).toBe(true);
+  });
+
+  it("is create-only — a PATCH strips every capture key and cannot rewrite them", () => {
+    expect(savedPlacePatch.safeParse({ clientId: "cap_x", anchor: "pin" }).success).toBe(false);
+    const parsed = savedPlacePatch.parse({ note: "book A15", anchor: "pin", capturedAt: CAPTURE.capturedAt });
+    expect(parsed).toEqual({ note: "book A15" });
+  });
+
+  it("defaults the read shape's capture fields for a payload from an older server", () => {
+    const row = savedPlace.parse({
+      id: "s1",
+      ownerId: "dev-user",
+      place: { name: "Kalaloch Campground" },
+      type: "campground",
+      rating: null,
+    });
+    expect(row).toMatchObject({ anchor: "area", areaLabel: null, destination: null, suggestedPlace: null });
+  });
+});

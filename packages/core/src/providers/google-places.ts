@@ -1,4 +1,12 @@
-import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index";
+import {
+  DESTINATION_MAX_MILES,
+  haversineMeters,
+  type LatLng,
+  type PlaceDetails,
+  type PlaceSummary,
+  type PlacesProvider,
+  type ResolvedDestination,
+} from "./index";
 
 /**
  * Google Places (New) — SERVER SIDE ONLY.
@@ -26,6 +34,9 @@ import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index
 export const SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 /** Place Details (New). GET .../places/{PLACE_ID}. */
 export const DETAILS_URL_BASE = "https://places.googleapis.com/v1/places/";
+/** Geocoding API — the reverse lookup behind `resolveDestination` (#111). Needs
+ * the Geocoding API enabled on the same key (an operator step). */
+export const GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 
 /**
  * Exactly the five fields PlaceSummary carries — nothing else is requested, so
@@ -53,7 +64,14 @@ const DETAILS_FIELDS = [
 ] as const;
 
 export const DETAILS_FIELD_MASK = DETAILS_FIELDS.join(",");
-export const SEARCH_FIELD_MASK = PLACE_FIELDS.map((f) => `places.${f}`).join(",");
+/**
+ * Search's cheap five, plus the two type fields the capture sheet needs (#111):
+ * `primaryType` picks the row's category tile and `primaryTypeDisplayName`
+ * leads its subline. Both are Pro-SKU fields, the same tier as `location` and
+ * `formattedAddress`, so they cost nothing extra per result.
+ */
+const SEARCH_FIELDS = [...PLACE_FIELDS, "primaryType", "primaryTypeDisplayName"] as const;
+export const SEARCH_FIELD_MASK = SEARCH_FIELDS.map((f) => `places.${f}`).join(",");
 
 /**
  * How far around `near` the search leans. A BIAS, never a restriction — a
@@ -120,6 +138,19 @@ export class GooglePlacesProvider implements PlacesProvider {
     if (!res.ok) throw new Error(`Google places/details → ${res.status}`);
     return parseDetailsResponse(await res.json());
   }
+
+  async resolveDestination(lat: number, lng: number): Promise<ResolvedDestination | null> {
+    const url = `${GEOCODE_URL}?latlng=${lat},${lng}&result_type=locality&key=${encodeURIComponent(
+      this.credentials.apiKey,
+    )}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Google geocode → ${res.status}`);
+    const body = (await res.json()) as { status?: string };
+    // ZERO_RESULTS is an answer — the middle of the Alvord Desert has no town.
+    if (body?.status === "ZERO_RESULTS") return null;
+    if (body?.status !== "OK") throw new Error(`Google geocode → ${body?.status ?? "no status"}`);
+    return parseReverseGeocode(body, { lat, lng });
+  }
 }
 
 // ── response mapping ───────────────────────────────────────────────────────
@@ -133,6 +164,9 @@ interface GooglePlace {
   location?: GoogleLatLng;
   rating?: number;
   formattedAddress?: string;
+  /** Search only (#111). */
+  primaryType?: string;
+  primaryTypeDisplayName?: { text?: string };
   /** Details only — requested by DETAILS_FIELD_MASK and by nothing else. */
   userRatingCount?: number;
   websiteUri?: string;
@@ -140,12 +174,76 @@ interface GooglePlace {
   googleMapsUri?: string;
 }
 
-/** Text Search wraps its hits in `places`, and omits the key entirely on none. */
+/**
+ * Text Search wraps its hits in `places`, and omits the key entirely on none.
+ * Search rows carry the two type fields (#111); details rows never do, which is
+ * why they are added here and not in the shared `toPlaceSummary`.
+ */
 export function parseSearchResponse(body: unknown): PlaceSummary[] {
   const places = (body as { places?: GooglePlace[] } | null)?.places ?? [];
-  return places
-    .map((place) => toPlaceSummary(place))
-    .filter((place): place is PlaceSummary => place !== null);
+  return places.flatMap((place) => {
+    const summary = toPlaceSummary(place);
+    if (!summary) return [];
+    return [
+      {
+        ...summary,
+        primaryType: place.primaryType ?? null,
+        primaryTypeDisplayName: place.primaryTypeDisplayName?.text ?? null,
+      },
+    ];
+  });
+}
+
+// ── the reverse geocode (#111) ─────────────────────────────────────────────
+interface GeocodeComponent {
+  long_name?: string;
+  short_name?: string;
+  types?: string[];
+}
+interface GeocodeResult {
+  place_id?: string;
+  address_components?: GeocodeComponent[];
+  geometry?: { location?: { lat?: number; lng?: number } };
+}
+
+const METERS_PER_MILE = 1609.344;
+
+/**
+ * A Geocoding API reverse answer (`result_type=locality`) → the destination,
+ * or null. The rule is docs/design/111's, and it is one rule for everywhere:
+ *
+ * - the locality must be within {@link DESTINATION_MAX_MILES} of the point,
+ *   measured to the locality's own geometry, or the save is unanchored;
+ * - in the US the name is "Locality, ST" and the region the state's long name
+ *   ("Bandon, OR" · "Oregon");
+ * - anywhere else the name is "Locality, Country" and the region the country
+ *   ("San José, Costa Rica" · "Costa Rica").
+ */
+export function parseReverseGeocode(body: unknown, point: LatLng): ResolvedDestination | null {
+  const results = (body as { results?: GeocodeResult[] } | null)?.results ?? [];
+  for (const result of results) {
+    const comps = result.address_components ?? [];
+    const find = (type: string) => comps.find((c) => c.types?.includes(type));
+    const locality = find("locality")?.long_name;
+    const loc = result.geometry?.location;
+    if (!result.place_id || !locality) continue;
+    if (typeof loc?.lat !== "number" || typeof loc?.lng !== "number") continue;
+    const at = { lat: loc.lat, lng: loc.lng };
+    if (haversineMeters(point, at) > DESTINATION_MAX_MILES * METERS_PER_MILE) return null;
+    const admin = find("administrative_area_level_1");
+    const country = find("country");
+    const us = country?.short_name === "US";
+    const name = us
+      ? admin?.short_name
+        ? `${locality}, ${admin.short_name}`
+        : locality
+      : country?.long_name
+        ? `${locality}, ${country.long_name}`
+        : locality;
+    const region = (us ? admin?.long_name : country?.long_name) ?? null;
+    return { googlePlaceId: result.place_id, name, region, lat: at.lat, lng: at.lng };
+  }
+  return null;
 }
 
 /** Details answers with the place itself, unwrapped. */

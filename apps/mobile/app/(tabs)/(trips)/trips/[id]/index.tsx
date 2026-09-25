@@ -20,9 +20,9 @@ import {
   tripArcs,
   tripStopPins,
 } from "@rv-trip/core";
-import { MapFrame, TripMap, useStyleMode } from "../../../src/map";
-import { useBundle } from "../../../src/store";
-import { C, F, R } from "../../../src/theme";
+import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
+import { useBundle } from "../../../../../src/store";
+import { C, F, R } from "../../../../../src/theme";
 import {
   Button,
   Card,
@@ -34,7 +34,7 @@ import {
   Segmented,
   Stars,
   type SegmentedOption,
-} from "../../../src/ui";
+} from "../../../../../src/ui";
 
 /**
  * The two lenses on one trip (#44 · q1 A): the Route rail as it has always

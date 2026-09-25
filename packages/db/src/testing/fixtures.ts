@@ -1,6 +1,7 @@
 import { asc, count, eq, sql } from "drizzle-orm";
 import { db } from "../index";
 import {
+  destinations,
   ideas,
   legs,
   reservations,
@@ -144,6 +145,8 @@ export interface PlaceSeed {
   source: string | null;
   rating: number | null;
   tripId: string | null;
+  /** #111: the phone's capture id. */
+  clientId: string | null;
 }
 
 export interface RigSeed {
@@ -285,6 +288,7 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
       source: p.source ?? null,
       rating: p.rating ?? null,
       tripId: p.tripId ?? null,
+      clientId: p.clientId ?? null,
     })
     .returning();
   return row!;
@@ -485,6 +489,14 @@ export const read = {
   async savedPlace(id: string): Promise<SavedPlaceRow | null> {
     const [row] = await db.select().from(saves).where(eq(saves.id, id));
     return row ?? null;
+  },
+  /** An owner's destinations rows (#111), oldest first. */
+  async destinations(owner: string): Promise<(typeof destinations.$inferSelect)[]> {
+    return db
+      .select()
+      .from(destinations)
+      .where(eq(destinations.ownerId, owner))
+      .orderBy(asc(destinations.createdAt));
   },
   /** The ROW, not the payload: `RigProfile` carries no timestamp (C3), so the
    * upsert's touch can only be asserted here. */

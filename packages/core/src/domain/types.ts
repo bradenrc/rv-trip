@@ -502,6 +502,43 @@ export type IdeaPromoteInput = z.infer<typeof ideaPromoteInput>;
 export const savedPlaceStatus = z.enum(["want", "been"]);
 export type SavedPlaceStatus = z.infer<typeof savedPlaceStatus>;
 
+/**
+ * What a save is pinned to (#110 §5): a Google `place`, a named `area` (a note
+ * "in the Bandon area"), or a dropped `pin`. Mirrors the `save_anchor` pgEnum
+ * (packages/db/src/schema.ts).
+ */
+export const saveAnchor = z.enum(["place", "area", "pin"]);
+export type SaveAnchor = z.infer<typeof saveAnchor>;
+
+/**
+ * The locality a save resolved to (#111 · docs/design/111 "One resolver"): a
+ * `destinations` row, named "Bandon, OR" / "San José, Costa Rica", with its
+ * region header ("Oregon" / "Costa Rica") and the locality's own coordinates —
+ * the point an area save with no coordinates of its own is measured from.
+ */
+export const saveDestination = z.object({
+  id: z.string(),
+  name: z.string(),
+  region: z.string().nullable().default(null),
+  googlePlaceId: z.string(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+});
+export type SaveDestination = z.infer<typeof saveDestination>;
+
+/**
+ * The one-tap upgrade an offline note is offered after sync (#111 Q3 A): the
+ * top Places hit for the note's text near where it was typed. `saves.suggested_place`.
+ */
+export const suggestedPlace = z.object({
+  name: z.string(),
+  googlePlaceId: z.string(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+  subline: z.string().nullable().default(null),
+});
+export type SuggestedPlace = z.infer<typeof suggestedPlace>;
+
 export const savedPlace = z.object({
   id: z.string(),
   ownerId: z.string(),
@@ -520,6 +557,14 @@ export const savedPlace = z.object({
   tripId: z.string().nullable().default(null),
   tripName: z.string().nullable().default(null),
   lastChange: lastChangeField,
+  // ── #111 W1 capture. Every one defaulted, so a payload from a server older
+  // than this read shape still parses (the phone ships on its own cadence).
+  anchor: saveAnchor.default("area"),
+  /** An area save's human label ("Bend, OR"). Null for place and pin saves. */
+  areaLabel: z.string().nullable().default(null),
+  /** Null = unanchored: no locality within 25 mi, or no provider key. */
+  destination: saveDestination.nullable().default(null),
+  suggestedPlace: suggestedPlace.nullable().default(null),
 });
 export type SavedPlace = z.infer<typeof savedPlace>;
 
@@ -562,7 +607,7 @@ export type PlaceEnrichment = z.infer<typeof placeEnrichment>;
  * through. `id`, `ownerId`, `createdAt` and the joined `tripName` are
  * server-owned and are stripped from any body that sends them.
  */
-export const savedPlaceCreate = z.object({
+const savedPlaceFields = z.object({
   name: z.string().min(1),
   region: z.string().nullable().default(null),
   lat: z.number().nullable().default(null),
@@ -576,6 +621,42 @@ export const savedPlaceCreate = z.object({
   rating: rating.default(null),
   tripId: z.string().uuid().nullable().default(null),
 });
+
+/**
+ * The capture half of the create body (#111 · docs/design/111 "Contracts").
+ * CREATE-ONLY on purpose: `savedPlacePatch` below is built from
+ * `savedPlaceFields`, not from this, so a PATCH can never rewrite a save's
+ * client id, birthday or anchor (updateSavedPlaceFields spreads its patch
+ * straight into `.set()`).
+ *
+ * All optional and none defaulted, so a body that omits them — the web, an
+ * older phone — parses to exactly the shape it always did.
+ */
+export const savedPlaceCreate = savedPlaceFields
+  .extend({
+    /** `cap_…`, minted on the phone when the capture is queued. The save is
+     * idempotent on it: a replay answers 200 with the row that exists. */
+    clientId: z.string().min(1).max(64).optional(),
+    /** When the capture happened (it may be flushed hours later) → created_at. */
+    capturedAt: z.string().datetime({ offset: true }).optional(),
+    /** Wins over the derived `saveAnchorOf` when present. */
+    anchor: saveAnchor.optional(),
+    areaLabel: z.string().nullable().optional(),
+    /** Typed with no signal. With an area anchor it earns a place suggestion (i2). */
+    capturedOffline: z.boolean().optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.anchor === "pin" && (b.lat == null || b.lng == null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["anchor"], message: "a pin needs lat and lng" });
+    }
+    if (b.anchor === "place" && !b.googlePlaceId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["anchor"],
+        message: "a place anchor needs a googlePlaceId",
+      });
+    }
+  });
 /** Post-parse: every default resolved. What the mutations receive. */
 export type SavedPlaceCreate = z.infer<typeof savedPlaceCreate>;
 /** Pre-parse: `name` and whatever else the caller chose to send. What a client
@@ -588,7 +669,7 @@ export type SavedPlaceCreateInput = z.input<typeof savedPlaceCreate>;
  * required: an empty `.set({})` is a Drizzle error, and a body of nothing but
  * unknown keys is a caller bug that deserves a 400 rather than a 500.
  */
-export const savedPlacePatch = savedPlaceCreate
+export const savedPlacePatch = savedPlaceFields
   .partial()
   .refine((p) => Object.keys(p).length > 0, {
     message: "patch must name at least one field",

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { savedPlaceCreate } from "@rv-trip/core";
 import { createSave, listSavedPlacesForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
+import { placesProvider } from "@/lib/places";
 
 /** The Places library, both shelves — `SavedPlace[]`. */
 export async function GET() {
@@ -19,11 +20,22 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
+  // The destination is resolved HERE, where the provider is (#111): packages/db
+  // holds no key, so the route hands `createSave` the live resolver — the stub
+  // without GOOGLE_API_KEY, which anchors nothing.
+  const { provider } = placesProvider();
   try {
-    const saved = await createSave(await getOwner(), parsed.data);
-    return NextResponse.json(saved, { status: 201 });
-  } catch {
+    const { saved, replayed } = await createSave(await getOwner(), parsed.data, {
+      resolveDestination: (lat, lng) => provider.resolveDestination(lat, lng),
+    });
+    // A replayed `clientId` is the phone re-sending a capture that already
+    // landed: 200 with the row that exists, never a second row.
+    return NextResponse.json(saved, { status: replayed ? 200 : 201 });
+  } catch (e) {
     // The only guarded input is `tripId` — a trip this owner does not own.
-    return NextResponse.json({ error: "trip not found" }, { status: 404 });
+    if (e instanceof Error && e.message === "trip not found") {
+      return NextResponse.json({ error: "trip not found" }, { status: 404 });
+    }
+    throw e;
   }
 }

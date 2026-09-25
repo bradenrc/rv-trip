@@ -18,13 +18,20 @@ const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*
 const flat = (s: string) => s.replace(/\s+/g, " ");
 
 describe("packages/db/drizzle — one clean migration set", () => {
-  it("holds exactly one .sql migration, and its journal exactly one entry", () => {
-    const sql = readdirSync(join(REPO, "packages/db/drizzle")).filter((f) => f.endsWith(".sql"));
-    expect(sql).toEqual(["0000_v2.sql"]);
+  // W0 reset the history to ONE baseline, 0000_v2. The waves after it add a
+  // migration each on top (#111 i1: 0001_w1_capture — docs/design/111
+  // "Contracts": "drizzle-kit generate, one per item"), so what stays true is
+  // that the history STARTS at the v2 baseline and nothing pre-v2 came back.
+  it("starts at the single v2 baseline, and journals every .sql it holds", () => {
+    const sql = readdirSync(join(REPO, "packages/db/drizzle"))
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    expect(sql[0]).toBe("0000_v2.sql");
+    expect(sql.filter((f) => f.startsWith("0000_"))).toEqual(["0000_v2.sql"]);
     const journal = JSON.parse(read("packages/db/drizzle/meta/_journal.json")) as {
       entries: { tag: string }[];
     };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_v2"]);
+    expect(journal.entries.map((e) => `${e.tag}.sql`)).toEqual(sql);
   });
 });
 

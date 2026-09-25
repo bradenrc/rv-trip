@@ -40,6 +40,7 @@ import type {
   Idea,
   Place,
   SavedPlace,
+  SaveDestination,
   Segment,
   PlaceSuggestion,
   NavCheck,
@@ -502,7 +503,7 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
   const rows = await db.query.saves.findMany({
     where: eq(saves.ownerId, ownerId),
     orderBy: [desc(saves.createdAt)],
-    with: { trip: { columns: { title: true } } },
+    with: { trip: { columns: { title: true } }, destination: true },
   });
   // The /places cards render a byline (§5), so the library read joins the log
   // the same way the trip tree does — one query for the whole page.
@@ -555,6 +556,12 @@ export function mapSavedPlaceRow(
     source: string | null;
     rating: number | null;
     tripId: string | null;
+    anchor: SavedPlace["anchor"];
+    areaLabel: string | null;
+    suggestedPlace: SavedPlace["suggestedPlace"];
+    /** The joined `destinations` row (#111) — null when unanchored. Absent
+     * (undefined) reads as null too, for a caller that did not join it. */
+    destination?: SaveDestinationRow | null;
   },
   tripName: string | null,
   last: LastChangeIndex = NO_CHANGES,
@@ -572,6 +579,31 @@ export function mapSavedPlaceRow(
     tripId: r.tripId,
     tripName,
     lastChange: lastChangeOf(last, "save", r.id),
+    anchor: r.anchor,
+    areaLabel: r.areaLabel,
+    destination: r.destination ? mapSaveDestination(r.destination) : null,
+    suggestedPlace: r.suggestedPlace ?? null,
+  };
+}
+
+/** The `destinations` columns a save's read shape carries. */
+export interface SaveDestinationRow {
+  id: string;
+  name: string;
+  region: string | null;
+  googlePlaceId: string;
+  lat: number | null;
+  lng: number | null;
+}
+
+export function mapSaveDestination(d: SaveDestinationRow): SaveDestination {
+  return {
+    id: d.id,
+    name: d.name,
+    region: d.region,
+    googlePlaceId: d.googlePlaceId,
+    lat: d.lat,
+    lng: d.lng,
   };
 }
 

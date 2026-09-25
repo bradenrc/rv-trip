@@ -438,6 +438,77 @@ export function TripMap({
   );
 }
 
+// ── the capture pin (#111) ──────────────────────────────────────────────────
+
+/** Street-level: close enough to nudge a pin onto the right pullout. */
+const PIN_ZOOM = 14;
+
+/**
+ * The pin sub-screen's map (docs/design/111 #100 offline ②): a fixed crosshair
+ * over a draggable map, and the map's CENTRE is the pin. Drag the map to nudge
+ * the pin; `onMove` reports the new centre when the camera settles.
+ *
+ * The coordinate is the source of truth, not the tiles — so with no token, no
+ * native module, or no tiles (no signal) this draws the design's BLANK GRID
+ * with the same crosshair and coordinate, and the pin is still the GPS fix.
+ */
+export function PinMap({
+  at,
+  mode,
+  onMove,
+  label,
+  height = 190,
+}: {
+  at: { lat: number; lng: number };
+  mode: StyleMode;
+  onMove: (at: { lat: number; lng: number }) => void;
+  /** The coordinate line drawn bottom-left ("43.0500, −124.3300"). */
+  label: string;
+  height?: number;
+}) {
+  const mapbox = mapAvailable() ? loadMapbox() : null;
+  // The first fix frames the map once; after that the user owns the camera.
+  const [start] = useState(at);
+
+  return (
+    <View style={[styles.pinCanvas, { height }]}>
+      {mapbox ? (
+        <mapbox.MapView
+          style={styles.fill}
+          styleURL={MAP_STYLES[mode]}
+          scaleBarEnabled={false}
+          compassEnabled={false}
+          onMapIdle={(state) => {
+            const [lng, lat] = state.properties.center;
+            if (typeof lat === "number" && typeof lng === "number") onMove({ lat, lng });
+          }}
+        >
+          <mapbox.Camera
+            defaultSettings={{ centerCoordinate: [start.lng, start.lat], zoomLevel: PIN_ZOOM }}
+          />
+        </mapbox.MapView>
+      ) : (
+        <View style={[styles.fill, styles.pinGrid]}>
+          {GRID_LINES.map((i) => (
+            <View key={`h${i}`} style={[styles.gridH, { top: i * 28 }]} />
+          ))}
+          {GRID_LINES.map((i) => (
+            <View key={`v${i}`} style={[styles.gridV, { left: i * 28 }]} />
+          ))}
+        </View>
+      )}
+      <View pointerEvents="none" style={styles.crosshair}>
+        <Text style={styles.crosshairGlyph}>⌖</Text>
+      </View>
+      <View pointerEvents="none" style={styles.coord}>
+        <Text style={styles.coordText}>{label}</Text>
+      </View>
+    </View>
+  );
+}
+
+const GRID_LINES = Array.from({ length: 16 }, (_, i) => i + 1);
+
 /**
  * A trip stop: a numbered disc, green because that is the shipped stop language.
  * A floating stop is an amber DASHED HOLLOW disc with no ordinal — it has no
@@ -518,4 +589,39 @@ const styles = StyleSheet.create({
   frameBodyWarn: { fontSize: 12.5, color: C.warning, textAlign: "center", maxWidth: 280 },
   frameBody: { fontSize: 12.5, color: C.inkMuted, textAlign: "center", maxWidth: 280 },
   frameMono: { fontFamily: F.mono, fontSize: 11, color: C.inkFaded },
+
+  // The pin sub-screen — docs/design/111 `.map`: navy-soft ground, a 28pt
+  // rv-border grid, a green crosshair, the coordinate in a mono chip.
+  pinCanvas: {
+    position: "relative",
+    overflow: "hidden",
+    borderRadius: R.card,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  pinGrid: { backgroundColor: C.navySoft },
+  gridH: { position: "absolute", left: 0, right: 0, height: 1, backgroundColor: C.border },
+  gridV: { position: "absolute", top: 0, bottom: 0, width: 1, backgroundColor: C.border },
+  crosshair: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  crosshairGlyph: { fontSize: 30, color: C.green },
+  coord: {
+    position: "absolute",
+    left: 8,
+    bottom: 8,
+    backgroundColor: C.surface,
+    borderColor: C.border,
+    borderWidth: 1,
+    borderRadius: R.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  coordText: { fontFamily: F.mono, fontSize: 10, color: C.inkMuted },
 });

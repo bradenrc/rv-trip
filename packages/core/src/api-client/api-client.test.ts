@@ -193,3 +193,97 @@ describe("bearerAuthHeader", () => {
     ).resolves.toBeNull();
   });
 });
+
+// ── #111 · the capture calls ──────────────────────────────────────────────
+
+const SAVED_ROW = {
+  id: "5b1e0000-0000-4000-8000-000000000001",
+  ownerId: "dev-user",
+  place: { name: "El Chandelier", lat: 9.93, lng: -84.07, googlePlaceId: "ChIJchandelier" },
+  region: null,
+  type: "dining",
+  status: "want",
+  note: null,
+  source: "Marcy",
+  rating: null,
+  tripId: null,
+  tripName: null,
+  lastChange: null,
+  anchor: "place",
+  areaLabel: null,
+  destination: {
+    id: "d7a00000-0000-4000-8000-000000000001",
+    name: "San José, Costa Rica",
+    region: "Costa Rica",
+    googlePlaceId: "ChIJsanjose",
+    lat: 9.9281,
+    lng: -84.0907,
+  },
+  suggestedPlace: null,
+};
+
+describe("createApiClient — capture (#111)", () => {
+  it("POSTs a save and reads the destination off the answer", async () => {
+    const f = fakeFetch(201, SAVED_ROW);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const body = { clientId: "cap_1", name: "El Chandelier", googlePlaceId: "ChIJchandelier", anchor: "place" as const };
+    const saved = await api.places.create(body);
+    expect(saved.destination?.name).toBe("San José, Costa Rica");
+    expect(f.calls[0]!.url).toBe("http://x/api/places");
+    expect(f.calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(f.calls[0]!.init.body as string)).toEqual(body);
+  });
+
+  it("defaults the capture fields on a save from an older server", async () => {
+    const { anchor, areaLabel, destination, suggestedPlace, ...old } = SAVED_ROW;
+    void anchor, void areaLabel, void destination, void suggestedPlace;
+    const api = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(200, old).fn });
+    const saved = await api.places.create({ name: "El Chandelier" });
+    expect(saved.destination).toBeNull();
+    expect(saved.suggestedPlace).toBeNull();
+  });
+
+  it("throws ApiError with the status on a refused save — the queue keys off it", async () => {
+    const api = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(400, { error: "bad" }).fn });
+    await expect(api.places.create({ name: "x" })).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("searches with q and near, and reads a throttled 429 as the degraded envelope", async () => {
+    const hit = {
+      googlePlaceId: "ChIJchandelier",
+      name: "El Chandelier",
+      location: { lat: 9.93, lng: -84.07 },
+      rating: 4.6,
+      address: "San José, Costa Rica",
+      primaryType: "restaurant",
+      primaryTypeDisplayName: "Restaurant",
+    };
+    const f = fakeFetch(200, { results: [hit], degraded: false });
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const env = await api.places.search("chandel", { lat: 9.9325, lng: -84.0521 });
+    expect(env.results[0]?.primaryType).toBe("restaurant");
+    expect(f.calls[0]!.url).toBe("http://x/api/places/search?q=chandel&near=9.9325%2C-84.0521");
+
+    const limited = { results: [], degraded: true, reason: "rate_limited", retryAfterMs: 2000 };
+    const api429 = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(429, limited).fn });
+    await expect(api429.places.search("chandel")).resolves.toEqual(limited);
+  });
+
+  it("DELETEs a save for Undo", async () => {
+    const f = fakeFetch(204);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.places.remove("s 1")).resolves.toBeUndefined();
+    expect(f.calls[0]!.url).toBe("http://x/api/places/s%201");
+    expect(f.calls[0]!.init.method).toBe("DELETE");
+  });
+
+  it("resolves a point to its destination, or null", async () => {
+    const dest = { googlePlaceId: "ChIJsanjose", name: "San José, Costa Rica", region: "Costa Rica", lat: 9.9281, lng: -84.0907 };
+    const f = fakeFetch(200, dest);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    expect(await api.destinations.resolve({ lat: 9.9325, lng: -84.0521 })).toEqual(dest);
+    expect(f.calls[0]!.url).toBe("http://x/api/destinations/resolve?near=9.9325,-84.0521");
+    const none = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(200, null).fn });
+    expect(await none.destinations.resolve({ lat: 42.53, lng: -118.53 })).toBeNull();
+  });
+});

@@ -59,6 +59,10 @@ const SAVED: SavedPlace = {
   tripId: null,
   tripName: null,
   lastChange: null,
+  anchor: "place",
+  areaLabel: null,
+  destination: null,
+  suggestedPlace: null,
 };
 
 describe("regionFromAddress", () => {
