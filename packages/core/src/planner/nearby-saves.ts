@@ -150,13 +150,23 @@ function toItem({ save, stop, mi }: Measured): NearbySave {
 // The design's strings, in one place, so the phone (i3) and the web (i4) say
 // the same thing.
 
-/** The rv-info banner at the top of the Route lens. */
-export function nearbyBanner(n: number, radiusMi: number): { title: string; sub: string; dismiss: string } {
+/** The rv-info banner at the top of the Route lens. `verb` is the phone's
+ * "tap to review" by default; the web's banner (i4) says "review". */
+export function nearbyBanner(
+  n: number,
+  radiusMi: number,
+  verb: "tap to review" | "review" = "tap to review",
+): { title: string; sub: string; dismiss: string } {
   return {
     title: n === 1 ? "1 of your saves is near this trip" : `${n} of your saves are near this trip`,
-    sub: `within ${radiusMi} mi of a stop · tap to review`,
+    sub: `within ${radiusMi} mi of a stop · ${verb}`,
     dismiss: "Dismiss",
   };
+}
+
+/** A radius chip's label ("50 mi"). Surfacing radii are miles by design. */
+export function surfaceRadiusLabel(r: number): string {
+  return `${r} mi`;
 }
 
 /** The sheet head's mono count ("4 saves"). */

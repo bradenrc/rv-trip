@@ -427,3 +427,160 @@ the "#102 · trip surfacing" and "Contracts" sections) and the vet findings.
   (`Tests 1142 passed`), web (`Tests 314 passed`, including the 11 new nearby-saves route tests, against
   real Postgres on :5433 and not skipped), the mobile, db and web typechecks, and lint.
 - `npx drizzle-kit generate` (packages/db, after generating 0002) → `No schema changes, nothing to migrate`.
+
+---
+
+# #111 · i4: Web parity (Saves label, grouped library, escape row as area note, trip banner and review sheet)
+
+Item 4 of 4 (plan.json `i4`, #100 · #101 · #102). Built against the signed wireframe
+(`452aa81:docs/design/111/index.html`, "Web parity") and the vet findings. No schema change and no migration.
+
+## What changed
+
+### Core (packages/core)
+- `domain/place-form.ts:135` `isFreeTextPick(picked)`: the picker's escape row, meaning typed words with no
+  Place ID and no point.
+- `domain/place-form.ts:150` `savePlaceBody(form, areaLabel = null)`: an escape-row pick adds
+  `anchor: "area"` and `areaLabel`. A Google pick sends no anchor, so `saveAnchorOf` still derives it on the
+  server. Existing callers are unchanged.
+- `planner/nearby-saves.ts:155` `nearbyBanner(n, r, verb)`: the web passes `"review"`. The phone's default,
+  `"tap to review"`, is unchanged.
+- `planner/nearby-saves.ts:168` `surfaceRadiusLabel(r)` returns "50 mi". It lives in core because the
+  settings-page guard bans hard-coded `mi` labels anywhere under `apps/web/src`.
+
+### Web (apps/web)
+- `components/nav/Nav.tsx:23`: the label changes from Places to **Saves**. The href is still `/places`, and
+  `LINKS` stays declared once in Nav.tsx because core's `web-shell.test.ts` reads it as source.
+- `app/places/page.tsx:38`: the kicker changes from "Your places" to "Your saves". The H1 "Spots worth
+  keeping" and the blurb are unchanged. `components/places/PlaceSheet.tsx:43`: the save sheet's kicker is
+  also "Your saves".
+- `components/places/SavesGroups.tsx` (new): renders the library under core's `savesShelves`:
+  - `.grp` region headers (mono, 9.5 px, uppercase, `rv-ink-faded`); a null region gets no header, as on the
+    phone;
+  - `.whead` destination headers (15 px name and an 11 px mono count);
+  - a card grid for each destination;
+  - Unanchored last, with the phone's dashed note verbatim.
+- `components/places/PlacesLibrary.tsx:220`: the grid view renders `SavesGroups` over the filtered `list`.
+  The SegmentedControl, FilterChips, ViewSwitch and the map lens are unchanged, and the map side list stays
+  flat. The "Been there?" `leading` cards sit in their own grid row ahead of the groups.
+- `lib/area-label.ts` (new): `areaLabelNear(getPosition, resolve)` is the testable core. Around it,
+  `browserPosition` (coarse, cached, 10 s timeout), `resolveDestinationNear` (GET
+  `/api/destinations/resolve?near=`) and `browserAreaLabel` do the wiring. Any failure gives null.
+- `components/places/PlacesWorkspace.tsx:88`: `changeSaveForm` asks for the browser's area label **once per
+  open save sheet**, the first time the picker's value becomes free text. `:134` builds the POST with
+  `savePlaceBody(form, areaLabel)`.
+- `app/trips/[id]/page.tsx:46`: server-side `nearbySaves(trip, savedPlaces, listDismissedSaveIds(...),
+  trip.surfaceRadiusMi)`, passed as the new required `nearby` prop (`:62`).
+- `lib/trip-api.ts:56,60`: `nearbySaves(tripId)` (GET) and `dismissSaves(tripId, saveIds)` (POST).
+- `components/trip/NearbySaves.tsx` (new):
+  - `NearbySavesBanner` uses the shipped SuggestionBar classes (`border-rv-info bg-rv-info-soft`, Sparkles in
+    `text-rv-info-ink`, Dismiss in `font-mono text-[11px] text-rv-ink-faded`). The copy is a button that
+    opens the sheet.
+  - `sheetRows` merges rows.
+  - `NearbySavesSheet` is built on the shipped `SheetShell`:
+    - the kicker is the trip title and the title is "Near this trip";
+    - the footer hint is "N saves" and the primary button is "Add all N to ideas" (disabled at 0);
+    - `.chip` radius toggles for 25/50/100/200;
+    - `.rows` with a CategoryTile, the name, the `nearbyRowLine`, and Stars on been rows;
+    - Add or "✓ Idea" on each row;
+    - the dashed beyond line.
+- `components/trip/TripPlanner.tsx`:
+  - `:224`: the `nearby` prop;
+  - `:476`: `addIdeaFromPlace` now returns `Promise<boolean>`, so the sheet only marks a row "✓ Idea" when the
+    POST landed;
+  - `:503-567`: refresh, dismiss (optimistic, rolled back with a toast on failure), open, close (refetch),
+    `addNearby` (joins `saveId` against the `savedPlaces` prop, then `addIdeaFromPlace`), `addAllNearby`
+    (one at a time, nearest first), and `setSurfaceRadius` (optimistic trip + nearby, then PATCH
+    `{surfaceRadiusMi}`, then GET; rolled back on failure);
+  - `:1343`: the banner and sheet are mounted above the lenses, in the same slot as the Add-from-Places panel,
+    so they show in both Route and Timeline. They sit beside the "Add from Places" entrance, which still ships.
+
+### Tests
+- `packages/core/src/domain/place-form.test.ts`:
+  - the escape row posts `anchor: "area"` with the label, or with null;
+  - a Google pick sends no anchor;
+  - `isFreeTextPick`.
+- `packages/core/src/planner/nearby-saves.test.ts`: the "review" verb and the chip labels.
+- `apps/web/src/components/places/saves-groups.test.ts`: renders `SavesGroups` to static markup and reads
+  back the header and card outline:
+  - Oregon, then Bandon (chandel, BLM), then Bend (taco truck, Sunny's);
+  - Costa Rica, then San José (El Chandelier);
+  - Unanchored (Kalaloch);
+  - the mono counts, the Been shelf, and no Unanchored group when every save has a destination.
+- `apps/web/src/components/trip/nearby-saves.test.ts`:
+  - banner copy "4 of your saves are near this trip" / "within 50 mi of a stop · review", following the
+    radius, plus the SuggestionBar classes and the empty state;
+  - the sheet: head, count, pressed chip, row order and lines, the beyond line, "✓ Idea" with
+    "Add all 2 to ideas", and `sheetRows` merging.
+- `apps/web/src/components/nav/nav.test.ts`: the `/places` entry is labelled "Saves", with the five labels in
+  order. Asserted as source, like `web-shell.test.ts`.
+- `apps/web/src/lib/area-label.test.ts`: granted, refused, no locality, and both failure paths.
+- `apps/web/src/app/api/places/route.test.ts` (the last describe block, against real Postgres): POSTs the
+  `savePlaceBody` escape-row body and gets anchor `area` and areaLabel "Bend, OR" on both the 201 and the
+  row. There's no resolver call (no point) and the destination is null. A refused geolocation gives
+  areaLabel null.
+
+## Vet findings in scope for i4, and how each was addressed
+- **HIGH: PlacePicker never POSTs.** `PlacePicker.tsx` is **untouched**, so its 9 callers (home base, stops,
+  ideas) are unaffected. Anchor and areaLabel ride the save path: core `savePlaceBody` (`place-form.ts:150`)
+  and `PlacesWorkspace.submitSave` (`:134`). The plan's "PlacePicker escape row posts" line is read as "the
+  escape row's pick, saved through the sheet, posts".
+- **MED: Add path.** Web rows join `saveId` against the `savedPlaces` prop the page already reads, then
+  call the shipped `addIdeaFromPlace`, as the plan says. i3's item `place` isn't needed on the web.
+- **MED: PATCH answers 204.** After a radius PATCH the sheet always GETs `nearby-saves` again. It doesn't
+  reuse the empty 204.
+- **MED: illustrative numbers.** The component fixture is the i3 acceptance set (South Beach 1.9,
+  Fort Stevens 6.2, Beverly 6.2, Nehalem 34, beyond Cape Lookout 50.3). None of the frame counts are walk
+  expectations.
+
+## Decisions, defaults, and flags for the walk and qa
+- **Web note carries no coordinates.** Per the plan, the escape row sends only `areaLabel` (the browser's
+  town), never the browser's lat/lng. So a web note gets **no destination**. It groups under Unanchored,
+  reading "note · Bend area", and it can't surface on a trip (it has no point). If notes should anchor and
+  surface, send the browser point too; that's a one-line change in `savePlaceBody`. I flagged it rather
+  than guessing.
+- **The area label is asked for once per open sheet**, the first time the value becomes free text. If you
+  submit before geolocation or the resolver answers, the body has areaLabel null and the server falls
+  back to `region`. The browser shows a permission prompt the first time. Render-required.
+- **Add button color.** The wireframe's `.addbtn` is `rv-green-cta` fill on navy. On the web that would fail
+  the palette guard (`nightfall-tokens.test.ts` "no rv-green-cta call site…" and "text-rv-navy only on
+  green"). So Add reuses the web's shipped "Add from Places" Add (`border-rv-green bg-rv-green-soft
+  text-rv-green-ink`), and "✓ Idea" is the same outline on a transparent fill. That's a deliberate
+  deviation from the wireframe.
+- **"Add all" is SheetShell's primary** (accent-deep), not the phone's ghost button, because SheetShell has one
+  footer action. It's disabled rather than hidden at 0.
+- **The sheet's head is SheetShell's**: the kicker is the trip title, the H2 is "Near this trip", and the
+  mono "N saves" sits in the footer hint slot rather than beside the title.
+- **Copy I chose:** the dismiss-failure toast "Couldn't dismiss those saves." and the radius-failure toast
+  "Couldn't change the radius."; the /places kicker and the save-sheet kicker "Your saves" (the H1 is kept).
+  The Add-from-Places panel's "From your Places" and "Add from Places" labels are **unchanged**, as the
+  design says ("does not replace it").
+- **The banner stays up while the sheet is open**, and its count updates on close (refetch). Added rows
+  drop off at that point, because they're on the trip now.
+- **The map lens side list isn't grouped.** The plan only asks for the grid.
+- **Render-required at walk:**
+  - the grouped grid at desktop and phone widths (9.5 px region headers on a desktop page);
+  - the banner above the lenses in both Route and Timeline;
+  - the SheetShell sheet's chips, Add changing to ✓ Idea, and the toast;
+  - the geolocation prompt and label on /places;
+  - and, on the seeded Pacific Northwest Loop, a banner with its Bend saves.
+- **Claims for qa to check:**
+  - on the trip page, the server-computed banner matches `GET /api/trips/:id/nearby-saves`;
+  - Dismiss persists across a reload;
+  - a chip persists `surfaceRadiusMi` and the banner's "within R mi" follows;
+  - Add creates a shelf idea and that save doesn't reappear after a reload;
+  - a /places escape-row save lands as a note, with "note · <town> area" when location is allowed.
+- **TDD note:** these were seen failing before their implementation:
+  - the core `savePlaceBody` and `isFreeTextPick` tests;
+  - the nav test;
+  - the SavesGroups and NearbySaves tests (missing module);
+  - the core banner-verb and chip-label tests.
+
+  `area-label.ts` and the escape-row route test were written with or right after the code.
+
+## Checks run (i4)
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. That covers core
+  (`Tests 1148 passed`), web (`Tests 338 passed`, including `places/route.test.ts (16 tests)` and
+  `nearby-saves/route.test.ts (11 tests)` against real Postgres on :5433, not skipped), ui (`Tests 42
+  passed`), and the web, mobile and db typechecks and lint.
+- There's no `drizzle-kit generate` this item because the schema didn't change.

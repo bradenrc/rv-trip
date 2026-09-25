@@ -3,8 +3,10 @@ import {
   getTripById,
   getRigByOwner,
   getPrefsByOwner,
+  listDismissedSaveIds,
   listSavedPlacesForOwner,
 } from "@rv-trip/db";
+import { nearbySaves } from "@rv-trip/core";
 import { TripPlanner } from "@/components/trip/TripPlanner";
 import { getOwner } from "@/lib/owner";
 import { unitsFromPrefs } from "@/lib/units";
@@ -37,6 +39,16 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // SAME seam rather than inventing a client fetch, so picking a place is one
   // POST and not a round-trip to discover what there is to pick.
   const savedPlaces = await listSavedPlacesForOwner(owner);
+  // #111 i4 · trip surfacing, on the SAME seam: the saves near this trip at
+  // its radius, minus the ones dismissed here — core's `nearbySaves`, the very
+  // function GET /api/trips/:id/nearby-saves answers with — so the banner is
+  // in the first paint with no client fetch.
+  const nearby = nearbySaves(
+    trip,
+    savedPlaces,
+    await listDismissedSaveIds(owner, trip.id),
+    trip.surfaceRadiusMi,
+  );
 
   return (
     <TripPlanner
@@ -47,6 +59,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       hasRig={rig !== null}
       units={units}
       savedPlaces={savedPlaces}
+      nearby={nearby}
     />
   );
 }

@@ -18,7 +18,9 @@ import { Account } from "./Account";
 
 const LINKS: { href: string; label: string; Icon: LucideIcon; match: (p: string) => boolean }[] = [
   { href: "/", label: "Trips", Icon: Route, match: (p) => p === "/" || p.startsWith("/trips") },
-  { href: "/places", label: "Places", Icon: Bookmark, match: (p) => p.startsWith("/places") },
+  // #111 i4 · Q5 A: the library is "Saves" (the button is Save, the tab is
+  // Saves). The URL stays /places.
+  { href: "/places", label: "Saves", Icon: Bookmark, match: (p) => p.startsWith("/places") },
   { href: "/map", label: "Map", Icon: MapIcon, match: (p) => p.startsWith("/map") },
   { href: "/rig", label: "Rig", Icon: Caravan, match: (p) => p.startsWith("/rig") },
   { href: "/settings", label: "Settings", Icon: Settings, match: (p) => p.startsWith("/settings") },

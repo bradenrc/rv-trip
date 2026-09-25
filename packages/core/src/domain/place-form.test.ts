@@ -6,6 +6,7 @@ import {
   emptySavePlaceForm,
   graduateFormFromSaved,
   graduatePatch,
+  isFreeTextPick,
   pickPlace,
   regionFromAddress,
   savePlaceBody,
@@ -165,6 +166,35 @@ describe("savePlaceBody", () => {
       note: null,
     });
     expect(savedPlaceCreate.safeParse(body).success).toBe(true);
+  });
+
+  // #111 i4 (docs/design/111 "Web parity"): the web capture is the shipped
+  // picker, and its free-text escape row saves an AREA note. The label is the
+  // locality the browser is in when geolocation is granted, else null.
+  it("the escape row posts anchor 'area', with the area label it was handed", () => {
+    const form = pickPlace(emptySavePlaceForm(), FREE_TEXT);
+    const body = savePlaceBody(form, "Bend, OR");
+    expect(body).toMatchObject({ name: "That gravel pullout", anchor: "area", areaLabel: "Bend, OR" });
+    expect(body).toMatchObject({ lat: null, lng: null, googlePlaceId: null });
+    expect(savedPlaceCreate.safeParse(body).success).toBe(true);
+  });
+
+  it("the escape row's area label is null when no locality was resolved", () => {
+    const body = savePlaceBody(pickPlace(emptySavePlaceForm(), FREE_TEXT));
+    expect(body).toMatchObject({ anchor: "area", areaLabel: null });
+  });
+
+  it("a Google pick names no anchor — the server's saveAnchorOf derives it", () => {
+    const body = savePlaceBody(pickPlace(emptySavePlaceForm(), KALALOCH), "Bend, OR");
+    expect(body).not.toHaveProperty("anchor");
+    expect(body).not.toHaveProperty("areaLabel");
+  });
+
+  it("isFreeTextPick is the escape row: no Place ID and no point", () => {
+    expect(isFreeTextPick(FREE_TEXT)).toBe(true);
+    expect(isFreeTextPick(KALALOCH)).toBe(false);
+    expect(isFreeTextPick(null)).toBe(false);
+    expect(isFreeTextPick({ ...FREE_TEXT, name: "   " })).toBe(false);
   });
 
   it("blank optional fields go to the wire as null, not as empty strings", () => {

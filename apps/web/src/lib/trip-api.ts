@@ -8,6 +8,7 @@ import type {
   LegPatchInput,
   LocateResponse,
   LocateRow,
+  NearbySaves,
   PlaceDetails,
   PlacesEnvelope,
   Reservation,
@@ -47,6 +48,17 @@ export const tripApi = {
 
   /** The settings dialog. Send only what changed: an omitted key is left alone. */
   updateTrip: (id: string, patch: TripPatchInput) => req(`/api/trips/${id}`, "PATCH", patch),
+
+  /**
+   * #111 i4 · trip surfacing. The saves near this trip at its radius — the
+   * banner and sheet's numbers, re-read after a radius chip or a close.
+   */
+  nearbySaves: (tripId: string): Promise<NearbySaves> =>
+    req(`/api/trips/${tripId}/nearby-saves`, "GET") as Promise<NearbySaves>,
+
+  /** The banner's Dismiss: every save it names, remembered for this trip. */
+  dismissSaves: (tripId: string, saveIds: string[]) =>
+    req(`/api/trips/${tripId}/dismissed-saves`, "POST", { saveIds }),
 
   /** Legs, stops, reservations and ideas cascade with it. */
   deleteTrip: (id: string) => req(`/api/trips/${id}`, "DELETE"),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Idea, NearbySave, SavedPlace, Stop, Trip } from "../domain/types";
-import { ideaCreateInput, nearbySavesResponse as nearbySavesSchema } from "../domain/types";
+import { SURFACE_RADII, ideaCreateInput, nearbySavesResponse as nearbySavesSchema } from "../domain/types";
 import {
   IDEAS_EMPTY_COPY,
   addAllLabel,
@@ -8,6 +8,7 @@ import {
   nearbyBanner,
   nearbyBeyondLine,
   nearbyCountLabel,
+  surfaceRadiusLabel,
   nearbyIdeaBody,
   nearbyRowLine,
   nearbySaves,
@@ -326,6 +327,15 @@ describe("the banner, sheet and Ideas copy", () => {
     });
     expect(nearbyBanner(5, 100).sub).toBe("within 100 mi of a stop · tap to review");
     expect(nearbyBanner(1, 50).title).toBe("1 of your saves is near this trip");
+  });
+
+  it("the web's banner says 'review' where the phone says 'tap to review' (#111 i4)", () => {
+    expect(nearbyBanner(4, 50, "review").sub).toBe("within 50 mi of a stop · review");
+    expect(nearbyBanner(4, 50, "review").title).toBe("4 of your saves are near this trip");
+  });
+
+  it("a radius chip reads '{r} mi'", () => {
+    expect(SURFACE_RADII.map(surfaceRadiusLabel)).toEqual(["25 mi", "50 mi", "100 mi", "200 mi"]);
   });
 
   it("the sheet head counts saves", () => {

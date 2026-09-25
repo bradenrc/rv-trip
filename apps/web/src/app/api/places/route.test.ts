@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import type { PlaceSummary, ResolvedDestination } from "@rv-trip/core";
+import { emptySavePlaceForm, pickPlace, savePlaceBody } from "@rv-trip/core";
 import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { POST } from "@/app/api/places/route";
 import { describeDb, req } from "@/test/db";
@@ -274,5 +275,46 @@ describeDb("POST /api/places — the offline suggestion (#111 i2)", () => {
     expect(res.status).toBe(201);
     expect((await res.json()).suggestedPlace).toBeNull();
     expect(await read.countSavedPlaces(DEV_OWNER)).toBe(2);
+  });
+});
+
+// ── #111 i4 · the web capture: the picker's escape row is an area note ─────
+
+describeDb("POST /api/places — the web's escape row (#111 i4)", () => {
+  const typed = pickPlace(emptySavePlaceForm(), {
+    name: "taco truck Dana said",
+    lat: null,
+    lng: null,
+    googlePlaceId: null,
+    address: null,
+    rating: null,
+  });
+
+  it("saves the escape row's body as an AREA note with the browser's locality", async () => {
+    reset(BANDON);
+    const body = savePlaceBody(typed, "Bend, OR");
+    expect(body).toMatchObject({ anchor: "area", areaLabel: "Bend, OR" });
+
+    const res = await POST(req(body));
+    expect(res.status).toBe(201);
+    const saved = await res.json();
+    expect(saved.anchor).toBe("area");
+    expect(saved.areaLabel).toBe("Bend, OR");
+    const row = (await read.savedPlace(saved.id))!;
+    expect(row.anchor).toBe("area");
+    expect(row.areaLabel).toBe("Bend, OR");
+    // No point went up, so nothing was resolved: the note's label is the
+    // browser's town, and the row has no destination.
+    expect(resolver.calls).toEqual([]);
+    expect(saved.destination).toBeNull();
+  });
+
+  it("saves it as an area note with a null label when geolocation was refused", async () => {
+    reset();
+    const res = await POST(req(savePlaceBody(typed, null)));
+    expect(res.status).toBe(201);
+    const saved = await res.json();
+    expect(saved.anchor).toBe("area");
+    expect(saved.areaLabel).toBeNull();
   });
 });
