@@ -333,6 +333,7 @@ describe("routeSummary — the rail counts the stops it cannot draw", () => {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     segments: [],
   });
 

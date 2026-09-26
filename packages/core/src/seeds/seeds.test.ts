@@ -1,8 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { segmentDateConflicts, reconcileSegments } from "../domain/segments";
-import { trip as tripSchema } from "../domain/types";
+import { savedPlace, trip as tripSchema } from "../domain/types";
+import { savesShelves, shelfCounts } from "../capture/shelves";
+import { DESTINATION_MAX_MILES, haversineMeters } from "../providers/index";
 import { timelineModel } from "../planner/index";
-import { costaRicaTrip, greeceTrip, pnwTrip, seedTrips } from "./index";
+import {
+  SEED_OWNER,
+  costaRicaTrip,
+  greeceTrip,
+  pnwTrip,
+  seedDestinations,
+  seedSaves,
+  seedTrips,
+} from "./index";
 
 /**
  * The seeds every later pass is judged against (#110 §7). They are PURE data,
@@ -112,5 +122,92 @@ describe("the seeds on the gantt (wireframe §1)", () => {
       ["Athens", "May 19–20", 10, 2, "fly"],
     ]);
     expect(m.rhythm[6]!.title).toBe("2027-05-16 — Ferry → Naxos");
+  });
+});
+
+// ── #111 i2 · the walk's Saves tab ─────────────────────────────────────────
+
+describe("the seed saves (#111 i2)", () => {
+  const dests = seedDestinations();
+  const byKey = new Map(dests.map((d) => [d.key, d]));
+  /** The seed as the read shape, the way GET /api/places will answer it. */
+  const library = seedSaves().map((s, i) =>
+    savedPlace.parse({
+      id: `seed_${i}`,
+      ownerId: SEED_OWNER,
+      place: { name: s.name, lat: s.lat, lng: s.lng, googlePlaceId: null },
+      region: s.region,
+      type: s.type,
+      status: s.status,
+      source: s.source,
+      rating: s.rating,
+      lastChange: null,
+      anchor: s.anchor,
+      areaLabel: s.areaLabel,
+      destination: s.destination ? { ...byKey.get(s.destination)!, id: s.destination } : null,
+      suggestedPlace: s.suggestedPlace,
+      createdAt: s.createdAt,
+    }),
+  );
+
+  it("draws the wireframe's Want to go shelf: Oregon 8, Costa Rica 1, Unanchored 2", () => {
+    const want = savesShelves(library, "want");
+    expect(want.regions.map((r) => [r.region, r.count])).toEqual([
+      ["Oregon", 8],
+      ["Costa Rica", 1],
+    ]);
+    expect(want.regions[0]!.destinations.map((d) => [d.destination.name, d.saves.map((s) => s.place.name)])).toEqual([
+      ["Bandon, OR", ["great BLM camp spot", "chandel"]],
+      ["Bend, OR", ["taco truck Dana said", "Sunny's Smokehouse"]],
+      ["Nehalem, OR", ["Nehalem Bay State Park"]],
+      ["Newport, OR", ["Beverly Beach State Park"]],
+      ["Tillamook, OR", ["Cape Lookout State Park"]],
+      ["Warrenton, OR", ["Fort Stevens State Park"]],
+    ]);
+    expect(want.regions[1]!.destinations[0]!.saves.map((s) => [s.place.name, s.source])).toEqual([
+      ["El Chandelier", "Marcy"],
+    ]);
+    expect(want.unanchored.map((s) => s.place.name)).toEqual(["pin in the Alvord Desert", "Kalaloch Campground"]);
+    expect(shelfCounts(library)).toEqual({ want: 11, been: 4 });
+  });
+
+  it("carries Jane & Rick on the three coast campgrounds and Marcy on Cape Lookout", () => {
+    const heard = Object.fromEntries(library.map((s) => [s.place.name, s.source]));
+    expect(heard["Fort Stevens State Park"]).toBe("Jane & Rick");
+    expect(heard["Nehalem Bay State Park"]).toBe("Jane & Rick");
+    expect(heard["Beverly Beach State Park"]).toBe("Jane & Rick");
+    expect(heard["Cape Lookout State Park"]).toBe("Marcy");
+  });
+
+  it("has South Beach on the Been there shelf, ★5, under Newport, OR · Oregon, visited on the coast trip", () => {
+    const south = seedSaves().find((s) => s.name === "South Beach State Park")!;
+    expect(south).toMatchObject({ status: "been", rating: 5, trip: "trip_coast", destination: "newport" });
+    expect(byKey.get("newport")).toMatchObject({ name: "Newport, OR", region: "Oregon" });
+    const been = savesShelves(library, "been");
+    expect(been.regions[0]!.region).toBe("Oregon");
+    expect(been.regions[0]!.destinations[0]!.saves.map((s) => s.place.name)).toContain("South Beach State Park");
+  });
+
+  it("hangs the one Q3 A suggestion on the offline 'chandel' note", () => {
+    const withSuggestion = seedSaves().filter((s) => s.suggestedPlace);
+    expect(withSuggestion.map((s) => [s.name, s.anchor, s.suggestedPlace!.name])).toEqual([
+      ["chandel", "area", "El Chandelier"],
+    ]);
+  });
+
+  it("files every anchored save within 25 mi of its destination, and names only real trips", () => {
+    const tripIds = new Set(seedTrips().map((t) => t.id));
+    for (const s of seedSaves()) {
+      if (s.trip) expect(tripIds.has(s.trip)).toBe(true);
+      if (!s.destination) continue;
+      const d = byKey.get(s.destination);
+      expect(d, s.name).toBeDefined();
+      const mi = haversineMeters({ lat: s.lat!, lng: s.lng! }, d!) / 1609.344;
+      expect(mi, s.name).toBeLessThanOrEqual(DESTINATION_MAX_MILES);
+    }
+  });
+
+  it("keeps destination place ids unique — the (owner, google_place_id) unique", () => {
+    expect(new Set(dests.map((d) => d.googlePlaceId)).size).toBe(dests.length);
   });
 });

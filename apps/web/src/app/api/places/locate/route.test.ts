@@ -25,6 +25,10 @@ const FOREIGN_UUID = "99999999-9999-4999-8999-999999999999";
 /** Answers one canned summary for any query. Serial, so the order the batch
  * asked in is the order this records. */
 class FakeProvider implements PlacesProvider {
+  // #111 widened the interface; nothing here resolves a destination.
+  async resolveDestination(): Promise<null> {
+    return null;
+  }
   readonly asked: string[] = [];
   constructor(private readonly answer: PlaceSummary | null) {}
   async search(query: string): Promise<PlaceSummary[]> {

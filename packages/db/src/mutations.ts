@@ -10,6 +10,8 @@ import {
   rigs,
   routes,
   saves,
+  tripDismissedSaves,
+  destinations,
   travelSegments,
   userPrefs,
   changeLog,
@@ -27,13 +29,17 @@ import type {
   IdeaCategory,
   IdeaStatus,
   IsoDate,
+  LatLng,
   NavCheck,
+  PlaceSummary,
   RigProfile,
   RigProfileInput,
+  ResolvedDestination,
   RouteResult,
   SavedPlace,
   SavedPlaceCreate,
   SavedPlacePatch,
+  SurfaceRadiusMi,
   TripStatus,
   UserPrefs,
   UserPrefsPatch,
@@ -41,7 +47,12 @@ import type {
   SegmentDateConflict,
   SegmentTrip,
 } from "@rv-trip/core";
-import { diffSegments, newSegmentDateConflicts, reconcileSegments } from "@rv-trip/core";
+import {
+  diffSegments,
+  newSegmentDateConflicts,
+  reconcileSegments,
+  suggestedPlaceFromSearch,
+} from "@rv-trip/core";
 import {
   getHouseholdInvite,
   mapIdea,
@@ -50,6 +61,7 @@ import {
   mapStop,
   mapPrefsRow,
   mapRigRow,
+  mapSaveDestination,
   mapSavedPlaceRow,
 } from "./queries";
 
@@ -351,6 +363,8 @@ export async function updateTripFields(
     statusAuto?: boolean;
     rating?: number | null;
     note?: string | null;
+    /** #111 i3 — the review sheet's radius chip (core's `surfaceRadiusMi`). */
+    surfaceRadiusMi?: SurfaceRadiusMi | null;
   },
 ): Promise<boolean> {
   const scope = and(eq(trips.id, tripId), eq(trips.ownerId, owner));
@@ -380,6 +394,40 @@ export async function updateTripFields(
     .where(scope)
     .returning({ id: trips.id });
   return updated.length > 0;
+}
+
+/**
+ * The banner's Dismiss (#111 Q6 A): remember these saves as dismissed for this
+ * trip. Idempotent — a save dismissed twice is one row (`ON CONFLICT DO
+ * NOTHING` on the (trip, save) key).
+ *
+ * The trip must be the caller's (false → the handler's 404), and only the
+ * caller's own saves are recorded: an id that is not one of their saves is
+ * dropped rather than planted against their trip.
+ */
+export async function dismissSavesForTrip(
+  owner: string,
+  tripId: string,
+  saveIds: string[],
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const owned = await tx
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(eq(trips.id, tripId), eq(trips.ownerId, owner)));
+    if (!owned.length) return false;
+    if (saveIds.length === 0) return true;
+    const mine = await tx
+      .select({ id: saves.id })
+      .from(saves)
+      .where(and(eq(saves.ownerId, owner), inArray(saves.id, saveIds)));
+    if (mine.length === 0) return true;
+    await tx
+      .insert(tripDismissedSaves)
+      .values(mine.map((s) => ({ tripId, saveId: s.id })))
+      .onConflictDoNothing();
+    return true;
+  });
 }
 
 export async function deleteTrip(owner: string, tripId: string): Promise<boolean> {
@@ -1142,13 +1190,179 @@ export function saveAnchorOf(input: {
   return { anchor: "area", areaLabel: input.region };
 }
 
-export async function createSave(owner: string, input: SavedPlaceCreate): Promise<SavedPlace> {
+/**
+ * Reverse-geocodes a point to its locality — `PlacesProvider.resolveDestination`
+ * handed in by the ROUTE (#111). packages/db holds no provider and no key: the
+ * web resolves which provider is live (`apps/web/src/lib/places.ts`) and passes
+ * its method here, the same way `api/places/locate` hands `locatePlaces` one.
+ */
+export type DestinationResolver = (lat: number, lng: number) => Promise<ResolvedDestination | null>;
+
+/**
+ * A Places text search near a point — `PlacesProvider.search` handed in by the
+ * ROUTE, like the resolver. Used for exactly one thing: the Q3 A offer on an
+ * offline note (#111 i2).
+ */
+export type PlacesSearcher = (query: string, near: LatLng) => Promise<PlaceSummary[]>;
+
+export interface SaveDeps {
+  resolveDestination?: DestinationResolver;
+  searchPlaces?: PlacesSearcher;
+}
+
+export interface CreateSaveResult {
+  saved: SavedPlace;
+  /** True when `clientId` matched a row this owner already has (answer 200). */
+  replayed: boolean;
+}
+
+/** An owner's save by its phone client id, destination joined, or null. */
+async function saveByClientId(owner: string, clientId: string): Promise<SavedPlace | null> {
+  const row = await db.query.saves.findFirst({
+    where: and(eq(saves.ownerId, owner), eq(saves.clientId, clientId)),
+    with: { trip: { columns: { title: true } }, destination: true },
+  });
+  return row ? mapSavedPlaceRow(row, row.trip?.title ?? null) : null;
+}
+
+/**
+ * The resolver's answer, or null — never a failed save. No key (the stub), a
+ * Google outage, a refused Geocoding API: the save is still written, with a
+ * null destination (docs/design/111 "One resolver").
+ */
+async function resolveQuietly(
+  resolve: DestinationResolver | undefined,
+  lat: number | null,
+  lng: number | null,
+): Promise<ResolvedDestination | null> {
+  if (!resolve || lat == null || lng == null) return null;
+  try {
+    return await resolve(lat, lng);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Q3 A offer (#111 i2): an AREA note typed with no signal is searched for
+ * by its words near where it was typed, and the top hit is stored as
+ * `suggested_place`. Only then — a note typed online was already offered the
+ * Google rows and chose the note on purpose. No point, no searcher, no hit or
+ * a failed search: no suggestion, and the save is written all the same.
+ */
+async function suggestQuietly(
+  search: PlacesSearcher | undefined,
+  input: Pick<SavedPlaceCreate, "name" | "lat" | "lng" | "capturedOffline">,
+  anchor: SavedPlace["anchor"],
+) {
+  if (!search || !input.capturedOffline || anchor !== "area") return null;
+  if (input.lat == null || input.lng == null) return null;
+  try {
+    return suggestedPlaceFromSearch(await search(input.name, { lat: input.lat, lng: input.lng }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One destinations row per (household, locality place id) — created on first
+ * use, REUSED after (the unique is `destinations_owner_place_uq`). The name,
+ * region and point are refreshed from the resolver on every hit, so a row
+ * written before `region` existed picks its header up the next time it is used.
+ */
+async function upsertDestination(owner: string, d: ResolvedDestination) {
+  const [row] = await db
+    .insert(destinations)
+    .values({
+      ownerId: owner,
+      googlePlaceId: d.googlePlaceId,
+      name: d.name,
+      region: d.region,
+      lat: d.lat,
+      lng: d.lng,
+    })
+    .onConflictDoUpdate({
+      target: [destinations.ownerId, destinations.googlePlaceId],
+      set: { name: d.name, region: d.region, lat: d.lat, lng: d.lng },
+    })
+    .returning();
+  return row!;
+}
+
+/**
+ * Save a place (docs/design/41 §3), extended for capture (#111):
+ *
+ * - **Idempotent on `clientId`.** A phone replaying a queued capture whose
+ *   first POST landed but whose answer was lost gets the row that exists, with
+ *   `replayed: true`, and no second row. Checked first, and again on the
+ *   insert's `ON CONFLICT` so two concurrent replays cannot both write.
+ * - **An explicit `anchor` wins** over `saveAnchorOf`, which would file an area
+ *   note that carries the phone's location as a pin. The derivation stays the
+ *   fallback for the web and older callers.
+ * - **`capturedAt` is `created_at`** when sent — a queued save flushed hours
+ *   later still sorts where it was captured.
+ * - **The destination is resolved** from the save's point when there is one and
+ *   the route handed in a resolver. An area save's `areaLabel` falls back to
+ *   the destination's name ("Bend, OR"), then to `region` (the W0 rule).
+ * - **An offline area note earns a place suggestion** (Q3 A, i2): see
+ *   `suggestQuietly`.
+ */
+export async function createSave(
+  owner: string,
+  input: SavedPlaceCreate,
+  deps: SaveDeps = {},
+): Promise<CreateSaveResult> {
+  if (input.clientId) {
+    const existing = await saveByClientId(owner, input.clientId);
+    if (existing) return { saved: existing, replayed: true };
+  }
   const tripName = await ownedTripTitle(owner, input.tripId);
+  const {
+    clientId,
+    capturedAt,
+    anchor: explicitAnchor,
+    areaLabel: explicitLabel,
+    // Read by suggestQuietly below; there is no column for it.
+    capturedOffline,
+    ...fields
+  } = input;
+  void capturedOffline;
+  const anchor = explicitAnchor ?? saveAnchorOf(input).anchor;
+
+  const [resolved, suggestedPlace] = await Promise.all([
+    resolveQuietly(deps.resolveDestination, input.lat, input.lng),
+    suggestQuietly(deps.searchPlaces, input, anchor),
+  ]);
+  const destination = resolved ? await upsertDestination(owner, resolved) : null;
+  const areaLabel =
+    anchor === "area" ? (explicitLabel ?? destination?.name ?? input.region ?? null) : null;
+
   const [row] = await db
     .insert(saves)
-    .values({ ownerId: owner, ...input, ...saveAnchorOf(input) })
+    .values({
+      ownerId: owner,
+      ...fields,
+      anchor,
+      areaLabel,
+      clientId: clientId ?? null,
+      destinationId: destination?.id ?? null,
+      suggestedPlace,
+      ...(capturedAt ? { createdAt: new Date(capturedAt) } : {}),
+    })
+    .onConflictDoNothing({ target: [saves.ownerId, saves.clientId] })
     .returning();
-  return mapSavedPlaceRow(row!, tripName);
+  if (!row) {
+    // Lost the race to a concurrent replay of the same capture.
+    const existing = await saveByClientId(owner, clientId!);
+    return { saved: existing!, replayed: true };
+  }
+  return {
+    saved: {
+      ...mapSavedPlaceRow(row, tripName),
+      destination: destination ? mapSaveDestination(destination) : null,
+    },
+    replayed: false,
+  };
 }
 
 /**
@@ -1167,14 +1381,63 @@ const SAVED_PLACE_COLUMNS = { notes: "note" } as const;
  * so the want → been graduation is a shared-voice change like any other and is
  * logged as one.
  */
+/** Thrown by an upgrade on a save that has no suggestion to take (→ 409). */
+export const NO_SUGGESTION = "no suggestion";
+
+/**
+ * The columns `upgradeToSuggested` writes (#111 i2 · Q3 A): the suggestion's
+ * name, Place ID and point, the anchor area → place, and the destination
+ * RE-RESOLVED from the new point. When the resolver answers nothing (no key,
+ * a Google failure, nothing within 25 mi) the save keeps the destination it
+ * had — the suggestion was searched for near that very point, so the town it
+ * was typed in is still the honest answer. Null when the row is not this
+ * owner's; throws NO_SUGGESTION when there is nothing to take.
+ */
+async function upgradeColumns(
+  owner: string,
+  scope: ReturnType<typeof and>,
+  resolve: DestinationResolver | undefined,
+) {
+  const [row] = await db
+    .select({ suggestedPlace: saves.suggestedPlace, destinationId: saves.destinationId })
+    .from(saves)
+    .where(scope);
+  if (!row) return null;
+  const sp = row.suggestedPlace;
+  if (!sp) throw new Error(NO_SUGGESTION);
+  const resolved = await resolveQuietly(resolve, sp.lat, sp.lng);
+  const destination = resolved ? await upsertDestination(owner, resolved) : null;
+  return {
+    name: sp.name,
+    googlePlaceId: sp.googlePlaceId,
+    lat: sp.lat,
+    lng: sp.lng,
+    anchor: "place" as const,
+    areaLabel: null,
+    destinationId: destination?.id ?? row.destinationId,
+    suggestedPlace: null,
+  };
+}
+
 export async function updateSavedPlaceFields(
   owner: string,
   placeId: string,
-  patch: SavedPlacePatch,
+  input: SavedPlacePatch,
   actor: string,
+  deps: Pick<SaveDeps, "resolveDestination"> = {},
 ): Promise<boolean> {
-  if (patch.tripId !== undefined) await ownedTripTitle(owner, patch.tripId);
+  const { upgradeToSuggested, suggestedPlace, ...fields } = input;
+  if (fields.tripId !== undefined) await ownedTripTitle(owner, fields.tripId);
   const scope = and(eq(saves.id, placeId), eq(saves.ownerId, owner));
+  // The two suggestion actions are not columns: they become the columns they
+  // write, applied over whatever else the body named.
+  let patch: Partial<typeof saves.$inferInsert> = { ...fields };
+  if (suggestedPlace === null) patch.suggestedPlace = null;
+  if (upgradeToSuggested) {
+    const up = await upgradeColumns(owner, scope, deps.resolveDestination);
+    if (!up) return false;
+    patch = { ...patch, ...up };
+  }
   if (!logs(patch, SAVED_PLACE_COLUMNS)) {
     const rows = await db
       .update(saves)

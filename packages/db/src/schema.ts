@@ -18,7 +18,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
-import type { NavCheck, RouteResult } from "@rv-trip/core";
+import type { NavCheck, RouteResult, SuggestedPlace } from "@rv-trip/core";
 
 /**
  * Relational schema for the trip grammar. Mirrors @rv-trip/core/domain.
@@ -109,10 +109,18 @@ export const trips = pgTable(
     defaultMode: travelMode("default_mode").notNull().default("drive"),
     lodgingDefault: lodgingKind("lodging_default"),
     rigOn: boolean("rig_on").notNull().default(true),
+    // #111 Q7 B: how far from a stop a save may sit and still surface on this
+    // trip — the review sheet's four chips. Null = never picked, which reads as
+    // core's NEAR_RADIUS_MI (50). The CHECK mirrors core's `surfaceRadiusMi`
+    // literal union, so a value the grammar would refuse can't land either.
+    surfaceRadiusMi: smallint("surface_radius_mi"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("trips_owner_idx").on(t.ownerId)],
+  (t) => [
+    index("trips_owner_idx").on(t.ownerId),
+    check("trips_surface_radius_mi_ck", sql`${t.surfaceRadiusMi} IN (25, 50, 100, 200)`),
+  ],
 );
 
 export const legs = pgTable(
@@ -263,6 +271,12 @@ export const destinations = pgTable(
     ownerId: text("owner_id").notNull(),
     googlePlaceId: text("google_place_id").notNull(),
     name: text("name").notNull(),
+    // The Saves tab's region HEADER (#111 Q4 B): the state's long name in the
+    // US ("Oregon"), the country elsewhere ("Costa Rica"). A header only — not
+    // a table. Written by the same resolver that names the row.
+    region: text("region"),
+    // The LOCALITY's own point (#111): what an area save with no coordinates
+    // of its own is measured from when a trip looks for nearby saves.
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -304,9 +318,42 @@ export const saves = pgTable(
     // "been" shelf only.
     rating: smallint("rating"),
     tripId: uuid("trip_id").references(() => trips.id, { onDelete: "set null" }),
+    // #111 capture: the phone's `cap_…` id, minted when the capture is queued.
+    // The save is idempotent on it — a replayed POST finds this row instead of
+    // writing a second one. Null for every web save; Postgres treats NULLs as
+    // distinct, so the unique below constrains only the phone's ids.
+    clientId: text("client_id"),
+    // #111 Q3 A: the top Places hit for an offline note's text, offered as a
+    // one-tap upgrade. Null once taken or dismissed (i2 writes it).
+    suggestedPlace: jsonb("suggested_place").$type<SuggestedPlace>(),
+    // When the capture HAPPENED — the body's `capturedAt` when the phone sends
+    // one (a queued save may reach us hours later), else now.
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("saves_owner_idx").on(t.ownerId)],
+  (t) => [
+    index("saves_owner_idx").on(t.ownerId),
+    unique("saves_owner_client_uq").on(t.ownerId, t.clientId),
+  ],
+);
+
+/**
+ * The saves a trip's banner was DISMISSED for (#111 Q6 A): Dismiss records
+ * every save surfaced at that moment, per trip, so the banner comes back only
+ * when a NEW save matches. Both sides cascade — a deleted trip or a deleted
+ * save takes its dismissals with it. No owner column: the trip is the
+ * ownership root, and every read and write proves it first.
+ */
+export const tripDismissedSaves = pgTable(
+  "trip_dismissed_saves",
+  {
+    tripId: uuid("trip_id")
+      .notNull()
+      .references(() => trips.id, { onDelete: "cascade" }),
+    saveId: uuid("save_id")
+      .notNull()
+      .references(() => saves.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.tripId, t.saveId] })],
 );
 
 /**

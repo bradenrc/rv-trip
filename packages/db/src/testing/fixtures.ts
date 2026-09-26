@@ -1,12 +1,15 @@
 import { asc, count, eq, sql } from "drizzle-orm";
+import type { SuggestedPlace } from "@rv-trip/core";
 import { db } from "../index";
 import {
+  destinations,
   ideas,
   legs,
   reservations,
   rigs,
   routes,
   saves,
+  tripDismissedSaves,
   travelSegments,
   stops,
   trips,
@@ -144,6 +147,14 @@ export interface PlaceSeed {
   source: string | null;
   rating: number | null;
   tripId: string | null;
+  /** #111: the phone's capture id. */
+  clientId: string | null;
+  /** #111 i2: override the derived anchor / label, attach a destination row,
+   * or hang a pending Q3 A suggestion on the save. */
+  anchor: "place" | "area" | "pin";
+  areaLabel: string | null;
+  destinationId: string | null;
+  suggestedPlace: SuggestedPlace | null;
 }
 
 export interface RigSeed {
@@ -272,19 +283,43 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
       lng: p.lng ?? null,
       googlePlaceId: p.googlePlaceId ?? null,
       // The W0 anchor rule createSave applies (#110 §5).
-      anchor: p.googlePlaceId ? "place" : p.lat != null && p.lng != null ? "pin" : "area",
+      anchor:
+        p.anchor ?? (p.googlePlaceId ? "place" : p.lat != null && p.lng != null ? "pin" : "area"),
       areaLabel:
-        p.googlePlaceId || (p.lat != null && p.lng != null)
-          ? null
-          : p.region === undefined
-            ? "Tillamook, OR"
-            : p.region,
+        p.areaLabel !== undefined
+          ? p.areaLabel
+          : p.googlePlaceId || (p.lat != null && p.lng != null)
+            ? null
+            : p.region === undefined
+              ? "Tillamook, OR"
+              : p.region,
+      destinationId: p.destinationId ?? null,
+      suggestedPlace: p.suggestedPlace ?? null,
       type: p.type ?? "campground",
       status: p.status ?? "want",
       note: p.note ?? null,
       source: p.source ?? null,
       rating: p.rating ?? null,
       tripId: p.tripId ?? null,
+      clientId: p.clientId ?? null,
+    })
+    .returning();
+  return row!;
+}
+
+/** A destinations row (#111), Bandon unless told otherwise. */
+async function insertDestination(
+  p: Partial<{ owner: string; googlePlaceId: string; name: string; region: string | null; lat: number | null; lng: number | null }> = {},
+) {
+  const [row] = await db
+    .insert(destinations)
+    .values({
+      ownerId: p.owner ?? DEV_OWNER,
+      googlePlaceId: p.googlePlaceId ?? "ChIJbandon",
+      name: p.name ?? "Bandon, OR",
+      region: p.region === undefined ? "Oregon" : p.region,
+      lat: p.lat === undefined ? 43.119 : p.lat,
+      lng: p.lng === undefined ? -124.4084 : p.lng,
     })
     .returning();
   return row!;
@@ -443,6 +478,7 @@ export const fx = {
   idea: insertIdea,
   reservation: insertReservation,
   savedPlace: insertSavedPlace,
+  destination: insertDestination,
   segment: insertSegment,
   rig: insertRig,
   pacificNorthwestLoop,
@@ -485,6 +521,22 @@ export const read = {
   async savedPlace(id: string): Promise<SavedPlaceRow | null> {
     const [row] = await db.select().from(saves).where(eq(saves.id, id));
     return row ?? null;
+  },
+  /** A trip's dismissed save ids (#111 i3), sorted — the ROWS. */
+  async dismissedSaveIds(tripId: string): Promise<string[]> {
+    const rows = await db
+      .select({ saveId: tripDismissedSaves.saveId })
+      .from(tripDismissedSaves)
+      .where(eq(tripDismissedSaves.tripId, tripId));
+    return rows.map((r) => r.saveId).sort();
+  },
+  /** An owner's destinations rows (#111), oldest first. */
+  async destinations(owner: string): Promise<(typeof destinations.$inferSelect)[]> {
+    return db
+      .select()
+      .from(destinations)
+      .where(eq(destinations.ownerId, owner))
+      .orderBy(asc(destinations.createdAt));
   },
   /** The ROW, not the payload: `RigProfile` carries no timestamp (C3), so the
    * upsert's touch can only be asserted here. */

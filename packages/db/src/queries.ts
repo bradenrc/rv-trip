@@ -8,6 +8,7 @@ import {
   routeSummary,
   routingHash,
   suggestionsFromTrips,
+  surfaceRadiusMi,
   todayIso,
 } from "@rv-trip/core";
 import { db } from "./index";
@@ -18,6 +19,7 @@ import {
   ideas,
   reservations,
   saves,
+  tripDismissedSaves,
   travelSegments,
   rigs,
   routes,
@@ -40,6 +42,7 @@ import type {
   Idea,
   Place,
   SavedPlace,
+  SaveDestination,
   Segment,
   PlaceSuggestion,
   NavCheck,
@@ -319,6 +322,9 @@ function mapTripRow(
     defaultMode: row.defaultMode,
     lodgingDefault: row.lodgingDefault,
     rigOn: row.rigOn,
+    // A smallint on the way out; the CHECK only ever lets the four chips in,
+    // and anything else (a hand-edited row) reads as "never picked".
+    surfaceRadiusMi: surfaceRadiusMi.nullable().catch(null).parse(row.surfaceRadiusMi),
     legs: row.legs.map((l) => mapLeg(l, last)),
     ideas: row.ideas.map((i) => mapIdea(i, last)),
     segments: row.segments.map((s) => mapSegment(s, last)),
@@ -502,12 +508,26 @@ export async function listSavedPlacesForOwner(ownerId: string): Promise<SavedPla
   const rows = await db.query.saves.findMany({
     where: eq(saves.ownerId, ownerId),
     orderBy: [desc(saves.createdAt)],
-    with: { trip: { columns: { title: true } } },
+    with: { trip: { columns: { title: true } }, destination: true },
   });
   // The /places cards render a byline (§5), so the library read joins the log
   // the same way the trip tree does — one query for the whole page.
   const last = await lastChangesFor(ownerId, rows.map((r) => r.id));
   return rows.map((r) => mapSavedPlaceRow(r, r.trip?.title ?? null, last));
+}
+
+/**
+ * The saves this trip's banner was dismissed for (#111 Q6 A) — what
+ * `nearbySaves` leaves out. Owner-scoped through the trip: a foreign trip id
+ * reads as no dismissals, never as someone else's.
+ */
+export async function listDismissedSaveIds(ownerId: string, tripId: string): Promise<string[]> {
+  const rows = await db
+    .select({ saveId: tripDismissedSaves.saveId })
+    .from(tripDismissedSaves)
+    .innerJoin(trips, eq(trips.id, tripDismissedSaves.tripId))
+    .where(and(eq(tripDismissedSaves.tripId, tripId), eq(trips.ownerId, ownerId)));
+  return rows.map((r) => r.saveId);
 }
 
 /**
@@ -555,6 +575,14 @@ export function mapSavedPlaceRow(
     source: string | null;
     rating: number | null;
     tripId: string | null;
+    anchor: SavedPlace["anchor"];
+    areaLabel: string | null;
+    suggestedPlace: SavedPlace["suggestedPlace"];
+    /** Absent reads as null, for a caller that selected columns (#111 i2). */
+    createdAt?: Date | null;
+    /** The joined `destinations` row (#111) — null when unanchored. Absent
+     * (undefined) reads as null too, for a caller that did not join it. */
+    destination?: SaveDestinationRow | null;
   },
   tripName: string | null,
   last: LastChangeIndex = NO_CHANGES,
@@ -572,6 +600,32 @@ export function mapSavedPlaceRow(
     tripId: r.tripId,
     tripName,
     lastChange: lastChangeOf(last, "save", r.id),
+    anchor: r.anchor,
+    areaLabel: r.areaLabel,
+    destination: r.destination ? mapSaveDestination(r.destination) : null,
+    suggestedPlace: r.suggestedPlace ?? null,
+    createdAt: r.createdAt ? r.createdAt.toISOString() : null,
+  };
+}
+
+/** The `destinations` columns a save's read shape carries. */
+export interface SaveDestinationRow {
+  id: string;
+  name: string;
+  region: string | null;
+  googlePlaceId: string;
+  lat: number | null;
+  lng: number | null;
+}
+
+export function mapSaveDestination(d: SaveDestinationRow): SaveDestination {
+  return {
+    id: d.id,
+    name: d.name,
+    region: d.region,
+    googlePlaceId: d.googlePlaceId,
+    lat: d.lat,
+    lng: d.lng,
   };
 }
 

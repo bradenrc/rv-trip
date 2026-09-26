@@ -170,6 +170,92 @@ export function Segmented<T extends string>({
   );
 }
 
+/**
+ * A chip — docs/design/111's `.chip`: mono 10/600 on a pill. `on` is the
+ * chosen one (rv-green on green-soft: "verified / chosen"); `warn` is amber
+ * ("attention" — the Saves tab's queue count).
+ */
+export function Chip({
+  children,
+  on = false,
+  warn = false,
+  onPress,
+}: {
+  children: ReactNode;
+  on?: boolean;
+  warn?: boolean;
+  onPress?: () => void;
+}) {
+  const tone = on
+    ? { borderColor: C.green, backgroundColor: C.greenSoft, color: C.greenInk }
+    : warn
+      ? { borderColor: C.warning, backgroundColor: C.warningSoft, color: C.warning }
+      : { borderColor: C.borderHi, backgroundColor: C.surface, color: C.inkMuted };
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityState={{ selected: on }}
+      hitSlop={4}
+      style={[styles.chip, { borderColor: tone.borderColor, backgroundColor: tone.backgroundColor }]}
+    >
+      <Text style={[styles.chipText, { color: tone.color }]}>{children}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * The capture toast (docs/design/111 `.toast`). Green = verified — "Saved
+ * El Chandelier", "Synced 2 saves". Amber = attention — "Saved on this phone",
+ * and the sheet's offline strip. A native-local pattern: `packages/ui` is
+ * web-only, and promoting this into the DS is a later decision.
+ */
+export function Toast({
+  title,
+  sub,
+  tone,
+  glyph,
+  onUndo,
+}: {
+  title: string;
+  sub?: string | null;
+  tone: "green" | "amber";
+  glyph: string;
+  onUndo?: () => void;
+}) {
+  const amber = tone === "amber";
+  const color = amber ? C.warning : C.greenInk;
+  return (
+    <View
+      style={[
+        styles.toast,
+        amber
+          ? { borderColor: C.warning, backgroundColor: C.warningSoft }
+          : { borderColor: C.green, backgroundColor: C.greenSoft },
+      ]}
+      accessibilityRole="alert"
+    >
+      <Text style={[styles.toastGlyph, { color }]}>{glyph}</Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={[styles.toastTitle, { color }]} numberOfLines={1}>
+          {title}
+        </Text>
+        {sub ? (
+          <Text style={styles.toastSub} numberOfLines={1}>
+            {sub}
+          </Text>
+        ) : null}
+      </View>
+      {onUndo && (
+        <Pressable onPress={onUndo} hitSlop={8} accessibilityRole="button">
+          <Text style={[styles.toastUndo, { color }]}>Undo</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 export function Centered({ children }: { children: ReactNode }) {
   return <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 12 }}>{children}</View>;
 }
@@ -239,4 +325,27 @@ const styles = StyleSheet.create({
   },
   segmentText: { fontSize: 13, fontWeight: "700" },
   segmentTextMono: { fontFamily: F.mono, fontSize: 11 },
+  chip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: R.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  chipText: { fontFamily: F.mono, fontSize: 10, fontWeight: "600" },
+  toast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: R.card,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  toastGlyph: { fontSize: 14, fontWeight: "700" },
+  toastTitle: { fontSize: 12.5, fontWeight: "600" },
+  toastSub: { fontFamily: F.mono, fontSize: 10, fontWeight: "500", color: C.inkMuted },
+  toastUndo: { fontSize: 11, textDecorationLine: "underline" },
 });

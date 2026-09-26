@@ -28,13 +28,14 @@ export default async function PlacesPage() {
     .map((t) => ({ id: t.id, title: t.title }));
 
   // The header copy stays on the server; the island owns only the button beside
-  // it, both sheets and the ⋯ menu.
+  // it, both sheets and the ⋯ menu. #111 i4 · Q5 A: the library is "Saves"
+  // (the nav label and this kicker); the URL stays /places.
   return (
     <PageShell>
       <PlacesWorkspace places={places} trips={visitedOn} suggestions={suggestions}>
         <div>
           <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
-            Your places
+            Your saves
           </div>
           <h1 className="m-0 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
             Spots worth keeping

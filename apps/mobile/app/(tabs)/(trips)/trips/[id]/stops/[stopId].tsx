@@ -14,11 +14,11 @@ import {
   stopMap,
   tripStopPins,
 } from "@rv-trip/core";
-import { api } from "../../../../src/api";
-import { MapFrame, TripMap, useStyleMode } from "../../../../src/map";
-import { updateTrip, useBundle } from "../../../../src/store";
-import { C, F, R } from "../../../../src/theme";
-import { Card, CategoryTile, Centered, Kicker, Muted, Stars } from "../../../../src/ui";
+import { api } from "../../../../../../src/api";
+import { MapFrame, TripMap, useStyleMode } from "../../../../../../src/map";
+import { updateTrip, useBundle } from "../../../../../../src/store";
+import { C, F, R } from "../../../../../../src/theme";
+import { Card, CategoryTile, Centered, Kicker, Muted, Stars } from "../../../../../../src/ui";
 
 /** The height packages/ui's `MapPlaceholder` has always reserved, and the web's
  * `STOP_MINI_MAP_HEIGHT` (apps/web/src/components/map/StopMiniMap.tsx:13). */

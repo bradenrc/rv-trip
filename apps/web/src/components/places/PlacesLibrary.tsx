@@ -28,6 +28,7 @@ import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { GoogleLine } from "@/components/places/GoogleLine";
 import { MapMount } from "@/components/map/MapMount";
 import { buildMapModel } from "@/components/map/pins";
+import { SavesGroups } from "./SavesGroups";
 
 type View = "grid" | "map";
 type CatFilter = "All" | CategoryLabel;
@@ -43,8 +44,10 @@ const CAT_CHIPS: { cat: CategoryLabel; type: ReservationType }[] = [
 ];
 
 /**
- * The Places library. Two shelves off one status field, a category filter
- * scoped to the active shelf, and a grid/map lens over the same filtered list.
+ * The Saves library (#111 i4 renamed it from Places; the URL is still
+ * /places). Two shelves off one status field, a category filter scoped to the
+ * active shelf, and a grid/map lens over the same filtered list — the grid
+ * grouped by destination under region headers (`SavesGroups`).
  */
 export function PlacesLibrary({
   places,
@@ -114,7 +117,7 @@ export function PlacesLibrary({
   // the card's own box. `onAddToTrip` stays unpassed: the add-a-stop path it
   // needs is issue #22, in epic #40 — until then the DS button is inert by
   // design, not by omission.
-  const cards = list.map((p) => (
+  const renderCard = (p: SavedPlace) => (
     <div key={p.id} className="relative grid">
       <PlaceCard
         savedPlace={p}
@@ -138,7 +141,10 @@ export function PlacesLibrary({
       />
       {cardMenu?.(p)}
     </div>
-  ));
+  );
+  // The map lens's side list stays the flat list it shipped as — the pins ARE
+  // the list, and the grouping is the grid's (#111 i4).
+  const cards = list.map(renderCard);
 
   return (
     <>
@@ -199,10 +205,20 @@ export function PlacesLibrary({
           )}
         </>
       ) : list.length > 0 || leading ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
-          {leading}
-          {cards}
-        </div>
+        <>
+          {/* The "Been there?" suggestions are not library rows, so they sit
+              in their own row ahead of the groups rather than under a header. */}
+          {leading && (
+            <div className="mb-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
+                {leading}
+              </div>
+            </div>
+          )}
+          {/* #111 i4 · Q4 B: the grid is grouped by destination under region
+              headers — core's savesShelves, the phone's Saves tab order. */}
+          <SavesGroups places={list} status={status} renderCard={renderCard} />
+        </>
       ) : status === "want" ? (
         <EmptyShelf
           Icon={BookmarkCheck}

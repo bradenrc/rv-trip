@@ -45,6 +45,7 @@ function fixture(over: Partial<Trip> = {}): Trip {
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
+    surfaceRadiusMi: null,
     ideas: [],
     legs: [],
     segments: [],

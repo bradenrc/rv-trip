@@ -7,8 +7,11 @@ import type {
   CascadeCounts,
   Idea,
   IdeaCategory,
+  NearbySave,
+  NearbySaves,
   PickedPlace,
   SavedPlace,
+  SurfaceRadiusMi,
   Reservation,
   ReservationDraft,
   ReservationType,
@@ -165,6 +168,7 @@ import { Timeline } from "./Timeline";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
+import { NearbySavesBanner, NearbySavesSheet, sheetRows } from "./NearbySaves";
 
 
 /**
@@ -184,6 +188,7 @@ export function TripPlanner({
   hasRig,
   units,
   savedPlaces = [],
+  nearby: initialNearby,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -211,6 +216,12 @@ export function TripPlanner({
    * rather than failing to render at all.
    */
   savedPlaces?: SavedPlace[];
+  /**
+   * #111 i4 · trip surfacing: the saves near this trip at its radius, minus
+   * the ones dismissed here — core's `nearbySaves`, computed on the server
+   * (trips/[id]/page.tsx) so the banner is in the first paint.
+   */
+  nearby: NearbySaves;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
@@ -256,6 +267,13 @@ export function TripPlanner({
   const [shelfPicked, setShelfPicked] = useState<PickedPlace | null>(null);
   /** The Add-from-Places panel — the library, filtered, one Add per row. */
   const [placesPanelOpen, setPlacesPanelOpen] = useState(false);
+  /** #111 i4 · the nearby-saves banner's numbers, re-read after a radius chip
+   * and on closing the review sheet. */
+  const [nearby, setNearby] = useState(initialNearby);
+  const [nearbyOpen, setNearbyOpen] = useState(false);
+  /** The rows added from the OPEN review sheet — kept as "✓ Idea" even after a
+   * refetch drops them (they are on the trip now). Cleared on each open. */
+  const [nearbyAdded, setNearbyAdded] = useState<NearbySave[]>([]);
   /** The shelf row whose place picker is open — the same #69 entrance the stop
    * sheet's idea card has, on the rail's card. */
   const [locatingShelfIdeaId, setLocatingShelfIdeaId] = useState<string | null>(null);
@@ -455,7 +473,7 @@ export function TripPlanner({
    * goes back — a link would re-create the dual-write the answer rejects, and
    * the copy is yours to edit without touching the library.
    */
-  const addIdeaFromPlace = async (p: SavedPlace) => {
+  const addIdeaFromPlace = async (p: SavedPlace): Promise<boolean> => {
     try {
       const created = await tripApi.createIdea({
         tripId: trip.id,
@@ -471,9 +489,78 @@ export function TripPlanner({
       });
       setTrip((t) => appendShelfIdea(t, created));
       toast.success(`Added ${p.place.name} to this trip's ideas`);
+      return true;
     } catch {
       toast.error(`Couldn't add ${p.place.name}.`);
+      return false;
     }
+  };
+
+  // ── #111 i4 · trip surfacing: the banner and its review sheet ─────────────
+
+  /** Re-read the banner's numbers. Quiet on failure: the banner keeps what it
+   * had, and a surfacing hint is never worth an error. */
+  const refreshNearby = () =>
+    tripApi
+      .nearbySaves(trip.id)
+      .then(setNearby)
+      .catch(() => {});
+
+  /** Dismiss: every save the banner names, remembered for THIS trip (Q6 A).
+   * The banner comes back only when a new save matches. */
+  const dismissNearby = () => {
+    const before = nearby;
+    const saveIds = nearby.items.map((i) => i.saveId);
+    setNearby({ ...nearby, items: [], beyond: null });
+    tripApi.dismissSaves(trip.id, saveIds).catch(() => {
+      setNearby(before);
+      toast.error("Couldn't dismiss those saves.");
+    });
+  };
+
+  const openNearby = () => {
+    setNearbyAdded([]);
+    setNearbyOpen(true);
+  };
+
+  const closeNearby = () => {
+    setNearbyOpen(false);
+    void refreshNearby();
+  };
+
+  /** A row's Add — the shipped "Add from Places" copy (`addIdeaFromPlace`),
+   * the save found by id in the library the page already read. */
+  const addNearby = async (item: NearbySave) => {
+    const p = savedPlaces.find((s) => s.id === item.saveId);
+    if (!p) return;
+    if (await addIdeaFromPlace(p)) setNearbyAdded((a) => [...a, item]);
+  };
+
+  /** "Add all N to ideas" — one at a time, so the shelf's order follows the
+   * sheet's (nearest first). */
+  const addAllNearby = async () => {
+    const done = new Set(nearbyAdded.map((i) => i.saveId));
+    for (const item of sheetRows(nearby.items, nearbyAdded)) {
+      if (!done.has(item.saveId)) await addNearby(item);
+    }
+  };
+
+  /** A radius chip: saved to this trip, then the sheet re-reads at it. */
+  const setSurfaceRadius = (r: SurfaceRadiusMi) => {
+    if (r === nearby.radiusMi) return;
+    const undoTrip = trip;
+    const undoNearby = nearby;
+    setTrip((t) => ({ ...t, surfaceRadiusMi: r }));
+    setNearby((n) => ({ ...n, radiusMi: r }));
+    tripApi
+      .updateTrip(trip.id, { surfaceRadiusMi: r })
+      .then(() => tripApi.nearbySaves(trip.id))
+      .then(setNearby)
+      .catch(() => {
+        setTrip(undoTrip);
+        setNearby(undoNearby);
+        toast.error("Couldn't change the radius.");
+      });
   };
 
   /**
@@ -1250,6 +1337,22 @@ export function TripPlanner({
 
         {/* The shelf's "+ Add" draft and the Add-from-Places panel both open
             ABOVE the two lenses: a maybe belongs to the trip, not to a lens. */}
+        {/* #111 i4 · the saves near this trip. Above the lenses with the
+            Add-from-Places panel — a save belongs to the trip, not a lens —
+            and beside that entrance, never instead of it. */}
+        <NearbySavesBanner nearby={nearby} onOpen={openNearby} onDismiss={dismissNearby} />
+        {nearbyOpen && (
+          <NearbySavesSheet
+            tripTitle={trip.title}
+            nearby={nearby}
+            rows={sheetRows(nearby.items, nearbyAdded)}
+            added={new Set(nearbyAdded.map((i) => i.saveId))}
+            onAdd={(item) => void addNearby(item)}
+            onAddAll={() => void addAllNearby()}
+            onRadius={setSurfaceRadius}
+            onClose={closeNearby}
+          />
+        )}
         {addIdeaCategory && (
           <ShelfIdeaDraft
             category={addIdeaCategory}

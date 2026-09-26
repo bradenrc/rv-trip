@@ -27,7 +27,13 @@
     "newArchEnabled": true,
     "plugins": [
       "expo-router",
-      "@rnmapbox/maps"
+      "@rnmapbox/maps",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "RV Trip Hub uses your location to drop a pin, or to file a note under the town you're in."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

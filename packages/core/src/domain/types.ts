@@ -238,6 +238,21 @@ export const segment = z.object({
 });
 export type Segment = z.infer<typeof segment>;
 
+/**
+ * The per-trip surfacing radius (#111 Q7 B): the review sheet's four chips.
+ * A LITERAL union, so a hand-rolled 75 is a 400 at the boundary rather than a
+ * CHECK violation deeper in (`trips_surface_radius_mi_ck`, schema.ts). Null =
+ * never chosen, which reads as `NEAR_RADIUS_MI` (planner/shelf.ts).
+ */
+export const SURFACE_RADII = [25, 50, 100, 200] as const;
+export const surfaceRadiusMi = z.union([
+  z.literal(25),
+  z.literal(50),
+  z.literal(100),
+  z.literal(200),
+]);
+export type SurfaceRadiusMi = z.infer<typeof surfaceRadiusMi>;
+
 export const tripStatus = z.enum(["planning", "upcoming", "complete"]);
 export type TripStatus = z.infer<typeof tripStatus>;
 
@@ -272,6 +287,9 @@ export const trip = z.object({
   defaultMode: travelMode.default("drive"),
   lodgingDefault: lodgingKind.nullable().default(null),
   rigOn: z.boolean().default(true),
+  /** How far from a stop a save may sit and still surface on this trip
+   * (#111 Q7 B · `trips.surface_radius_mi`). Null → the 50 mi default. */
+  surfaceRadiusMi: surfaceRadiusMi.nullable().default(null),
   legs: z.array(leg).default([]),
   /** Every hop of the journey, by `sortOrder` (#110 Q1 A). */
   segments: z.array(segment).default([]),
@@ -319,6 +337,9 @@ export const tripPatchInput = trip
     statusAuto: true,
     rating: true,
     note: true,
+    // #111 i3: the review sheet's radius chips. Explicit for the same reason
+    // as `homeBasePlace` above — `.pick()` drops an unlisted key silently.
+    surfaceRadiusMi: true,
   })
   .partial();
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
@@ -502,6 +523,43 @@ export type IdeaPromoteInput = z.infer<typeof ideaPromoteInput>;
 export const savedPlaceStatus = z.enum(["want", "been"]);
 export type SavedPlaceStatus = z.infer<typeof savedPlaceStatus>;
 
+/**
+ * What a save is pinned to (#110 §5): a Google `place`, a named `area` (a note
+ * "in the Bandon area"), or a dropped `pin`. Mirrors the `save_anchor` pgEnum
+ * (packages/db/src/schema.ts).
+ */
+export const saveAnchor = z.enum(["place", "area", "pin"]);
+export type SaveAnchor = z.infer<typeof saveAnchor>;
+
+/**
+ * The locality a save resolved to (#111 · docs/design/111 "One resolver"): a
+ * `destinations` row, named "Bandon, OR" / "San José, Costa Rica", with its
+ * region header ("Oregon" / "Costa Rica") and the locality's own coordinates —
+ * the point an area save with no coordinates of its own is measured from.
+ */
+export const saveDestination = z.object({
+  id: z.string(),
+  name: z.string(),
+  region: z.string().nullable().default(null),
+  googlePlaceId: z.string(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+});
+export type SaveDestination = z.infer<typeof saveDestination>;
+
+/**
+ * The one-tap upgrade an offline note is offered after sync (#111 Q3 A): the
+ * top Places hit for the note's text near where it was typed. `saves.suggested_place`.
+ */
+export const suggestedPlace = z.object({
+  name: z.string(),
+  googlePlaceId: z.string(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+  subline: z.string().nullable().default(null),
+});
+export type SuggestedPlace = z.infer<typeof suggestedPlace>;
+
 export const savedPlace = z.object({
   id: z.string(),
   ownerId: z.string(),
@@ -520,6 +578,18 @@ export const savedPlace = z.object({
   tripId: z.string().nullable().default(null),
   tripName: z.string().nullable().default(null),
   lastChange: lastChangeField,
+  // ── #111 W1 capture. Every one defaulted, so a payload from a server older
+  // than this read shape still parses (the phone ships on its own cadence).
+  anchor: saveAnchor.default("area"),
+  /** An area save's human label ("Bend, OR"). Null for place and pin saves. */
+  areaLabel: z.string().nullable().default(null),
+  /** Null = unanchored: no locality within 25 mi, or no provider key. */
+  destination: saveDestination.nullable().default(null),
+  suggestedPlace: suggestedPlace.nullable().default(null),
+  /** When the save was captured (`saves.created_at`, ISO) — the Saves tab's
+   * newest-first order inside a destination (#111 i2). Null from a server that
+   * predates it. */
+  createdAt: z.string().nullable().default(null),
 });
 export type SavedPlace = z.infer<typeof savedPlace>;
 
@@ -562,7 +632,7 @@ export type PlaceEnrichment = z.infer<typeof placeEnrichment>;
  * through. `id`, `ownerId`, `createdAt` and the joined `tripName` are
  * server-owned and are stripped from any body that sends them.
  */
-export const savedPlaceCreate = z.object({
+const savedPlaceFields = z.object({
   name: z.string().min(1),
   region: z.string().nullable().default(null),
   lat: z.number().nullable().default(null),
@@ -576,6 +646,42 @@ export const savedPlaceCreate = z.object({
   rating: rating.default(null),
   tripId: z.string().uuid().nullable().default(null),
 });
+
+/**
+ * The capture half of the create body (#111 · docs/design/111 "Contracts").
+ * CREATE-ONLY on purpose: `savedPlacePatch` below is built from
+ * `savedPlaceFields`, not from this, so a PATCH can never rewrite a save's
+ * client id, birthday or anchor (updateSavedPlaceFields spreads its patch
+ * straight into `.set()`).
+ *
+ * All optional and none defaulted, so a body that omits them — the web, an
+ * older phone — parses to exactly the shape it always did.
+ */
+export const savedPlaceCreate = savedPlaceFields
+  .extend({
+    /** `cap_…`, minted on the phone when the capture is queued. The save is
+     * idempotent on it: a replay answers 200 with the row that exists. */
+    clientId: z.string().min(1).max(64).optional(),
+    /** When the capture happened (it may be flushed hours later) → created_at. */
+    capturedAt: z.string().datetime({ offset: true }).optional(),
+    /** Wins over the derived `saveAnchorOf` when present. */
+    anchor: saveAnchor.optional(),
+    areaLabel: z.string().nullable().optional(),
+    /** Typed with no signal. With an area anchor it earns a place suggestion (i2). */
+    capturedOffline: z.boolean().optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.anchor === "pin" && (b.lat == null || b.lng == null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["anchor"], message: "a pin needs lat and lng" });
+    }
+    if (b.anchor === "place" && !b.googlePlaceId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["anchor"],
+        message: "a place anchor needs a googlePlaceId",
+      });
+    }
+  });
 /** Post-parse: every default resolved. What the mutations receive. */
 export type SavedPlaceCreate = z.infer<typeof savedPlaceCreate>;
 /** Pre-parse: `name` and whatever else the caller chose to send. What a client
@@ -588,8 +694,20 @@ export type SavedPlaceCreateInput = z.input<typeof savedPlaceCreate>;
  * required: an empty `.set({})` is a Drizzle error, and a body of nothing but
  * unknown keys is a caller bug that deserves a 400 rather than a 500.
  */
-export const savedPlacePatch = savedPlaceCreate
+export const savedPlacePatch = savedPlaceFields
   .partial()
+  .extend({
+    /**
+     * #111 Q3 A, "tap the strip": the save becomes its `suggested_place` — the
+     * name, Place ID and point are copied, the anchor goes area → place, the
+     * destination is re-resolved and the suggestion is cleared. PATCH-only: it
+     * is an action on a row that exists, never a create field.
+     */
+    upgradeToSuggested: z.literal(true).optional(),
+    /** Dismiss: `null` is the only value a client may write. The server is the
+     * one that fills it (createSave's offline text search). */
+    suggestedPlace: z.null().optional(),
+  })
   .refine((p) => Object.keys(p).length > 0, {
     message: "patch must name at least one field",
   });
@@ -604,6 +722,57 @@ export type SavedPlacePatch = z.infer<typeof savedPlacePatch>;
 export function normalizeSavedPlacePatch(patch: SavedPlacePatch): SavedPlacePatch {
   return patch.status === "been" ? { ...patch, source: null } : patch;
 }
+
+/**
+ * `GET /api/trips/:id/nearby-saves` (#111 i3 · docs/design/111 "Contracts"):
+ * the saves within the trip's radius of a located stop, nearest first, and the
+ * next ring out. Computed by `nearbySaves` (planner/nearby-saves.ts).
+ *
+ * Each item carries the save's `place` as well as the design's display fields:
+ * Add copies the place into a trip idea (`POST /api/ideas`), and without it
+ * the phone would have to join `saveId` back against the whole library.
+ */
+export const nearbySave = z.object({
+  saveId: z.string(),
+  name: z.string(),
+  type: reservationType,
+  status: savedPlaceStatus,
+  rating,
+  source: z.string().nullable(),
+  /** The save's OWN place — its own coordinates, never the destination's it
+   * was measured from, so the idea it becomes is exactly the save. */
+  place,
+  nearestStop: z.object({ id: z.string(), name: z.string() }),
+  /** At the shelf's precision: one decimal under 10 mi, whole miles above. */
+  distanceMi: z.number(),
+});
+export type NearbySave = z.infer<typeof nearbySave>;
+
+export const nearbySavesBeyond = z.object({
+  /** The next chip out (25 → 50 → 100 → 200). */
+  radiusMi: surfaceRadiusMi,
+  /** Saves past the current radius but inside that ring. */
+  count: z.number().int().positive(),
+  /** One decimal, always ("50.3 mi"). */
+  nearestMi: z.number(),
+  nearestName: z.string(),
+});
+export type NearbySavesBeyond = z.infer<typeof nearbySavesBeyond>;
+
+export const nearbySavesResponse = z.object({
+  radiusMi: z.number().int().positive(),
+  items: z.array(nearbySave),
+  /** Null at 200 mi (there is no next ring) and when the next ring is empty. */
+  beyond: nearbySavesBeyond.nullable(),
+});
+export type NearbySaves = z.infer<typeof nearbySavesResponse>;
+
+/** `POST /api/trips/:id/dismissed-saves` — the banner's Dismiss: every save
+ * currently surfaced, remembered for this trip (Q6 A). */
+export const dismissSavesInput = z.object({
+  saveIds: z.array(z.string().uuid()).min(1).max(500),
+});
+export type DismissSavesInput = z.infer<typeof dismissSavesInput>;
 
 /** A stop is "scheduled" iff it has both dates. */
 export function isScheduled(

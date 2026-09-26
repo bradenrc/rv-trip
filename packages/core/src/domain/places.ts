@@ -258,3 +258,37 @@ export function suggestionToCreate(s: PlaceSuggestion): SavedPlaceCreate {
     tripId: s.tripId,
   };
 }
+
+// ── #111 · a Google result's category ──────────────────────────────────────
+
+const GOOGLE_DINING = new Set(["restaurant", "cafe", "bar", "food", "coffee_shop", "bakery"]);
+const GOOGLE_CAMPGROUND = new Set(["campground", "rv_park"]);
+const GOOGLE_LODGING = new Set(["lodging", "hotel", "motel"]);
+const GOOGLE_ACTIVITY = new Set([
+  "tourist_attraction",
+  "park",
+  "museum",
+  "national_park",
+  "state_park",
+]);
+
+/**
+ * A Places (New) `primaryType` → the reservation type a save is filed under,
+ * so a search row's tile and the saved row speak the shipped five-category
+ * language (`categoryMeta`). docs/design/111 #100 dev note: restaurant, cafe,
+ * bar or food → dining; campground or rv_park → campground; lodging → lodging;
+ * tourist_attraction, park or museum → activity; anything else → other.
+ *
+ * Google's own sub-types are folded in where the family is unambiguous — every
+ * `*_restaurant` ("mexican_restaurant") is a restaurant, a hotel/motel is
+ * lodging, a national/state park is a park. `null` (no type sent) is `other`.
+ */
+export function reservationTypeOfGoogle(primaryType: string | null | undefined): ReservationType {
+  if (!primaryType) return "other";
+  const t = primaryType.trim().toLowerCase();
+  if (GOOGLE_DINING.has(t) || t.endsWith("_restaurant")) return "dining";
+  if (GOOGLE_CAMPGROUND.has(t)) return "campground";
+  if (GOOGLE_LODGING.has(t)) return "lodging";
+  if (GOOGLE_ACTIVITY.has(t)) return "activity";
+  return "other";
+}

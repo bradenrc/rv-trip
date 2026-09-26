@@ -3,10 +3,10 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { useState } from "react";
 import type { TripSummary, TripStatus } from "@rv-trip/core";
 import { fullRange } from "@rv-trip/core";
-import { useTrips } from "../src/store";
-import { API_URL } from "../src/api";
-import { C, F, R } from "../src/theme";
-import { Button, Card, Centered, Kicker, Muted, Pill, Stars } from "../src/ui";
+import { useTrips } from "../../../src/store";
+import { API_URL } from "../../../src/api";
+import { C, F, R } from "../../../src/theme";
+import { Button, Card, Centered, Kicker, Muted, Pill, Stars } from "../../../src/ui";
 
 const STATUS: Record<TripStatus, { label: string; color: string }> = {
   planning: { label: "Planning", color: C.accent },

@@ -3,31 +3,39 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { ClerkProvider, SignedIn, SignedOut, useAuth } from "@clerk/clerk-expo";
 import { CLERK_KEY, clerkEnabled, secureStoreTokenCache, setTokenGetter } from "../src/auth";
-import { C, F } from "../src/theme";
+import { useCaptureRuntime } from "../src/capture";
+import { STACK_OPTIONS } from "../src/nav";
+import { C } from "../src/theme";
 import SignInScreen from "./sign-in";
 
 /**
- * Today's navigator and its four registered screens, lifted into one component
- * so the app is mounted from exactly one place — bare when there is no Clerk
- * key, and behind `<SignedIn>` when there is.
+ * The navigator, lifted into one component so the app is mounted from exactly
+ * one place — bare when there is no Clerk key, and behind `<SignedIn>` when
+ * there is.
+ *
+ * #111 (Q1 A): the root Stack holds the bottom tabs — Trips · + · Saves, whose
+ * Trips tab nests the stack that used to live here, so `/` and `/trips/[id]`
+ * keep their URLs — plus the two screens that sit ABOVE the tabs: the capture
+ * sheet, opened by the center + from any tab as a formSheet, and the rig.
  */
 function Shell() {
+  // The capture queue's flush needs the session token, so it runs in here.
+  useCaptureRuntime();
   return (
     <>
       <StatusBar style="light" />
-      <Stack
-        screenOptions={{
-          headerStyle: { backgroundColor: C.navy },
-          headerTintColor: C.ink,
-          headerTitleStyle: { fontWeight: "800", fontFamily: F.sans },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: C.surfaceAlt },
-          headerBackButtonDisplayMode: "minimal",
-        }}
-      >
-        <Stack.Screen name="index" options={{ title: "RV Trip Hub" }} />
-        <Stack.Screen name="trips/[id]/index" options={{ title: "Trip" }} />
-        <Stack.Screen name="trips/[id]/stops/[stopId]" options={{ title: "Stop" }} />
+      <Stack screenOptions={STACK_OPTIONS}>
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="capture"
+          options={{
+            presentation: "formSheet",
+            headerShown: false,
+            sheetGrabberVisible: true,
+            sheetAllowedDetents: [0.92],
+            contentStyle: { backgroundColor: C.surface },
+          }}
+        />
         <Stack.Screen name="rig" options={{ title: "Your rig" }} />
       </Stack>
     </>

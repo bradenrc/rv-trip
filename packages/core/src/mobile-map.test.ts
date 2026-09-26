@@ -52,8 +52,8 @@ const appConfig = JSON.parse(appJson) as {
 };
 const map = read("apps/mobile/src/map.tsx");
 const ui = read("apps/mobile/src/ui.tsx");
-const tripScreen = read("apps/mobile/app/trips/[id]/index.tsx");
-const stopScreen = read("apps/mobile/app/trips/[id]/stops/[stopId].tsx");
+const tripScreen = read("apps/mobile/app/(tabs)/(trips)/trips/[id]/index.tsx");
+const stopScreen = read("apps/mobile/app/(tabs)/(trips)/trips/[id]/stops/[stopId].tsx");
 const readme = read("apps/mobile/README.md");
 // The two files the phone mirrors, read so a change there reds here.
 const dsMapFrame = read("packages/ui/src/MapFrame.tsx");

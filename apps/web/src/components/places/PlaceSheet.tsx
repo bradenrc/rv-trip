@@ -40,7 +40,7 @@ export function PlaceSheet({
 
   return (
     <SheetShell
-      kicker="Your places"
+      kicker="Your saves"
       title={mode === "save" ? "Save a place" : "Edit place"}
       hint={`saves to · ${form.status}`}
       submitLabel="Save to library"
