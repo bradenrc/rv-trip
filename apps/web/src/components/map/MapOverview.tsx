@@ -63,7 +63,8 @@ export function MapOverview({
   /** Every drive the server resolved, keyed by `routeCacheKey` — props only,
    * because this island cannot await a vendor. */
   routes: RouteMap;
-  routingHash: string;
+  /** Each trip's own routing hash (#103 · `tripRig`), keyed by trip id. */
+  routingHash: string | Readonly<Record<string, string>>;
   /** The account's display units, resolved on the server (map/page.tsx). It
    * reaches exactly one thing: the distance in each arc's label. */
   units: Units;

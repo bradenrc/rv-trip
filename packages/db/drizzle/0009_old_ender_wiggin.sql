@@ -1,1 +1,0 @@
-ALTER TABLE "places" ADD COLUMN "google_maps_uri" text;

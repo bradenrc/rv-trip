@@ -91,7 +91,7 @@ export function ideaStatusColor(status: IdeaStatus): string {
 /** The rhythm strip's fills — the same three the web's `KIND_COLOR` names by CSS variable. */
 export function dayKindColor(kind: DayKind): string {
   switch (kind) {
-    case "drive":
+    case "travel":
       return RV.navy;
     case "stay":
       return RV.green;

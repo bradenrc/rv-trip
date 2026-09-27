@@ -169,12 +169,22 @@ Two things to know about what you see:
 
 ## What's here (v1)
 
-- `app/index.tsx` — Trips (planning / upcoming / traveled)
-- `app/trips/[id]/index.tsx` — the trip, under a **Route ⇄ Map** lens: the day
+- `app/(tabs)/_layout.tsx` — the bottom tabs, **Trips · + · Saves** (#111). The
+  center + opens the capture sheet from any tab; Saves carries the capture
+  queue's count until it drains
+- `app/(tabs)/(trips)/index.tsx` — Trips (planning / upcoming / traveled), at `/`
+- `app/(tabs)/(trips)/trips/[id]/index.tsx` — the trip, under a **Route ⇄ Map** lens: the day
   strip + route list with drives and Navigate, or the same drives as corridors
-- `app/trips/[id]/stops/[stopId].tsx` — stop detail: the mini-map, reservations, ideas (tap to cycle), rating + notes (persist)
+- `app/(tabs)/(trips)/trips/[id]/stops/[stopId].tsx` — stop detail: the mini-map, reservations, ideas (tap to cycle), rating + notes (persist)
+- `app/(tabs)/saves.tsx` — Saves (a placeholder until #111 i2's shelves)
+- `app/capture.tsx` — the capture sheet (a root formSheet): one smart field →
+  a Google place, a note in the area you're in, or a dropped pin. Works offline:
+  every capture is queued on the phone (`src/capture.ts`, AsyncStorage
+  `rv.captureQueue.v1`) and sent when there is signal
 - `app/rig.tsx` — you (the Account card) and the rig, read-only
 - `app/sign-in.tsx` — email → 6-digit code, rendered only when Clerk is keyed
-- `src/api.ts` · `src/auth.ts` · `src/map.tsx` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
+- `src/api.ts` · `src/auth.ts` · `src/capture.ts` · `src/map.tsx` · `src/nav.ts` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
 
-Not in v1: creating anything.
+Capture adds two native modules — `@react-native-community/netinfo` and
+`expo-location` — so a tree that predates them needs `pnpm --filter
+@rv-trip/mobile ios` (a dev-client rebuild) before the sheet can open.

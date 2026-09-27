@@ -24,7 +24,7 @@ import { ctx, describeDb, req } from "@/test/db";
  * on them would be flaky by construction.
  */
 
-type Entity = "stop" | "idea" | "reservation" | "savedPlace";
+type Entity = "stop" | "idea" | "reservation" | "save";
 
 /** One planted change_log row. `at` is minutes into 2026-09-12, so "newest
  * first" is readable in the assertion rather than inferred from a clock. */
@@ -139,13 +139,13 @@ describeDb("GET /api/history", () => {
     const place = await fx.savedPlace({ owner: DEV_OWNER });
     await log("idea", loop.idea.id, { minute: 1, to: "4" });
     await log("reservation", loop.reservation.id, { minute: 2, to: "5" });
-    await log("savedPlace", place.id, { minute: 3, to: "3" });
+    await log("save", place.id, { minute: 3, to: "3" });
 
     expect(await (await history("idea", loop.idea.id)).json()).toMatchObject([{ to: "4" }]);
     expect(await (await history("reservation", loop.reservation.id)).json()).toMatchObject([
       { to: "5" },
     ]);
-    expect(await (await history("savedPlace", place.id)).json()).toMatchObject([{ to: "3" }]);
+    expect(await (await history("save", place.id)).json()).toMatchObject([{ to: "3" }]);
   });
 
   it("404s each of the other three when they are not the household's", async () => {
@@ -154,7 +154,7 @@ describeDb("GET /api/history", () => {
 
     expect((await history("idea", theirs.idea.id)).status).toBe(404);
     expect((await history("reservation", theirs.reservation.id)).status).toBe(404);
-    expect((await history("savedPlace", theirPlace.id)).status).toBe(404);
+    expect((await history("save", theirPlace.id)).status).toBe(404);
   });
 
   it("scopes the household through getOwner(), never through the query", async () => {
@@ -241,7 +241,7 @@ describeDb("lastChange on the wire", () => {
 
   it("rides on a saved place, on GET /api/places", async () => {
     const place = await fx.savedPlace({ owner: DEV_OWNER });
-    await log("savedPlace", place.id, { field: "status", from: "want", to: "been", minute: 8 });
+    await log("save", place.id, { field: "status", from: "want", to: "been", minute: 8 });
 
     const rows = savedPlace.array().parse(await (await GET_PLACES()).json());
 

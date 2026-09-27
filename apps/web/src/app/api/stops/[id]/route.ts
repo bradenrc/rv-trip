@@ -5,7 +5,12 @@ import {
   stopPatchColumns,
   stopPatchInput,
 } from "@rv-trip/core";
-import { deleteStop, getStopDateContext, updateStopFields } from "@rv-trip/db";
+import {
+  SegmentDateMismatch,
+  deleteStop,
+  getStopDateContext,
+  updateStopFields,
+} from "@rv-trip/db";
 import { getActor, getOwner } from "@/lib/owner";
 
 /**
@@ -26,6 +31,17 @@ import { getActor, getOwner } from "@/lib/owner";
  * the trip window does not contain would leave the stop in the database and
  * nowhere on the calendar, because `deriveDays` clamps to that window
  * (derive-days.ts). The reply carries the trip's range for the dialog to show.
+ *
+ * 409 `segment_date_mismatch` (#110 Q3 A — stop dates win): a date, move or
+ * reorder that would put a TIMED travel segment (a flight) out of step with
+ * the stop it lands at — or, for a flight home, the stop it leaves — is
+ * refused and NOTHING is written; a stop is never silently re-dated. The reply
+ * names the segment, the stop date the write would set (`expected`) and the
+ * segment's own local date (`actual`). A FLOATING endpoint is exempt, so
+ * "Unschedule" still works next to a flight (core's `segmentDateConflicts`).
+ * The client needs nothing new: `tripApi.updateStop` rejects on any non-2xx,
+ * so the gesture's `persist()` rolls the optimistic change back and shows its
+ * existing error toast.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -59,7 +75,13 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   try {
     const matched = await updateStopFields(owner, id, stopPatchColumns(patch), await getActor());
     if (!matched) return NextResponse.json({ error: "stop not found" }, { status: 404 });
-  } catch {
+  } catch (err) {
+    if (err instanceof SegmentDateMismatch) {
+      return NextResponse.json(
+        { error: "segment_date_mismatch", ...err.conflict },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: "leg not found" }, { status: 404 });
   }
   return new NextResponse(null, { status: 204 });

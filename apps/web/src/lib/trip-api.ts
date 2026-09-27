@@ -8,16 +8,18 @@ import type {
   LegPatchInput,
   LocateResponse,
   LocateRow,
+  NearbySaves,
   PlaceDetails,
   PlacesEnvelope,
   Reservation,
-  ReservationCreateInput,
+  ReservationCreateBody,
   ReservationPatchInput,
   ReservationType,
   RigProfileInput,
   SavedPlace,
   SavedPlaceCreateInput,
   SavedPlacePatch,
+  SegmentPatchInput,
   Stop,
   StopCreateInput,
   StopPatchInput,
@@ -47,6 +49,17 @@ export const tripApi = {
 
   /** The settings dialog. Send only what changed: an omitted key is left alone. */
   updateTrip: (id: string, patch: TripPatchInput) => req(`/api/trips/${id}`, "PATCH", patch),
+
+  /**
+   * #111 i4 · trip surfacing. The saves near this trip at its radius — the
+   * banner and sheet's numbers, re-read after a radius chip or a close.
+   */
+  nearbySaves: (tripId: string): Promise<NearbySaves> =>
+    req(`/api/trips/${tripId}/nearby-saves`, "GET") as Promise<NearbySaves>,
+
+  /** The banner's Dismiss: every save it names, remembered for this trip. */
+  dismissSaves: (tripId: string, saveIds: string[]) =>
+    req(`/api/trips/${tripId}/dismissed-saves`, "POST", { saveIds }),
 
   /** Legs, stops, reservations and ideas cascade with it. */
   deleteTrip: (id: string) => req(`/api/trips/${id}`, "DELETE"),
@@ -89,8 +102,12 @@ export const tripApi = {
    * body is the whole row. 201 carries the created reservation, because only
    * the server can mint the id.
    */
-  createReservation: (input: ReservationCreateInput): Promise<Reservation> =>
+  createReservation: (input: ReservationCreateBody): Promise<Reservation> =>
     req(`/api/reservations`, "POST", input) as Promise<Reservation>,
+
+  /** A hop's mode switch (#104). 409 `segment_has_bookings` rejects like any
+   * non-2xx, so `persist()` rolls the optimistic switch back. */
+  updateSegment: (id: string, patch: SegmentPatchInput) => req(`/api/segments/${id}`, "PATCH", patch),
 
   /** The widened reservation write: the full field set, all optional — the edit
    * form sends what changed, the card's stars and note send one. */
@@ -130,8 +147,11 @@ export const tripApi = {
    */
   routePairs: (
     pairs: { from: LatLng; to: LatLng }[],
+    /** The trip the pairs are on (#103): a trip that leaves the rig at home is
+     * keyed without it, so the reply's hash matches the page's. */
+    tripId?: string,
   ): Promise<{ routingHash: string; routes: RouteMap }> =>
-    req(`/api/routes`, "POST", { pairs }) as Promise<{
+    req(`/api/routes`, "POST", { pairs, tripId }) as Promise<{
       routingHash: string;
       routes: RouteMap;
     }>,

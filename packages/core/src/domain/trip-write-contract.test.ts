@@ -23,6 +23,33 @@ describe("tripCreateInput", () => {
       endDate: "2026-10-04",
       homeBase: null,
       homeBasePlace: null,
+      // The trip's defaults as the grammar defaults them (#110 W0).
+      defaultMode: "drive",
+      lodgingDefault: null,
+      rigOn: true,
+    });
+  });
+
+  /** #103 — the setup's three answers must SURVIVE the parse (the same class of
+   * bug as homeBasePlace: `.pick()` drops an unlisted key silently). */
+  it("carries the three defaults on create and on patch", () => {
+    const body = {
+      title: "Costa Rica Fly & Stay",
+      startDate: "2027-01-16",
+      endDate: "2027-01-25",
+      defaultMode: "fly",
+      lodgingDefault: "hotel",
+      rigOn: false,
+    };
+    expect(tripCreateInput.parse(body)).toMatchObject({
+      defaultMode: "fly",
+      lodgingDefault: "hotel",
+      rigOn: false,
+    });
+    expect(tripPatchInput.parse({ defaultMode: "drive", lodgingDefault: "friends", rigOn: true })).toEqual({
+      defaultMode: "drive",
+      lodgingDefault: "friends",
+      rigOn: true,
     });
   });
 

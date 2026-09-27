@@ -116,7 +116,7 @@ describeDb("POST /api/household/join", () => {
     await fx.savedPlace({ owner: DEV_OWNER });
     expect((await POST(req({ token: "live" }))).status).toBe(409);
 
-    await db.delete(schema.savedPlaces);
+    await db.delete(schema.saves);
     await fx.rig({ owner: DEV_OWNER });
     expect((await POST(req({ token: "live" }))).status).toBe(409);
   });

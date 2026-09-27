@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq, and, inArray, isNull, max, ne, notExists, sql } from "drizzle-orm";
+import { eq, and, inArray, isNull, max, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   legs,
@@ -9,7 +9,10 @@ import {
   trips,
   rigs,
   routes,
-  savedPlaces,
+  saves,
+  tripDismissedSaves,
+  destinations,
+  travelSegments,
   userPrefs,
   changeLog,
   households,
@@ -26,16 +29,35 @@ import type {
   IdeaCategory,
   IdeaStatus,
   IsoDate,
+  LatLng,
+  LodgingKind,
   NavCheck,
+  PlaceSummary,
   RigProfile,
   RigProfileInput,
+  ResolvedDestination,
   RouteResult,
   SavedPlace,
   SavedPlaceCreate,
   SavedPlacePatch,
+  SurfaceRadiusMi,
+  TravelMode,
   TripStatus,
   UserPrefs,
   UserPrefsPatch,
+  Segment,
+  SegmentDateConflict,
+  SegmentTrip,
+} from "@rv-trip/core";
+import {
+  clashMoveIsValid,
+  clashOf,
+  clashStopPatch,
+  diffSegments,
+  newSegmentDateConflicts,
+  reconcileSegments,
+  retimedSegment,
+  suggestedPlaceFromSearch,
 } from "@rv-trip/core";
 import {
   getHouseholdInvite,
@@ -45,6 +67,7 @@ import {
   mapStop,
   mapPrefsRow,
   mapRigRow,
+  mapSaveDestination,
   mapSavedPlaceRow,
 } from "./queries";
 
@@ -77,6 +100,154 @@ const ownedStopIds = (owner: string) =>
  */
 const ownedTripIds = (owner: string) =>
   db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
+
+/** The ownership path for a HOP and the bookings on it (#104): a segment
+ * carries `trip_id`, so it scopes through the trip like an idea does. */
+const ownedSegmentIds = (owner: string) =>
+  db
+    .select({ id: travelSegments.id })
+    .from(travelSegments)
+    .where(inArray(travelSegments.tripId, ownedTripIds(owner)));
+
+/** A reservation the caller owns — through its stop OR (#104) its hop. The
+ * segment arm is why a flight can be edited and removed at all (vet MED: the
+ * stop-only scope made both a 404). */
+const ownedReservation = (owner: string, resId: string) =>
+  and(
+    eq(reservations.id, resId),
+    or(
+      inArray(reservations.stopId, ownedStopIds(owner)),
+      inArray(reservations.segmentId, ownedSegmentIds(owner)),
+    ),
+  );
+
+// ── the journey's hops (#110 · docs/design/110 §6) ─────────────────────────
+//
+// Every write that can move the ROUTE SEQUENCE — a stop created, deleted,
+// re-dated, moved or reordered; a leg reordered or deleted; a home base set or
+// cleared — persists core's `reconcileSegments` diff in the SAME transaction,
+// so `travel_segments` is always the dense hop set Q1 A promises. A kept hop
+// keeps its row (mode, times, reservations); a new hop is born in the trip's
+// `default_mode`, untimed; an orphan is deleted and its reservations cascade.
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * A write refused because it would put a timed segment and a stop's dates in
+ * disagreement (Q3 A — stop dates win, a stop is never silently re-dated).
+ * `PATCH /api/stops/:id` answers it as 409 `segment_date_mismatch`.
+ */
+export class SegmentDateMismatch extends Error {
+  constructor(readonly conflict: SegmentDateConflict) {
+    super("segment_date_mismatch");
+    this.name = "SegmentDateMismatch";
+  }
+}
+
+/**
+ * A hop switched back to Drive while flights or ferries hang on it (#104 · vet
+ * MED "switching back to drive"). Refused rather than silently orphaning the
+ * bookings on a drive row that cannot draw them — remove them first.
+ * `PATCH /api/segments/:id` answers it as 409 `segment_has_bookings`.
+ */
+export class SegmentHasBookings extends Error {
+  constructor() {
+    super("segment_has_bookings");
+    this.name = "SegmentHasBookings";
+  }
+}
+
+/** The slice of a trip its hop set is a function of, read inside `tx`. */
+async function loadSegmentTrip(tx: Tx, tripId: string): Promise<SegmentTrip | null> {
+  const [trip] = await tx
+    .select({ id: trips.id, homeBase: trips.homeBase, defaultMode: trips.defaultMode })
+    .from(trips)
+    .where(eq(trips.id, tripId));
+  if (!trip) return null;
+  const legRows = await tx
+    .select({ id: legs.id, sortOrder: legs.sortOrder })
+    .from(legs)
+    .where(eq(legs.tripId, tripId));
+  const stopRows = await tx
+    .select({
+      id: stops.id,
+      legId: stops.legId,
+      arriveDate: stops.arriveDate,
+      departDate: stops.departDate,
+      sortOrder: stops.sortOrder,
+    })
+    .from(stops)
+    .innerJoin(legs, eq(stops.legId, legs.id))
+    .where(eq(legs.tripId, tripId));
+  const segRows = await tx.select().from(travelSegments).where(eq(travelSegments.tripId, tripId));
+  return {
+    ...trip,
+    legs: legRows.map((l) => ({
+      id: l.id,
+      sortOrder: l.sortOrder,
+      stops: stopRows.filter((s) => s.legId === l.id),
+    })),
+    segments: segRows.map(
+      (r): Segment => ({
+        ...r,
+        departAt: r.departAt?.toISOString() ?? null,
+        arriveAt: r.arriveAt?.toISOString() ?? null,
+        reservations: [],
+      }),
+    ),
+  };
+}
+
+/** Write `before → after` as the three statements it takes. */
+async function writeSegments(tx: Tx, before: Segment[], after: Segment[]): Promise<void> {
+  const diff = diffSegments(before, after);
+  if (diff.remove.length > 0) {
+    await tx.delete(travelSegments).where(inArray(travelSegments.id, diff.remove));
+  }
+  for (const s of diff.update) {
+    await tx
+      .update(travelSegments)
+      .set({ fromStopId: s.fromStopId, toStopId: s.toStopId, sortOrder: s.sortOrder })
+      .where(eq(travelSegments.id, s.id));
+  }
+  if (diff.insert.length > 0) {
+    await tx.insert(travelSegments).values(
+      diff.insert.map((s) => ({
+        id: s.id,
+        tripId: s.tripId,
+        fromStopId: s.fromStopId,
+        toStopId: s.toStopId,
+        mode: s.mode,
+        departAt: s.departAt === null ? null : new Date(s.departAt),
+        arriveAt: s.arriveAt === null ? null : new Date(s.arriveAt),
+        departTz: s.departTz,
+        arriveTz: s.arriveTz,
+        sortOrder: s.sortOrder,
+      })),
+    );
+  }
+}
+
+/**
+ * Reconcile one trip's hops and persist the diff. `transform` is the
+ * would-be trip for a write that has NOT happened yet (a delete: the hops are
+ * re-pointed first, so a → home row survives its from-stop's cascade).
+ */
+async function syncSegments(
+  tx: Tx,
+  tripId: string,
+  transform: (t: SegmentTrip) => SegmentTrip = (t) => t,
+): Promise<void> {
+  const current = await loadSegmentTrip(tx, tripId);
+  if (!current) return;
+  const next = reconcileSegments(transform(current), randomUUID);
+  await writeSegments(tx, current.segments, next);
+}
+
+/** A trip minus some stops — what a stop or leg delete is about to leave. */
+function withoutStops(t: SegmentTrip, gone: (s: { id: string; legId: string }) => boolean): SegmentTrip {
+  return { ...t, legs: t.legs.map((l) => ({ ...l, stops: l.stops.filter((s) => !gone(s)) })) };
+}
 
 // ── the change log ────────────────────────────────────────────────────────
 //
@@ -114,7 +285,7 @@ const logs = (patch: object, map: Partial<Record<LoggedField, string>> = {}): bo
  * write — `.returning()` cannot serve it, because it yields post-update values
  * only.
  *
- * `map` exists for exactly one column: `saved_places.note` is singular
+ * `map` exists for exactly one column: `saves.note` is singular
  * (schema.ts:204) while the log's vocabulary is `notes`, so the saved-place
  * call site maps the key here and nothing downstream has to know.
  */
@@ -193,6 +364,12 @@ export async function createTrip(
     homeBaseLat?: number | null;
     homeBaseLng?: number | null;
     homeBasePlaceId?: string | null;
+    // #103 · the setup's three answers (vet HIGH: the insert lists its values
+    // explicitly, so a key not named here never reaches the row). Optional, so
+    // a caller with none keeps the columns' own defaults.
+    defaultMode?: TravelMode;
+    lodgingDefault?: LodgingKind | null;
+    rigOn?: boolean;
   },
 ) {
   // One empty leg in the SAME transaction: RouteView renders per leg, so a trip
@@ -209,6 +386,9 @@ export async function createTrip(
         homeBaseLat: input.homeBaseLat ?? null,
         homeBaseLng: input.homeBaseLng ?? null,
         homeBasePlaceId: input.homeBasePlaceId ?? null,
+        ...(input.defaultMode !== undefined && { defaultMode: input.defaultMode }),
+        ...(input.lodgingDefault !== undefined && { lodgingDefault: input.lodgingDefault }),
+        ...(input.rigOn !== undefined && { rigOn: input.rigOn }),
       })
       .returning();
     await tx.insert(legs).values({ tripId: row!.id, title: "Leg 1", sortOrder: 0 });
@@ -231,6 +411,13 @@ export async function updateTripFields(
     statusAuto?: boolean;
     rating?: number | null;
     note?: string | null;
+    /** #111 i3 — the review sheet's radius chip (core's `surfaceRadiusMi`). */
+    surfaceRadiusMi?: SurfaceRadiusMi | null;
+    /** #103 · Trip settings' three defaults. A new `defaultMode` reaches only
+     * the hops reconciled from now on — no existing segment is re-moded. */
+    defaultMode?: TravelMode;
+    lodgingDefault?: LodgingKind | null;
+    rigOn?: boolean;
   },
 ): Promise<boolean> {
   const scope = and(eq(trips.id, tripId), eq(trips.ownerId, owner));
@@ -240,12 +427,60 @@ export async function updateTripFields(
     const rows = await db.select({ id: trips.id }).from(trips).where(scope);
     return rows.length > 0;
   }
+  // Setting or clearing the home base adds or removes the home → first hop
+  // (#110 §6), so that write reconciles in the same transaction.
+  if (patch.homeBase !== undefined) {
+    return db.transaction(async (tx) => {
+      const updated = await tx
+        .update(trips)
+        .set({ ...patch, updatedAt: new Date() })
+        .where(scope)
+        .returning({ id: trips.id });
+      if (updated.length === 0) return false;
+      await syncSegments(tx, tripId);
+      return true;
+    });
+  }
   const updated = await db
     .update(trips)
     .set({ ...patch, updatedAt: new Date() })
     .where(scope)
     .returning({ id: trips.id });
   return updated.length > 0;
+}
+
+/**
+ * The banner's Dismiss (#111 Q6 A): remember these saves as dismissed for this
+ * trip. Idempotent — a save dismissed twice is one row (`ON CONFLICT DO
+ * NOTHING` on the (trip, save) key).
+ *
+ * The trip must be the caller's (false → the handler's 404), and only the
+ * caller's own saves are recorded: an id that is not one of their saves is
+ * dropped rather than planted against their trip.
+ */
+export async function dismissSavesForTrip(
+  owner: string,
+  tripId: string,
+  saveIds: string[],
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const owned = await tx
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(eq(trips.id, tripId), eq(trips.ownerId, owner)));
+    if (!owned.length) return false;
+    if (saveIds.length === 0) return true;
+    const mine = await tx
+      .select({ id: saves.id })
+      .from(saves)
+      .where(and(eq(saves.ownerId, owner), inArray(saves.id, saveIds)));
+    if (mine.length === 0) return true;
+    await tx
+      .insert(tripDismissedSaves)
+      .values(mine.map((s) => ({ tripId, saveId: s.id })))
+      .onConflictDoNothing();
+    return true;
+  });
 }
 
 export async function deleteTrip(owner: string, tripId: string): Promise<boolean> {
@@ -337,11 +572,18 @@ export async function updateLegFields(
 
 /** Stops (and their reservations and ideas) cascade with the leg. */
 export async function deleteLeg(owner: string, legId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(legs)
-    .where(and(eq(legs.id, legId), inArray(legs.id, ownedLegIds(owner))))
-    .returning({ id: legs.id });
-  return deleted.length > 0;
+  return db.transaction(async (tx) => {
+    const [owned] = await tx
+      .select({ tripId: legs.tripId })
+      .from(legs)
+      .where(and(eq(legs.id, legId), inArray(legs.id, ownedLegIds(owner))));
+    if (!owned) return false;
+    // Re-point the hops BEFORE the cascade, so the neighbours either side of
+    // the leg are joined and a → home row moves to the new last stop.
+    await syncSegments(tx, owned.tripId, (t) => withoutStops(t, (s) => s.legId === legId));
+    await tx.delete(legs).where(eq(legs.id, legId));
+    return true;
+  });
 }
 
 /**
@@ -363,6 +605,7 @@ export async function reorderTripLegs(
         .set({ sortOrder: i })
         .where(and(eq(legs.id, order[i]!), eq(legs.tripId, tripId)));
     }
+    await syncSegments(tx, tripId);
   });
 }
 
@@ -402,6 +645,8 @@ export async function createStop(
         sortOrder: (agg?.highest ?? -1) + 1,
       })
       .returning();
+    const [leg] = await tx.select({ tripId: legs.tripId }).from(legs).where(eq(legs.id, input.legId));
+    await syncSegments(tx, leg!.tripId);
     return mapStop({ ...row!, reservations: [], ideas: [] });
   });
 }
@@ -441,37 +686,112 @@ export async function updateStopFields(
     const rows = await db.select({ id: stops.id }).from(stops).where(scope);
     return rows.length > 0;
   }
-  // A patch that names neither rating nor notes stays the ONE statement it has
-  // always been — the log costs a transaction, and only a logged field pays it.
-  if (!logs(patch)) {
+  // A move, a reorder or a date moves the ROUTE SEQUENCE (route-order.ts sorts
+  // scheduled stops by arriveDate, floating ones after): drag-to-schedule,
+  // Unschedule, "Move to leg" and the rail reorder all reconcile the hops.
+  const moves = SEQUENCE_KEYS.some((k) => k in patch);
+  // A patch that names none of those and neither rating nor notes stays the ONE
+  // statement it has always been — only a logged or sequencing field pays for
+  // a transaction.
+  if (!logs(patch) && !moves) {
     const updated = await db.update(stops).set(patch).where(scope).returning({ id: stops.id });
     return updated.length > 0;
   }
   return db.transaction(async (tx) => {
     const [before] = await tx
-      .select({ rating: stops.rating, notes: stops.notes })
+      .select({ rating: stops.rating, notes: stops.notes, tripId: legs.tripId })
       .from(stops)
+      .innerJoin(legs, eq(stops.legId, legs.id))
       .where(scope);
+    if (!before) return false;
+
+    let segmentWrite: (() => Promise<void>) | null = null;
+    if (moves) {
+      const current = (await loadSegmentTrip(tx, before.tripId))!;
+      const wouldBe = patchedStop(current, stopId, patch);
+      const next = reconcileSegments(wouldBe, randomUUID);
+      // Q3 A — stop dates win: a write that would put a TIMED segment out of
+      // step with a stop's dates is refused, whole, before anything is written.
+      const [conflict] = newSegmentDateConflicts(current, { ...wouldBe, segments: next });
+      if (conflict) throw new SegmentDateMismatch(conflict);
+      segmentWrite = () => writeSegments(tx, current.segments, next);
+    }
+
     const updated = await tx.update(stops).set(patch).where(scope).returning({ id: stops.id });
-    if (!before || updated.length === 0) return false;
-    await logChanges(tx, {
-      owner,
-      actor,
-      entity: "stop",
-      entityId: stopId,
-      pairs: loggedPairs(patch, before),
-    });
+    if (updated.length === 0) return false;
+    if (segmentWrite) {
+      await segmentWrite();
+      // "Move to leg" into ANOTHER trip: that trip gains a stop too.
+      if (patch.legId !== undefined) {
+        const [dest] = await tx.select({ tripId: legs.tripId }).from(legs).where(eq(legs.id, patch.legId));
+        if (dest && dest.tripId !== before.tripId) await syncSegments(tx, dest.tripId);
+      }
+    }
+    if (logs(patch)) {
+      await logChanges(tx, {
+        owner,
+        actor,
+        entity: "stop",
+        entityId: stopId,
+        pairs: loggedPairs(patch, before),
+      });
+    }
     return true;
   });
 }
 
+/** The stop-patch keys that can move the route sequence. */
+const SEQUENCE_KEYS = ["legId", "sortOrder", "arriveDate", "departDate"] as const;
+
+/**
+ * The trip as it WOULD be after a stop patch — the stop re-dated, re-ordered or
+ * moved (out of this trip entirely when its new leg lives elsewhere). What the
+ * conflict check and the reconcile both judge.
+ */
+function patchedStop(
+  t: SegmentTrip,
+  stopId: string,
+  patch: {
+    legId?: string;
+    sortOrder?: number;
+    arriveDate?: IsoDate | null;
+    departDate?: IsoDate | null;
+  },
+): SegmentTrip {
+  const stop = t.legs.flatMap((l) => l.stops).find((s) => s.id === stopId);
+  if (!stop) return t;
+  const moved = {
+    ...stop,
+    ...(patch.legId !== undefined && { legId: patch.legId }),
+    ...(patch.sortOrder !== undefined && { sortOrder: patch.sortOrder }),
+    ...(patch.arriveDate !== undefined && { arriveDate: patch.arriveDate }),
+    ...(patch.departDate !== undefined && { departDate: patch.departDate }),
+  };
+  return {
+    ...t,
+    legs: t.legs.map((l) => {
+      const rest = l.stops.filter((s) => s.id !== stopId);
+      return (l as { id?: string }).id === moved.legId ? { ...l, stops: [...rest, moved] } : { ...l, stops: rest };
+    }),
+  };
+}
+
 /** Reservations and ideas cascade with the stop. */
 export async function deleteStop(owner: string, stopId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(stops)
-    .where(and(eq(stops.id, stopId), inArray(stops.legId, ownedLegIds(owner))))
-    .returning({ id: stops.id });
-  return deleted.length > 0;
+  return db.transaction(async (tx) => {
+    const [owned] = await tx
+      .select({ tripId: legs.tripId })
+      .from(stops)
+      .innerJoin(legs, eq(stops.legId, legs.id))
+      .where(and(eq(stops.id, stopId), inArray(stops.legId, ownedLegIds(owner))));
+    if (!owned) return false;
+    // Re-point first (see deleteLeg): the neighbours are joined by a new hop,
+    // and a → home row leaving this stop moves to the new last stop instead of
+    // cascading away with it.
+    await syncSegments(tx, owned.tripId, (t) => withoutStops(t, (s) => s.id === stopId));
+    await tx.delete(stops).where(eq(stops.id, stopId));
+    return true;
+  });
 }
 
 // ── reservations and ideas: the two LEAVES ────────────────────────────────
@@ -510,42 +830,234 @@ async function assertStopInTrip(
   if (!found.length) throw new Error("stop not found");
 }
 
+/** The paperwork columns a create writes, parent aside. */
+interface ReservationFields {
+  type: ReservationType;
+  name: string;
+  checkIn: IsoDate | null;
+  checkOut: IsoDate | null;
+  confirmationNumber: string | null;
+  cost: number | null;
+  rating: number | null;
+  notes: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  startsTz?: string | null;
+  endsTz?: string | null;
+  lodgingKind?: LodgingKind | null;
+}
+
+const reservationValues = (input: ReservationFields) => ({
+  type: input.type,
+  name: input.name,
+  checkIn: input.checkIn,
+  checkOut: input.checkOut,
+  confirmationNumber: input.confirmationNumber,
+  cost: input.cost == null ? null : String(input.cost),
+  rating: input.rating,
+  notes: input.notes,
+  startsAt: input.startsAt ? new Date(input.startsAt) : null,
+  endsAt: input.endsAt ? new Date(input.endsAt) : null,
+  startsTz: input.startsTz ?? null,
+  endsTz: input.endsTz ?? null,
+  lodgingKind: input.lodgingKind ?? null,
+});
+
 /**
- * The stop sheet's reservation form — and the body an undone DELETE re-POSTs,
- * which is why every column travels rather than the four the form used to
- * collect. `cost` is a numeric column: it arrives as a number and is written
- * as a string, exactly the way `mapReservation` reads it back.
+ * The stop sheet's reservation form, a hop's Add flight / Add ferry (#104) —
+ * and the body an undone DELETE re-POSTs, which is why every column travels.
+ * `cost` is a numeric column: it arrives as a number and is written as a
+ * string, exactly the way `mapReservation` reads it back.
+ *
+ * A STOP parent is proved with `assertOwnedStop` and inserted, as it always
+ * was. A SEGMENT parent is `createSegmentReservation` below.
  */
 export async function createReservation(
   owner: string,
-  input: {
-    stopId: string;
-    type: ReservationType;
-    name: string;
-    checkIn: IsoDate | null;
-    checkOut: IsoDate | null;
-    confirmationNumber: string | null;
-    cost: number | null;
-    rating: number | null;
-    notes: string | null;
+  input: ReservationFields & {
+    stopId?: string | null;
+    segmentId?: string | null;
+    moveStop?: boolean;
   },
 ): Promise<Reservation> {
+  if (input.segmentId) return createSegmentReservation(owner, { ...input, segmentId: input.segmentId });
+  if (!input.stopId) throw new Error("stop not found");
   await assertOwnedStop(db, owner, input.stopId);
   const [row] = await db
     .insert(reservations)
-    .values({
-      stopId: input.stopId,
-      type: input.type,
-      name: input.name,
-      checkIn: input.checkIn,
-      checkOut: input.checkOut,
-      confirmationNumber: input.confirmationNumber,
-      cost: input.cost == null ? null : String(input.cost),
-      rating: input.rating,
-      notes: input.notes,
-    })
+    .values({ stopId: input.stopId, ...reservationValues(input) })
     .returning();
   return mapReservation(row!);
+}
+
+/** A hop the caller owns, proved before an insert can point at it — an INSERT
+ * has no WHERE, so the trip's owner is checked explicitly (vet MED). */
+async function ownedSegment(
+  tx: { select: typeof db.select },
+  owner: string,
+  segmentId: string,
+): Promise<{ id: string; tripId: string } | null> {
+  const [seg] = await tx
+    .select({ id: travelSegments.id, tripId: travelSegments.tripId })
+    .from(travelSegments)
+    .innerJoin(trips, eq(travelSegments.tripId, trips.id))
+    .where(and(eq(travelSegments.id, segmentId), eq(trips.ownerId, owner)));
+  return seg ?? null;
+}
+
+/** Every booking on a hop, as its clock reads them. */
+async function segmentBookings(tx: Tx, segmentId: string) {
+  const rows = await tx
+    .select({
+      startsAt: reservations.startsAt,
+      endsAt: reservations.endsAt,
+      startsTz: reservations.startsTz,
+      endsTz: reservations.endsTz,
+    })
+    .from(reservations)
+    .where(eq(reservations.segmentId, segmentId));
+  return rows.map((r) => ({
+    startsAt: r.startsAt?.toISOString() ?? null,
+    endsAt: r.endsAt?.toISOString() ?? null,
+    startsTz: r.startsTz,
+    endsTz: r.endsTz,
+  }));
+}
+
+/** Write a segment's clock. */
+async function writeSegmentClock(tx: Tx, seg: Segment): Promise<void> {
+  await tx
+    .update(travelSegments)
+    .set({
+      departAt: seg.departAt === null ? null : new Date(seg.departAt),
+      arriveAt: seg.arriveAt === null ? null : new Date(seg.arriveAt),
+      departTz: seg.departTz,
+      arriveTz: seg.arriveTz,
+    })
+    .where(eq(travelSegments.id, seg.id));
+}
+
+/**
+ * A flight or a ferry booked on a hop (#104), in ONE transaction:
+ *
+ *  1. prove the hop is the caller's (its trip's owner — an insert has no WHERE);
+ *  2. insert the booking;
+ *  3. re-time the hop from ALL its bookings (core's `retimedSegment`: earliest
+ *     departure, latest arrival, each in its own zone);
+ *  4. judge it with `newSegmentDateConflicts(before, after)` — stop dates win
+ *     (Q3 A), so a clash throws `SegmentDateMismatch` and the insert rolls
+ *     back, UNLESS `moveStop` (Q8 A's "Check out of … on … instead"): then the
+ *     touched stop's date — its check-out for a hop home, its check-in
+ *     otherwise — is set to the booking's own date, its stay row moves with it
+ *     (vet MED c), and the hops are reconciled exactly as a stop re-date is
+ *     (vet MED b: a new arrive date can reorder the route). After the move the
+ *     check must find nothing new, or the whole write is refused.
+ */
+async function createSegmentReservation(
+  owner: string,
+  input: ReservationFields & { segmentId: string; moveStop?: boolean },
+): Promise<Reservation> {
+  return db.transaction(async (tx) => {
+    const seg = await ownedSegment(tx, owner, input.segmentId);
+    if (!seg) throw new Error("segment not found");
+
+    const [row] = await tx
+      .insert(reservations)
+      .values({ segmentId: seg.id, ...reservationValues(input) })
+      .returning();
+
+    const before = (await loadSegmentTrip(tx, seg.tripId))!;
+    const current = before.segments.find((s) => s.id === seg.id)!;
+    const retimed = retimedSegment(current, await segmentBookings(tx, seg.id));
+    const after: SegmentTrip = {
+      ...before,
+      segments: before.segments.map((s) => (s.id === seg.id ? retimed : s)),
+    };
+    const [conflict] = newSegmentDateConflicts(before, after).filter((c) => c.segmentId === seg.id);
+
+    if (!conflict) {
+      await writeSegmentClock(tx, retimed);
+      return mapReservation(row!);
+    }
+    const clash = input.moveStop ? clashOf(after, retimed, conflict) : null;
+    if (!clash) throw new SegmentDateMismatch(conflict);
+
+    // Q8 A · move the stop. Refused (as the same 409) when the move would turn
+    // the stop's range backwards or push it outside the trip.
+    const stop = after.legs.flatMap((l) => l.stops).find((s) => s.id === clash.stopId)!;
+    const patch = clashStopPatch(clash);
+    const [window] = await tx
+      .select({ startDate: trips.startDate, endDate: trips.endDate })
+      .from(trips)
+      .where(eq(trips.id, seg.tripId));
+    const moved = Object.values(patch)[0] as IsoDate;
+    if (!clashMoveIsValid(stop, clash) || moved < window!.startDate || moved > window!.endDate) {
+      throw new SegmentDateMismatch(conflict);
+    }
+    const wouldBe = patchedStop(after, stop.id, patch);
+    const next = reconcileSegments(wouldBe, randomUUID);
+    if (newSegmentDateConflicts(before, { ...wouldBe, segments: next }).length > 0) {
+      throw new SegmentDateMismatch(conflict);
+    }
+
+    await tx.update(stops).set(patch).where(eq(stops.id, stop.id));
+    // The stop's own stay follows it, so the card and the stop agree.
+    const { expected, actual } = conflict;
+    const stay = and(
+      eq(reservations.stopId, stop.id),
+      inArray(reservations.type, ["campground", "lodging"]),
+    );
+    if (clash.side === "checkout") {
+      await tx
+        .update(reservations)
+        .set({ checkOut: actual })
+        .where(and(stay, eq(reservations.checkOut, expected)));
+    } else {
+      await tx
+        .update(reservations)
+        .set({ checkIn: actual })
+        .where(and(stay, eq(reservations.checkIn, expected)));
+    }
+    await writeSegments(tx, before.segments, next);
+    if (next.some((s) => s.id === seg.id)) await writeSegmentClock(tx, retimed);
+    return mapReservation(row!);
+  });
+}
+
+/**
+ * A hop's mode switch (#104 · Q7 B) — `PATCH /api/segments/:id`. Owner-scoped
+ * in the UPDATE itself (vet MED): the segment's trip must be the caller's.
+ *
+ * Back to Drive (vet MED): refused with `SegmentHasBookings` while a flight or
+ * a ferry hangs on the hop, and otherwise the hop's clock is cleared with the
+ * mode — an untimed drive borrows its day from the stop it arrives at, where a
+ * timed one would keep judging the stop dates by a flight that is gone.
+ */
+export async function updateSegmentMode(
+  owner: string,
+  segmentId: string,
+  mode: TravelMode,
+): Promise<boolean> {
+  const scope = and(eq(travelSegments.id, segmentId), inArray(travelSegments.tripId, ownedTripIds(owner)));
+  return db.transaction(async (tx) => {
+    const [seg] = await tx.select({ id: travelSegments.id }).from(travelSegments).where(scope);
+    if (!seg) return false;
+    if (mode === "drive") {
+      const [booked] = await tx
+        .select({ id: reservations.id })
+        .from(reservations)
+        .where(eq(reservations.segmentId, segmentId))
+        .limit(1);
+      if (booked) throw new SegmentHasBookings();
+      await tx
+        .update(travelSegments)
+        .set({ mode, departAt: null, arriveAt: null, departTz: null, arriveTz: null })
+        .where(scope);
+      return true;
+    }
+    await tx.update(travelSegments).set({ mode }).where(scope);
+    return true;
+  });
 }
 
 /**
@@ -565,13 +1077,12 @@ export async function updateReservationFields(
     cost?: number | null;
     rating?: number | null;
     notes?: string | null;
+    /** #105 · the stay form's kind switch. */
+    lodgingKind?: LodgingKind | null;
   },
   actor: string,
 ): Promise<boolean> {
-  const scope = and(
-    eq(reservations.id, resId),
-    inArray(reservations.stopId, ownedStopIds(owner)),
-  );
+  const scope = ownedReservation(owner, resId);
   if (Object.keys(patch).length === 0) {
     const rows = await db.select({ id: reservations.id }).from(reservations).where(scope);
     return rows.length > 0;
@@ -612,11 +1123,33 @@ export async function updateReservationFields(
 /** A leaf delete — nothing cascades from it, which is why the client offers an
  * undo toast instead of a confirm dialog. */
 export async function deleteReservation(owner: string, resId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(reservations)
-    .where(and(eq(reservations.id, resId), inArray(reservations.stopId, ownedStopIds(owner))))
-    .returning({ id: reservations.id });
-  return deleted.length > 0;
+  return db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(reservations)
+      .where(ownedReservation(owner, resId))
+      .returning({ id: reservations.id, segmentId: reservations.segmentId });
+    const [gone] = deleted;
+    if (!gone) return false;
+    // A flight removed from its hop (#104): the hop re-times from what is
+    // left. A hop left with no timed booking keeps its clock, and a re-time
+    // that would itself clash with the stop dates is not applied.
+    if (gone.segmentId) {
+      const [seg] = await tx
+        .select({ tripId: travelSegments.tripId })
+        .from(travelSegments)
+        .where(eq(travelSegments.id, gone.segmentId));
+      if (seg) {
+        const before = (await loadSegmentTrip(tx, seg.tripId))!;
+        const current = before.segments.find((s) => s.id === gone.segmentId)!;
+        const retimed = retimedSegment(current, await segmentBookings(tx, gone.segmentId));
+        const after = { ...before, segments: before.segments.map((s) => (s.id === retimed.id ? retimed : s)) };
+        if (retimed !== current && newSegmentDateConflicts(before, after).length === 0) {
+          await writeSegmentClock(tx, retimed);
+        }
+      }
+    }
+    return true;
+  });
 }
 
 /**
@@ -821,6 +1354,8 @@ export async function reorderLegStops(
         .set({ sortOrder: i })
         .where(and(eq(stops.id, order[i]!), eq(stops.legId, legId)));
     }
+    const [leg] = await tx.select({ tripId: legs.tripId }).from(legs).where(eq(legs.id, legId));
+    await syncSegments(tx, leg!.tripId);
   });
 }
 
@@ -882,7 +1417,7 @@ export async function upsertPrefs(owner: string, patch: UserPrefsPatch): Promise
 /**
  * ── The Places library (docs/design/41 §3) ───────────────────────────────────
  *
- * saved_places is account-scoped, not trip-scoped, so these three scope on
+ * `saves` is account-scoped, not trip-scoped, so these three scope on
  * `owner_id` directly rather than through the leg/stop subqueries above. The
  * update and the delete RETURN the ids they matched: a row belonging to another
  * owner matches nothing, so the caller gets `false` and answers 404 instead of
@@ -905,16 +1440,195 @@ async function ownedTripTitle(owner: string, tripId: string | null): Promise<str
   return row.title;
 }
 
-export async function createSavedPlace(
+/**
+ * What a new save is anchored to (#110 §5, the W0 rule): a Google place id
+ * makes it a `place`; bare coordinates a `pin`; otherwise it is an `area`,
+ * labelled by its region. Validation beyond this is W1 capture's (#111).
+ */
+export function saveAnchorOf(input: {
+  googlePlaceId: string | null;
+  lat: number | null;
+  lng: number | null;
+  region: string | null;
+}): { anchor: "place" | "area" | "pin"; areaLabel: string | null } {
+  if (input.googlePlaceId) return { anchor: "place", areaLabel: null };
+  if (input.lat != null && input.lng != null) return { anchor: "pin", areaLabel: null };
+  return { anchor: "area", areaLabel: input.region };
+}
+
+/**
+ * Reverse-geocodes a point to its locality — `PlacesProvider.resolveDestination`
+ * handed in by the ROUTE (#111). packages/db holds no provider and no key: the
+ * web resolves which provider is live (`apps/web/src/lib/places.ts`) and passes
+ * its method here, the same way `api/places/locate` hands `locatePlaces` one.
+ */
+export type DestinationResolver = (lat: number, lng: number) => Promise<ResolvedDestination | null>;
+
+/**
+ * A Places text search near a point — `PlacesProvider.search` handed in by the
+ * ROUTE, like the resolver. Used for exactly one thing: the Q3 A offer on an
+ * offline note (#111 i2).
+ */
+export type PlacesSearcher = (query: string, near: LatLng) => Promise<PlaceSummary[]>;
+
+export interface SaveDeps {
+  resolveDestination?: DestinationResolver;
+  searchPlaces?: PlacesSearcher;
+}
+
+export interface CreateSaveResult {
+  saved: SavedPlace;
+  /** True when `clientId` matched a row this owner already has (answer 200). */
+  replayed: boolean;
+}
+
+/** An owner's save by its phone client id, destination joined, or null. */
+async function saveByClientId(owner: string, clientId: string): Promise<SavedPlace | null> {
+  const row = await db.query.saves.findFirst({
+    where: and(eq(saves.ownerId, owner), eq(saves.clientId, clientId)),
+    with: { trip: { columns: { title: true } }, destination: true },
+  });
+  return row ? mapSavedPlaceRow(row, row.trip?.title ?? null) : null;
+}
+
+/**
+ * The resolver's answer, or null — never a failed save. No key (the stub), a
+ * Google outage, a refused Geocoding API: the save is still written, with a
+ * null destination (docs/design/111 "One resolver").
+ */
+async function resolveQuietly(
+  resolve: DestinationResolver | undefined,
+  lat: number | null,
+  lng: number | null,
+): Promise<ResolvedDestination | null> {
+  if (!resolve || lat == null || lng == null) return null;
+  try {
+    return await resolve(lat, lng);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The Q3 A offer (#111 i2): an AREA note typed with no signal is searched for
+ * by its words near where it was typed, and the top hit is stored as
+ * `suggested_place`. Only then — a note typed online was already offered the
+ * Google rows and chose the note on purpose. No point, no searcher, no hit or
+ * a failed search: no suggestion, and the save is written all the same.
+ */
+async function suggestQuietly(
+  search: PlacesSearcher | undefined,
+  input: Pick<SavedPlaceCreate, "name" | "lat" | "lng" | "capturedOffline">,
+  anchor: SavedPlace["anchor"],
+) {
+  if (!search || !input.capturedOffline || anchor !== "area") return null;
+  if (input.lat == null || input.lng == null) return null;
+  try {
+    return suggestedPlaceFromSearch(await search(input.name, { lat: input.lat, lng: input.lng }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * One destinations row per (household, locality place id) — created on first
+ * use, REUSED after (the unique is `destinations_owner_place_uq`). The name,
+ * region and point are refreshed from the resolver on every hit, so a row
+ * written before `region` existed picks its header up the next time it is used.
+ */
+async function upsertDestination(owner: string, d: ResolvedDestination) {
+  const [row] = await db
+    .insert(destinations)
+    .values({
+      ownerId: owner,
+      googlePlaceId: d.googlePlaceId,
+      name: d.name,
+      region: d.region,
+      lat: d.lat,
+      lng: d.lng,
+    })
+    .onConflictDoUpdate({
+      target: [destinations.ownerId, destinations.googlePlaceId],
+      set: { name: d.name, region: d.region, lat: d.lat, lng: d.lng },
+    })
+    .returning();
+  return row!;
+}
+
+/**
+ * Save a place (docs/design/41 §3), extended for capture (#111):
+ *
+ * - **Idempotent on `clientId`.** A phone replaying a queued capture whose
+ *   first POST landed but whose answer was lost gets the row that exists, with
+ *   `replayed: true`, and no second row. Checked first, and again on the
+ *   insert's `ON CONFLICT` so two concurrent replays cannot both write.
+ * - **An explicit `anchor` wins** over `saveAnchorOf`, which would file an area
+ *   note that carries the phone's location as a pin. The derivation stays the
+ *   fallback for the web and older callers.
+ * - **`capturedAt` is `created_at`** when sent — a queued save flushed hours
+ *   later still sorts where it was captured.
+ * - **The destination is resolved** from the save's point when there is one and
+ *   the route handed in a resolver. An area save's `areaLabel` falls back to
+ *   the destination's name ("Bend, OR"), then to `region` (the W0 rule).
+ * - **An offline area note earns a place suggestion** (Q3 A, i2): see
+ *   `suggestQuietly`.
+ */
+export async function createSave(
   owner: string,
   input: SavedPlaceCreate,
-): Promise<SavedPlace> {
+  deps: SaveDeps = {},
+): Promise<CreateSaveResult> {
+  if (input.clientId) {
+    const existing = await saveByClientId(owner, input.clientId);
+    if (existing) return { saved: existing, replayed: true };
+  }
   const tripName = await ownedTripTitle(owner, input.tripId);
+  const {
+    clientId,
+    capturedAt,
+    anchor: explicitAnchor,
+    areaLabel: explicitLabel,
+    // Read by suggestQuietly below; there is no column for it.
+    capturedOffline,
+    ...fields
+  } = input;
+  void capturedOffline;
+  const anchor = explicitAnchor ?? saveAnchorOf(input).anchor;
+
+  const [resolved, suggestedPlace] = await Promise.all([
+    resolveQuietly(deps.resolveDestination, input.lat, input.lng),
+    suggestQuietly(deps.searchPlaces, input, anchor),
+  ]);
+  const destination = resolved ? await upsertDestination(owner, resolved) : null;
+  const areaLabel =
+    anchor === "area" ? (explicitLabel ?? destination?.name ?? input.region ?? null) : null;
+
   const [row] = await db
-    .insert(savedPlaces)
-    .values({ ownerId: owner, ...input })
+    .insert(saves)
+    .values({
+      ownerId: owner,
+      ...fields,
+      anchor,
+      areaLabel,
+      clientId: clientId ?? null,
+      destinationId: destination?.id ?? null,
+      suggestedPlace,
+      ...(capturedAt ? { createdAt: new Date(capturedAt) } : {}),
+    })
+    .onConflictDoNothing({ target: [saves.ownerId, saves.clientId] })
     .returning();
-  return mapSavedPlaceRow(row!, tripName);
+  if (!row) {
+    // Lost the race to a concurrent replay of the same capture.
+    const existing = await saveByClientId(owner, clientId!);
+    return { saved: existing!, replayed: true };
+  }
+  return {
+    saved: {
+      ...mapSavedPlaceRow(row, tripName),
+      destination: destination ? mapSaveDestination(destination) : null,
+    },
+    replayed: false,
+  };
 }
 
 /**
@@ -933,41 +1647,90 @@ const SAVED_PLACE_COLUMNS = { notes: "note" } as const;
  * so the want → been graduation is a shared-voice change like any other and is
  * logged as one.
  */
+/** Thrown by an upgrade on a save that has no suggestion to take (→ 409). */
+export const NO_SUGGESTION = "no suggestion";
+
+/**
+ * The columns `upgradeToSuggested` writes (#111 i2 · Q3 A): the suggestion's
+ * name, Place ID and point, the anchor area → place, and the destination
+ * RE-RESOLVED from the new point. When the resolver answers nothing (no key,
+ * a Google failure, nothing within 25 mi) the save keeps the destination it
+ * had — the suggestion was searched for near that very point, so the town it
+ * was typed in is still the honest answer. Null when the row is not this
+ * owner's; throws NO_SUGGESTION when there is nothing to take.
+ */
+async function upgradeColumns(
+  owner: string,
+  scope: ReturnType<typeof and>,
+  resolve: DestinationResolver | undefined,
+) {
+  const [row] = await db
+    .select({ suggestedPlace: saves.suggestedPlace, destinationId: saves.destinationId })
+    .from(saves)
+    .where(scope);
+  if (!row) return null;
+  const sp = row.suggestedPlace;
+  if (!sp) throw new Error(NO_SUGGESTION);
+  const resolved = await resolveQuietly(resolve, sp.lat, sp.lng);
+  const destination = resolved ? await upsertDestination(owner, resolved) : null;
+  return {
+    name: sp.name,
+    googlePlaceId: sp.googlePlaceId,
+    lat: sp.lat,
+    lng: sp.lng,
+    anchor: "place" as const,
+    areaLabel: null,
+    destinationId: destination?.id ?? row.destinationId,
+    suggestedPlace: null,
+  };
+}
+
 export async function updateSavedPlaceFields(
   owner: string,
   placeId: string,
-  patch: SavedPlacePatch,
+  input: SavedPlacePatch,
   actor: string,
+  deps: Pick<SaveDeps, "resolveDestination"> = {},
 ): Promise<boolean> {
-  if (patch.tripId !== undefined) await ownedTripTitle(owner, patch.tripId);
-  const scope = and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner));
+  const { upgradeToSuggested, suggestedPlace, ...fields } = input;
+  if (fields.tripId !== undefined) await ownedTripTitle(owner, fields.tripId);
+  const scope = and(eq(saves.id, placeId), eq(saves.ownerId, owner));
+  // The two suggestion actions are not columns: they become the columns they
+  // write, applied over whatever else the body named.
+  let patch: Partial<typeof saves.$inferInsert> = { ...fields };
+  if (suggestedPlace === null) patch.suggestedPlace = null;
+  if (upgradeToSuggested) {
+    const up = await upgradeColumns(owner, scope, deps.resolveDestination);
+    if (!up) return false;
+    patch = { ...patch, ...up };
+  }
   if (!logs(patch, SAVED_PLACE_COLUMNS)) {
     const rows = await db
-      .update(savedPlaces)
+      .update(saves)
       .set(patch)
       .where(scope)
-      .returning({ id: savedPlaces.id });
+      .returning({ id: saves.id });
     return rows.length > 0;
   }
   return db.transaction(async (tx) => {
     const [before] = await tx
       .select({
-        rating: savedPlaces.rating,
-        note: savedPlaces.note,
-        status: savedPlaces.status,
+        rating: saves.rating,
+        note: saves.note,
+        status: saves.status,
       })
-      .from(savedPlaces)
+      .from(saves)
       .where(scope);
     const rows = await tx
-      .update(savedPlaces)
+      .update(saves)
       .set(patch)
       .where(scope)
-      .returning({ id: savedPlaces.id });
+      .returning({ id: saves.id });
     if (!before || rows.length === 0) return false;
     await logChanges(tx, {
       owner,
       actor,
-      entity: "savedPlace",
+      entity: "save",
       entityId: placeId,
       pairs: loggedPairs(patch, before, SAVED_PLACE_COLUMNS),
     });
@@ -978,9 +1741,9 @@ export async function updateSavedPlaceFields(
 /** Hard delete, owner-scoped. Returns false when the id is not this owner's. */
 export async function deleteSavedPlace(owner: string, placeId: string): Promise<boolean> {
   const rows = await db
-    .delete(savedPlaces)
-    .where(and(eq(savedPlaces.id, placeId), eq(savedPlaces.ownerId, owner)))
-    .returning({ id: savedPlaces.id });
+    .delete(saves)
+    .where(and(eq(saves.id, placeId), eq(saves.ownerId, owner)))
+    .returning({ id: saves.id });
   return rows.length > 0;
 }
 
@@ -1304,7 +2067,7 @@ export function joinVerdict(input: {
  */
 const ownedContent = (householdId: string) => [
   db.select({ one: sql<number>`1` }).from(trips).where(eq(trips.ownerId, householdId)),
-  db.select({ one: sql<number>`1` }).from(savedPlaces).where(eq(savedPlaces.ownerId, householdId)),
+  db.select({ one: sql<number>`1` }).from(saves).where(eq(saves.ownerId, householdId)),
   db.select({ one: sql<number>`1` }).from(rigs).where(eq(rigs.ownerId, householdId)),
 ];
 

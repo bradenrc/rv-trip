@@ -23,3 +23,20 @@ const cells = [
 ];
 
 export const TwoWeeks = () => <RhythmStrip cells={cells} />;
+
+// Greece, May 10–20 (#110 §1): fly and ferry days carry their glyph on navy.
+const greece = [
+  { color: STAY, title: "2027-05-10 — Stay · Athens" },
+  { color: STAY, title: "2027-05-11 — Stay · Athens" },
+  { color: DRIVE, title: "2027-05-12 — Fly → Mykonos", mode: "fly" as const },
+  { color: STAY, title: "2027-05-13 — Stay · Mykonos" },
+  { color: STAY, title: "2027-05-14 — Stay · Mykonos" },
+  { color: STAY, title: "2027-05-15 — Stay · Mykonos" },
+  { color: DRIVE, title: "2027-05-16 — Ferry → Naxos", mode: "ferry" as const },
+  { color: STAY, title: "2027-05-17 — Stay · Naxos" },
+  { color: STAY, title: "2027-05-18 — Stay · Naxos" },
+  { color: DRIVE, title: "2027-05-19 — Fly → Athens", mode: "fly" as const },
+  { color: STAY, title: "2027-05-20 — Stay · Athens" },
+];
+
+export const FlyAndFerry = () => <RhythmStrip cells={greece} />;

@@ -65,6 +65,7 @@ export function Timeline({
   onCommitIdeaNote,
   ideaPicker,
   ideaActions,
+  onOpenHop,
 }: {
   model: TimelineModel;
   /** The rail's first section (#80) — the trip's unattached maybes, already
@@ -99,6 +100,8 @@ export function Timeline({
   ideaPicker?: (idea: Idea) => ReactNode;
   /** The row menu the app hangs on a shelf card (#74's door lands here). */
   ideaActions?: (idea: Idea) => ReactNode;
+  /** #104 · Q5 A — a fly or ferry day pressed: open that hop on Route. */
+  onOpenHop?: (segmentId: string) => void;
 }) {
   const [dragged, setDragged] = useState<TimelineDrag | null>(null);
   /**
@@ -126,7 +129,17 @@ export function Timeline({
         <div className="rounded-rv-card border border-rv-border bg-rv-surface p-5 shadow-rv-md">
           <div className="overflow-x-auto">
             <div style={{ minWidth }}>
-              <RhythmStrip cells={model.rhythm} />
+              <RhythmStrip
+                cells={model.rhythm}
+                onModeCell={
+                  onOpenHop
+                    ? (i) => {
+                        const id = model.rhythm[i]?.segmentId;
+                        if (id) onOpenHop(id);
+                      }
+                    : undefined
+                }
+              />
               <Ruler cells={model.ruler} />
               {model.legs.map((leg) => (
                 <SwimLane key={leg.id} kicker={leg.kicker} name={leg.name} columns={days} rowHeight={ROW_HEIGHT}>
@@ -140,6 +153,7 @@ export function Timeline({
                       ideaCount={b.ideaCount}
                       startCol={b.startCol}
                       span={b.span}
+                      arriveMode={b.arriveMode}
                       compact
                       active={stopActive}
                       onClick={() => onOpenStop(b.stopId)}
@@ -179,7 +193,7 @@ export function Timeline({
           <div className="mt-2 font-mono text-[10px] text-rv-ink-faded md:hidden">
             ← swipe the calendar · the leg column stays put →
           </div>
-          <GanttLegend />
+          <GanttLegend modes={model.modes} />
         </div>
       </div>
 

@@ -135,6 +135,17 @@ export const RIG_PRESETS: RigPreset[] = [
 ];
 
 // ── the cache key's rig half ───────────────────────────────────────────────
+/**
+ * The rig a TRIP routes with (#103 · klunk row 4): the account's rig when the
+ * trip brings it, and none when it does not ("No, just the car", and every fly
+ * trip). One helper, so the trip page, the bundle, the post-reorder upgrade,
+ * /map and the dashboard all pick the same rig — and so key the same hash
+ * (vet HIGH: a mismatched hash throws every upgraded route away).
+ */
+export function tripRig<R>(trip: { rigOn: boolean }, rig: R | null): R | null {
+  return trip.rigOn ? rig : null;
+}
+
 /** No rig yet — the same code path as a missing key, and a distinct key half. */
 export const NO_RIG_HASH = "no-rig";
 

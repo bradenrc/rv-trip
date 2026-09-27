@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -17,6 +17,7 @@ import {
   emptySavePlaceForm,
   graduateFormFromSaved,
   graduatePatch,
+  isFreeTextPick,
   matchCandidateFromSaved,
   savePlaceBody,
   savePlaceFormFromSaved,
@@ -24,6 +25,7 @@ import {
   suggestionToCreate,
 } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
+import { browserAreaLabel } from "@/lib/area-label";
 import { PlacesLibrary } from "./PlacesLibrary";
 import { PlaceCardMenu } from "./PlaceCardMenu";
 import { PlaceSheet } from "./PlaceSheet";
@@ -67,6 +69,28 @@ export function PlacesWorkspace({
   );
   const [gradSheet, setGradSheet] = useState<{ place: SavedPlace; form: GraduateForm } | null>(null);
   const [saving, setSaving] = useState(false);
+  /**
+   * #111 i4 · the escape row's area label: the locality the browser is in,
+   * asked for ONCE per open save sheet, the first time the picker's value
+   * becomes typed words (the browser's position does not change with the
+   * words). Null until it answers, and null for good when geolocation is
+   * refused — `savePlaceBody` sends whatever is here at submit.
+   */
+  const [areaLabel, setAreaLabel] = useState<string | null>(null);
+  const areaAsked = useRef(false);
+
+  const openSaveSheet = () => {
+    areaAsked.current = false;
+    setAreaLabel(null);
+    setSaveSheet({ id: null, form: emptySavePlaceForm() });
+  };
+
+  const changeSaveForm = (form: SavePlaceForm) => {
+    setSaveSheet((s) => (s ? { ...s, form } : s));
+    if (saveSheet?.id !== null || areaAsked.current || !isFreeTextPick(form.picked)) return;
+    areaAsked.current = true;
+    void browserAreaLabel().then(setAreaLabel);
+  };
 
   const failed = () => toast.error("That change didn't save — check your connection.");
 
@@ -107,7 +131,7 @@ export function PlacesWorkspace({
     };
 
     if (id === null) {
-      const body = savePlaceBody(form);
+      const body = savePlaceBody(form, areaLabel);
       if (!body) return setSaving(false);
       tripApi
         .savePlace(body)
@@ -212,7 +236,7 @@ export function PlacesWorkspace({
         {children}
         <button
           type="button"
-          onClick={() => setSaveSheet({ id: null, form: emptySavePlaceForm() })}
+          onClick={openSaveSheet}
           className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-accent-deep px-[18px] py-[11px] text-[14px] font-bold text-rv-accent-ink"
         >
           <Plus className="size-[15px]" fill="currentColor" strokeWidth={2.5} />
@@ -254,7 +278,7 @@ export function PlacesWorkspace({
           form={saveSheet.form}
           mode={saveSheet.id === null ? "save" : "edit"}
           saving={saving}
-          onChange={(form) => setSaveSheet((s) => (s ? { ...s, form } : s))}
+          onChange={changeSaveForm}
           onSubmit={submitSave}
           onClose={() => setSaveSheet(null)}
         />

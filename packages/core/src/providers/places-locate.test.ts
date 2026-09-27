@@ -55,6 +55,10 @@ const pulloutRow: LocateRow = { kind: "stop", id: PULLOUT_ID };
 
 /** Answers per query, and records everything it was asked. */
 class FakeProvider implements PlacesProvider {
+  // #111 widened the interface; nothing here resolves a destination.
+  async resolveDestination(): Promise<null> {
+    return null;
+  }
   readonly searches: string[] = [];
   constructor(private readonly byQuery: Record<string, PlaceSummary[]> = {}) {}
   async search(query: string): Promise<PlaceSummary[]> {
@@ -68,6 +72,10 @@ class FakeProvider implements PlacesProvider {
 }
 
 class BrokenProvider implements PlacesProvider {
+  // #111 widened the interface; nothing here resolves a destination.
+  async resolveDestination(): Promise<null> {
+    return null;
+  }
   async search(): Promise<PlaceSummary[]> {
     throw new Error("Google places:searchText → 500");
   }

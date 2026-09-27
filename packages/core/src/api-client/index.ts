@@ -1,14 +1,37 @@
 import type { z } from "zod";
-import type { IsoDate, ReservationType, IdeaStatus, Reservation, SavedPlace, TripSummary } from "../domain/types";
+import type {
+  IsoDate,
+  Idea,
+  IdeaCreateInput,
+  IdeaStatus,
+  NearbySaves,
+  Reservation,
+  SavedPlace,
+  SavedPlaceCreateInput,
+  SavedPlacePatch,
+  ReservationCreateBody,
+  SegmentPatchInput,
+  Trip,
+  TripCreateInput,
+  TripPatchInput,
+  TripSummary,
+} from "../domain/types";
 import type { RigProfile, RigProfileInput } from "../domain/rig";
-import type { LatLng, RouteResult } from "../providers/index";
+import type { LatLng, ResolvedDestination, RouteResult } from "../providers/index";
 import {
   tripBundleSchema,
   tripSummaryListSchema,
+  nearbySavesSchema,
+  ideaSchema,
   savedPlaceListSchema,
+  savedPlaceSchema,
+  placesEnvelopeSchema,
+  resolvedDestinationSchema,
   rigResponseSchema,
   routePairsResponseSchema,
   reservationRowSchema,
+  tripSchema,
+  type PlacesSearchEnvelope,
   type TripBundle,
 } from "./schemas";
 
@@ -94,21 +117,48 @@ export interface IdeaPatch {
   rating?: number | null;
   notes?: string | null;
 }
-export interface CreateReservationInput {
-  stopId: string;
-  type: ReservationType;
-  name: string;
-  cost: number | null;
-  checkIn: IsoDate | null;
-}
+/**
+ * `POST /api/reservations` — core's own create grammar, pre-parse: a stop OR a
+ * segment parent, the clock a flight carries, a stay's kind, and `moveStop`
+ * (vet HIGH: this used to be a five-field subset that could not carry a
+ * flight). A 409 `segment_date_mismatch` throws `ApiError` with its body.
+ */
+export type CreateReservationInput = ReservationCreateBody;
 
 export interface ApiClient {
   trips: {
     list(): Promise<TripSummary[]>;
     get(id: string): Promise<TripBundle>;
+    /** POST /api/trips → 201 Trip — the setup screen (#103). */
+    create(input: TripCreateInput): Promise<Trip>;
+    /** PATCH /api/trips/:id → 204. The review sheet's radius chips send
+     * `{ surfaceRadiusMi }` (#111 i3). */
+    patch(id: string, patch: TripPatchInput): Promise<void>;
+    /** The saves near this trip, at the trip's own radius (#111 i3). */
+    nearbySaves(id: string): Promise<NearbySaves>;
+    /** The banner's Dismiss: remember these saves as dismissed for this trip. */
+    dismissSaves(id: string, saveIds: string[]): Promise<void>;
   };
   places: {
     list(): Promise<SavedPlace[]>;
+    /** POST /api/places. 201 new or 200 on a replayed `clientId` — the same
+     * row either way (#111). A non-2xx throws `ApiError` with its status, which
+     * is what the phone's capture queue keeps or drops on. */
+    create(body: SavedPlaceCreateInput): Promise<SavedPlace>;
+    /** The shipped search proxy. A throttled 429 still answers the degraded
+     * envelope rather than throwing — its body IS that envelope. */
+    search(q: string, near?: LatLng): Promise<PlacesSearchEnvelope>;
+    /** PATCH /api/places/:id → 204. On the Saves tab (#111 i2) it carries
+     * `{ upgradeToSuggested: true }` (tap the strip) or `{ suggestedPlace: null }`
+     * (Dismiss). No body comes back: refetch `list()` for the re-resolved
+     * destination. */
+    patch(id: string, patch: SavedPlacePatch): Promise<void>;
+    /** DELETE /api/places/:id — the capture toast's Undo. */
+    remove(id: string): Promise<void>;
+  };
+  destinations: {
+    /** The locality a point is in, or null (#111). */
+    resolve(near: LatLng): Promise<ResolvedDestination | null>;
   };
   rig: {
     get(): Promise<RigProfile | null>;
@@ -117,11 +167,18 @@ export interface ApiClient {
   stops: {
     patch(id: string, patch: StopPatch): Promise<void>;
   };
+  segments: {
+    /** PATCH /api/segments/:id → 204 — a hop's mode switch (#104). */
+    patch(id: string, patch: SegmentPatchInput): Promise<void>;
+  };
   reservations: {
     create(input: CreateReservationInput): Promise<Reservation>;
     patch(id: string, patch: ReservationPatch): Promise<void>;
   };
   ideas: {
+    /** POST /api/ideas → 201 Idea. The review sheet's Add copies a save
+     * (`nearbyIdeaBody`, #111 i3). */
+    create(input: IdeaCreateInput): Promise<Idea>;
     patch(id: string, patch: IdeaPatch): Promise<void>;
     promote(id: string): Promise<Reservation>;
   };
@@ -176,9 +233,38 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     trips: {
       list: () => parsed(tripSummaryListSchema, request("GET", "/api/trips")),
       get: (id) => parsed(tripBundleSchema, request("GET", `/api/trips/${encodeURIComponent(id)}`)),
+      create: (input) => parsed(tripSchema, request("POST", "/api/trips", input)),
+      patch: (id, patch) => voidResult(request("PATCH", `/api/trips/${encodeURIComponent(id)}`, patch)),
+      nearbySaves: (id) =>
+        parsed(nearbySavesSchema, request("GET", `/api/trips/${encodeURIComponent(id)}/nearby-saves`)),
+      dismissSaves: (id, saveIds) =>
+        voidResult(
+          request("POST", `/api/trips/${encodeURIComponent(id)}/dismissed-saves`, { saveIds }),
+        ),
     },
     places: {
       list: () => parsed(savedPlaceListSchema, request("GET", "/api/places")),
+      create: (body) => parsed(savedPlaceSchema, request("POST", "/api/places", body)),
+      search: async (q, near) => {
+        const qs = new URLSearchParams({ q });
+        if (near) qs.set("near", `${near.lat},${near.lng}`);
+        try {
+          return await parsed(placesEnvelopeSchema, request("GET", `/api/places/search?${qs}`));
+        } catch (e) {
+          if (e instanceof ApiError && e.status === 429) return placesEnvelopeSchema.parse(e.body);
+          throw e;
+        }
+      },
+      patch: (id, patch) =>
+        voidResult(request("PATCH", `/api/places/${encodeURIComponent(id)}`, patch)),
+      remove: (id) => voidResult(request("DELETE", `/api/places/${encodeURIComponent(id)}`)),
+    },
+    destinations: {
+      resolve: (near) =>
+        parsed(
+          resolvedDestinationSchema,
+          request("GET", `/api/destinations/resolve?near=${near.lat},${near.lng}`),
+        ),
     },
     rig: {
       get: () => parsed(rigResponseSchema, request("GET", "/api/rig")),
@@ -191,12 +277,17 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     stops: {
       patch: (id, patch) => voidResult(request("PATCH", `/api/stops/${encodeURIComponent(id)}`, patch)),
     },
+    segments: {
+      patch: (id, patch) =>
+        voidResult(request("PATCH", `/api/segments/${encodeURIComponent(id)}`, patch)),
+    },
     reservations: {
       create: (input) => parsed(reservationRowSchema, request("POST", "/api/reservations", input)),
       patch: (id, patch) =>
         voidResult(request("PATCH", `/api/reservations/${encodeURIComponent(id)}`, patch)),
     },
     ideas: {
+      create: (input) => parsed(ideaSchema, request("POST", "/api/ideas", input)),
       patch: (id, patch) => voidResult(request("PATCH", `/api/ideas/${encodeURIComponent(id)}`, patch)),
       promote: (id) =>
         parsed(reservationRowSchema, request("POST", `/api/ideas/${encodeURIComponent(id)}/promote`)),

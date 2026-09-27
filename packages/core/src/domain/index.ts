@@ -8,5 +8,8 @@ export * from "./leaf-form";
 export * from "./bounds";
 export * from "./rig";
 export * from "./route-order";
+export * from "./segments";
 export * from "./prefs";
 export * from "./units";
+export * from "./airports";
+export * from "./hops";

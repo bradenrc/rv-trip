@@ -23,10 +23,13 @@ import {
   Trash2,
   CircleDot,
   LocateFixed,
+  Plane,
+  Ship,
   X,
   type LucideIcon,
 } from "lucide-react";
 import {
+  LODGING_KIND_LABEL,
   LOCATE_MAX_ROWS,
   PICKED_COORDLESS_LABEL,
   convertMiles,
@@ -38,6 +41,8 @@ import {
   type NearPlace,
   type PickedPlace,
   type Place,
+  type TravelMode,
+  type Trip,
   type Units,
 } from "@rv-trip/core";
 import {
@@ -70,6 +75,7 @@ import {
   MENU_ITEM_WARN,
   MENU_SURFACE,
 } from "./row-menu";
+import { HopCard, HopModeSwitch, type HopCardActions } from "./HopCard";
 
 /**
  * Every structural verb in the route lens lives on a row menu (⋯) — the leg
@@ -115,10 +121,18 @@ export interface RouteViewActions {
   /** The rail's Locate — one bounded batch over `summary.unmappedStops`. */
   locating: boolean;
   onLocate: () => void;
+
+  // ── #104 · hops ──────────────────────────────────────────────────────────
+
+  /** The hop whose Add flight / Add ferry form is open — set by its button
+   * and by a fly/ferry day clicked on the Timeline (Q5 A). */
+  openHopId: string | null;
+  hops: HopCardActions;
 }
 
 export function RouteView({
   legs,
+  trip,
   summary,
   homeBasePlace,
   costs,
@@ -132,6 +146,10 @@ export function RouteView({
   actions,
 }: {
   legs: RouteLeg[];
+  /** The trip the model was built from (#104): its default mode decides the
+   * intro and where a hop's mode switch lives (Q7 B), `rigOn` gates the rig
+   * nudge, and the Add flight form judges its date clash against it. */
+  trip: Trip;
   summary: RouteSummary;
   /** The trip's home base as a real place (#60 Q4 → B). It is the search bias
    * for the FIRST stop of a leg — the one row with nothing above it. */
@@ -152,13 +170,40 @@ export function RouteView({
   onRowDrop: (legId: string, targetId: string) => void;
   actions: RouteViewActions;
 }) {
+  // Q7 B: on a drive trip the mode switch hides in a drive row's ⋯ menu; on a
+  // fly trip it is visible on every hop. Klunk row 2: the intro follows too.
+  const driveTrip = trip.defaultMode === "drive";
+  const hopCard = (hop: NonNullable<RouteLeg["leadingHop"]>, flush: boolean) => (
+    <HopCard
+      key={hop.segmentId}
+      hop={hop}
+      trip={trip}
+      flush={flush}
+      formOpen={actions.openHopId === hop.segmentId}
+      actions={actions.hops}
+    />
+  );
+  const driveRow = (drive: RouteDrive) => (
+    <Drive
+      drive={drive}
+      trailing={
+        drive.segmentId === null ? null : driveTrip ? (
+          <DriveHopMenu onMode={(m) => actions.hops.onMode(drive.segmentId!, m)} />
+        ) : (
+          <HopModeSwitch value="drive" onChange={(m) => actions.hops.onMode(drive.segmentId!, m)} />
+        )
+      }
+    />
+  );
   return (
     <div className="flex flex-wrap items-start gap-8">
       {/* Reading column */}
       <div className="min-w-0 flex-1 basis-[520px] [max-width:760px]">
         <p className="m-0 mb-6 max-w-[60ch] text-[15px] text-rv-ink-muted">
-          Lay out the places and take it as you go — dates are optional. Drag to reorder; drives
-          are shown between any two places, dated or not.
+          Lay out the places and take it as you go — dates are optional.{" "}
+          {driveTrip
+            ? "Drag to reorder; drives are shown between any two places, dated or not."
+            : "Drag to reorder; how you get between places is shown in order."}
         </p>
 
         {legs.map((leg) => (
@@ -226,6 +271,8 @@ export function RouteView({
                 </RowMenu>
               </div>
             </div>
+
+            {leg.leadingHop && hopCard(leg.leadingHop, true)}
 
             {leg.rows.map((row, i) => {
               // The picker's bias: the stop ABOVE this one in the leg, and the
@@ -431,6 +478,7 @@ export function RouteView({
                             type={r.type}
                             name={r.name}
                             cost={costs ? r.cost : null}
+                            label={r.lodgingKind ? LODGING_KIND_LABEL[r.lodgingKind] : null}
                           />
                         ))}
                       </div>
@@ -460,7 +508,8 @@ export function RouteView({
                   </div>
                 </div>
 
-                {row.drive && <Drive drive={row.drive} />}
+                {row.drive && driveRow(row.drive)}
+                {row.hop && hopCard(row.hop, false)}
               </div>
               );
             })}
@@ -486,7 +535,7 @@ export function RouteView({
               </div>
             )}
 
-            {leg.outboundDrive && (
+            {(leg.outboundDrive || leg.outboundHop) && (
               <>
                 <div className="my-0.5 ml-8 flex items-center gap-[9px]">
                   <span className="font-mono text-[9px] uppercase tracking-[0.11em] text-rv-ink-faded">
@@ -494,9 +543,14 @@ export function RouteView({
                   </span>
                   <span className="h-px flex-1 bg-rv-border-soft" />
                 </div>
-                <Drive drive={leg.outboundDrive} />
+                {leg.outboundDrive && driveRow(leg.outboundDrive)}
+                {/* A hop that crosses legs sits under the same seam a crossing
+                    drive does (Greece: Athens → Mykonos, Naxos → Athens). */}
+                {leg.outboundHop && hopCard(leg.outboundHop, false)}
               </>
             )}
+
+            {leg.returnHop && hopCard(leg.returnHop, true)}
           </div>
         ))}
 
@@ -513,7 +567,9 @@ export function RouteView({
       <RouteRail
         summary={summary}
         costs={costs}
-        hasRig={hasRig}
+        // Klunk row 4: the nudge only on a trip that brings the rig. A trip
+        // that leaves it home is routed without one on purpose.
+        hasRig={hasRig || !trip.rigOn}
         units={units}
         locating={actions.locating}
         onLocate={actions.onLocate}
@@ -599,7 +655,7 @@ function PlaceEditor({
  * caption is green when the corridor check passed and the shipped amber string
  * when it did not.
  */
-function Drive({ drive }: { drive: RouteDrive }) {
+function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React.ReactNode }) {
   if (drive.notices.length === 0) {
     return (
       <div className="my-1 ml-8 flex flex-wrap items-center gap-[9px] py-[5px] font-mono text-[12px] text-rv-ink-faded">
@@ -613,6 +669,7 @@ function Drive({ drive }: { drive: RouteDrive }) {
         )}
         {drive.estimate && <EstimateChip />}
         <NavigateButton drive={drive} className="ml-2" />
+        {trailing}
       </div>
     );
   }
@@ -628,6 +685,7 @@ function Drive({ drive }: { drive: RouteDrive }) {
           )}
           {drive.estimate && <EstimateChip />}
           <NavigateButton drive={drive} className="ml-auto" />
+          {trailing}
         </div>
         {/* The caveat belongs ON the action. The handoff is still origin and
             destination only — Google's URL scheme has no pass-through waypoint
@@ -647,6 +705,26 @@ function Drive({ drive }: { drive: RouteDrive }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A drive trip's hop menu (#104 · Q7 B): the one way a PNW drive becomes a
+ * flight or a ferry. The shipped RowMenu surface; the mock's "Open in Maps" is
+ * dropped — Navigate's split button already hands off to Maps.
+ */
+function DriveHopMenu({ onMode }: { onMode: (m: TravelMode) => void }) {
+  return (
+    <RowMenu label="Change how this hop travels">
+      <DropdownMenuItem className={MENU_ITEM} onSelect={() => onMode("fly")}>
+        <Plane />
+        Fly this hop instead
+      </DropdownMenuItem>
+      <DropdownMenuItem className={MENU_ITEM} onSelect={() => onMode("ferry")}>
+        <Ship />
+        Take a ferry instead
+      </DropdownMenuItem>
+    </RowMenu>
   );
 }
 

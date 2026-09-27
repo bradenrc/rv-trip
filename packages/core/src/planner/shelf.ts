@@ -23,7 +23,7 @@ import { haversineMeters } from "../providers/index";
  */
 export const NEAR_RADIUS_MI = 50;
 
-const METERS_PER_MILE = 1609.344;
+export const METERS_PER_MILE = 1609.344;
 
 /** Stay first, then Eat, then Do — the frame's order, and the order the groups
  * are built in so the rail never has to sort them. */
@@ -87,17 +87,23 @@ export interface IdeaShelf {
   groups: ShelfGroup[];
 }
 
+/** Miles at the precision a shelf row prints — one decimal under 10, whole
+ * above ("1.4 mi", "33 mi"). Shared with `nearbySaves` (#111 i3), whose rows
+ * the design draws at the same precision. */
+export function shelfMiles(mi: number): number {
+  return mi < 10 ? Math.round(mi * 10) / 10 : Math.round(mi);
+}
+
 /** Miles, at the precision the row line prints. */
 function milesBetween(
   a: { lat: number; lng: number },
   b: { lat: number; lng: number },
 ): number {
-  const mi = haversineMeters(a, b) / METERS_PER_MILE;
-  return mi < 10 ? Math.round(mi * 10) / 10 : Math.round(mi);
+  return shelfMiles(haversineMeters(a, b) / METERS_PER_MILE);
 }
 
 /** One stop that can anchor a distance. */
-interface Anchor {
+export interface StopAnchor {
   id: string;
   name: string;
   lat: number;
@@ -110,7 +116,7 @@ interface Anchor {
  * Resolved ONCE per shelf and passed down, never rebuilt per row: `ideaShelf`
  * asks the filter question once per (located stop × row) pair, so a call in
  * there would walk every leg of the trip on each of them. */
-function locatedStops(trip: Trip): Anchor[] {
+export function locatedStops(trip: Trip): StopAnchor[] {
   return trip.legs
     .flatMap((l) => l.stops)
     .map((s) => ({ id: s.id, name: s.place.name, lat: s.place.lat, lng: s.place.lng }))
@@ -119,7 +125,7 @@ function locatedStops(trip: Trip): Anchor[] {
 
 /** The shelf rows: `stopId === null`, in group-then-sortOrder order. An idea
  * attached to a stop has ONE home and it is not this one. */
-export function shelfIdeas(trip: Trip, anchors: Anchor[] = locatedStops(trip)): ShelfIdea[] {
+export function shelfIdeas(trip: Trip, anchors: StopAnchor[] = locatedStops(trip)): ShelfIdea[] {
   return trip.ideas
     .filter((i) => i.stopId === null)
     .slice()
@@ -152,7 +158,7 @@ export function shelfIdeas(trip: Trip, anchors: Anchor[] = locatedStops(trip)): 
  *
  * It takes the ANCHORS, not the trip: the caller already has them, and this is
  * the function asked (located stops × rows) times. */
-function matchesFilter(row: ShelfIdea, anchors: Anchor[], filter: ShelfFilter): boolean {
+function matchesFilter(row: ShelfIdea, anchors: StopAnchor[], filter: ShelfFilter): boolean {
   if (filter.kind === "all") return true;
   if (filter.kind === "coordless") {
     return row.idea.place === null || !hasCoords(row.idea.place);

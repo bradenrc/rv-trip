@@ -16,7 +16,7 @@
     "db:down": "docker compose down",
     "db:generate": "pnpm --filter @rv-trip/db generate",
     "db:migrate": "pnpm --filter @rv-trip/db migrate",
-    "db:baseline": "pnpm --filter @rv-trip/db baseline",
+    "db:reset": "pnpm --filter @rv-trip/db reset",
     "db:push": "pnpm --filter @rv-trip/db push",
     "db:studio": "pnpm --filter @rv-trip/db studio",
     "db:seed": "pnpm --filter @rv-trip/db seed",

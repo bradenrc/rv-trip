@@ -118,6 +118,13 @@ export const placesSearchQuerySchema = z.object({
 });
 export type PlacesSearchQuery = z.infer<typeof placesSearchQuerySchema>;
 
+/**
+ * GET /api/destinations/resolve?near=lat,lng (#111) — the capture sheet's
+ * "in San José area" line. `near` is required: there is nothing to resolve
+ * without a point.
+ */
+export const destinationResolveQuerySchema = z.object({ near: nearSchema });
+
 /** The `[id]` segment of the details route. */
 export const googlePlaceIdSchema = z.string().trim().min(1);
 

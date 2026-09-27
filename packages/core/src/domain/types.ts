@@ -52,8 +52,9 @@ export const rating = z.number().int().min(1).max(5).nullable();
 export const changeField = z.enum(["rating", "notes", "status"]);
 export type ChangeField = z.infer<typeof changeField>;
 
-/** The four things a change is logged against. */
-export const changeEntity = z.enum(["stop", "idea", "reservation", "savedPlace"]);
+/** The four things a change is logged against. `save` was `savedPlace` before
+ * the W0 reset (#110 §5) — the table it names is now `saves`. */
+export const changeEntity = z.enum(["stop", "idea", "reservation", "save"]);
 export type ChangeEntity = z.infer<typeof changeEntity>;
 
 /**
@@ -107,9 +108,38 @@ export const place = z.object({
 });
 export type Place = z.infer<typeof place>;
 
+/**
+ * How a hop between two stops is travelled (#110 · Q1 A). Mode lives on the
+ * SEGMENT, never on a stop or a day: HERE routing and the RV-safety corridor key
+ * off `drive` only. `train` is a later wave.
+ */
+export const travelMode = z.enum(["drive", "fly", "ferry"]);
+export type TravelMode = z.infer<typeof travelMode>;
+
+/** A trip's lodging default (#110 §5, Q7 A) — a default, never a constraint. */
+export const lodgingKind = z.enum(["hotel", "friends", "airbnb", "campground"]);
+export type LodgingKind = z.infer<typeof lodgingKind>;
+
+/**
+ * An INSTANT (ISO 8601 with a zone), as a timed segment or a flight carries it.
+ * Unlike `isoDate` this has a clock; its IANA zone travels beside it
+ * (`departTz`, `startsTz`, …) so a local wall clock and a local DATE can be
+ * recovered (`localDate`, segments.ts).
+ */
+const instant = z.string().nullable().default(null);
+/** An IANA zone name ("America/Boise"), or null when the instant is untimed. */
+const ianaZone = z.string().nullable().default(null);
+
+/**
+ * A reservation hangs on EXACTLY ONE parent (#110 Q2 A): a stop (lodging, a
+ * tour) or a travel segment (a flight, a ferry ticket). The database enforces
+ * it with `CHECK num_nonnulls(stop_id, segment_id) = 1`; `stop.reservations`
+ * carries only the stop-attached rows and `segment.reservations` the rest.
+ */
 export const reservation = z.object({
   id: z.string(),
-  stopId: z.string(),
+  stopId: z.string().nullable(),
+  segmentId: z.string().nullable().default(null),
   ideaId: z.string().nullable().default(null),
   type: reservationType,
   name: z.string().min(1),
@@ -119,6 +149,20 @@ export const reservation = z.object({
   cost: z.number().nonnegative().nullable().default(null),
   rating,
   notes: z.string().nullable().default(null),
+  /** A transport booking's clock (#110 §6): when it leaves and lands, each in
+   * its own zone. Lodging keeps the day-grain `checkIn`/`checkOut`. */
+  startsAt: instant,
+  endsAt: instant,
+  startsTz: ianaZone,
+  endsTz: ianaZone,
+  /**
+   * What KIND of stay a lodging row is (#105 · Q9 A) — the same four words as
+   * the trip's `lodgingDefault`. Null for everything that is not a stay, and
+   * for a stay written before W2. It never replaces `type`: the kind DECIDES
+   * the type at the form (campground → "campground", the rest → "lodging"), so
+   * `categoryMeta` and every Stay tile keep reading `type` alone.
+   */
+  lodgingKind: lodgingKind.nullable().default(null),
   lastChange: lastChangeField,
 });
 export type Reservation = z.infer<typeof reservation>;
@@ -177,6 +221,46 @@ export const leg = z.object({
 });
 export type Leg = z.infer<typeof leg>;
 
+/**
+ * One hop of the journey (#110 · Q1 A): every adjacent pair of the route
+ * sequence has a row, plus home → first stop when the trip has a home base.
+ * `fromStopId === null` is the home base; `toStopId === null` is home. The row
+ * set is kept dense by `reconcileSegments` (segments.ts) — never hand-edited.
+ *
+ * Timed (`departAt` + `arriveAt`) or untimed. A timed segment is travel on
+ * every LOCAL date it touches (Q4 B); an untimed one borrows its day from the
+ * stop it arrives at (derive-days.ts).
+ */
+export const segment = z.object({
+  id: z.string(),
+  tripId: z.string(),
+  fromStopId: z.string().nullable(),
+  toStopId: z.string().nullable(),
+  mode: travelMode,
+  departAt: instant,
+  arriveAt: instant,
+  departTz: ianaZone,
+  arriveTz: ianaZone,
+  sortOrder: z.number().int(),
+  reservations: z.array(reservation).default([]),
+});
+export type Segment = z.infer<typeof segment>;
+
+/**
+ * The per-trip surfacing radius (#111 Q7 B): the review sheet's four chips.
+ * A LITERAL union, so a hand-rolled 75 is a 400 at the boundary rather than a
+ * CHECK violation deeper in (`trips_surface_radius_mi_ck`, schema.ts). Null =
+ * never chosen, which reads as `NEAR_RADIUS_MI` (planner/shelf.ts).
+ */
+export const SURFACE_RADII = [25, 50, 100, 200] as const;
+export const surfaceRadiusMi = z.union([
+  z.literal(25),
+  z.literal(50),
+  z.literal(100),
+  z.literal(200),
+]);
+export type SurfaceRadiusMi = z.infer<typeof surfaceRadiusMi>;
+
 export const tripStatus = z.enum(["planning", "upcoming", "complete"]);
 export type TripStatus = z.infer<typeof tripStatus>;
 
@@ -204,7 +288,19 @@ export const trip = z.object({
   statusAuto: z.boolean().default(true),
   rating: rating,
   note: z.string().nullable().default(null),
+  /**
+   * The trip's three plain DEFAULTS (#110 Q7 A) — never constraints. A newly
+   * reconciled segment takes `defaultMode`; W0 stores and seeds the other two.
+   */
+  defaultMode: travelMode.default("drive"),
+  lodgingDefault: lodgingKind.nullable().default(null),
+  rigOn: z.boolean().default(true),
+  /** How far from a stop a save may sit and still surface on this trip
+   * (#111 Q7 B · `trips.surface_radius_mi`). Null → the 50 mi default. */
+  surfaceRadiusMi: surfaceRadiusMi.nullable().default(null),
   legs: z.array(leg).default([]),
+  /** Every hop of the journey, by `sortOrder` (#110 Q1 A). */
+  segments: z.array(segment).default([]),
   /**
    * The idea SHELF (#80) — the trip's unattached maybes, the rows whose
    * `stopId` is null. It sits beside `legs`, not inside it, because that is
@@ -231,6 +327,11 @@ export const tripCreateInput = trip.pick({
   // is a key `safeParse` DROPS silently at the handler — the whole home-base
   // migration would be a no-op on the wire.
   homeBasePlace: true,
+  // #103 · the setup's three answers. Explicit for the same reason: an
+  // unlisted key would parse away and every new trip would be a drive trip.
+  defaultMode: true,
+  lodgingDefault: true,
+  rigOn: true,
 });
 export type TripCreateInput = z.infer<typeof tripCreateInput>;
 
@@ -249,6 +350,13 @@ export const tripPatchInput = trip
     statusAuto: true,
     rating: true,
     note: true,
+    // #111 i3: the review sheet's radius chips. Explicit for the same reason
+    // as `homeBasePlace` above — `.pick()` drops an unlisted key silently.
+    surfaceRadiusMi: true,
+    // #103 · Trip settings' three defaults (klunk row 7). Explicit, same reason.
+    defaultMode: true,
+    lodgingDefault: true,
+    rigOn: true,
   })
   .partial();
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
@@ -338,7 +446,24 @@ export type StopPatchInput = z.infer<typeof stopPatchInput>;
  * never client-editable, and `sortOrder` is the server's to append.
  */
 
-/** `POST /api/reservations` — the stop sheet's reservation form, and the undo. */
+/** An instant as a create body carries it: ISO 8601 WITH an offset ("Z" or
+ * "+03:00"), so the server never has to guess a zone for a bare wall clock. */
+const instantInput = z.string().datetime({ offset: true }).nullable().default(null);
+
+/**
+ * `POST /api/reservations` — the stop sheet's reservation form, a hop's Add
+ * flight / Add ferry (#104), and the undo.
+ *
+ * The parent is a STOP or a SEGMENT, exactly one (#110 Q2 A) — the refine
+ * mirrors the `reservations_one_parent` CHECK, so a body naming both or
+ * neither is a 400 at the boundary rather than a constraint error deeper in.
+ * A segment-parented row carries its clock (`startsAt`/`endsAt`, each with its
+ * IANA zone); the server re-times the segment from its bookings.
+ *
+ * `moveStop` is the Q8 A "Check out of … on … instead" fix: save the booking
+ * AND move the stop's date to agree with it, in one transaction. Without it a
+ * booking whose date disagrees with the stop is refused (409).
+ */
 export const reservationCreateInput = reservation
   .pick({
     type: true,
@@ -348,9 +473,43 @@ export const reservationCreateInput = reservation
     confirmationNumber: true,
     cost: true,
     notes: true,
+    startsTz: true,
+    endsTz: true,
+    lodgingKind: true,
   })
-  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+  .extend({
+    stopId: z.string().uuid().nullish(),
+    segmentId: z.string().uuid().nullish(),
+    rating: rating.default(null),
+    startsAt: instantInput,
+    endsAt: instantInput,
+    moveStop: z.boolean().optional(),
+  })
+  .superRefine((b, ctx) => {
+    const parents = (b.stopId ? 1 : 0) + (b.segmentId ? 1 : 0);
+    if (parents !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stopId"],
+        message: "exactly one of stopId / segmentId",
+      });
+    }
+    // Half a clock is no clock: an instant with no zone cannot be shown as
+    // the wall time printed on the ticket.
+    if (b.startsAt !== null && !b.startsTz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["startsTz"], message: "startsAt needs its zone" });
+    }
+    if (b.endsAt !== null && !b.endsTz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endsTz"], message: "endsAt needs its zone" });
+    }
+    if (b.startsAt !== null && b.endsAt !== null && Date.parse(b.endsAt) < Date.parse(b.startsAt)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endsAt"], message: "lands before it leaves" });
+    }
+  });
+/** Post-parse: every default resolved. What the mutation receives. */
 export type ReservationCreateInput = z.infer<typeof reservationCreateInput>;
+/** Pre-parse: what a client sends — the clock and the kind may be omitted. */
+export type ReservationCreateBody = z.input<typeof reservationCreateInput>;
 
 /** `PATCH /api/reservations/:id` — every editable field, all optional, because
  * the form sends only what it changed (and the card's stars/note send one). */
@@ -364,9 +523,20 @@ export const reservationPatchInput = reservation
     cost: true,
     rating: true,
     notes: true,
+    // #105 · the stay form's kind switch is part of the ONE add/edit form, so
+    // an edit can change it (vet HIGH: an unlisted key would parse away).
+    lodgingKind: true,
   })
   .partial();
 export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
+
+/**
+ * `PATCH /api/segments/:id` (#104 · Q7 B) — a hop's mode switch. The mode is
+ * the only thing a client writes on a segment: its ends are reconciled from
+ * the stop sequence and its clock is re-timed from its bookings.
+ */
+export const segmentPatchInput = z.object({ mode: travelMode });
+export type SegmentPatchInput = z.infer<typeof segmentPatchInput>;
 
 /**
  * `POST /api/ideas` — the stop sheet's "Add idea", the shelf's "+ Add", the
@@ -432,6 +602,43 @@ export type IdeaPromoteInput = z.infer<typeof ideaPromoteInput>;
 export const savedPlaceStatus = z.enum(["want", "been"]);
 export type SavedPlaceStatus = z.infer<typeof savedPlaceStatus>;
 
+/**
+ * What a save is pinned to (#110 §5): a Google `place`, a named `area` (a note
+ * "in the Bandon area"), or a dropped `pin`. Mirrors the `save_anchor` pgEnum
+ * (packages/db/src/schema.ts).
+ */
+export const saveAnchor = z.enum(["place", "area", "pin"]);
+export type SaveAnchor = z.infer<typeof saveAnchor>;
+
+/**
+ * The locality a save resolved to (#111 · docs/design/111 "One resolver"): a
+ * `destinations` row, named "Bandon, OR" / "San José, Costa Rica", with its
+ * region header ("Oregon" / "Costa Rica") and the locality's own coordinates —
+ * the point an area save with no coordinates of its own is measured from.
+ */
+export const saveDestination = z.object({
+  id: z.string(),
+  name: z.string(),
+  region: z.string().nullable().default(null),
+  googlePlaceId: z.string(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+});
+export type SaveDestination = z.infer<typeof saveDestination>;
+
+/**
+ * The one-tap upgrade an offline note is offered after sync (#111 Q3 A): the
+ * top Places hit for the note's text near where it was typed. `saves.suggested_place`.
+ */
+export const suggestedPlace = z.object({
+  name: z.string(),
+  googlePlaceId: z.string(),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+  subline: z.string().nullable().default(null),
+});
+export type SuggestedPlace = z.infer<typeof suggestedPlace>;
+
 export const savedPlace = z.object({
   id: z.string(),
   ownerId: z.string(),
@@ -450,6 +657,18 @@ export const savedPlace = z.object({
   tripId: z.string().nullable().default(null),
   tripName: z.string().nullable().default(null),
   lastChange: lastChangeField,
+  // ── #111 W1 capture. Every one defaulted, so a payload from a server older
+  // than this read shape still parses (the phone ships on its own cadence).
+  anchor: saveAnchor.default("area"),
+  /** An area save's human label ("Bend, OR"). Null for place and pin saves. */
+  areaLabel: z.string().nullable().default(null),
+  /** Null = unanchored: no locality within 25 mi, or no provider key. */
+  destination: saveDestination.nullable().default(null),
+  suggestedPlace: suggestedPlace.nullable().default(null),
+  /** When the save was captured (`saves.created_at`, ISO) — the Saves tab's
+   * newest-first order inside a destination (#111 i2). Null from a server that
+   * predates it. */
+  createdAt: z.string().nullable().default(null),
 });
 export type SavedPlace = z.infer<typeof savedPlace>;
 
@@ -492,7 +711,7 @@ export type PlaceEnrichment = z.infer<typeof placeEnrichment>;
  * through. `id`, `ownerId`, `createdAt` and the joined `tripName` are
  * server-owned and are stripped from any body that sends them.
  */
-export const savedPlaceCreate = z.object({
+const savedPlaceFields = z.object({
   name: z.string().min(1),
   region: z.string().nullable().default(null),
   lat: z.number().nullable().default(null),
@@ -506,6 +725,42 @@ export const savedPlaceCreate = z.object({
   rating: rating.default(null),
   tripId: z.string().uuid().nullable().default(null),
 });
+
+/**
+ * The capture half of the create body (#111 · docs/design/111 "Contracts").
+ * CREATE-ONLY on purpose: `savedPlacePatch` below is built from
+ * `savedPlaceFields`, not from this, so a PATCH can never rewrite a save's
+ * client id, birthday or anchor (updateSavedPlaceFields spreads its patch
+ * straight into `.set()`).
+ *
+ * All optional and none defaulted, so a body that omits them — the web, an
+ * older phone — parses to exactly the shape it always did.
+ */
+export const savedPlaceCreate = savedPlaceFields
+  .extend({
+    /** `cap_…`, minted on the phone when the capture is queued. The save is
+     * idempotent on it: a replay answers 200 with the row that exists. */
+    clientId: z.string().min(1).max(64).optional(),
+    /** When the capture happened (it may be flushed hours later) → created_at. */
+    capturedAt: z.string().datetime({ offset: true }).optional(),
+    /** Wins over the derived `saveAnchorOf` when present. */
+    anchor: saveAnchor.optional(),
+    areaLabel: z.string().nullable().optional(),
+    /** Typed with no signal. With an area anchor it earns a place suggestion (i2). */
+    capturedOffline: z.boolean().optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.anchor === "pin" && (b.lat == null || b.lng == null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["anchor"], message: "a pin needs lat and lng" });
+    }
+    if (b.anchor === "place" && !b.googlePlaceId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["anchor"],
+        message: "a place anchor needs a googlePlaceId",
+      });
+    }
+  });
 /** Post-parse: every default resolved. What the mutations receive. */
 export type SavedPlaceCreate = z.infer<typeof savedPlaceCreate>;
 /** Pre-parse: `name` and whatever else the caller chose to send. What a client
@@ -518,8 +773,20 @@ export type SavedPlaceCreateInput = z.input<typeof savedPlaceCreate>;
  * required: an empty `.set({})` is a Drizzle error, and a body of nothing but
  * unknown keys is a caller bug that deserves a 400 rather than a 500.
  */
-export const savedPlacePatch = savedPlaceCreate
+export const savedPlacePatch = savedPlaceFields
   .partial()
+  .extend({
+    /**
+     * #111 Q3 A, "tap the strip": the save becomes its `suggested_place` — the
+     * name, Place ID and point are copied, the anchor goes area → place, the
+     * destination is re-resolved and the suggestion is cleared. PATCH-only: it
+     * is an action on a row that exists, never a create field.
+     */
+    upgradeToSuggested: z.literal(true).optional(),
+    /** Dismiss: `null` is the only value a client may write. The server is the
+     * one that fills it (createSave's offline text search). */
+    suggestedPlace: z.null().optional(),
+  })
   .refine((p) => Object.keys(p).length > 0, {
     message: "patch must name at least one field",
   });
@@ -534,6 +801,57 @@ export type SavedPlacePatch = z.infer<typeof savedPlacePatch>;
 export function normalizeSavedPlacePatch(patch: SavedPlacePatch): SavedPlacePatch {
   return patch.status === "been" ? { ...patch, source: null } : patch;
 }
+
+/**
+ * `GET /api/trips/:id/nearby-saves` (#111 i3 · docs/design/111 "Contracts"):
+ * the saves within the trip's radius of a located stop, nearest first, and the
+ * next ring out. Computed by `nearbySaves` (planner/nearby-saves.ts).
+ *
+ * Each item carries the save's `place` as well as the design's display fields:
+ * Add copies the place into a trip idea (`POST /api/ideas`), and without it
+ * the phone would have to join `saveId` back against the whole library.
+ */
+export const nearbySave = z.object({
+  saveId: z.string(),
+  name: z.string(),
+  type: reservationType,
+  status: savedPlaceStatus,
+  rating,
+  source: z.string().nullable(),
+  /** The save's OWN place — its own coordinates, never the destination's it
+   * was measured from, so the idea it becomes is exactly the save. */
+  place,
+  nearestStop: z.object({ id: z.string(), name: z.string() }),
+  /** At the shelf's precision: one decimal under 10 mi, whole miles above. */
+  distanceMi: z.number(),
+});
+export type NearbySave = z.infer<typeof nearbySave>;
+
+export const nearbySavesBeyond = z.object({
+  /** The next chip out (25 → 50 → 100 → 200). */
+  radiusMi: surfaceRadiusMi,
+  /** Saves past the current radius but inside that ring. */
+  count: z.number().int().positive(),
+  /** One decimal, always ("50.3 mi"). */
+  nearestMi: z.number(),
+  nearestName: z.string(),
+});
+export type NearbySavesBeyond = z.infer<typeof nearbySavesBeyond>;
+
+export const nearbySavesResponse = z.object({
+  radiusMi: z.number().int().positive(),
+  items: z.array(nearbySave),
+  /** Null at 200 mi (there is no next ring) and when the next ring is empty. */
+  beyond: nearbySavesBeyond.nullable(),
+});
+export type NearbySaves = z.infer<typeof nearbySavesResponse>;
+
+/** `POST /api/trips/:id/dismissed-saves` — the banner's Dismiss: every save
+ * currently surfaced, remembered for this trip (Q6 A). */
+export const dismissSavesInput = z.object({
+  saveIds: z.array(z.string().uuid()).min(1).max(500),
+});
+export type DismissSavesInput = z.infer<typeof dismissSavesInput>;
 
 /** A stop is "scheduled" iff it has both dates. */
 export function isScheduled(

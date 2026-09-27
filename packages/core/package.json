@@ -11,7 +11,8 @@
     "./providers/google-places": "./src/providers/google-places.ts",
     "./providers/google-routes": "./src/providers/google-routes.ts",
     "./planner": "./src/planner/index.ts",
-    "./api-client": "./src/api-client/index.ts"
+    "./api-client": "./src/api-client/index.ts",
+    "./seeds": "./src/seeds/index.ts"
   },
   "scripts": {
     "test": "vitest run",

@@ -286,7 +286,10 @@ export function buildMapModel(
   trips: Trip[],
   places: SavedPlace[],
   routes: RouteMap = {},
-  routingHash: string = NO_ROUTING_HASH,
+  /** One hash for every trip, or (#103) each trip's own — a trip that leaves
+   * the rig at home is routed on the no-rig key. A trip missing from the map
+   * reads the no-rig hash. */
+  routingHash: string | Readonly<Record<string, string>> = NO_ROUTING_HASH,
   units: Units = DEFAULT_UNITS,
 ): MapModel {
   const pins: MapPin[] = [];
@@ -349,7 +352,9 @@ export function buildMapModel(
     // What stays here is what is genuinely the web's: the layer this trip
     // paints on. The label wording is core's `arcLabel` — shared with the
     // phone's Map lens, and units-aware as of #45.
-    for (const arc of tripArcs(trip, routes, routingHash)) {
+    const hash =
+      typeof routingHash === "string" ? routingHash : (routingHash[trip.id] ?? NO_ROUTING_HASH);
+    for (const arc of tripArcs(trip, routes, hash)) {
       arcs.push({
         id: arc.id,
         layer,

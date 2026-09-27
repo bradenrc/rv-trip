@@ -131,14 +131,22 @@ describe("mobile auth · app/_layout.tsx is the hard gate", () => {
     expect(layout).toMatch(/function Shell\(/);
   });
 
-  it("still registers exactly the four screens, and only inside Shell", () => {
+  // #111 (Q1 A): the root Stack now holds the tabs, the capture sheet and the
+  // rig; the trips screens moved one level down into the Trips tab's own stack
+  // at the same URLs. The gate still wraps ALL of it — everything mounts
+  // through Shell's one Stack.
+  it("still registers the app's screens only inside Shell", () => {
     const stacks = layout.match(/<Stack[\s>]/g) ?? [];
     expect(stacks).toHaveLength(1);
     const shellAt = layout.indexOf("function Shell(");
     expect(shellAt).toBeGreaterThan(-1);
     expect(layout.indexOf("<Stack")).toBeGreaterThan(shellAt);
-    for (const name of ["index", "trips/[id]/index", "trips/[id]/stops/[stopId]", "rig"]) {
+    for (const name of ["(tabs)", "capture", "rig"]) {
       expect(layout).toContain(`name="${name}"`);
+    }
+    const trips = read("app/(tabs)/(trips)/_layout.tsx");
+    for (const name of ["index", "trips/[id]/index", "trips/[id]/stops/[stopId]"]) {
+      expect(trips).toContain(`name="${name}"`);
     }
   });
 

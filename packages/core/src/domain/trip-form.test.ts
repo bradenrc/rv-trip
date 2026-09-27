@@ -14,9 +14,14 @@ import {
   stopDatesHelp,
   stopDatesPatch,
   unscheduleStopPatch,
+  withTripMode,
+  lodgingChoices,
+  tripModeChoice,
+  tripDefaultsPatch,
+  type TripModeChoice,
   type TripSettingsDraft,
 } from "./trip-form";
-import { tripPatchInput, type Leg, type Stop, type Trip } from "./types";
+import { tripCreateInput, tripPatchInput, type Leg, type Stop, type Trip } from "./types";
 
 /** What the picker hands back for "Boise, ID" — a mapped pick. */
 const BOISE = {
@@ -42,8 +47,13 @@ function fixture(over: Partial<Trip> = {}): Trip {
     statusAuto: true,
     rating: null,
     note: null,
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    surfaceRadiusMi: null,
     ideas: [],
     legs: [],
+    segments: [],
     ...over,
   };
 }
@@ -66,9 +76,13 @@ describe("tripDayCount", () => {
 });
 
 describe("tripDraftInput — /trips/new", () => {
+  /** A road trip with its preselected answers — the page's state 2. */
+  const ROAD = withTripMode(BLANK_TRIP_DRAFT, "road");
+
   it("builds the POST body the design shows", () => {
     expect(
       tripDraftInput({
+        ...ROAD,
         title: "Redwoods Run",
         startDate: "2026-09-20",
         endDate: "2026-10-04",
@@ -80,18 +94,22 @@ describe("tripDraftInput — /trips/new", () => {
       endDate: "2026-10-04",
       homeBase: "Boise, ID",
       homeBasePlace: { name: "Boise, ID", lat: 43.615, lng: -116.2023, googlePlaceId: "ChIJnbRH" },
+      defaultMode: "drive",
+      lodgingDefault: "campground",
+      rigOn: true,
     });
   });
 
   it("trims, and no picked place is a null home base — the field is optional", () => {
     expect(
       tripDraftInput({
+        ...ROAD,
         title: "  Redwoods Run  ",
         startDate: "2026-09-20",
         endDate: "2026-10-04",
         homeBasePlace: null,
       }),
-    ).toEqual({
+    ).toMatchObject({
       title: "Redwoods Run",
       startDate: "2026-09-20",
       endDate: "2026-10-04",
@@ -103,27 +121,95 @@ describe("tripDraftInput — /trips/new", () => {
   it("is null until the form is submittable", () => {
     expect(tripDraftInput(BLANK_TRIP_DRAFT)).toBeNull();
     expect(
-      tripDraftInput({ ...BLANK_TRIP_DRAFT, startDate: "2026-09-20", endDate: "2026-10-04" }),
+      tripDraftInput({ ...ROAD, startDate: "2026-09-20", endDate: "2026-10-04" }),
     ).toBeNull(); // no title
     expect(
+      tripDraftInput({ ...ROAD, title: "Redwoods Run", startDate: "2026-09-20", endDate: "" }),
+    ).toBeNull(); // no end date
+  });
+
+  it("is null with no mode picked — the question the page opens on (#103)", () => {
+    expect(
       tripDraftInput({
+        ...BLANK_TRIP_DRAFT,
         title: "Redwoods Run",
         startDate: "2026-09-20",
-        endDate: "",
-        homeBasePlace: null,
+        endDate: "2026-10-04",
       }),
-    ).toBeNull(); // no end date
+    ).toBeNull();
   });
 
   it("refuses a range that ends before it starts", () => {
     expect(
-      tripDraftInput({
-        title: "Redwoods Run",
-        startDate: "2026-10-04",
-        endDate: "2026-09-20",
-        homeBasePlace: null,
-      }),
+      tripDraftInput({ ...ROAD, title: "Redwoods Run", startDate: "2026-10-04", endDate: "2026-09-20" }),
     ).toBeNull();
+  });
+
+  const filled = (mode: TripModeChoice) => ({
+    ...withTripMode(BLANK_TRIP_DRAFT, mode),
+    title: "T",
+    startDate: "2027-01-16",
+    endDate: "2027-01-25",
+  });
+
+  it("maps road / air / mixed to drive / fly / fly (Q2 A: a mix stores fly)", () => {
+    expect(tripDraftInput(filled("road"))?.defaultMode).toBe("drive");
+    expect(tripDraftInput(filled("air"))?.defaultMode).toBe("fly");
+    expect(tripDraftInput(filled("mixed"))?.defaultMode).toBe("fly");
+  });
+
+  it("forces rigOn false off the road — a fly trip or a mix is never asked", () => {
+    expect(tripDraftInput({ ...filled("air"), rigOn: true })?.rigOn).toBe(false);
+    expect(tripDraftInput({ ...filled("mixed"), rigOn: true })?.rigOn).toBe(false);
+    expect(tripDraftInput({ ...filled("road"), rigOn: false })?.rigOn).toBe(false);
+    expect(tripDraftInput(filled("road"))?.rigOn).toBe(true);
+  });
+
+  it("preselects campgrounds + the rig for a road trip, hotels otherwise", () => {
+    expect(withTripMode(BLANK_TRIP_DRAFT, "road")).toMatchObject({ lodgingDefault: "campground", rigOn: true });
+    expect(withTripMode(BLANK_TRIP_DRAFT, "air")).toMatchObject({ lodgingDefault: "hotel", rigOn: false });
+    expect(withTripMode(BLANK_TRIP_DRAFT, "mixed")).toMatchObject({ lodgingDefault: "hotel", rigOn: false });
+  });
+
+  it("orders the lodging cards by mode", () => {
+    expect(lodgingChoices("road")).toEqual(["campground", "hotel", "airbnb", "friends"]);
+    expect(lodgingChoices("air")).toEqual(["hotel", "airbnb", "friends", "campground"]);
+  });
+
+  it("every body parses under the API's own schema", () => {
+    for (const m of ["road", "air", "mixed"] as const) {
+      expect(tripCreateInput.safeParse(tripDraftInput(filled(m))).success).toBe(true);
+    }
+  });
+});
+
+describe("the three defaults in Trip settings (#103 · klunk row 7)", () => {
+  it("reopens a fly trip — Greece's 'A mix' included — as Fly & stay", () => {
+    expect(tripModeChoice("fly")).toBe("air");
+    expect(tripModeChoice("drive")).toBe("road");
+    const d = tripSettingsDraft(fixture({ defaultMode: "fly", lodgingDefault: "hotel", rigOn: false }));
+    expect(d).toMatchObject({ mode: "air", lodgingDefault: "hotel", rigOn: false });
+  });
+
+  it("sends only what changed", () => {
+    const t = fixture({ defaultMode: "fly", lodgingDefault: "hotel", rigOn: false });
+    expect(tripSettingsPatch(t, tripSettingsDraft(t))).toEqual({});
+    // "A mix" stores the same fly: not a change.
+    expect(tripSettingsPatch(t, { ...tripSettingsDraft(t), mode: "mixed" })).toEqual({});
+    expect(tripSettingsPatch(t, { ...tripSettingsDraft(t), mode: "road", rigOn: false })).toEqual({
+      defaultMode: "drive",
+    });
+    expect(tripSettingsPatch(t, { ...tripSettingsDraft(t), lodgingDefault: "friends" })).toEqual({
+      lodgingDefault: "friends",
+    });
+  });
+
+  it("Road trip → Fly & stay also turns the rig off", () => {
+    const t = fixture({ defaultMode: "drive", lodgingDefault: "campground", rigOn: true });
+    expect(tripDefaultsPatch(t, { mode: "air", lodgingDefault: "campground", rigOn: true })).toEqual({
+      defaultMode: "fly",
+      rigOn: false,
+    });
   });
 });
 
@@ -144,6 +230,9 @@ describe("tripSettingsDraft", () => {
       status: "auto",
       rating: 0,
       note: "",
+      mode: "road",
+      lodgingDefault: null,
+      rigOn: true,
     });
   });
 
@@ -249,6 +338,12 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
       cost: null,
       rating: null,
       notes: null,
+      segmentId: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
+      lodgingKind: null,
       lastChange: null,
     })),
     ideas: Array.from({ length: ideas }, (_, i) => ({
@@ -329,6 +424,12 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     cost: null,
     rating: null,
     notes: null,
+    segmentId: null,
+    startsAt: null,
+    endsAt: null,
+    startsTz: null,
+    endsTz: null,
+    lodgingKind: null,
     lastChange: null,
   });
   const stopOf = (id: string, resCount: number, ideaCount: number): Stop => ({

@@ -8,6 +8,7 @@ import {
   type IdeaCreateInput,
   type IdeaPatchInput,
   type IsoDate,
+  type LodgingKind,
   type Reservation,
   type ReservationCreateInput,
   type ReservationPatchInput,
@@ -35,7 +36,7 @@ export const UNDO_WINDOW_MS = 6000;
 // ── the reservation form ───────────────────────────────────────────────────
 
 /** What the reservation form holds. Every field is a string, the way an input
- * holds it; "" is the empty/null state for all but `type`. */
+ * holds it; "" is the empty/null state for all but `type` and `lodgingKind`. */
 export interface ReservationDraft {
   type: ReservationType;
   name: string;
@@ -43,6 +44,8 @@ export interface ReservationDraft {
   checkOut: string;
   confirmationNumber: string;
   cost: string;
+  /** The stay's kind (#105 · Q9 A) — set only while the form is on Stay. */
+  lodgingKind: LodgingKind | null;
 }
 
 export const BLANK_RESERVATION_DRAFT: ReservationDraft = {
@@ -52,7 +55,66 @@ export const BLANK_RESERVATION_DRAFT: ReservationDraft = {
   checkOut: "",
   confirmationNumber: "",
   cost: "",
+  lodgingKind: null,
 };
+
+// ── #105 · somewhere to stay, by kind ──────────────────────────────────────
+
+/** The kind switch, in the form's order (Campground · Hotel · Airbnb · Friends). */
+export const STAY_KINDS: readonly LodgingKind[] = ["campground", "hotel", "airbnb", "friends"];
+
+/** The label a saved stay prints in place of its raw type word. */
+export const LODGING_KIND_LABEL: Record<LodgingKind, string> = {
+  campground: "Campground",
+  hotel: "Hotel",
+  airbnb: "Airbnb",
+  friends: "Friends",
+};
+
+/**
+ * The kind DECIDES the type (Q9 A): a campground is a "campground", every
+ * other stay is "lodging". `categoryMeta` is therefore untouched — a Friends
+ * or an Airbnb stay is the same green BedDouble Stay tile a hotel is.
+ */
+export function stayKindType(kind: LodgingKind): ReservationType {
+  return kind === "campground" ? "campground" : "lodging";
+}
+
+/** The name field's label follows the kind. */
+export function stayNameLabel(kind: LodgingKind): string {
+  switch (kind) {
+    case "campground":
+      return "Campground";
+    case "hotel":
+      return "Hotel";
+    case "airbnb":
+      return "Listing name or link";
+    case "friends":
+      return "Staying with";
+  }
+}
+
+/** Is this row a stay (the Stay grouping of the Type select)? */
+export function isStayType(type: ReservationType): boolean {
+  return type === "campground" || type === "lodging";
+}
+
+/**
+ * "Add" opens the form on Stay with the trip's lodging default preselected
+ * (#105 · Q3 A) — Campground on PNW, Hotel on Costa Rica and Greece. A trip
+ * with no default opens on Campground, the shipped form's first type.
+ */
+export function stayDraft(kind: LodgingKind | null): ReservationDraft {
+  const k = kind ?? "campground";
+  return { ...BLANK_RESERVATION_DRAFT, type: stayKindType(k), lodgingKind: k };
+}
+
+/** The kind switch pressed: the type follows, and Friends drops the paperwork
+ * it never has (no cost, no confirmation number — it's their couch). */
+export function withStayKind(d: ReservationDraft, kind: LodgingKind): ReservationDraft {
+  const next = { ...d, type: stayKindType(kind), lodgingKind: kind };
+  return kind === "friends" ? { ...next, cost: "", confirmationNumber: "" } : next;
+}
 
 /**
  * The cost field. `null` is "no cost recorded" (an empty field — planning
@@ -113,7 +175,10 @@ export function reservationDraftInput(
 ): ReservationCreateInput | null {
   const name = d.name.trim();
   if (name === "") return null;
-  const cost = reservationCost(d.cost);
+  // A stay with friends carries no cost and no confirmation (Q9 A), whatever
+  // the fields held before the switch.
+  const friends = d.lodgingKind === "friends" && isStayType(d.type);
+  const cost = friends ? null : reservationCost(d.cost);
   if (cost === undefined) return null;
   const dates = reservationDates(d);
   if (dates === undefined) return null;
@@ -123,10 +188,16 @@ export function reservationDraftInput(
     name,
     checkIn: dates.checkIn,
     checkOut: dates.checkOut,
-    confirmationNumber: trimmedOrNull(d.confirmationNumber),
+    confirmationNumber: friends ? null : trimmedOrNull(d.confirmationNumber),
     cost,
     rating: null,
     notes: null,
+    startsAt: null,
+    endsAt: null,
+    startsTz: null,
+    endsTz: null,
+    // A kind belongs to a stay only: switching the Type off Stay drops it.
+    lodgingKind: isStayType(d.type) ? d.lodgingKind : null,
   };
 }
 
@@ -139,6 +210,7 @@ export function reservationDraft(r: Reservation): ReservationDraft {
     checkOut: text(r.checkOut),
     confirmationNumber: text(r.confirmationNumber),
     cost: r.cost === null ? "" : String(r.cost),
+    lodgingKind: r.lodgingKind,
   };
 }
 
@@ -151,7 +223,8 @@ export function reservationDraftPatch(
   r: Reservation,
   d: ReservationDraft,
 ): ReservationPatchInput | null {
-  const next = reservationDraftInput(r.stopId, d);
+  // Only the validation is borrowed here — a PATCH never carries the parent.
+  const next = reservationDraftInput(r.stopId ?? "", d);
   if (next === null) return null;
   const patch: ReservationPatchInput = {};
   if (next.type !== r.type) patch.type = next.type;
@@ -162,6 +235,7 @@ export function reservationDraftPatch(
     patch.confirmationNumber = next.confirmationNumber;
   }
   if (next.cost !== r.cost) patch.cost = next.cost;
+  if (next.lodgingKind !== r.lodgingKind) patch.lodgingKind = next.lodgingKind;
   return patch;
 }
 
@@ -172,7 +246,15 @@ export function reservationDraftPatch(
  */
 export function reservationRestoreInput(r: Reservation): ReservationCreateInput {
   return {
+    // The row goes back on the parent it came from — a stop, or (#104) the hop
+    // a flight or ferry was booked on. Exactly one of the two is set.
     stopId: r.stopId,
+    segmentId: r.segmentId,
+    startsAt: r.startsAt,
+    endsAt: r.endsAt,
+    startsTz: r.startsTz,
+    endsTz: r.endsTz,
+    lodgingKind: r.lodgingKind,
     type: r.type,
     name: r.name,
     checkIn: r.checkIn,

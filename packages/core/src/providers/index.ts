@@ -62,7 +62,33 @@ export interface PlaceSummary {
   location: LatLng | null;
   rating: number | null;
   address: string | null;
+  /**
+   * Google's `primaryType` ("restaurant") and its display name ("Restaurant")
+   * — SEARCH rows only (#111): the capture sheet's tile comes from the first
+   * through `reservationTypeOfGoogle`, its subline from the second. Optional so
+   * a details answer, a cached row and every older fake stay a PlaceSummary.
+   */
+  primaryType?: string | null;
+  primaryTypeDisplayName?: string | null;
 }
+
+/**
+ * A save's locality (#111 · docs/design/111 "One resolver"). `name` is the
+ * shelf heading ("Bandon, OR" in the US, "San José, Costa Rica" elsewhere) and
+ * `region` the header above it ("Oregon" / "Costa Rica"). `lat`/`lng` are the
+ * LOCALITY's, stored on the destinations row so an area save with no
+ * coordinates of its own still has a point to be measured from.
+ */
+export interface ResolvedDestination {
+  googlePlaceId: string;
+  name: string;
+  region: string | null;
+  lat: number;
+  lng: number;
+}
+
+/** A locality further than this from the point is not the point's town. */
+export const DESTINATION_MAX_MILES = 25;
 
 /**
  * What a DETAILS call answers with (#82 §7①, #91) — `PlaceSummary` plus the
@@ -89,6 +115,12 @@ export interface PlaceDetails extends PlaceSummary {
 export interface PlacesProvider {
   search(query: string, near?: LatLng): Promise<PlaceSummary[]>;
   details(googlePlaceId: string): Promise<PlaceDetails | null>;
+  /**
+   * Reverse-geocode a point to its locality (#111). `null` when there is none
+   * within {@link DESTINATION_MAX_MILES}. Throws on an upstream failure, like
+   * `search`; the save path turns that into a null destination.
+   */
+  resolveDestination(lat: number, lng: number): Promise<ResolvedDestination | null>;
 }
 
 /** The nominal RV highway speed the straight-line estimate assumes. */
@@ -144,6 +176,10 @@ export class StubPlacesProvider implements PlacesProvider {
    * environment. No provider means no line at all.
    */
   async details(): Promise<PlaceDetails | null> {
+    return null;
+  }
+  /** No key, no locality: every save is written with a null destination. */
+  async resolveDestination(): Promise<ResolvedDestination | null> {
     return null;
   }
 }

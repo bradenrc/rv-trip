@@ -1,17 +1,22 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type {
   CascadeCounts,
   Idea,
   IdeaCategory,
+  NearbySave,
+  NearbySaves,
   PickedPlace,
   SavedPlace,
+  SurfaceRadiusMi,
   Reservation,
+  ReservationCreateInput,
   ReservationDraft,
   ReservationType,
+  TravelMode,
   Stop,
   StopDatesDraft,
   Trip,
@@ -19,8 +24,11 @@ import type {
   TripSettingsDraft,
 } from "@rv-trip/core";
 import {
-  BLANK_RESERVATION_DRAFT,
   UNDO_WINDOW_MS,
+  applyHopBooking,
+  removeSegmentBooking,
+  setSegmentMode,
+  stayDraft,
   cascadeLossSentence,
   ideaDraftInput,
   ideaIsLocated,
@@ -32,7 +40,8 @@ import {
   locateToastMessage,
   legCascadeCounts,
   nextLegTitle,
-  orderedPairs,
+  drivePairs,
+  withReconciledSegments,
   orphanedStopsMessage,
   reservationDraft,
   reservationDraftInput,
@@ -164,6 +173,8 @@ import { Timeline } from "./Timeline";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
+import { NearbySavesBanner, NearbySavesSheet, sheetRows } from "./NearbySaves";
+import { LodgingCards, RigCards, TripModeCards } from "./choice-cards";
 
 
 /**
@@ -183,6 +194,7 @@ export function TripPlanner({
   hasRig,
   units,
   savedPlaces = [],
+  nearby: initialNearby,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -210,11 +222,26 @@ export function TripPlanner({
    * rather than failing to render at all.
    */
   savedPlaces?: SavedPlace[];
+  /**
+   * #111 i4 · trip surfacing: the saves near this trip at its radius, minus
+   * the ones dismissed here — core's `nearbySaves`, computed on the server
+   * (trips/[id]/page.tsx) so the banner is in the first paint.
+   */
+  nearby: NearbySaves;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
   const [routes, setRoutes] = useState(initialRoutes);
-  const [lens, setLens] = useState<"timeline" | "route">("timeline");
+  // Klunk row 8 · Q4 A: the lens follows the mode — a drive trip opens on
+  // Route, a fly trip on Timeline. Derived, never stored.
+  const [lens, setLens] = useState<"timeline" | "route">(
+    initialTrip.defaultMode === "drive" ? "route" : "timeline",
+  );
+  /** The hop whose Add flight / Add ferry form is open (#104 · Q5 A). */
+  const [openHopId, setOpenHopId] = useState<string | null>(null);
+  /** A fly/ferry day clicked on the Timeline: once Route has rendered, scroll
+   * that hop into view. A ref, not state — it is a one-shot DOM instruction. */
+  const scrollHopId = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -237,7 +264,7 @@ export function TripPlanner({
   const [ideaPicked, setIdeaPicked] = useState<PickedPlace | null>(null);
   const [deleteLegId, setDeleteLegId] = useState<string | null>(null);
   const [deleteStopId, setDeleteStopId] = useState<string | null>(null);
-  const [form, setForm] = useState<AddForm>(BLANK_RESERVATION_DRAFT);
+  const [form, setForm] = useState<AddForm>(() => stayDraft(initialTrip.lodgingDefault));
   const [ideaAddOpen, setIdeaAddOpen] = useState(false);
   const [ideaDraft, setIdeaDraft] = useState("");
   /** The idea whose "Book as" picker is open, and the type it is set to. The
@@ -255,6 +282,13 @@ export function TripPlanner({
   const [shelfPicked, setShelfPicked] = useState<PickedPlace | null>(null);
   /** The Add-from-Places panel — the library, filtered, one Add per row. */
   const [placesPanelOpen, setPlacesPanelOpen] = useState(false);
+  /** #111 i4 · the nearby-saves banner's numbers, re-read after a radius chip
+   * and on closing the review sheet. */
+  const [nearby, setNearby] = useState(initialNearby);
+  const [nearbyOpen, setNearbyOpen] = useState(false);
+  /** The rows added from the OPEN review sheet — kept as "✓ Idea" even after a
+   * refetch drops them (they are on the trip now). Cleared on each open. */
+  const [nearbyAdded, setNearbyAdded] = useState<NearbySave[]>([]);
   /** The shelf row whose place picker is open — the same #69 entrance the stop
    * sheet's idea card has, on the rail's card. */
   const [locatingShelfIdeaId, setLocatingShelfIdeaId] = useState<string | null>(null);
@@ -272,6 +306,13 @@ export function TripPlanner({
    * ever open.
    */
   const noteUndo = useRef<Trip | null>(null);
+
+  useEffect(() => {
+    const id = scrollHopId.current;
+    if (lens !== "route" || !id) return;
+    scrollHopId.current = null;
+    document.getElementById(`hop-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [lens, openHopId]);
 
   /**
    * Every write: the optimistic change is already on screen, so a failure
@@ -454,7 +495,7 @@ export function TripPlanner({
    * goes back — a link would re-create the dual-write the answer rejects, and
    * the copy is yours to edit without touching the library.
    */
-  const addIdeaFromPlace = async (p: SavedPlace) => {
+  const addIdeaFromPlace = async (p: SavedPlace): Promise<boolean> => {
     try {
       const created = await tripApi.createIdea({
         tripId: trip.id,
@@ -470,9 +511,78 @@ export function TripPlanner({
       });
       setTrip((t) => appendShelfIdea(t, created));
       toast.success(`Added ${p.place.name} to this trip's ideas`);
+      return true;
     } catch {
       toast.error(`Couldn't add ${p.place.name}.`);
+      return false;
     }
+  };
+
+  // ── #111 i4 · trip surfacing: the banner and its review sheet ─────────────
+
+  /** Re-read the banner's numbers. Quiet on failure: the banner keeps what it
+   * had, and a surfacing hint is never worth an error. */
+  const refreshNearby = () =>
+    tripApi
+      .nearbySaves(trip.id)
+      .then(setNearby)
+      .catch(() => {});
+
+  /** Dismiss: every save the banner names, remembered for THIS trip (Q6 A).
+   * The banner comes back only when a new save matches. */
+  const dismissNearby = () => {
+    const before = nearby;
+    const saveIds = nearby.items.map((i) => i.saveId);
+    setNearby({ ...nearby, items: [], beyond: null });
+    tripApi.dismissSaves(trip.id, saveIds).catch(() => {
+      setNearby(before);
+      toast.error("Couldn't dismiss those saves.");
+    });
+  };
+
+  const openNearby = () => {
+    setNearbyAdded([]);
+    setNearbyOpen(true);
+  };
+
+  const closeNearby = () => {
+    setNearbyOpen(false);
+    void refreshNearby();
+  };
+
+  /** A row's Add — the shipped "Add from Places" copy (`addIdeaFromPlace`),
+   * the save found by id in the library the page already read. */
+  const addNearby = async (item: NearbySave) => {
+    const p = savedPlaces.find((s) => s.id === item.saveId);
+    if (!p) return;
+    if (await addIdeaFromPlace(p)) setNearbyAdded((a) => [...a, item]);
+  };
+
+  /** "Add all N to ideas" — one at a time, so the shelf's order follows the
+   * sheet's (nearest first). */
+  const addAllNearby = async () => {
+    const done = new Set(nearbyAdded.map((i) => i.saveId));
+    for (const item of sheetRows(nearby.items, nearbyAdded)) {
+      if (!done.has(item.saveId)) await addNearby(item);
+    }
+  };
+
+  /** A radius chip: saved to this trip, then the sheet re-reads at it. */
+  const setSurfaceRadius = (r: SurfaceRadiusMi) => {
+    if (r === nearby.radiusMi) return;
+    const undoTrip = trip;
+    const undoNearby = nearby;
+    setTrip((t) => ({ ...t, surfaceRadiusMi: r }));
+    setNearby((n) => ({ ...n, radiusMi: r }));
+    tripApi
+      .updateTrip(trip.id, { surfaceRadiusMi: r })
+      .then(() => tripApi.nearbySaves(trip.id))
+      .then(setNearby)
+      .catch(() => {
+        setTrip(undoTrip);
+        setNearby(undoNearby);
+        toast.error("Couldn't change the radius.");
+      });
   };
 
   /**
@@ -925,7 +1035,9 @@ export function TripPlanner({
     const patch = tripSettingsPatch(trip, draft);
     if (Object.keys(patch).length === 0) return;
     const undo = trip;
-    setTrip({ ...trip, ...patch });
+    // A home base set or cleared adds or drops the home → first hop; the server
+    // reconciles in the same write, so the optimistic trip does too (#110 §6).
+    setTrip(withReconciledSegments({ ...trip, ...patch }));
     persist(
       tripApi.updateTrip(trip.id, patch),
       undo,
@@ -956,8 +1068,10 @@ export function TripPlanner({
   // for six seconds — Undo re-POSTs the row, because the DELETE has already
   // committed by the time the toast is gone and the id is not coming back.
 
+  /** "Add" opens on Stay, with the trip's lodging default as its kind (#105 ·
+   * Q3 A) — Campground on PNW, Hotel on Costa Rica and Greece. */
   const openAddReservation = () => {
-    setForm(BLANK_RESERVATION_DRAFT);
+    setForm(stayDraft(trip.lodgingDefault));
     setFormTarget("new");
   };
 
@@ -980,7 +1094,7 @@ export function TripPlanner({
         // the server can mint the id, so it awaits the 201 and splices the row.
         const row = await tripApi.createReservation(body);
         setTrip((t) => appendReservation(t, stopId, row));
-        setForm(BLANK_RESERVATION_DRAFT);
+        setForm(stayDraft(trip.lodgingDefault));
         setFormTarget(null);
       } catch {
         toast.error("Couldn't save that reservation.");
@@ -988,13 +1102,15 @@ export function TripPlanner({
       return;
     }
     const r = selectedStop?.reservations.find((x) => x.id === formTarget);
-    if (!r) return;
+    if (!r || !selectedStop) return;
     const patch = reservationDraftPatch(r, form);
     if (patch === null) return;
     setFormTarget(null);
     if (Object.keys(patch).length === 0) return;
     const undo = trip;
-    setTrip(setReservationFields(trip, r.stopId, r.id, patch));
+    // The sheet lists only its stop's reservations (#110 Q2 A), so the row's
+    // parent IS the open stop.
+    setTrip(setReservationFields(trip, selectedStop.id, r.id, patch));
     persist(
       tripApi.updateReservation(r.id, patch),
       undo,
@@ -1004,10 +1120,10 @@ export function TripPlanner({
 
   const doDeleteReservation = (resId: string) => {
     const r = selectedStop?.reservations.find((x) => x.id === resId);
-    if (!r) return;
+    if (!r || !selectedStop) return;
     if (formTarget === resId) setFormTarget(null);
     const undo = trip;
-    const next = removeReservation(trip, r.stopId, resId);
+    const next = removeReservation(trip, selectedStop.id, resId);
     setTrip(next);
     persist(
       tripApi.deleteReservation(resId),
@@ -1027,7 +1143,8 @@ export function TripPlanner({
   const restoreReservation = async (r: Reservation) => {
     try {
       const row = await tripApi.createReservation(reservationRestoreInput(r));
-      setTrip((t) => appendReservation(t, r.stopId, row));
+      // The re-POSTed row is stop-attached by construction.
+      setTrip((t) => (row.stopId ? appendReservation(t, row.stopId, row) : t));
     } catch {
       toast.error(`Couldn't put ${r.name} back.`);
     }
@@ -1104,6 +1221,74 @@ export function TripPlanner({
     }
   };
 
+  // ── #104 · hops: the mode switch and the bookings on a hop ─────────────────
+
+  /** Drive / Fly / Ferry — `PATCH /api/segments/:id`, optimistic. A drive that
+   * flies leaves `drivePairs`, taking its Navigate, rail miles and HERE call
+   * with it; a hop driven again is routed in the background. */
+  const doSetHopMode = (segmentId: string, mode: TravelMode) => {
+    const seg = trip.segments.find((s) => s.id === segmentId);
+    if (!seg || seg.mode === mode) return;
+    if (mode === "drive" && seg.reservations.length > 0) {
+      // The server refuses it too (409 segment_has_bookings, vet MED).
+      toast.error("Remove this hop's bookings before switching it to Drive.");
+      return;
+    }
+    const undo = trip;
+    const next = setSegmentMode(trip, segmentId, mode);
+    setTrip(next);
+    if (mode === "drive") upgradeRoutes(next);
+    else setOpenHopId(null);
+    persist(
+      tripApi.updateSegment(segmentId, { mode }),
+      undo,
+      "Couldn't change how that hop travels — put back the way it was.",
+    );
+  };
+
+  /** Save flight / Save ferry — and, with `moveStop`, Q8 A's "Check out of …
+   * instead": the booking and the stop's new date in ONE request. A create is
+   * not optimistic (only the server mints the id), so it awaits the 201. */
+  const saveHopBooking = async (body: ReservationCreateInput, moveStop: boolean) => {
+    try {
+      const row = await tripApi.createReservation(moveStop ? { ...body, moveStop: true } : body);
+      setTrip((t) => withReconciledSegments(applyHopBooking(t, row, moveStop)));
+      setOpenHopId(null);
+      return true;
+    } catch {
+      toast.error("Couldn't save that booking — nothing was saved.");
+      return false;
+    }
+  };
+
+  /** A flight or ferry removed from its hop: optimistic, with the leaf undo. */
+  const doDeleteHopBooking = (resId: string) => {
+    const r = trip.segments.flatMap((s) => s.reservations).find((x) => x.id === resId);
+    if (!r) return;
+    const undo = trip;
+    setTrip(removeSegmentBooking(trip, resId));
+    persist(tripApi.deleteReservation(resId), undo, `Couldn't delete ${r.name} — it's back.`);
+    toast.success(`Deleted ${r.name}`, {
+      duration: UNDO_WINDOW_MS,
+      action: {
+        label: "Undo",
+        onClick: () =>
+          void tripApi
+            .createReservation(reservationRestoreInput(r))
+            .then((row) => setTrip((t) => applyHopBooking(t, row, false)))
+            .catch(() => toast.error(`Couldn't put ${r.name} back.`)),
+      },
+    });
+  };
+
+  /** Q5 A · a fly or ferry day on the Timeline: switch to Route, scroll to
+   * that hop, and open its Add flight (or Add ferry) form. */
+  const openHopFromTimeline = (segmentId: string) => {
+    scrollHopId.current = segmentId;
+    setLens("route");
+    setOpenHopId(segmentId);
+  };
+
   /**
    * Reordering invents pairs the server never routed. Those render immediately
    * from the synchronous straight-line estimate; this asks for the real ones in
@@ -1111,12 +1296,18 @@ export function TripPlanner({
    * screen and is honestly labelled.
    */
   const upgradeRoutes = (next: Trip) => {
-    const missing = orderedPairs(next).filter(
+    // Driven hops only (#110 §6): a flight has no road to fetch.
+    const missing = drivePairs(next).filter(
       (p) => !routes[routeCacheKey(p.from, p.to, routingHash)],
     );
     if (missing.length === 0) return;
     tripApi
-      .routePairs(missing.map((p) => ({ from: p.from, to: p.to })))
+      // The trip rides along (#103): a trip that leaves the rig home is keyed
+      // without it, so the reply's hash matches this page's.
+      .routePairs(
+        missing.map((p) => ({ from: p.from, to: p.to })),
+        next.id,
+      )
       // Merge ONLY when the reply was keyed with the rig this page rendered
       // against. Edit a ROUTING field in another tab and the server keys with
       // the new hash — merging those would add keys nothing ever looks up, so
@@ -1243,6 +1434,22 @@ export function TripPlanner({
 
         {/* The shelf's "+ Add" draft and the Add-from-Places panel both open
             ABOVE the two lenses: a maybe belongs to the trip, not to a lens. */}
+        {/* #111 i4 · the saves near this trip. Above the lenses with the
+            Add-from-Places panel — a save belongs to the trip, not a lens —
+            and beside that entrance, never instead of it. */}
+        <NearbySavesBanner nearby={nearby} onOpen={openNearby} onDismiss={dismissNearby} />
+        {nearbyOpen && (
+          <NearbySavesSheet
+            tripTitle={trip.title}
+            nearby={nearby}
+            rows={sheetRows(nearby.items, nearbyAdded)}
+            added={new Set(nearbyAdded.map((i) => i.saveId))}
+            onAdd={(item) => void addNearby(item)}
+            onAddAll={() => void addAllNearby()}
+            onRadius={setSurfaceRadius}
+            onClose={closeNearby}
+          />
+        )}
         {addIdeaCategory && (
           <ShelfIdeaDraft
             category={addIdeaCategory}
@@ -1295,6 +1502,7 @@ export function TripPlanner({
             onPlanIdea={(ideaId, gap) => void doPlanIdea(ideaId, gap)}
             onAttachIdea={doAttachIdea}
             onAddFromPlaces={() => setPlacesPanelOpen((v) => !v)}
+            onOpenHop={openHopFromTimeline}
             ideaActions={(it) => (
               <RowMenu label={`Actions for ${it.title}`}>
                 {/* #74 · place-state 3 only. A coordless or place-less shelf
@@ -1335,6 +1543,7 @@ export function TripPlanner({
         ) : (
           <RouteView
             legs={route}
+            trip={trip}
             summary={summary}
             homeBasePlace={trip.homeBasePlace}
             costs={costTracking}
@@ -1375,6 +1584,13 @@ export function TripPlanner({
               onCancelChangePlace: () => setPlacingStopId(null),
               locating,
               onLocate: locateUnmapped,
+              openHopId,
+              hops: {
+                onMode: doSetHopMode,
+                onOpenForm: setOpenHopId,
+                onSave: saveHopBooking,
+                onDelete: doDeleteHopBooking,
+              },
             }}
             onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
             onRowDragEnd={() => setRouteDrag(null)}
@@ -1408,6 +1624,7 @@ export function TripPlanner({
           legName={selectedLegName}
           stopOrdinal={scheduledOrdinal.get(selectedStop.id) ?? null}
           costs={costTracking}
+          lodgingDefault={trip.lodgingDefault}
           leaves={{
             formTarget,
             form,
@@ -1704,6 +1921,32 @@ function TripSettingsFields({
       </DialogHeader>
 
       <div className="mt-3 flex flex-col gap-2.5">
+        {/* #103 · klunk row 7 — the setup's three answers, so none of them is
+            permanent. Greece ("A mix", stored fly) reopens as Fly & stay. A new
+            mode reaches only the hops added from now on. */}
+        <div className="flex flex-col gap-1">
+          <FieldLabel>How it moves</FieldLabel>
+          <TripModeCards
+            value={draft.mode}
+            withSubs={false}
+            onChange={(mode) => set({ mode, rigOn: mode === "road" ? draft.rigOn : false })}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <FieldLabel>Mostly sleeping in</FieldLabel>
+          <LodgingCards
+            mode={draft.mode}
+            value={draft.lodgingDefault}
+            onChange={(lodgingDefault) => set({ lodgingDefault })}
+          />
+        </div>
+        {draft.mode === "road" && (
+          <div className="flex flex-col gap-1">
+            <FieldLabel>Bringing the rig?</FieldLabel>
+            <RigCards value={draft.rigOn} onChange={(rigOn) => set({ rigOn })} />
+          </div>
+        )}
+
         <div className="flex gap-2.5">
           <div className="flex flex-1 flex-col gap-1">
             <FieldLabel>Start</FieldLabel>

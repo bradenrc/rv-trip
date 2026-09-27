@@ -107,6 +107,11 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
         ],
       },
     ],
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    surfaceRadiusMi: null,
+    segments: [],
   };
 }
 
@@ -349,6 +354,11 @@ describe("buildMapModel — the third pin kind", () => {
           tripId: null,
           tripName: null,
           lastChange: null,
+          anchor: "area",
+          areaLabel: null,
+          destination: null,
+          suggestedPlace: null,
+          createdAt: null,
         },
       ],
       {},

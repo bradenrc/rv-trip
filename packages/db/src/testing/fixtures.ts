@@ -1,12 +1,16 @@
 import { asc, count, eq, sql } from "drizzle-orm";
+import type { SuggestedPlace } from "@rv-trip/core";
 import { db } from "../index";
 import {
+  destinations,
   ideas,
   legs,
   reservations,
   rigs,
   routes,
-  savedPlaces,
+  saves,
+  tripDismissedSaves,
+  travelSegments,
   stops,
   trips,
   userPrefs,
@@ -46,8 +50,9 @@ export type LegRow = typeof legs.$inferSelect;
 export type StopRow = typeof stops.$inferSelect;
 export type IdeaRow = typeof ideas.$inferSelect;
 export type ReservationRow = typeof reservations.$inferSelect;
-export type SavedPlaceRow = typeof savedPlaces.$inferSelect;
+export type SavedPlaceRow = typeof saves.$inferSelect;
 export type RigRow = typeof rigs.$inferSelect;
+export type SegmentRow = typeof travelSegments.$inferSelect;
 export type RouteRow = typeof routes.$inferSelect;
 export type UserPrefsRow = typeof userPrefs.$inferSelect;
 
@@ -71,6 +76,10 @@ export interface TripSeed {
   statusAuto: boolean;
   rating: number | null;
   note: string | null;
+  /** #103 · the trip's three defaults — the column defaults when omitted. */
+  defaultMode: "drive" | "fly" | "ferry";
+  lodgingDefault: "hotel" | "friends" | "airbnb" | "campground" | null;
+  rigOn: boolean;
 }
 
 export interface LegSeed {
@@ -142,6 +151,14 @@ export interface PlaceSeed {
   source: string | null;
   rating: number | null;
   tripId: string | null;
+  /** #111: the phone's capture id. */
+  clientId: string | null;
+  /** #111 i2: override the derived anchor / label, attach a destination row,
+   * or hang a pending Q3 A suggestion on the save. */
+  anchor: "place" | "area" | "pin";
+  areaLabel: string | null;
+  destinationId: string | null;
+  suggestedPlace: SuggestedPlace | null;
 }
 
 export interface RigSeed {
@@ -182,6 +199,9 @@ async function insertTrip(p: Partial<TripSeed> = {}): Promise<TripRow> {
       statusAuto: p.statusAuto ?? true,
       rating: p.rating ?? null,
       note: p.note ?? null,
+      ...(p.defaultMode !== undefined && { defaultMode: p.defaultMode }),
+      ...(p.lodgingDefault !== undefined && { lodgingDefault: p.lodgingDefault }),
+      ...(p.rigOn !== undefined && { rigOn: p.rigOn }),
     })
     .returning();
   return row!;
@@ -261,7 +281,7 @@ async function insertReservation(
 
 async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceRow> {
   const [row] = await db
-    .insert(savedPlaces)
+    .insert(saves)
     .values({
       ownerId: p.owner ?? DEV_OWNER,
       name: p.name ?? "Cape Lookout State Park",
@@ -269,12 +289,44 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
       lat: p.lat ?? null,
       lng: p.lng ?? null,
       googlePlaceId: p.googlePlaceId ?? null,
+      // The W0 anchor rule createSave applies (#110 §5).
+      anchor:
+        p.anchor ?? (p.googlePlaceId ? "place" : p.lat != null && p.lng != null ? "pin" : "area"),
+      areaLabel:
+        p.areaLabel !== undefined
+          ? p.areaLabel
+          : p.googlePlaceId || (p.lat != null && p.lng != null)
+            ? null
+            : p.region === undefined
+              ? "Tillamook, OR"
+              : p.region,
+      destinationId: p.destinationId ?? null,
+      suggestedPlace: p.suggestedPlace ?? null,
       type: p.type ?? "campground",
       status: p.status ?? "want",
       note: p.note ?? null,
       source: p.source ?? null,
       rating: p.rating ?? null,
       tripId: p.tripId ?? null,
+      clientId: p.clientId ?? null,
+    })
+    .returning();
+  return row!;
+}
+
+/** A destinations row (#111), Bandon unless told otherwise. */
+async function insertDestination(
+  p: Partial<{ owner: string; googlePlaceId: string; name: string; region: string | null; lat: number | null; lng: number | null }> = {},
+) {
+  const [row] = await db
+    .insert(destinations)
+    .values({
+      ownerId: p.owner ?? DEV_OWNER,
+      googlePlaceId: p.googlePlaceId ?? "ChIJbandon",
+      name: p.name ?? "Bandon, OR",
+      region: p.region === undefined ? "Oregon" : p.region,
+      lat: p.lat === undefined ? 43.119 : p.lat,
+      lng: p.lng === undefined ? -124.4084 : p.lng,
     })
     .returning();
   return row!;
@@ -370,6 +422,37 @@ async function ageCachedRoute(key: string, days: number): Promise<void> {
     .where(eq(routes.key, key));
 }
 
+/** A travel segment (#110). Fixtures write stops directly, so a trip built
+ * here has NO hops until a mutation reconciles it — this is how a test plants
+ * a timed one (a flight) to reconcile or conflict against. */
+async function insertSegment(p: {
+  tripId: string;
+  fromStopId: string | null;
+  toStopId: string | null;
+  mode?: "drive" | "fly" | "ferry";
+  departAt?: string | null;
+  arriveAt?: string | null;
+  departTz?: string | null;
+  arriveTz?: string | null;
+  sortOrder?: number;
+}): Promise<SegmentRow> {
+  const [row] = await db
+    .insert(travelSegments)
+    .values({
+      tripId: p.tripId,
+      fromStopId: p.fromStopId,
+      toStopId: p.toStopId,
+      mode: p.mode ?? "drive",
+      departAt: p.departAt ? new Date(p.departAt) : null,
+      arriveAt: p.arriveAt ? new Date(p.arriveAt) : null,
+      departTz: p.departTz ?? null,
+      arriveTz: p.arriveTz ?? null,
+      sortOrder: p.sortOrder ?? 0,
+    })
+    .returning();
+  return row!;
+}
+
 /** A `user_prefs` row. Every preference is optional — omitting one is the
  * "never chosen" null the product default falls back to. */
 async function insertPrefs(p: {
@@ -402,6 +485,8 @@ export const fx = {
   idea: insertIdea,
   reservation: insertReservation,
   savedPlace: insertSavedPlace,
+  destination: insertDestination,
+  segment: insertSegment,
   rig: insertRig,
   pacificNorthwestLoop,
 };
@@ -432,9 +517,33 @@ export const read = {
     const [row] = await db.select().from(reservations).where(eq(reservations.id, id));
     return row ?? null;
   },
+  /** A trip's hops, in journey order. */
+  async segments(tripId: string): Promise<SegmentRow[]> {
+    return db
+      .select()
+      .from(travelSegments)
+      .where(eq(travelSegments.tripId, tripId))
+      .orderBy(asc(travelSegments.sortOrder));
+  },
   async savedPlace(id: string): Promise<SavedPlaceRow | null> {
-    const [row] = await db.select().from(savedPlaces).where(eq(savedPlaces.id, id));
+    const [row] = await db.select().from(saves).where(eq(saves.id, id));
     return row ?? null;
+  },
+  /** A trip's dismissed save ids (#111 i3), sorted — the ROWS. */
+  async dismissedSaveIds(tripId: string): Promise<string[]> {
+    const rows = await db
+      .select({ saveId: tripDismissedSaves.saveId })
+      .from(tripDismissedSaves)
+      .where(eq(tripDismissedSaves.tripId, tripId));
+    return rows.map((r) => r.saveId).sort();
+  },
+  /** An owner's destinations rows (#111), oldest first. */
+  async destinations(owner: string): Promise<(typeof destinations.$inferSelect)[]> {
+    return db
+      .select()
+      .from(destinations)
+      .where(eq(destinations.ownerId, owner))
+      .orderBy(asc(destinations.createdAt));
   },
   /** The ROW, not the payload: `RigProfile` carries no timestamp (C3), so the
    * upsert's touch can only be asserted here. */
@@ -500,8 +609,8 @@ export const read = {
   async countSavedPlaces(owner: string): Promise<number> {
     const [row] = await db
       .select({ n: count() })
-      .from(savedPlaces)
-      .where(eq(savedPlaces.ownerId, owner));
+      .from(saves)
+      .where(eq(saves.ownerId, owner));
     return Number(row!.n);
   },
   async countRigs(owner: string): Promise<number> {

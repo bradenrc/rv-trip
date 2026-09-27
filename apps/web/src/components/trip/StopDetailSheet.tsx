@@ -14,9 +14,14 @@ import {
   Pencil,
   Trash2,
   CornerRightUp,
+  Tent,
+  BedDouble,
+  House,
+  Users,
 } from "lucide-react";
 import type {
   Idea,
+  LodgingKind,
   NearPlace,
   PickedPlace,
   ReservationDraft,
@@ -24,8 +29,13 @@ import type {
   Stop,
 } from "@rv-trip/core";
 import {
+  LODGING_KIND_LABEL,
+  STAY_KINDS,
   ideaIsLocated,
   isScheduled,
+  isStayType,
+  stayNameLabel,
+  withStayKind,
   nearLabel,
   nearOf,
   pickedFromPlace,
@@ -39,6 +49,7 @@ import {
   FieldLabel,
   ReservationCard,
   IdeaCard,
+  SegmentedControl,
   categoryMeta,
   ideaCategoryType,
   money,
@@ -53,13 +64,23 @@ import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdow
 import { MenuHint, RowMenu, MENU_ITEM, MENU_ITEM_WARN } from "./row-menu";
 
 /**
- * The eight reservation types, in the order the shipped form has always listed
- * them. `categoryMeta` collapses them 8 → 5 for colour and language (Stay ←
- * campground|lodging, Do ← tour|activity|event), and that collapse does not
- * invert — so the picker names the five-category vocabulary the cards render
- * WITH the type it is actually writing ("Stay · Campground"), rather than
- * offering five options it could not turn back into a type.
+ * The Type select (#105 · klunk row 5): "Stay" first — a UI grouping, not an
+ * enum value; the kind switch under it decides campground vs lodging — then
+ * Eat · Dining, Do · Tour / Activity / Event, and Other. Transport is gone from
+ * a stop's form: flights and ferries go on the hop (#104). A legacy transport
+ * row being EDITED still shows its own type, so opening it never rewrites it.
  */
+const TYPE_OPTIONS: { value: "stay" | ReservationType; label: string }[] = [
+  { value: "stay", label: "Stay" },
+  { value: "dining", label: "Eat · Dining" },
+  { value: "tour", label: "Do · Tour" },
+  { value: "activity", label: "Do · Activity" },
+  { value: "event", label: "Do · Event" },
+  { value: "other", label: "Other" },
+];
+
+/** The eight types, in their shipped order — the idea's "Book as" picker,
+ * which this issue does not change. */
 const RES_TYPES: ReservationType[] = [
   "campground",
   "lodging",
@@ -70,6 +91,9 @@ const RES_TYPES: ReservationType[] = [
   "transport",
   "other",
 ];
+
+const KIND_ICON = { campground: Tent, hotel: BedDouble, airbnb: House, friends: Users } as const;
+const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABEL[k], Icon: KIND_ICON[k] }));
 
 /** The sheet's one input skin — the surface palette, not the dialog's navy. */
 const SHEET_FIELD =
@@ -134,6 +158,7 @@ export function StopDetailSheet({
   legName,
   stopOrdinal,
   costs,
+  lodgingDefault = null,
   leaves,
   ideaNoteOpen,
   onClose,
@@ -161,6 +186,8 @@ export function StopDetailSheet({
    * carries, so the sheet and /map count the stops the same way. */
   stopOrdinal: number | null;
   costs: boolean;
+  /** The trip's lodging default (#105 · Q3 A) — the kind "Stay" opens on. */
+  lodgingDefault?: LodgingKind | null;
   leaves: StopLeafActions;
   ideaNoteOpen: Set<string>;
   onClose: () => void;
@@ -315,95 +342,16 @@ export function StopDetailSheet({
                 on the core `reservation` schema is here — the dates the form
                 used to collect and throw away included. */}
             {leaves.formTarget && (
-              <div className="mb-3 flex flex-col gap-2.5 rounded-rv-card border border-rv-border bg-rv-surface p-4">
-                <div className="flex flex-wrap gap-2.5">
-                  <label className="flex flex-[1_1_150px] flex-col gap-1">
-                    <FieldLabel>Type</FieldLabel>
-                    <select
-                      value={leaves.form.type}
-                      onChange={(e) =>
-                        leaves.onFormChange({ type: e.target.value as ReservationType })
-                      }
-                      className={SHEET_FIELD}
-                    >
-                      {RES_TYPES.map((t) => (
-                        <option key={t} value={t}>
-                          {typeLabel(t)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  {costs && (
-                    <label className="flex flex-[1_1_90px] flex-col gap-1">
-                      <FieldLabel>Cost $</FieldLabel>
-                      <input
-                        value={leaves.form.cost}
-                        onChange={(e) => leaves.onFormChange({ cost: e.target.value })}
-                        inputMode="numeric"
-                        placeholder="0"
-                        aria-invalid={reservationCost(leaves.form.cost) === undefined}
-                        className={SHEET_FIELD}
-                      />
-                    </label>
-                  )}
-                </div>
-                <label className="flex flex-col gap-1">
-                  <FieldLabel>Name</FieldLabel>
-                  <input
-                    value={leaves.form.name}
-                    onChange={(e) => leaves.onFormChange({ name: e.target.value })}
-                    placeholder="e.g. Fort Stevens State Park"
-                    className={SHEET_FIELD}
-                  />
-                </label>
-                <div className="flex flex-wrap gap-2.5">
-                  <label className="flex flex-[1_1_130px] flex-col gap-1">
-                    <FieldLabel>Check-in</FieldLabel>
-                    <input
-                      type="date"
-                      value={leaves.form.checkIn}
-                      onChange={(e) => leaves.onFormChange({ checkIn: e.target.value })}
-                      className={SHEET_FIELD}
-                    />
-                  </label>
-                  <label className="flex flex-[1_1_130px] flex-col gap-1">
-                    <FieldLabel>Check-out</FieldLabel>
-                    <input
-                      type="date"
-                      value={leaves.form.checkOut}
-                      onChange={(e) => leaves.onFormChange({ checkOut: e.target.value })}
-                      className={SHEET_FIELD}
-                    />
-                  </label>
-                </div>
-                <label className="flex flex-col gap-1">
-                  <FieldLabel>Confirmation #</FieldLabel>
-                  <input
-                    value={leaves.form.confirmationNumber}
-                    onChange={(e) => leaves.onFormChange({ confirmationNumber: e.target.value })}
-                    placeholder="e.g. KOA-88213"
-                    className={SHEET_FIELD}
-                  />
-                </label>
-                <div className="flex items-center gap-2.5">
-                  <button
-                    type="button"
-                    onClick={leaves.onFormSubmit}
-                    disabled={!canSave}
-                    className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-accent-deep px-4 py-2 text-[13px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
-                  >
-                    <Check className="size-4" />
-                    {editing ? "Save changes" : "Save reservation"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={leaves.onFormCancel}
-                    className="inline-flex cursor-pointer items-center rounded-rv-md border border-rv-border-hi bg-transparent px-3 py-2 text-[13px] font-semibold text-rv-ink-muted"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
+              <ReservationForm
+                form={leaves.form}
+                costs={costs}
+                lodgingDefault={lodgingDefault}
+                editing={editing !== null}
+                canSave={canSave}
+                onChange={leaves.onFormChange}
+                onSubmit={leaves.onFormSubmit}
+                onCancel={leaves.onFormCancel}
+              />
             )}
 
             <div className="flex flex-col gap-2.5">
@@ -684,6 +632,153 @@ export function StopDetailSheet({
  * eight-value type the row actually stores. */
 function typeLabel(t: ReservationType): string {
   return `${categoryMeta(t).cat} · ${t[0]!.toUpperCase()}${t.slice(1)}`;
+}
+
+/**
+ * The one reservation form, for add and edit (#105). On Stay, the kind switch
+ * (Campground · Hotel · Airbnb · Friends — the DS SegmentedControl) swaps the
+ * fields: the name's label follows the kind, and Friends asks only who you're
+ * staying with and the nights — no cost, no confirmation number. The mock's
+ * campground "Site" field is dropped: no column holds it.
+ */
+function ReservationForm({
+  form,
+  costs,
+  lodgingDefault,
+  editing,
+  canSave,
+  onChange,
+  onSubmit,
+  onCancel,
+}: {
+  form: ReservationDraft;
+  costs: boolean;
+  lodgingDefault: LodgingKind | null;
+  editing: boolean;
+  canSave: boolean;
+  onChange: (patch: Partial<ReservationDraft>) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  const stay = isStayType(form.type);
+  // A pre-W2 stay has no kind yet: it shows the kind its type implies, and
+  // becomes a real kind the moment one is pressed.
+  const kind: LodgingKind =
+    form.lodgingKind ?? (form.type === "campground" ? "campground" : stay ? "hotel" : (lodgingDefault ?? "campground"));
+  const friends = stay && kind === "friends";
+  const typeValue = stay ? "stay" : form.type;
+  const options =
+    stay || TYPE_OPTIONS.some((o) => o.value === form.type)
+      ? TYPE_OPTIONS
+      : [...TYPE_OPTIONS, { value: form.type, label: typeLabel(form.type) }];
+
+  const pickType = (v: string) => {
+    if (v === "stay") onChange(withStayKind(form, form.lodgingKind ?? lodgingDefault ?? "campground"));
+    else onChange({ type: v as ReservationType, lodgingKind: null });
+  };
+
+  return (
+    <div className="mb-3 flex flex-col gap-2.5 rounded-rv-card border border-rv-border bg-rv-surface p-4">
+      <label className="flex flex-col gap-1">
+        <FieldLabel>Type</FieldLabel>
+        <select value={typeValue} onChange={(e) => pickType(e.target.value)} className={SHEET_FIELD}>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {stay && (
+        <div>
+          <SegmentedControl
+            value={kind}
+            options={KIND_OPTIONS}
+            onChange={(k) => onChange(withStayKind(form, k))}
+          />
+        </div>
+      )}
+
+      <label className="flex flex-col gap-1">
+        <FieldLabel>{stay ? stayNameLabel(kind) : "Name"}</FieldLabel>
+        <input
+          value={form.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          placeholder={friends ? "Jane & Rick" : "e.g. Fort Stevens State Park"}
+          className={SHEET_FIELD}
+        />
+      </label>
+      <div className="flex flex-wrap gap-2.5">
+        <label className="flex flex-[1_1_130px] flex-col gap-1">
+          <FieldLabel>{friends ? "Nights · from" : "Check-in"}</FieldLabel>
+          <input
+            type="date"
+            value={form.checkIn}
+            onChange={(e) => onChange({ checkIn: e.target.value })}
+            className={SHEET_FIELD}
+          />
+        </label>
+        <label className="flex flex-[1_1_130px] flex-col gap-1">
+          <FieldLabel>{friends ? "to" : "Check-out"}</FieldLabel>
+          <input
+            type="date"
+            value={form.checkOut}
+            onChange={(e) => onChange({ checkOut: e.target.value })}
+            className={SHEET_FIELD}
+          />
+        </label>
+      </div>
+      {friends ? (
+        <div className="font-mono text-[11.5px] text-rv-ink-faded">
+          No cost and no confirmation number. It&apos;s their couch.
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2.5">
+          <label className="flex flex-[1_1_130px] flex-col gap-1">
+            <FieldLabel>Confirmation #</FieldLabel>
+            <input
+              value={form.confirmationNumber}
+              onChange={(e) => onChange({ confirmationNumber: e.target.value })}
+              placeholder="optional"
+              className={SHEET_FIELD}
+            />
+          </label>
+          {costs && (
+            <label className="flex flex-[1_1_90px] flex-col gap-1">
+              <FieldLabel>Cost $</FieldLabel>
+              <input
+                value={form.cost}
+                onChange={(e) => onChange({ cost: e.target.value })}
+                inputMode="numeric"
+                placeholder="0"
+                aria-invalid={reservationCost(form.cost) === undefined}
+                className={SHEET_FIELD}
+              />
+            </label>
+          )}
+        </div>
+      )}
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={!canSave}
+          className="inline-flex cursor-pointer items-center gap-1.5 self-start rounded-rv-md border-none bg-rv-accent-deep px-4 py-2 text-[13px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
+        >
+          <Check className="size-4" />
+          {editing ? "Save changes" : "Save reservation"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex cursor-pointer items-center rounded-rv-md border border-rv-border-hi bg-transparent px-3 py-2 text-[13px] font-semibold text-rv-ink-muted"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /**

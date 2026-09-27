@@ -44,6 +44,10 @@ const KALALOCH_DETAILS: PlaceDetails = {
 
 /** Answers with the fixture and records what it was asked. */
 class FakeProvider implements PlacesProvider {
+  // #111 widened the interface; nothing here resolves a destination.
+  async resolveDestination(): Promise<null> {
+    return null;
+  }
   readonly searches: { query: string; near?: LatLng }[] = [];
   readonly detailsCalls: string[] = [];
   constructor(private readonly rows: PlaceSummary[] = [KALALOCH]) {}
@@ -59,6 +63,10 @@ class FakeProvider implements PlacesProvider {
 
 /** Google answered with a 500, or the socket died. */
 class BrokenProvider implements PlacesProvider {
+  // #111 widened the interface; nothing here resolves a destination.
+  async resolveDestination(): Promise<null> {
+    return null;
+  }
   async search(): Promise<PlaceSummary[]> {
     throw new Error("Google places:searchText → 500");
   }
@@ -423,5 +431,11 @@ describe("detailsPlacesEnvelope · the places cache", () => {
 
   it("is 30 days, to the millisecond", () => {
     expect(PLACE_CACHE_TTL_MS).toBe(30 * 24 * 60 * 60 * 1000);
+  });
+});
+
+describe("StubPlacesProvider.resolveDestination (#111)", () => {
+  it("resolves no locality — with no key every save is written unanchored", async () => {
+    expect(await new StubPlacesProvider().resolveDestination()).toBeNull();
   });
 });

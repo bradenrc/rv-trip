@@ -5,6 +5,7 @@ import {
   isAlreadySaved,
   matchCandidateFromSaved,
   normalizePlaceName,
+  reservationTypeOfGoogle,
   suggestionToCreate,
   suggestionsFromTrips,
   type MatchCandidate,
@@ -164,6 +165,12 @@ function pnwLoop(status: Trip["status"]): Trip {
                 rating: 5,
                 notes: "Full hookups, site A12 backs to the trees.",
                 lastChange: null,
+                segmentId: null,
+                startsAt: null,
+                endsAt: null,
+                startsTz: null,
+                endsTz: null,
+              lodgingKind: null,
               },
               {
                 id: "res-museum",
@@ -178,6 +185,12 @@ function pnwLoop(status: Trip["status"]): Trip {
                 rating: null,
                 notes: null,
                 lastChange: null,
+                segmentId: null,
+                startsAt: null,
+                endsAt: null,
+                startsTz: null,
+                endsTz: null,
+              lodgingKind: null,
               },
             ],
             ideas: [],
@@ -206,6 +219,12 @@ function pnwLoop(status: Trip["status"]): Trip {
                 rating: 4,
                 notes: null,
                 lastChange: null,
+                segmentId: null,
+                startsAt: null,
+                endsAt: null,
+                startsTz: null,
+                endsTz: null,
+              lodgingKind: null,
               },
             ],
             ideas: [],
@@ -227,6 +246,11 @@ function pnwLoop(status: Trip["status"]): Trip {
         ],
       },
     ],
+    defaultMode: "drive",
+    lodgingDefault: null,
+    rigOn: true,
+    surfaceRadiusMi: null,
+    segments: [],
   };
 }
 
@@ -294,6 +318,11 @@ const libraryRow = (name: string, lat: number | null, lng: number | null): Saved
   tripId: null,
   tripName: null,
   lastChange: null,
+  anchor: "pin",
+  areaLabel: null,
+  destination: null,
+  suggestedPlace: null,
+  createdAt: null,
 });
 
 describe("buildSuggestionShelf", () => {
@@ -373,5 +402,31 @@ describe("suggestionToCreate", () => {
     });
     // It is a real POST /api/places body, not a shape only this file believes.
     expect(savedPlaceCreate.safeParse(body).success).toBe(true);
+  });
+});
+
+// ── #111 · a Google result's category ─────────────────────────────────────
+
+describe("reservationTypeOfGoogle", () => {
+  it("maps the design's five named families", () => {
+    expect(reservationTypeOfGoogle("restaurant")).toBe("dining");
+    expect(reservationTypeOfGoogle("campground")).toBe("campground");
+    expect(reservationTypeOfGoogle("lodging")).toBe("lodging");
+    expect(reservationTypeOfGoogle("tourist_attraction")).toBe("activity");
+    expect(reservationTypeOfGoogle("car_wash")).toBe("other");
+  });
+
+  it("folds the rest of each family in", () => {
+    for (const t of ["cafe", "bar", "food", "mexican_restaurant"]) {
+      expect(reservationTypeOfGoogle(t)).toBe("dining");
+    }
+    expect(reservationTypeOfGoogle("rv_park")).toBe("campground");
+    for (const t of ["park", "museum", "state_park"]) expect(reservationTypeOfGoogle(t)).toBe("activity");
+  });
+
+  it("is other when Google sent no type at all", () => {
+    expect(reservationTypeOfGoogle(null)).toBe("other");
+    expect(reservationTypeOfGoogle(undefined)).toBe("other");
+    expect(reservationTypeOfGoogle("")).toBe("other");
   });
 });

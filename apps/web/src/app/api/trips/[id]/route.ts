@@ -4,6 +4,7 @@ import {
   orphanedStopsMessage,
   stopsOutsideRange,
   tripPatchInput,
+  tripRig,
 } from "@rv-trip/core";
 import { deleteTrip, getTripById, getRigByOwner, updateTripFields } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
@@ -21,7 +22,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const trip = await getTripById(owner, id);
   if (!trip) return NextResponse.json({ error: "trip not found" }, { status: 404 });
   const rig = await getRigByOwner(owner);
-  const { routes, routingHash } = await routeTrip(trip, rig);
+  // A trip that leaves the rig at home (#103 · `rigOn: false`) routes without
+  // it — the same `tripRig` rule the web page and POST /api/routes use.
+  const { routes, routingHash } = await routeTrip(trip, tripRig(trip, rig));
   // The wire field stays `rigHash`: apps/mobile parses this bundle through
   // tripBundleSchema and ships on its own Expo cadence, so renaming it here
   // would break every installed build. It carries the ROUTING hash either way —

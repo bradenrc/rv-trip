@@ -129,13 +129,33 @@ export function savePlaceFormFromSaved(p: SavedPlace): SavePlaceForm {
 }
 
 /**
+ * The picker's free-text escape row: typed words with no Place ID and no
+ * point. On the web that is the capture's area note (#111 i4).
+ */
+export function isFreeTextPick(picked: PickedPlace | null): boolean {
+  if (!picked || picked.name.trim() === "") return false;
+  return picked.googlePlaceId === null && picked.lat === null && picked.lng === null;
+}
+
+/**
  * The flat `POST /api/places` body (§3). Null until a place is chosen — the
  * picker's free-text escape row counts, which is why a coordless save is legal.
+ *
+ * #111 i4 (docs/design/111 "Web parity"): the escape row is the web's capture,
+ * so it saves an AREA note — `anchor: "area"` and `areaLabel`, the locality the
+ * browser was in (`/api/destinations/resolve`) or null when geolocation was
+ * refused or named nothing. A Google pick sends no anchor: the server's
+ * `saveAnchorOf` still derives it, as it does for every older caller.
  */
-export function savePlaceBody(form: SavePlaceForm): SavedPlaceCreate | null {
+export function savePlaceBody(
+  form: SavePlaceForm,
+  areaLabel: string | null = null,
+): SavedPlaceCreate | null {
   const picked = form.picked;
   if (!picked || picked.name.trim() === "") return null;
+  const area = isFreeTextPick(picked) ? { anchor: "area" as const, areaLabel } : {};
   return {
+    ...area,
     name: picked.name.trim(),
     region: blank(form.region),
     lat: picked.lat,
@@ -208,8 +228,24 @@ export function applySavedPlacePatch(
 ): SavedPlace {
   const keep = <T>(v: T | undefined, current: T): T => (v === undefined ? current : v);
   const status = keep(patch.status, p.status);
+  // #111 Q3 A: the upgrade copies the suggestion onto the row, the way the
+  // server does. The re-resolved destination is the server's alone — a
+  // client refetches for it (PATCH answers 204, no body).
+  const up = patch.upgradeToSuggested && p.suggestedPlace ? p.suggestedPlace : null;
+  if (up) {
+    const upgraded = applySavedPlacePatch(p, {
+      ...patch,
+      upgradeToSuggested: undefined,
+      name: up.name,
+      googlePlaceId: up.googlePlaceId,
+      lat: up.lat,
+      lng: up.lng,
+    }, tripName);
+    return { ...upgraded, anchor: "place", areaLabel: null, suggestedPlace: null };
+  }
   return {
     ...p,
+    suggestedPlace: patch.suggestedPlace === null ? null : p.suggestedPlace,
     place: {
       name: keep(patch.name, p.place.name),
       lat: keep(patch.lat, p.place.lat),
