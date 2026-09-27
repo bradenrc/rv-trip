@@ -251,6 +251,9 @@ export const reservations = pgTable(
     endsAt: timestamp("ends_at", { withTimezone: true }),
     startsTz: text("starts_tz"),
     endsTz: text("ends_tz"),
+    // What kind of stay a lodging row is (#105 · Q9 A) — the trip default's own
+    // enum, nullable: null for anything that is not a stay.
+    lodgingKind: lodgingKind("lodging_kind"),
   },
   (t) => [
     index("reservations_stop_idx").on(t.stopId),

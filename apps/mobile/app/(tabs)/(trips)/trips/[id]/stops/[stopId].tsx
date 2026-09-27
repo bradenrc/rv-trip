@@ -1,9 +1,15 @@
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { Idea, Reservation } from "@rv-trip/core";
+import type { Idea, LodgingKind, Reservation, ReservationDraft } from "@rv-trip/core";
 import {
+  LODGING_KIND_LABEL,
+  STAY_KINDS,
   cycleIdeaStatus,
+  reservationDraftInput,
+  stayDraft,
+  stayNameLabel,
+  withStayKind,
   dateRange,
   ideaStatusColor,
   isScheduled,
@@ -16,9 +22,10 @@ import {
 } from "@rv-trip/core";
 import { api } from "../../../../../../src/api";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../../src/map";
-import { updateTrip, useBundle } from "../../../../../../src/store";
+import { addStay, updateTrip, useBundle } from "../../../../../../src/store";
 import { C, F, R } from "../../../../../../src/theme";
-import { Card, CategoryTile, Centered, Kicker, Muted, Stars } from "../../../../../../src/ui";
+import { Input, Label, Sheet } from "../../../../../../src/hops";
+import { Button, Card, CategoryTile, Centered, Kicker, Muted, Segmented, Stars } from "../../../../../../src/ui";
 
 /** The height packages/ui's `MapPlaceholder` has always reserved, and the web's
  * `STOP_MINI_MAP_HEIGHT` (apps/web/src/components/map/StopMiniMap.tsx:13). */
@@ -55,6 +62,9 @@ export default function StopScreen() {
   // A stable array: the camera re-fits on a new `bounds`, so a fresh `[pin]`
   // every render would re-frame the map on every keystroke in the note field.
   const miniPins = useMemo(() => (pin ? [pin] : []), [pin]);
+
+  // #105 · Add stay — the sheet, opened on the trip's lodging default (Q3 A).
+  const [stayOpen, setStayOpen] = useState(false);
 
   // The note is edited locally and persisted on blur, like the web sheet.
   const [note, setNote] = useState("");
@@ -121,6 +131,9 @@ export default function StopScreen() {
           ) : (
             stop.reservations.map((r) => <ReservationCard key={r.id} r={r} />)
           )}
+          <Button tone="ghost" onPress={() => setStayOpen(true)}>
+            Add stay
+          </Button>
           {costTotal > 0 && (
             <Text style={[styles.mono, { textAlign: "right" }]}>
               Stop total <Text style={{ color: C.accent, fontWeight: "700" }}>${costTotal.toLocaleString("en-US")}</Text>
@@ -171,7 +184,93 @@ export default function StopScreen() {
           />
         </Section>
       </ScrollView>
+      {stayOpen && (
+        <AddStaySheet
+          tripId={id}
+          stopId={stop.id}
+          title={`${stop.place.name}${scheduled ? ` · ${dateRange(stop.arriveDate, stop.departDate)}` : ""}`}
+          kind={bundle.trip.lodgingDefault}
+          onClose={() => setStayOpen(false)}
+        />
+      )}
     </>
+  );
+}
+
+const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABEL[k] }));
+
+/**
+ * Add stay (#105 · Q9 A): the kind first. Friends asks only who you're staying
+ * with and the nights — no cost, no confirmation number. The body is core's
+ * `reservationDraftInput`, the same one the web form sends.
+ */
+function AddStaySheet({
+  tripId,
+  stopId,
+  title,
+  kind,
+  onClose,
+}: {
+  tripId: string;
+  stopId: string;
+  title: string;
+  kind: LodgingKind | null;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<ReservationDraft>(() => stayDraft(kind));
+  const [saving, setSaving] = useState(false);
+  const set = (patch: Partial<ReservationDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const current = draft.lodgingKind ?? "campground";
+  const friends = current === "friends";
+  const body = reservationDraftInput(stopId, draft);
+
+  const save = async () => {
+    if (!body || saving) return;
+    setSaving(true);
+    try {
+      await addStay(tripId, body);
+      onClose();
+    } catch {
+      setSaving(false);
+      failed("That stay");
+    }
+  };
+
+  return (
+    <Sheet visible onClose={onClose}>
+      <Text style={{ fontSize: 16, fontWeight: "800", color: C.ink }}>Add stay</Text>
+      <Text style={styles.mono}>{title}</Text>
+      <Segmented value={current} options={KIND_OPTIONS} onChange={(k) => setDraft((d) => withStayKind(d, k))} />
+      <Label>{stayNameLabel(current)}</Label>
+      <Input value={draft.name} onChangeText={(name) => set({ name })} autoCapitalize="words" />
+      <View style={{ flexDirection: "row", gap: 6 }}>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Label>{friends ? "Nights · from" : "Check-in"}</Label>
+          <Input mono value={draft.checkIn} onChangeText={(checkIn) => set({ checkIn })} placeholder="2026-08-12" />
+        </View>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Label>{friends ? "to" : "Check-out"}</Label>
+          <Input mono value={draft.checkOut} onChangeText={(checkOut) => set({ checkOut })} placeholder="2026-08-16" />
+        </View>
+      </View>
+      {friends ? (
+        <Text style={styles.mono}>No cost and no confirmation number. It’s their couch.</Text>
+      ) : (
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Label>Confirmation #</Label>
+            <Input mono value={draft.confirmationNumber} onChangeText={(confirmationNumber) => set({ confirmationNumber })} placeholder="optional" />
+          </View>
+          <View style={{ flex: 1, gap: 4 }}>
+            <Label>Cost $</Label>
+            <Input mono value={draft.cost} onChangeText={(cost) => set({ cost })} placeholder="0" keyboardType="decimal-pad" />
+          </View>
+        </View>
+      )}
+      <Button onPress={() => void save()} disabled={!body || saving}>
+        Save
+      </Button>
+    </Sheet>
   );
 }
 
@@ -183,7 +282,8 @@ function ReservationCard({ r }: { r: Reservation }) {
       <View style={{ flex: 1, gap: 3 }}>
         <Text style={{ color: C.ink, fontSize: 15, fontWeight: "700" }}>{r.name}</Text>
         <Text style={styles.mono}>
-          {r.type}
+          {/* #105 · a stay prints its kind ("Friends") in place of the type. */}
+          {r.lodgingKind ? LODGING_KIND_LABEL[r.lodgingKind] : r.type}
           {dates ? ` · ${dates}` : ""}
         </Text>
         {r.confirmationNumber ? (

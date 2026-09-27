@@ -44,8 +44,12 @@ function ModeGlyph({ mode, className }: { mode: TravelMode | null | undefined; c
  */
 export function RhythmStrip({
   cells,
+  onModeCell,
 }: {
   cells: { color: string; title: string; mode?: TravelMode }[];
+  /** #104 · Q5 A — a fly or ferry day is a door to its hop: pressing it hands
+   * back the cell's index. Omitted, the strip is display-only, as before. */
+  onModeCell?: (index: number) => void;
 }) {
   return (
     <div className="mb-1.5 flex items-center">
@@ -62,7 +66,15 @@ export function RhythmStrip({
               key={i}
               title={c.title}
               data-mode={c.mode}
-              className="dark flex items-center justify-center text-rv-ink-muted"
+              {...(onModeCell && {
+                role: "button",
+                tabIndex: 0,
+                onClick: () => onModeCell(i),
+                onKeyDown: (e: React.KeyboardEvent) => {
+                  if (e.key === "Enter" || e.key === " ") onModeCell(i);
+                },
+              })}
+              className={`dark flex items-center justify-center text-rv-ink-muted ${onModeCell ? "cursor-pointer" : ""}`}
               style={{ background: c.color }}
             >
               <ModeGlyph mode={c.mode} className="size-3 flex-none" />
@@ -294,14 +306,22 @@ function ModeSwatch({ mode }: { mode: TravelMode }) {
   );
 }
 
-/** The drive/fly/ferry/stay/open + navy-edge key. Static: every trip shows all
- * six keys (#110 §2). */
-export function GanttLegend() {
+/**
+ * The drive/fly/ferry/stay/open + navy-edge key.
+ *
+ * `modes` (#112 · klunk row 3) is the set of travel modes the trip's rhythm
+ * actually has — the planner passes `timelineModel().modes` — so a drive trip
+ * shows no Fly key. Omitted, every key shows, as it always has. Stay, Open and
+ * the navy edge always show. Key order: Drive · Fly · Ferry · Stay · Open ·
+ * Navy edge.
+ */
+export function GanttLegend({ modes }: { modes?: readonly TravelMode[] } = {}) {
+  const has = (m: TravelMode) => modes === undefined || modes.includes(m);
   return (
     <div className="mt-5 flex flex-wrap items-center gap-[18px] border-t border-rv-border-soft pt-4 text-[12px] text-rv-ink-faded">
-      <Item swatch={<span className="h-3 w-4 rounded-[2px] bg-rv-navy" />}>Drive day</Item>
-      <Item swatch={<ModeSwatch mode="fly" />}>Fly day</Item>
-      <Item swatch={<ModeSwatch mode="ferry" />}>Ferry day</Item>
+      {has("drive") && <Item swatch={<span className="h-3 w-4 rounded-[2px] bg-rv-navy" />}>Drive day</Item>}
+      {has("fly") && <Item swatch={<ModeSwatch mode="fly" />}>Fly day</Item>}
+      {has("ferry") && <Item swatch={<ModeSwatch mode="ferry" />}>Ferry day</Item>}
       <Item swatch={<span className="h-3 w-4 rounded-[2px] bg-rv-green" />}>Stay day</Item>
       <Item
         swatch={<span className="h-3 w-4 rounded-[2px] border border-dashed border-rv-border-hi bg-rv-navy-soft" />}

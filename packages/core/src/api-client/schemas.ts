@@ -94,14 +94,18 @@ export const routePairsResponseSchema = z.object({
 });
 
 /**
- * Creates return the raw DB row (numeric columns arrive as strings, dates as
- * plain strings). Coerce into the domain reservation so callers never see the
- * row shape — the same mapping `TripPlanner.mapRes` did by hand.
+ * Creates return the reservation (`mapReservation` of the inserted row) —
+ * coerced leniently into the domain reservation, because an older server may
+ * send the raw row (numeric columns as strings) and the phone ships on its own
+ * cadence. Every #104/#105 field is read, not hard-coded: a flight added on a
+ * hop comes back with its segment and its clock, and a stay with its kind
+ * (vet HIGH — this parser used to null the segment half out).
  */
 export const reservationRowSchema = z
   .object({
     id: z.string(),
-    stopId: z.string(),
+    stopId: z.string().nullable().optional(),
+    segmentId: z.string().nullable().optional(),
     ideaId: z.string().nullable().optional(),
     type: reservation.shape.type,
     name: z.string(),
@@ -111,10 +115,16 @@ export const reservationRowSchema = z
     cost: z.union([z.number(), z.string()]).nullable().optional(),
     rating: z.number().nullable().optional(),
     notes: z.string().nullable().optional(),
+    startsAt: z.string().nullable().optional(),
+    endsAt: z.string().nullable().optional(),
+    startsTz: z.string().nullable().optional(),
+    endsTz: z.string().nullable().optional(),
+    lodgingKind: reservation.shape.lodgingKind.optional(),
   })
   .transform((r) => ({
     id: r.id,
-    stopId: r.stopId,
+    stopId: r.stopId ?? null,
+    segmentId: r.segmentId ?? null,
     ideaId: r.ideaId ?? null,
     type: r.type,
     name: r.name,
@@ -124,15 +134,16 @@ export const reservationRowSchema = z
     cost: r.cost == null ? null : Number(r.cost),
     rating: r.rating ?? null,
     notes: r.notes ?? null,
-    // Every create in W0 is STOP-attached (#110 Q2 A — a segment's flights are
-    // seeded, not yet added from the app, #112), so the segment half is empty.
-    segmentId: null,
-    startsAt: null,
-    endsAt: null,
-    startsTz: null,
-    endsTz: null,
+    startsAt: r.startsAt ?? null,
+    endsAt: r.endsAt ?? null,
+    startsTz: r.startsTz ?? null,
+    endsTz: r.endsTz ?? null,
+    lodgingKind: r.lodgingKind ?? null,
     // A row that was just CREATED has no history yet, and the create response
     // carries none (#78 §6: the byline is joined on the READ path). The client
     // splices this shape straight into its trip, so the field has to be there.
     lastChange: null,
   }));
+
+/** `POST /api/trips` → 201: the created trip's whole tree. */
+export const tripSchema = trip;

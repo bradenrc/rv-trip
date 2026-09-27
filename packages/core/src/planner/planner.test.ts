@@ -195,6 +195,7 @@ function fixture(endDate = "2026-08-10"): Trip {
                 endsAt: null,
                 startsTz: null,
                 endsTz: null,
+                lodgingKind: null,
                 lastChange: null,
               },
             ],
@@ -958,6 +959,7 @@ describe("reservation and idea tree mutations", () => {
       endsAt: null,
       startsTz: null,
       endsTz: null,
+      lodgingKind: null,
       lastChange: null,
       ...over,
     };

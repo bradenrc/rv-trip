@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { routingHash } from "@rv-trip/core";
-import { getRigByOwner } from "@rv-trip/db";
+import { routingHash, tripRig } from "@rv-trip/core";
+import { getRigByOwner, getTripRigOn } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { routePairs } from "@/lib/routing";
 
@@ -28,6 +28,14 @@ const point = z.object({
 
 const bodySchema = z.object({
   pairs: z.array(z.object({ from: point, to: point })).min(1).max(50),
+  /**
+   * The trip the pairs belong to (#103 · vet HIGH). A trip that leaves the rig
+   * at home is routed WITHOUT it, so the reply must key on the no-rig hash the
+   * page rendered with — or the planner throws every upgraded route away.
+   * Optional: an older caller (the phone) sends none and gets the rig, as
+   * before.
+   */
+  tripId: z.string().uuid().optional(),
 });
 
 export async function POST(req: Request) {
@@ -36,7 +44,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const owner = await getOwner();
-  const rig = await getRigByOwner(owner);
+  const { tripId } = parsed.data;
+  const rigOn = tripId ? await getTripRigOn(owner, tripId) : true;
+  if (rigOn === null) return NextResponse.json({ error: "trip not found" }, { status: 404 });
+  const rig = tripRig({ rigOn }, await getRigByOwner(owner));
   const hash = await routingHash(rig);
   return NextResponse.json({
     routingHash: hash,

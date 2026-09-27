@@ -95,16 +95,81 @@ describe("createApiClient", () => {
       cost: 42.5,
       rating: null,
       notes: null,
-      // Every W0 create is stop-attached (#110 Q2 A): the segment half is empty.
+      // An older server's bare row: the segment half and the kind default null.
       segmentId: null,
       startsAt: null,
       endsAt: null,
       startsTz: null,
       endsTz: null,
+      lodgingKind: null,
       // A create carries no history: the byline is joined on the READ path
       // (#78 §6), so a just-made row comes back with `lastChange: null`.
       lastChange: null,
     });
+  });
+
+  it("keeps a flight's segment and clock, and a stay's kind (vet HIGH · #104/#105)", async () => {
+    const flight = {
+      id: "r2",
+      stopId: null,
+      segmentId: "seg1",
+      type: "transport" as const,
+      name: "AA 1190 LIR→DFW",
+      startsAt: "2027-01-25T01:30:00.000Z",
+      startsTz: "America/Costa_Rica",
+      endsAt: "2027-01-25T05:55:00.000Z",
+      endsTz: "America/Chicago",
+      lodgingKind: null,
+    };
+    const f = fakeFetch(201, flight);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const r = await api.reservations.create({ ...flight, moveStop: true });
+    expect(r).toMatchObject({ stopId: null, segmentId: "seg1", startsTz: "America/Costa_Rica", endsTz: "America/Chicago" });
+    expect(JSON.parse(f.calls[0]!.init.body as string).moveStop).toBe(true);
+
+    const g = fakeFetch(201, { id: "r3", stopId: "s1", type: "lodging", name: "Jane & Rick", lodgingKind: "friends" });
+    const stay = await createApiClient({ baseUrl: "http://x", fetch: g.fn }).reservations.create({
+      stopId: "s1",
+      type: "lodging",
+      name: "Jane & Rick",
+      lodgingKind: "friends",
+    });
+    expect(stay.lodgingKind).toBe("friends");
+  });
+
+  it("creates a trip and patches a segment (#103 · #104)", async () => {
+    const f = fakeFetch(201, {
+      id: "t9",
+      ownerId: "o",
+      title: "Costa Rica Fly & Stay",
+      startDate: "2027-01-16",
+      endDate: "2027-01-25",
+      defaultMode: "fly",
+      lodgingDefault: "hotel",
+      rigOn: false,
+      rating: null,
+      legs: [],
+    });
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const trip = await api.trips.create({
+      title: "Costa Rica Fly & Stay",
+      startDate: "2027-01-16",
+      endDate: "2027-01-25",
+      homeBase: null,
+      homeBasePlace: null,
+      defaultMode: "fly",
+      lodgingDefault: "hotel",
+      rigOn: false,
+    });
+    expect(trip).toMatchObject({ id: "t9", defaultMode: "fly", rigOn: false });
+    expect(f.calls[0]!.url).toBe("http://x/api/trips");
+
+    const g = fakeFetch(204);
+    await expect(
+      createApiClient({ baseUrl: "http://x", fetch: g.fn }).segments.patch("seg1", { mode: "fly" }),
+    ).resolves.toBeUndefined();
+    expect(g.calls[0]!.url).toBe("http://x/api/segments/seg1");
+    expect(JSON.parse(g.calls[0]!.init.body as string)).toEqual({ mode: "fly" });
   });
 
   it("validates the trip bundle, defaults included", async () => {

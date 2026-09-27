@@ -67,6 +67,7 @@ function mkRes(
     endsAt: null,
     startsTz: null,
     endsTz: null,
+    lodgingKind: null,
     lastChange: null,
     ...r,
   };

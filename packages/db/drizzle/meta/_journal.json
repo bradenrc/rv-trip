@@ -22,6 +22,13 @@
       "when": 1790358019285,
       "tag": "0002_w1_surfacing",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790470666525,
+      "tag": "0003_w2_lodging_kind",
+      "breakpoints": true
     }
   ]
 }

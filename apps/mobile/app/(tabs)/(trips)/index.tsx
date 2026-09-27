@@ -61,6 +61,8 @@ export default function TripsScreen() {
           contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
         >
+          {/* #103 · New trip is the first row of the Trips list. */}
+          <Button onPress={() => router.push("/trips/new")}>+ New trip</Button>
           <Kicker color={C.accent}>Your trips</Kicker>
           <Text style={styles.h1}>Where to next?</Text>
 
@@ -80,7 +82,7 @@ export default function TripsScreen() {
               </View>
             );
           })}
-          {trips && trips.length === 0 && <Muted>No trips yet — start one on the web app.</Muted>}
+          {trips && trips.length === 0 && <Muted>No trips yet — start one above.</Muted>}
         </ScrollView>
       )}
     </>

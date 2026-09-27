@@ -11,3 +11,5 @@ export * from "./route-order";
 export * from "./segments";
 export * from "./prefs";
 export * from "./units";
+export * from "./airports";
+export * from "./hops";

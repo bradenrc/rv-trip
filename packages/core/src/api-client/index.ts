@@ -1,7 +1,6 @@
 import type { z } from "zod";
 import type {
   IsoDate,
-  ReservationType,
   Idea,
   IdeaCreateInput,
   IdeaStatus,
@@ -10,6 +9,10 @@ import type {
   SavedPlace,
   SavedPlaceCreateInput,
   SavedPlacePatch,
+  ReservationCreateBody,
+  SegmentPatchInput,
+  Trip,
+  TripCreateInput,
   TripPatchInput,
   TripSummary,
 } from "../domain/types";
@@ -27,6 +30,7 @@ import {
   rigResponseSchema,
   routePairsResponseSchema,
   reservationRowSchema,
+  tripSchema,
   type PlacesSearchEnvelope,
   type TripBundle,
 } from "./schemas";
@@ -113,18 +117,20 @@ export interface IdeaPatch {
   rating?: number | null;
   notes?: string | null;
 }
-export interface CreateReservationInput {
-  stopId: string;
-  type: ReservationType;
-  name: string;
-  cost: number | null;
-  checkIn: IsoDate | null;
-}
+/**
+ * `POST /api/reservations` — core's own create grammar, pre-parse: a stop OR a
+ * segment parent, the clock a flight carries, a stay's kind, and `moveStop`
+ * (vet HIGH: this used to be a five-field subset that could not carry a
+ * flight). A 409 `segment_date_mismatch` throws `ApiError` with its body.
+ */
+export type CreateReservationInput = ReservationCreateBody;
 
 export interface ApiClient {
   trips: {
     list(): Promise<TripSummary[]>;
     get(id: string): Promise<TripBundle>;
+    /** POST /api/trips → 201 Trip — the setup screen (#103). */
+    create(input: TripCreateInput): Promise<Trip>;
     /** PATCH /api/trips/:id → 204. The review sheet's radius chips send
      * `{ surfaceRadiusMi }` (#111 i3). */
     patch(id: string, patch: TripPatchInput): Promise<void>;
@@ -160,6 +166,10 @@ export interface ApiClient {
   };
   stops: {
     patch(id: string, patch: StopPatch): Promise<void>;
+  };
+  segments: {
+    /** PATCH /api/segments/:id → 204 — a hop's mode switch (#104). */
+    patch(id: string, patch: SegmentPatchInput): Promise<void>;
   };
   reservations: {
     create(input: CreateReservationInput): Promise<Reservation>;
@@ -223,6 +233,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     trips: {
       list: () => parsed(tripSummaryListSchema, request("GET", "/api/trips")),
       get: (id) => parsed(tripBundleSchema, request("GET", `/api/trips/${encodeURIComponent(id)}`)),
+      create: (input) => parsed(tripSchema, request("POST", "/api/trips", input)),
       patch: (id, patch) => voidResult(request("PATCH", `/api/trips/${encodeURIComponent(id)}`, patch)),
       nearbySaves: (id) =>
         parsed(nearbySavesSchema, request("GET", `/api/trips/${encodeURIComponent(id)}/nearby-saves`)),
@@ -265,6 +276,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     },
     stops: {
       patch: (id, patch) => voidResult(request("PATCH", `/api/stops/${encodeURIComponent(id)}`, patch)),
+    },
+    segments: {
+      patch: (id, patch) =>
+        voidResult(request("PATCH", `/api/segments/${encodeURIComponent(id)}`, patch)),
     },
     reservations: {
       create: (input) => parsed(reservationRowSchema, request("POST", "/api/reservations", input)),

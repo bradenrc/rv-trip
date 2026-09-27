@@ -99,6 +99,7 @@ describe("reconcileSegments", () => {
           endsAt: null,
           startsTz: null,
           endsTz: null,
+          lodgingKind: null,
           lastChange: null,
         },
       ],

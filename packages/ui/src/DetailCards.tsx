@@ -9,7 +9,7 @@ import {
   MapPin,
   SquarePen,
 } from "lucide-react";
-import { PICKED_COORDLESS_LABEL, ideaIsLocated } from "@rv-trip/core";
+import { LODGING_KIND_LABEL, PICKED_COORDLESS_LABEL, ideaIsLocated } from "@rv-trip/core";
 import type { Reservation, Idea } from "@rv-trip/core";
 import { categoryMeta, ideaCategoryMeta } from "./category";
 import { CategoryTile } from "./CategoryTile";
@@ -71,7 +71,11 @@ export function ReservationCard({
           <span className="font-bold uppercase tracking-[0.06em]" style={{ color: cm.color }}>
             {cm.cat}
           </span>
-          <span className="uppercase tracking-[0.05em]">{r.type}</span>
+          {/* #105 · a stay prints its KIND ("Friends") in place of the raw type
+              word; every other row keeps the type. */}
+          <span className="uppercase tracking-[0.05em]">
+            {r.lodgingKind ? LODGING_KIND_LABEL[r.lodgingKind] : r.type}
+          </span>
           {dates && (
             <>
               <span>·</span>
