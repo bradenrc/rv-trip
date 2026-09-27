@@ -5,13 +5,15 @@ import {
   Utensils,
   Binoculars,
   Caravan,
+  Plane,
+  Ship,
   Ellipsis,
   MapPin,
   CircleDashed,
   Clock,
   CircleCheck,
 } from "lucide-react";
-import type { IdeaCategory, ReservationType, IdeaStatus } from "@rv-trip/core";
+import type { IdeaCategory, ReservationType, IdeaStatus, TravelMode } from "@rv-trip/core";
 
 /**
  * The design system's category language — every reservation/idea type maps to
@@ -56,7 +58,13 @@ const OTHER = {
   ink: "var(--color-rv-ink-muted)",
 } as const;
 
-export function categoryMeta(type: ReservationType): CategoryMeta {
+/**
+ * `mode` is the #104 hint (klunk row 6): a transport booking on a FLOWN hop is
+ * a Plane and on a ferry hop a Ship, where it used to be a Caravan for AA 2451
+ * too. Icon only — the Travel colours are unchanged, and every caller that
+ * passes no mode (every shipped one) is unchanged.
+ */
+export function categoryMeta(type: ReservationType, mode?: TravelMode): CategoryMeta {
   switch (type) {
     case "campground":
       return { cat: "Stay", Icon: Tent, ...STAY };
@@ -69,7 +77,11 @@ export function categoryMeta(type: ReservationType): CategoryMeta {
     case "event":
       return { cat: "Do", Icon: Binoculars, ...DO };
     case "transport":
-      return { cat: "Travel", Icon: Caravan, ...TRAVEL };
+      return {
+        cat: "Travel",
+        Icon: mode === "fly" ? Plane : mode === "ferry" ? Ship : Caravan,
+        ...TRAVEL,
+      };
     default:
       return { cat: "Other", Icon: type === "other" ? Ellipsis : MapPin, ...OTHER };
   }

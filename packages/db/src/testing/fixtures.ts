@@ -76,6 +76,10 @@ export interface TripSeed {
   statusAuto: boolean;
   rating: number | null;
   note: string | null;
+  /** #103 · the trip's three defaults — the column defaults when omitted. */
+  defaultMode: "drive" | "fly" | "ferry";
+  lodgingDefault: "hotel" | "friends" | "airbnb" | "campground" | null;
+  rigOn: boolean;
 }
 
 export interface LegSeed {
@@ -195,6 +199,9 @@ async function insertTrip(p: Partial<TripSeed> = {}): Promise<TripRow> {
       statusAuto: p.statusAuto ?? true,
       rating: p.rating ?? null,
       note: p.note ?? null,
+      ...(p.defaultMode !== undefined && { defaultMode: p.defaultMode }),
+      ...(p.lodgingDefault !== undefined && { lodgingDefault: p.lodgingDefault }),
+      ...(p.rigOn !== undefined && { rigOn: p.rigOn }),
     })
     .returning();
   return row!;

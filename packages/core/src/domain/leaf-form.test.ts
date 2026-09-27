@@ -11,6 +11,11 @@ import {
   reservationDraftInput,
   reservationDraftPatch,
   reservationRestoreInput,
+  stayDraft,
+  stayKindType,
+  stayNameLabel,
+  withStayKind,
+  LODGING_KIND_LABEL,
   type ReservationDraft,
 } from "./leaf-form";
 import {
@@ -44,6 +49,7 @@ function res(over: Partial<Reservation> = {}): Reservation {
     endsAt: null,
     startsTz: null,
     endsTz: null,
+    lodgingKind: null,
     lastChange: null,
     ...over,
   };
@@ -94,6 +100,7 @@ describe("reservationDraftInput — the add form's POST body", () => {
       checkOut: "2026-08-05",
       confirmationNumber: "KOA-88213",
       cost: "204",
+      lodgingKind: null,
     };
     expect(reservationDraftInput(STOP, draft)).toEqual({
       stopId: STOP,
@@ -105,6 +112,11 @@ describe("reservationDraftInput — the add form's POST body", () => {
       cost: 204,
       rating: null,
       notes: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
+      lodgingKind: null,
     });
   });
 
@@ -130,6 +142,11 @@ describe("reservationDraftInput — the add form's POST body", () => {
       cost: null,
       rating: null,
       notes: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
+      lodgingKind: null,
     });
   });
 
@@ -167,6 +184,7 @@ describe("reservationDraft / reservationDraftPatch — the edit form", () => {
       checkOut: "",
       confirmationNumber: "",
       cost: "64",
+      lodgingKind: null,
     });
   });
 
@@ -201,6 +219,12 @@ describe("reservationRestoreInput — what Undo re-POSTs", () => {
     const r = res();
     expect(reservationRestoreInput(r)).toEqual({
       stopId: STOP,
+      segmentId: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
+      lodgingKind: null,
       type: "dining",
       name: "Rogue Ales brewery lunch",
       checkIn: "2026-08-18",
@@ -411,5 +435,69 @@ describe("ideaIsLocated — place-state 3, the row menu's condition", () => {
   it("does not care where the idea lives — a shelf row is state 3 too", () => {
     expect(ideaIsLocated(ideaFixture({ stopId: null, place: LOCATED }))).toBe(true);
     expect(ideaIsLocated(ideaFixture({ stopId: null, place: null }))).toBe(false);
+  });
+});
+
+describe("#105 · a stay by kind", () => {
+  it("opens on the trip's lodging default, and the kind decides the type", () => {
+    expect(stayDraft("campground")).toMatchObject({ type: "campground", lodgingKind: "campground" });
+    expect(stayDraft("hotel")).toMatchObject({ type: "lodging", lodgingKind: "hotel" });
+    expect(stayDraft(null)).toMatchObject({ type: "campground", lodgingKind: "campground" });
+    expect(stayKindType("friends")).toBe("lodging");
+    expect(stayKindType("airbnb")).toBe("lodging");
+  });
+
+  it("Friends carries no cost and no confirmation number (Q9 A)", () => {
+    const d = withStayKind(
+      { ...stayDraft("hotel"), name: "Jane & Rick", cost: "90", confirmationNumber: "X1" },
+      "friends",
+    );
+    expect(d.cost).toBe("");
+    const body = reservationDraftInput(STOP, {
+      ...d,
+      cost: "90",
+      confirmationNumber: "X1",
+      checkIn: "2026-08-12",
+      checkOut: "2026-08-16",
+    });
+    expect(body).toMatchObject({
+      type: "lodging",
+      lodgingKind: "friends",
+      name: "Jane & Rick",
+      cost: null,
+      confirmationNumber: null,
+    });
+    expect(reservationCreateInput.safeParse(body).success).toBe(true);
+  });
+
+  it("a kind switch on edit is a patch key (vet HIGH)", () => {
+    const r = res({ type: "lodging", lodgingKind: "hotel", name: "Naxos Chora hotel", cost: null });
+    const patch = reservationDraftPatch(r, withStayKind(reservationDraft(r), "airbnb"));
+    expect(patch).toEqual({ lodgingKind: "airbnb" });
+    expect(reservationPatchInput.parse(patch)).toEqual({ lodgingKind: "airbnb" });
+  });
+
+  it("the label a saved stay prints", () => {
+    expect(LODGING_KIND_LABEL.friends).toBe("Friends");
+    expect(stayNameLabel("airbnb")).toBe("Listing name or link");
+    expect(stayNameLabel("friends")).toBe("Staying with");
+  });
+
+  it("an undone delete of a flight goes back on its HOP, clock and all", () => {
+    const flight = res({
+      stopId: null,
+      segmentId: "6f1c5b4e-0000-4000-8000-0000000000b1",
+      type: "transport",
+      name: "AA 2451 BOI→LAX",
+      checkIn: null,
+      cost: null,
+      startsAt: "2027-01-16T13:05:00.000Z",
+      startsTz: "America/Boise",
+      endsAt: "2027-01-16T15:10:00.000Z",
+      endsTz: "America/Los_Angeles",
+    });
+    const body = reservationRestoreInput(flight);
+    expect(body).toMatchObject({ stopId: null, segmentId: flight.segmentId, startsTz: "America/Boise" });
+    expect(reservationCreateInput.safeParse(body).success).toBe(true);
   });
 });

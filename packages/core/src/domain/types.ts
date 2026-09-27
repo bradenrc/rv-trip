@@ -155,6 +155,14 @@ export const reservation = z.object({
   endsAt: instant,
   startsTz: ianaZone,
   endsTz: ianaZone,
+  /**
+   * What KIND of stay a lodging row is (#105 · Q9 A) — the same four words as
+   * the trip's `lodgingDefault`. Null for everything that is not a stay, and
+   * for a stay written before W2. It never replaces `type`: the kind DECIDES
+   * the type at the form (campground → "campground", the rest → "lodging"), so
+   * `categoryMeta` and every Stay tile keep reading `type` alone.
+   */
+  lodgingKind: lodgingKind.nullable().default(null),
   lastChange: lastChangeField,
 });
 export type Reservation = z.infer<typeof reservation>;
@@ -319,6 +327,11 @@ export const tripCreateInput = trip.pick({
   // is a key `safeParse` DROPS silently at the handler — the whole home-base
   // migration would be a no-op on the wire.
   homeBasePlace: true,
+  // #103 · the setup's three answers. Explicit for the same reason: an
+  // unlisted key would parse away and every new trip would be a drive trip.
+  defaultMode: true,
+  lodgingDefault: true,
+  rigOn: true,
 });
 export type TripCreateInput = z.infer<typeof tripCreateInput>;
 
@@ -340,6 +353,10 @@ export const tripPatchInput = trip
     // #111 i3: the review sheet's radius chips. Explicit for the same reason
     // as `homeBasePlace` above — `.pick()` drops an unlisted key silently.
     surfaceRadiusMi: true,
+    // #103 · Trip settings' three defaults (klunk row 7). Explicit, same reason.
+    defaultMode: true,
+    lodgingDefault: true,
+    rigOn: true,
   })
   .partial();
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
@@ -429,7 +446,24 @@ export type StopPatchInput = z.infer<typeof stopPatchInput>;
  * never client-editable, and `sortOrder` is the server's to append.
  */
 
-/** `POST /api/reservations` — the stop sheet's reservation form, and the undo. */
+/** An instant as a create body carries it: ISO 8601 WITH an offset ("Z" or
+ * "+03:00"), so the server never has to guess a zone for a bare wall clock. */
+const instantInput = z.string().datetime({ offset: true }).nullable().default(null);
+
+/**
+ * `POST /api/reservations` — the stop sheet's reservation form, a hop's Add
+ * flight / Add ferry (#104), and the undo.
+ *
+ * The parent is a STOP or a SEGMENT, exactly one (#110 Q2 A) — the refine
+ * mirrors the `reservations_one_parent` CHECK, so a body naming both or
+ * neither is a 400 at the boundary rather than a constraint error deeper in.
+ * A segment-parented row carries its clock (`startsAt`/`endsAt`, each with its
+ * IANA zone); the server re-times the segment from its bookings.
+ *
+ * `moveStop` is the Q8 A "Check out of … on … instead" fix: save the booking
+ * AND move the stop's date to agree with it, in one transaction. Without it a
+ * booking whose date disagrees with the stop is refused (409).
+ */
 export const reservationCreateInput = reservation
   .pick({
     type: true,
@@ -439,9 +473,43 @@ export const reservationCreateInput = reservation
     confirmationNumber: true,
     cost: true,
     notes: true,
+    startsTz: true,
+    endsTz: true,
+    lodgingKind: true,
   })
-  .extend({ stopId: z.string().uuid(), rating: rating.default(null) });
+  .extend({
+    stopId: z.string().uuid().nullish(),
+    segmentId: z.string().uuid().nullish(),
+    rating: rating.default(null),
+    startsAt: instantInput,
+    endsAt: instantInput,
+    moveStop: z.boolean().optional(),
+  })
+  .superRefine((b, ctx) => {
+    const parents = (b.stopId ? 1 : 0) + (b.segmentId ? 1 : 0);
+    if (parents !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stopId"],
+        message: "exactly one of stopId / segmentId",
+      });
+    }
+    // Half a clock is no clock: an instant with no zone cannot be shown as
+    // the wall time printed on the ticket.
+    if (b.startsAt !== null && !b.startsTz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["startsTz"], message: "startsAt needs its zone" });
+    }
+    if (b.endsAt !== null && !b.endsTz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endsTz"], message: "endsAt needs its zone" });
+    }
+    if (b.startsAt !== null && b.endsAt !== null && Date.parse(b.endsAt) < Date.parse(b.startsAt)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endsAt"], message: "lands before it leaves" });
+    }
+  });
+/** Post-parse: every default resolved. What the mutation receives. */
 export type ReservationCreateInput = z.infer<typeof reservationCreateInput>;
+/** Pre-parse: what a client sends — the clock and the kind may be omitted. */
+export type ReservationCreateBody = z.input<typeof reservationCreateInput>;
 
 /** `PATCH /api/reservations/:id` — every editable field, all optional, because
  * the form sends only what it changed (and the card's stars/note send one). */
@@ -455,9 +523,20 @@ export const reservationPatchInput = reservation
     cost: true,
     rating: true,
     notes: true,
+    // #105 · the stay form's kind switch is part of the ONE add/edit form, so
+    // an edit can change it (vet HIGH: an unlisted key would parse away).
+    lodgingKind: true,
   })
   .partial();
 export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
+
+/**
+ * `PATCH /api/segments/:id` (#104 · Q7 B) — a hop's mode switch. The mode is
+ * the only thing a client writes on a segment: its ends are reconciled from
+ * the stop sequence and its clock is re-timed from its bookings.
+ */
+export const segmentPatchInput = z.object({ mode: travelMode });
+export type SegmentPatchInput = z.infer<typeof segmentPatchInput>;
 
 /**
  * `POST /api/ideas` — the stop sheet's "Add idea", the shelf's "+ Add", the

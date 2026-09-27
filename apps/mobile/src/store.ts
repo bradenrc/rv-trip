@@ -2,13 +2,26 @@ import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type {
   NearbySave,
   NearbySaves,
+  Reservation,
+  ReservationCreateInput,
+  TravelMode,
+  TripCreateInput,
+  TripPatchInput,
   SavedPlace,
   SavedPlacePatch,
   SurfaceRadiusMi,
   Trip,
   TripSummary,
 } from "@rv-trip/core";
-import { appendShelfIdea, applySavedPlacePatch, nearbyIdeaBody } from "@rv-trip/core";
+import {
+  appendReservation,
+  appendShelfIdea,
+  applyHopBooking,
+  applySavedPlacePatch,
+  nearbyIdeaBody,
+  setSegmentMode,
+  withReconciledSegments,
+} from "@rv-trip/core";
 import type { TripBundle } from "@rv-trip/core/api-client";
 import { api } from "./api";
 
@@ -181,4 +194,55 @@ export async function setSurfaceRadius(tripId: string, radius: SurfaceRadiusMi):
 export async function addNearbyIdea(tripId: string, item: NearbySave): Promise<void> {
   const created = await api.ideas.create(nearbyIdeaBody(tripId, item));
   updateTrip(tripId, (t) => appendShelfIdea(t, created));
+}
+
+// ── W2 (#112): setup, trip defaults, hops, stays ─────────────────────────────
+
+/** The setup's Create trip (#103): POST, then the Trips list re-reads. */
+export async function createTrip(input: TripCreateInput): Promise<Trip> {
+  const trip = await api.trips.create(input);
+  await loadTrips();
+  return trip;
+}
+
+/** Trip defaults' Save — only what changed. The bundle is re-read after, so a
+ * rig answer that moved re-routes the drives on the server (`tripRig`). */
+export async function patchTripDefaults(id: string, patch: TripPatchInput): Promise<void> {
+  if (Object.keys(patch).length === 0) return;
+  updateTrip(id, (t) => ({ ...t, ...patch }) as Trip);
+  try {
+    await api.trips.patch(id, patch);
+  } finally {
+    await Promise.all([loadBundle(id), loadTrips()]);
+  }
+}
+
+/** A hop's mode switch (#104 · Q7 B), optimistic; a refusal re-reads the trip
+ * (which puts the old mode back) and rethrows for the screen to say so. */
+export async function setHopMode(tripId: string, segmentId: string, mode: TravelMode): Promise<void> {
+  updateTrip(tripId, (t) => setSegmentMode(t, segmentId, mode));
+  try {
+    await api.segments.patch(segmentId, { mode });
+  } catch (e) {
+    await loadBundle(tripId);
+    throw e;
+  }
+}
+
+/** Save flight / Save ferry — with `moveStop`, the Q8 A "Check out of …
+ * instead" fix in one request. Throws on a refusal (the sheet stays open). */
+export async function addHopBooking(
+  tripId: string,
+  body: ReservationCreateInput,
+  moveStop: boolean,
+): Promise<Reservation> {
+  const r = await api.reservations.create(moveStop ? { ...body, moveStop: true } : body);
+  updateTrip(tripId, (t) => withReconciledSegments(applyHopBooking(t, r, moveStop)));
+  return r;
+}
+
+/** Add stay (#105) — a stop-parented stay of a kind. */
+export async function addStay(tripId: string, body: ReservationCreateInput): Promise<void> {
+  const r = await api.reservations.create(body);
+  if (r.stopId) updateTrip(tripId, (t) => appendReservation(t, r.stopId!, r));
 }

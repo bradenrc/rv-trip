@@ -1,0 +1,1 @@
+ALTER TABLE "reservations" ADD COLUMN "lodging_kind" "lodging_kind";

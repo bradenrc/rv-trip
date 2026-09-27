@@ -6,7 +6,7 @@ import {
   listDismissedSaveIds,
   listSavedPlacesForOwner,
 } from "@rv-trip/db";
-import { nearbySaves } from "@rv-trip/core";
+import { nearbySaves, tripRig } from "@rv-trip/core";
 import { TripPlanner } from "@/components/trip/TripPlanner";
 import { getOwner } from "@/lib/owner";
 import { unitsFromPrefs } from "@/lib/units";
@@ -29,7 +29,8 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // screen that renders a Navigate control asks for it. /map does not
   // (docs/design/43 §4).
   const rig = await getRigByOwner(owner);
-  const { routes, routingHash, nav } = await routeTrip(trip, rig, { nav: true });
+  // #103 · a trip that leaves the rig at home routes without it (klunk row 4).
+  const { routes, routingHash, nav } = await routeTrip(trip, tripRig(trip, rig), { nav: true });
   // The account's display units, read on the SAME seam as the routes: the rail
   // and every drive row render in the right unit with no flash, and no display
   // component has to become a preference consumer (lib/units.ts).

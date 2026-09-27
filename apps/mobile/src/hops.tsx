@@ -1,0 +1,410 @@
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type {
+  HopBookingDraft,
+  Place,
+  RouteHop,
+  RouteHopBooking,
+  TravelMode,
+  Trip,
+  ZoneChip,
+} from "@rv-trip/core";
+import {
+  blankHopDraft,
+  fixHopDraftDates,
+  hopBookingClash,
+  hopBookingInput,
+  hopClashCopy,
+  hopDraftZones,
+  instantToLocal,
+  localToInstant,
+  zoneChoices,
+} from "@rv-trip/core";
+import { addHopBooking, setHopMode } from "./store";
+import { C, F, R } from "./theme";
+import { Button, Chip, Segmented, type SegmentedOption } from "./ui";
+
+/**
+ * The phone's hops (#104 · Q12 C — full parity): the travel card a fly/ferry
+ * hop draws on the Route lens, the ⋯ action sheet a drive trip's drive row
+ * opens (Q7 B), and the Add flight / Add ferry sheet with the same fields,
+ * zone chips and date-clash fixes as the web — run through the same core
+ * functions. Menus and forms are bottom sheets on RN `Modal`, the
+ * `NearbySheet` precedent. Fly/ferry glyphs are text (✈ ⛴), as on the rhythm
+ * strip; date and time fields are mono TextInputs (the app has no picker).
+ */
+
+export const MODE_OPTIONS: SegmentedOption<TravelMode>[] = [
+  { value: "drive", label: "Drive" },
+  { value: "fly", label: "Fly" },
+  { value: "ferry", label: "Ferry" },
+];
+
+export const modeGlyph = (mode: TravelMode) => (mode === "ferry" ? "⛴" : "✈");
+
+const failed = (what: string) => Alert.alert("Didn’t save", `${what} — check your connection and try again.`);
+
+/** Switch a hop, saying so when the server refuses (a hop with bookings can't
+ * go back to Drive). */
+export function switchHop(tripId: string, segmentId: string, mode: TravelMode) {
+  setHopMode(tripId, segmentId, mode).catch(() =>
+    Alert.alert("Didn’t change", "Remove this hop’s bookings before switching it to Drive."),
+  );
+}
+
+/** The travel card: 3px rv-travel left rule, the hop's flights in local time. */
+export function HopRow({
+  hop,
+  flush,
+  showSwitch,
+  onMode,
+  onAdd,
+}: {
+  hop: RouteHop;
+  flush: boolean;
+  showSwitch: boolean;
+  onMode: (m: TravelMode) => void;
+  onAdd: () => void;
+}) {
+  const bookings = hop.items.filter((i): i is RouteHopBooking => i.kind === "booking");
+  return (
+    <View style={[styles.phop, flush && { marginLeft: 0 }]}>
+      <View style={styles.hh}>
+        <Text style={{ color: C.inkMuted, fontSize: 12 }}>{modeGlyph(hop.mode)}</Text>
+        <Text style={styles.hhBold}>
+          {hop.fromName} → {hop.toName}
+        </Text>
+        {hop.overnight && <Text style={styles.pm}>redeye</Text>}
+      </View>
+      {showSwitch && <Segmented mono value={hop.mode} options={MODE_OPTIONS} onChange={onMode} />}
+      {bookings.map((b) => (
+        <Text key={b.id} style={styles.pfl}>
+          {b.name}
+          {b.departTime && b.arriveTime ? (
+            <>
+              {"\n"}
+              {b.departTime} <Text style={styles.z}>{b.departAbbr}</Text> → {b.arriveTime}{" "}
+              <Text style={styles.z}>{b.arriveAbbr}</Text>
+            </>
+          ) : null}
+        </Text>
+      ))}
+      <Pressable onPress={onAdd} accessibilityRole="button" hitSlop={6}>
+        <Text style={[styles.pm, { color: C.ink }]}>+ {hop.mode === "ferry" ? "Add ferry" : "Add flight"}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/** A bottom sheet on RN Modal — dim, grab handle, surface. */
+export function Sheet({
+  visible,
+  onClose,
+  children,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.dim} onPress={onClose} accessibilityLabel="Close" />
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, maxHeight: "88%" }]}>
+        <View style={styles.grab} />
+        <ScrollView contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
+          {children}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+/** A drive trip's ⋯ on a drive row (Q7 B): the only way PNW flies a hop. */
+export function HopActionSheet({
+  visible,
+  title,
+  onPick,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  onPick: (mode: TravelMode) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Sheet visible={visible} onClose={onClose}>
+      <Text style={styles.pm}>{title}</Text>
+      <View style={styles.aslist}>
+        <Pressable onPress={() => onPick("fly")} accessibilityRole="button" style={styles.asRow}>
+          <Text style={styles.asText}>✈ Fly this hop instead</Text>
+        </Pressable>
+        <Pressable onPress={() => onPick("ferry")} accessibilityRole="button" style={[styles.asRow, styles.asRule]}>
+          <Text style={styles.asText}>⛴ Take a ferry instead</Text>
+        </Pressable>
+      </View>
+      <Button tone="ghost" onPress={onClose}>
+        Cancel
+      </Button>
+    </Sheet>
+  );
+}
+
+/** "America/Costa_Rica · CST" — the abbreviation in force at the typed time. */
+function zoneLabel(zone: string, local: string): string {
+  const at = localToInstant(local, zone) ?? new Date().toISOString();
+  return `${zone} · ${instantToLocal(at, zone).abbr}`;
+}
+
+/**
+ * Add flight / Add ferry. The same fields, chips and fixes as the web form:
+ * a chip the table verified is green; one it could not is amber and lists the
+ * zones when tapped; Save stays disabled until both ends have a zone; a date
+ * clash names the stop and offers the two fixes, and nothing saves until one
+ * is picked.
+ */
+export function HopBookingSheet({
+  trip,
+  hop,
+  onClose,
+}: {
+  trip: Trip;
+  hop: RouteHop | null;
+  onClose: () => void;
+}) {
+  const kind = hop?.mode === "ferry" ? "ferry" : "flight";
+  const [draft, setDraft] = useState<HopBookingDraft>(() => blankHopDraft(kind));
+  const [picking, setPicking] = useState<"from" | "to" | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // A fresh open starts clean, on this hop's ports.
+  useEffect(() => {
+    if (hop) setDraft(blankHopDraft(kind, { from: hop.fromName, to: hop.toName }));
+    setPicking(null);
+    setSaving(false);
+  }, [hop?.segmentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ports = useMemo(() => {
+    const stops = trip.legs.flatMap((l) => l.stops);
+    const of = (id: string | null): Place | null => stops.find((s) => s.id === id)?.place ?? null;
+    return { from: of(hop?.fromStopId ?? null), to: of(hop?.toStopId ?? null) };
+  }, [trip, hop]);
+
+  if (!hop) return null;
+  const set = (patch: Partial<HopBookingDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const zones = hopDraftZones(draft, ports);
+  const body = hopBookingInput(hop.segmentId, draft, zones);
+  const clash = body ? hopBookingClash(trip, hop.segmentId, body) : null;
+  const copy = clash ? hopClashCopy(clash, kind) : null;
+
+  const save = async (move: boolean) => {
+    if (!body || saving) return;
+    setSaving(true);
+    try {
+      await addHopBooking(trip.id, body, move);
+      onClose();
+    } catch {
+      setSaving(false);
+      failed(kind === "ferry" ? "That ferry" : "That flight");
+    }
+  };
+
+  const chip = (which: "from" | "to", c: ZoneChip, local: string) => (
+    <View style={{ alignSelf: "flex-start" }}>
+      <Chip on={c.verified} warn={c.zone === null} onPress={() => setPicking(picking === which ? null : which)}>
+        {c.zone ? `${c.verified ? "✓ " : ""}${zoneLabel(c.zone, local)}` : `${c.code || "?"}? pick a zone`}
+      </Chip>
+    </View>
+  );
+
+  return (
+    <Sheet visible onClose={onClose}>
+      <Text style={styles.st}>{kind === "ferry" ? "Add ferry" : "Add flight"}</Text>
+      <Text style={styles.pm}>
+        {hop.fromName} → {hop.toName}
+      </Text>
+
+      {kind === "flight" ? (
+        <>
+          <Label>Flight</Label>
+          <Input mono value={draft.label} onChangeText={(label) => set({ label })} placeholder="AA 1190" />
+          <View style={{ flexDirection: "row", gap: 6 }}>
+            <View style={{ flex: 1 }}>
+              <Label>From</Label>
+              <Input mono value={draft.from} onChangeText={(from) => set({ from, fromZone: null })} placeholder="LIR" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Label>To</Label>
+              <Input mono value={draft.to} onChangeText={(to) => set({ to, toZone: null })} placeholder="DFW" />
+            </View>
+          </View>
+        </>
+      ) : (
+        <>
+          <Label>Operator</Label>
+          <Input value={draft.label} onChangeText={(label) => set({ label })} />
+          <Text style={styles.pm}>
+            {draft.from} → {draft.to}
+          </Text>
+        </>
+      )}
+
+      <Label>Departs · local</Label>
+      <Input mono value={draft.departs} onChangeText={(departs) => set({ departs })} placeholder="2027-01-24 19:30" />
+      {(kind === "ferry" || zones.from.code !== "") && chip("from", zones.from, draft.departs)}
+      <Label>Arrives · local</Label>
+      <Input mono value={draft.arrives} onChangeText={(arrives) => set({ arrives })} placeholder="2027-01-24 23:55" />
+      {(kind === "flight" ? zones.to.code !== "" : zones.to.zone !== zones.from.zone) &&
+        chip("to", zones.to, draft.arrives)}
+
+      {picking && (
+        <View style={styles.zoneList}>
+          <ScrollView nestedScrollEnabled style={{ maxHeight: 180 }}>
+            {zoneChoices().map((z) => (
+              <Pressable
+                key={z}
+                onPress={() => {
+                  set(picking === "from" ? { fromZone: z } : { toZone: z });
+                  setPicking(null);
+                }}
+                style={styles.zoneRow}
+                accessibilityRole="button"
+              >
+                <Text style={styles.zoneText}>{z}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {clash && copy && (
+        <View style={styles.pconf}>
+          <Text style={styles.w}>⚠ {copy.headline}</Text>
+          <Text style={{ color: C.ink, fontSize: 11.5 }}>{copy.sub}</Text>
+          <Pressable onPress={() => void save(true)} disabled={saving} style={styles.pconfA} accessibilityRole="button">
+            <Text style={styles.pconfAText}>{copy.move}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setDraft((d) => fixHopDraftDates(d, clash))}
+            style={styles.pconfA}
+            accessibilityRole="button"
+          >
+            <Text style={styles.pconfAText}>{copy.keep}</Text>
+          </Pressable>
+        </View>
+      )}
+
+      <Button onPress={() => void save(false)} disabled={!body || clash !== null || saving}>
+        {kind === "ferry" ? "Save ferry" : "Save flight"}
+      </Button>
+    </Sheet>
+  );
+}
+
+export function Label({ children }: { children: ReactNode }) {
+  return <Text style={styles.fl}>{children}</Text>;
+}
+
+export function Input({
+  mono = false,
+  ...props
+}: { mono?: boolean } & React.ComponentProps<typeof TextInput>) {
+  return (
+    <TextInput
+      placeholderTextColor={C.inkSubtle}
+      autoCapitalize="none"
+      autoCorrect={false}
+      {...props}
+      style={[styles.pin, mono && styles.pinMono]}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  phop: {
+    marginLeft: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderLeftWidth: 3,
+    borderLeftColor: C.travel,
+    borderRadius: R.md,
+    backgroundColor: C.surface,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  hh: { flexDirection: "row", gap: 6, alignItems: "center", flexWrap: "wrap" },
+  hhBold: { color: C.ink, fontWeight: "700", fontSize: 12 },
+  pfl: { fontFamily: F.mono, fontSize: 10.5, color: C.ink },
+  z: { color: C.inkFaded },
+  pm: { fontFamily: F.mono, fontSize: 10.5, color: C.inkFaded },
+  st: { fontSize: 16, fontWeight: "800", color: C.ink },
+  fl: {
+    fontFamily: F.mono,
+    fontSize: 9,
+    textTransform: "uppercase",
+    letterSpacing: 0.72,
+    color: C.inkFaded,
+  },
+  pin: {
+    borderWidth: 1,
+    borderColor: C.borderHi,
+    borderRadius: R.md,
+    backgroundColor: C.navyDeep,
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    fontSize: 12.5,
+    color: C.ink,
+  },
+  pinMono: { fontFamily: F.mono, fontSize: 11.5 },
+  dim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: C.navy, opacity: 0.55 },
+  sheet: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: C.surface,
+    borderTopWidth: 1,
+    borderColor: C.borderHi,
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingTop: 8,
+    paddingHorizontal: 14,
+    gap: 8,
+  },
+  grab: {
+    width: 36,
+    height: 4,
+    borderRadius: R.pill,
+    backgroundColor: C.borderHi,
+    alignSelf: "center",
+    marginBottom: 4,
+  },
+  aslist: { borderWidth: 1, borderColor: C.border, borderRadius: R.card, overflow: "hidden" },
+  asRow: { paddingVertical: 11, paddingHorizontal: 12, backgroundColor: C.surface },
+  asRule: { borderTopWidth: 1, borderTopColor: C.borderSoft },
+  asText: { fontSize: 14, color: C.ink },
+  pconf: {
+    borderWidth: 1,
+    borderColor: C.warning,
+    backgroundColor: C.warningSoft,
+    borderRadius: R.card,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    gap: 6,
+  },
+  w: { color: C.warning, fontWeight: "700", fontSize: 11.5 },
+  pconfA: {
+    borderWidth: 1,
+    borderColor: C.borderHi,
+    borderRadius: R.md,
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    backgroundColor: C.surface,
+  },
+  pconfAText: { fontWeight: "700", fontSize: 12, color: C.ink, textAlign: "center" },
+  zoneList: { borderWidth: 1, borderColor: C.border, borderRadius: R.card, overflow: "hidden" },
+  zoneRow: { paddingVertical: 8, paddingHorizontal: 10, borderTopWidth: 1, borderTopColor: C.borderSoft },
+  zoneText: { fontFamily: F.mono, fontSize: 11.5, color: C.ink },
+});

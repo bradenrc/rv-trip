@@ -1,4 +1,4 @@
-import { NO_ROUTING_HASH, type RouteMap } from "@rv-trip/core";
+import { tripRig, type RouteMap } from "@rv-trip/core";
 import {
   getPrefsByOwner,
   getRigByOwner,
@@ -30,12 +30,19 @@ export default async function MapPage() {
   // so every drive is resolved HERE, before render, and handed down as one
   // plain keyed map. A trip you have already taken draws no arc (pins.ts), so
   // it is not routed either — nothing is billed for a drive nobody will see.
-  // Every pair is keyed on the SAME routingHash, so the maps merge cleanly.
+  // Each trip routes with the rig only when it brings one (#103 · `tripRig`),
+  // so the keys carry one of two hashes — handed down PER TRIP rather than as
+  // one shared hash (vet HIGH: a single hash left every rig-less trip's drives
+  // unfindable). The keys differ by hash, so the maps still merge cleanly.
   const routed = await Promise.all(
-    trips.filter((t) => t.status !== "complete").map((t) => routeTrip(t, rig)),
+    trips
+      .filter((t) => t.status !== "complete")
+      .map(async (t) => ({ id: t.id, ...(await routeTrip(t, tripRig(t, rig))) })),
   );
   const routes: RouteMap = Object.assign({}, ...routed.map((r) => r.routes));
-  const routingHash = routed[0]?.routingHash ?? NO_ROUTING_HASH;
+  const routingHash: Record<string, string> = Object.fromEntries(
+    routed.map((r) => [r.id, r.routingHash]),
+  );
 
   return (
     <PageShell>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type {
@@ -13,8 +13,10 @@ import type {
   SavedPlace,
   SurfaceRadiusMi,
   Reservation,
+  ReservationCreateInput,
   ReservationDraft,
   ReservationType,
+  TravelMode,
   Stop,
   StopDatesDraft,
   Trip,
@@ -22,8 +24,11 @@ import type {
   TripSettingsDraft,
 } from "@rv-trip/core";
 import {
-  BLANK_RESERVATION_DRAFT,
   UNDO_WINDOW_MS,
+  applyHopBooking,
+  removeSegmentBooking,
+  setSegmentMode,
+  stayDraft,
   cascadeLossSentence,
   ideaDraftInput,
   ideaIsLocated,
@@ -169,6 +174,7 @@ import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
 import { NearbySavesBanner, NearbySavesSheet, sheetRows } from "./NearbySaves";
+import { LodgingCards, RigCards, TripModeCards } from "./choice-cards";
 
 
 /**
@@ -226,7 +232,16 @@ export function TripPlanner({
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
   const [routes, setRoutes] = useState(initialRoutes);
-  const [lens, setLens] = useState<"timeline" | "route">("timeline");
+  // Klunk row 8 · Q4 A: the lens follows the mode — a drive trip opens on
+  // Route, a fly trip on Timeline. Derived, never stored.
+  const [lens, setLens] = useState<"timeline" | "route">(
+    initialTrip.defaultMode === "drive" ? "route" : "timeline",
+  );
+  /** The hop whose Add flight / Add ferry form is open (#104 · Q5 A). */
+  const [openHopId, setOpenHopId] = useState<string | null>(null);
+  /** A fly/ferry day clicked on the Timeline: once Route has rendered, scroll
+   * that hop into view. A ref, not state — it is a one-shot DOM instruction. */
+  const scrollHopId = useRef<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -249,7 +264,7 @@ export function TripPlanner({
   const [ideaPicked, setIdeaPicked] = useState<PickedPlace | null>(null);
   const [deleteLegId, setDeleteLegId] = useState<string | null>(null);
   const [deleteStopId, setDeleteStopId] = useState<string | null>(null);
-  const [form, setForm] = useState<AddForm>(BLANK_RESERVATION_DRAFT);
+  const [form, setForm] = useState<AddForm>(() => stayDraft(initialTrip.lodgingDefault));
   const [ideaAddOpen, setIdeaAddOpen] = useState(false);
   const [ideaDraft, setIdeaDraft] = useState("");
   /** The idea whose "Book as" picker is open, and the type it is set to. The
@@ -291,6 +306,13 @@ export function TripPlanner({
    * ever open.
    */
   const noteUndo = useRef<Trip | null>(null);
+
+  useEffect(() => {
+    const id = scrollHopId.current;
+    if (lens !== "route" || !id) return;
+    scrollHopId.current = null;
+    document.getElementById(`hop-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [lens, openHopId]);
 
   /**
    * Every write: the optimistic change is already on screen, so a failure
@@ -1046,8 +1068,10 @@ export function TripPlanner({
   // for six seconds — Undo re-POSTs the row, because the DELETE has already
   // committed by the time the toast is gone and the id is not coming back.
 
+  /** "Add" opens on Stay, with the trip's lodging default as its kind (#105 ·
+   * Q3 A) — Campground on PNW, Hotel on Costa Rica and Greece. */
   const openAddReservation = () => {
-    setForm(BLANK_RESERVATION_DRAFT);
+    setForm(stayDraft(trip.lodgingDefault));
     setFormTarget("new");
   };
 
@@ -1070,7 +1094,7 @@ export function TripPlanner({
         // the server can mint the id, so it awaits the 201 and splices the row.
         const row = await tripApi.createReservation(body);
         setTrip((t) => appendReservation(t, stopId, row));
-        setForm(BLANK_RESERVATION_DRAFT);
+        setForm(stayDraft(trip.lodgingDefault));
         setFormTarget(null);
       } catch {
         toast.error("Couldn't save that reservation.");
@@ -1197,6 +1221,74 @@ export function TripPlanner({
     }
   };
 
+  // ── #104 · hops: the mode switch and the bookings on a hop ─────────────────
+
+  /** Drive / Fly / Ferry — `PATCH /api/segments/:id`, optimistic. A drive that
+   * flies leaves `drivePairs`, taking its Navigate, rail miles and HERE call
+   * with it; a hop driven again is routed in the background. */
+  const doSetHopMode = (segmentId: string, mode: TravelMode) => {
+    const seg = trip.segments.find((s) => s.id === segmentId);
+    if (!seg || seg.mode === mode) return;
+    if (mode === "drive" && seg.reservations.length > 0) {
+      // The server refuses it too (409 segment_has_bookings, vet MED).
+      toast.error("Remove this hop's bookings before switching it to Drive.");
+      return;
+    }
+    const undo = trip;
+    const next = setSegmentMode(trip, segmentId, mode);
+    setTrip(next);
+    if (mode === "drive") upgradeRoutes(next);
+    else setOpenHopId(null);
+    persist(
+      tripApi.updateSegment(segmentId, { mode }),
+      undo,
+      "Couldn't change how that hop travels — put back the way it was.",
+    );
+  };
+
+  /** Save flight / Save ferry — and, with `moveStop`, Q8 A's "Check out of …
+   * instead": the booking and the stop's new date in ONE request. A create is
+   * not optimistic (only the server mints the id), so it awaits the 201. */
+  const saveHopBooking = async (body: ReservationCreateInput, moveStop: boolean) => {
+    try {
+      const row = await tripApi.createReservation(moveStop ? { ...body, moveStop: true } : body);
+      setTrip((t) => withReconciledSegments(applyHopBooking(t, row, moveStop)));
+      setOpenHopId(null);
+      return true;
+    } catch {
+      toast.error("Couldn't save that booking — nothing was saved.");
+      return false;
+    }
+  };
+
+  /** A flight or ferry removed from its hop: optimistic, with the leaf undo. */
+  const doDeleteHopBooking = (resId: string) => {
+    const r = trip.segments.flatMap((s) => s.reservations).find((x) => x.id === resId);
+    if (!r) return;
+    const undo = trip;
+    setTrip(removeSegmentBooking(trip, resId));
+    persist(tripApi.deleteReservation(resId), undo, `Couldn't delete ${r.name} — it's back.`);
+    toast.success(`Deleted ${r.name}`, {
+      duration: UNDO_WINDOW_MS,
+      action: {
+        label: "Undo",
+        onClick: () =>
+          void tripApi
+            .createReservation(reservationRestoreInput(r))
+            .then((row) => setTrip((t) => applyHopBooking(t, row, false)))
+            .catch(() => toast.error(`Couldn't put ${r.name} back.`)),
+      },
+    });
+  };
+
+  /** Q5 A · a fly or ferry day on the Timeline: switch to Route, scroll to
+   * that hop, and open its Add flight (or Add ferry) form. */
+  const openHopFromTimeline = (segmentId: string) => {
+    scrollHopId.current = segmentId;
+    setLens("route");
+    setOpenHopId(segmentId);
+  };
+
   /**
    * Reordering invents pairs the server never routed. Those render immediately
    * from the synchronous straight-line estimate; this asks for the real ones in
@@ -1210,7 +1302,12 @@ export function TripPlanner({
     );
     if (missing.length === 0) return;
     tripApi
-      .routePairs(missing.map((p) => ({ from: p.from, to: p.to })))
+      // The trip rides along (#103): a trip that leaves the rig home is keyed
+      // without it, so the reply's hash matches this page's.
+      .routePairs(
+        missing.map((p) => ({ from: p.from, to: p.to })),
+        next.id,
+      )
       // Merge ONLY when the reply was keyed with the rig this page rendered
       // against. Edit a ROUTING field in another tab and the server keys with
       // the new hash — merging those would add keys nothing ever looks up, so
@@ -1405,6 +1502,7 @@ export function TripPlanner({
             onPlanIdea={(ideaId, gap) => void doPlanIdea(ideaId, gap)}
             onAttachIdea={doAttachIdea}
             onAddFromPlaces={() => setPlacesPanelOpen((v) => !v)}
+            onOpenHop={openHopFromTimeline}
             ideaActions={(it) => (
               <RowMenu label={`Actions for ${it.title}`}>
                 {/* #74 · place-state 3 only. A coordless or place-less shelf
@@ -1445,6 +1543,7 @@ export function TripPlanner({
         ) : (
           <RouteView
             legs={route}
+            trip={trip}
             summary={summary}
             homeBasePlace={trip.homeBasePlace}
             costs={costTracking}
@@ -1485,6 +1584,13 @@ export function TripPlanner({
               onCancelChangePlace: () => setPlacingStopId(null),
               locating,
               onLocate: locateUnmapped,
+              openHopId,
+              hops: {
+                onMode: doSetHopMode,
+                onOpenForm: setOpenHopId,
+                onSave: saveHopBooking,
+                onDelete: doDeleteHopBooking,
+              },
             }}
             onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
             onRowDragEnd={() => setRouteDrag(null)}
@@ -1518,6 +1624,7 @@ export function TripPlanner({
           legName={selectedLegName}
           stopOrdinal={scheduledOrdinal.get(selectedStop.id) ?? null}
           costs={costTracking}
+          lodgingDefault={trip.lodgingDefault}
           leaves={{
             formTarget,
             form,
@@ -1814,6 +1921,32 @@ function TripSettingsFields({
       </DialogHeader>
 
       <div className="mt-3 flex flex-col gap-2.5">
+        {/* #103 · klunk row 7 — the setup's three answers, so none of them is
+            permanent. Greece ("A mix", stored fly) reopens as Fly & stay. A new
+            mode reaches only the hops added from now on. */}
+        <div className="flex flex-col gap-1">
+          <FieldLabel>How it moves</FieldLabel>
+          <TripModeCards
+            value={draft.mode}
+            withSubs={false}
+            onChange={(mode) => set({ mode, rigOn: mode === "road" ? draft.rigOn : false })}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <FieldLabel>Mostly sleeping in</FieldLabel>
+          <LodgingCards
+            mode={draft.mode}
+            value={draft.lodgingDefault}
+            onChange={(lodgingDefault) => set({ lodgingDefault })}
+          />
+        </div>
+        {draft.mode === "road" && (
+          <div className="flex flex-col gap-1">
+            <FieldLabel>Bringing the rig?</FieldLabel>
+            <RigCards value={draft.rigOn} onChange={(rigOn) => set({ rigOn })} />
+          </div>
+        )}
+
         <div className="flex gap-2.5">
           <div className="flex flex-1 flex-col gap-1">
             <FieldLabel>Start</FieldLabel>

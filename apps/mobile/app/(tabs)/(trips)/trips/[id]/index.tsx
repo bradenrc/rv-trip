@@ -10,7 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
-import type { RouteDrive, RouteRow as RouteRowModel, TravelMode } from "@rv-trip/core";
+import type { RouteDrive, RouteHop, RouteRow as RouteRowModel, TravelMode } from "@rv-trip/core";
 import {
   dayKindColor,
   fullRange,
@@ -22,6 +22,7 @@ import {
 } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
 import { IdeasSection, NearbyBanner, NearbySheet } from "../../../../../src/nearby";
+import { HopActionSheet, HopBookingSheet, HopRow, MODE_OPTIONS, switchHop } from "../../../../../src/hops";
 import { dismissNearby, useBundle, useNearby } from "../../../../../src/store";
 import { C, F, R } from "../../../../../src/theme";
 import {
@@ -60,6 +61,9 @@ export default function TripScreen() {
   // Trip surfacing (#111 i3): the saves near this trip, and the review sheet.
   const { nearby, reload: reloadNearby } = useNearby(id);
   const [reviewing, setReviewing] = useState(false);
+  // #104 · the hop sheets: a drive row's ⋯ (a drive trip) and Add flight/ferry.
+  const [menuSegment, setMenuSegment] = useState<string | null>(null);
+  const [bookingHop, setBookingHop] = useState<RouteHop | null>(null);
 
   // The same two models the web planner renders — from @rv-trip/core/planner.
   const timeline = useMemo(() => (bundle ? timelineModel(bundle.trip) : null), [bundle]);
@@ -99,6 +103,42 @@ export default function TripScreen() {
   }
 
   const { trip } = bundle;
+  // Q7 B: on a drive trip the mode lives in the drive row's ⋯; on a fly trip
+  // every hop shows its Segmented.
+  const driveTrip = trip.defaultMode === "drive";
+  const stopName = (sid: string | null) =>
+    sid === null ? "home" : (trip.legs.flatMap((l) => l.stops).find((s) => s.id === sid)?.place.name ?? "");
+  const menuSeg = menuSegment ? trip.segments.find((s) => s.id === menuSegment) : undefined;
+  const hopRow = (hop: RouteHop, flush: boolean) => (
+    <HopRow
+      key={hop.segmentId}
+      hop={hop}
+      flush={flush}
+      showSwitch
+      onMode={(m) => switchHop(trip.id, hop.segmentId, m)}
+      onAdd={() => setBookingHop(hop)}
+    />
+  );
+  const driveRow = (drive: RouteDrive) => (
+    <Drive
+      drive={drive}
+      trailing={
+        drive.segmentId === null ? null : driveTrip ? (
+          <Pressable
+            onPress={() => setMenuSegment(drive.segmentId)}
+            accessibilityRole="button"
+            accessibilityLabel="Change how this hop travels"
+            hitSlop={6}
+            style={styles.rowmenu}
+          >
+            <Text style={{ color: C.inkMuted, fontSize: 13, lineHeight: 14 }}>⋯</Text>
+          </Pressable>
+        ) : (
+          <Segmented mono value={"drive" as TravelMode} options={MODE_OPTIONS} onChange={(m) => switchHop(trip.id, drive.segmentId!, m)} />
+        )
+      }
+    />
+  );
   const refresh = async () => {
     setRefreshing(true);
     await Promise.all([reload(), reloadNearby()]);
@@ -108,7 +148,17 @@ export default function TripScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: trip.title }} />
+      <Stack.Screen
+        options={{
+          title: trip.title,
+          // #103 · Edit opens Trip defaults — the setup's three blocks.
+          headerRight: () => (
+            <Pressable onPress={() => router.push(`/trips/new?edit=${trip.id}`)} hitSlop={8} accessibilityRole="button">
+              <Text style={{ color: C.green, fontWeight: "700", fontSize: 14 }}>Edit</Text>
+            </Pressable>
+          ),
+        }}
+      />
       <View style={styles.screen}>
         {/* Masthead — above BOTH lenses, so the map can own the scroll-free
             half of the screen. On the map the date line shortens to the two
@@ -205,11 +255,12 @@ export default function TripScreen() {
                   })}
                 </View>
               </ScrollView>
+              {/* Klunk row 3: only the modes this trip's rhythm has. */}
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
                 <Legend color={C.green} label="Stay" />
-                <Legend color={C.navy} label="Drive" outlined />
-                <Legend color={C.navy} label="Fly" outlined glyph="✈" />
-                <Legend color={C.navy} label="Ferry" outlined glyph="⛴" />
+                {timeline!.modes.includes("drive") && <Legend color={C.navy} label="Drive" outlined />}
+                {timeline!.modes.includes("fly") && <Legend color={C.navy} label="Fly" outlined glyph="✈" />}
+                {timeline!.modes.includes("ferry") && <Legend color={C.navy} label="Ferry" outlined glyph="⛴" />}
                 <Legend color={C.navySoft} label="Open" />
               </View>
             </Card>
@@ -219,21 +270,25 @@ export default function TripScreen() {
               <View key={leg.id} style={{ gap: 8, marginTop: 6 }}>
                 <Kicker>{leg.kicker}</Kicker>
                 <Text style={styles.h2}>{leg.name}</Text>
+                {leg.leadingHop && hopRow(leg.leadingHop, true)}
                 {leg.rows.map((row) => (
                   <View key={row.stop.id} style={{ gap: 8 }}>
                     <StopRow row={row} onPress={() => router.push(`/trips/${trip.id}/stops/${row.stop.id}`)} />
-                    {row.drive && <Drive drive={row.drive} />}
+                    {row.drive && driveRow(row.drive)}
+                    {row.hop && hopRow(row.hop, false)}
                   </View>
                 ))}
-                {leg.outboundDrive && (
+                {(leg.outboundDrive || leg.outboundHop) && (
                   <View style={{ gap: 6 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 12 }}>
                       <Kicker>{leg.outboundSeam}</Kicker>
                       <View style={{ flex: 1, height: 1, backgroundColor: C.borderSoft }} />
                     </View>
-                    <Drive drive={leg.outboundDrive} />
+                    {leg.outboundDrive && driveRow(leg.outboundDrive)}
+                    {leg.outboundHop && hopRow(leg.outboundHop, false)}
                   </View>
                 )}
+                {leg.returnHop && hopRow(leg.returnHop, true)}
               </View>
             ))}
 
@@ -252,7 +307,8 @@ export default function TripScreen() {
                   ⚠ {summary!.restrictionCount} restriction{summary!.restrictionCount === 1 ? "" : "s"} on this route
                 </Text>
               )}
-              {!bundle.hasRig && summary!.driveMiles > 0 && (
+              {/* Klunk row 4: only a trip that brings the rig is nudged. */}
+              {trip.rigOn && !bundle.hasRig && summary!.driveMiles > 0 && (
                 <Text style={{ color: C.inkMuted, fontSize: 12.5 }}>
                   Drive times are straight-line estimates until you set up your rig on the web.
                 </Text>
@@ -266,6 +322,16 @@ export default function TripScreen() {
           </ScrollView>
         )}
       </View>
+      <HopActionSheet
+        visible={menuSeg !== undefined}
+        title={menuSeg ? `${stopName(menuSeg.fromStopId)} → ${stopName(menuSeg.toStopId)}` : ""}
+        onClose={() => setMenuSegment(null)}
+        onPick={(m) => {
+          if (menuSegment) switchHop(trip.id, menuSegment, m);
+          setMenuSegment(null);
+        }}
+      />
+      <HopBookingSheet trip={trip} hop={bookingHop} onClose={() => setBookingHop(null)} />
       {nearby && (
         <NearbySheet
           tripId={trip.id}
@@ -321,7 +387,7 @@ function StopRow({ row, onPress }: { row: RouteRowModel; onPress: () => void }) 
  * contract as the web's connector: clean · restricted (notices) · estimate.
  * Navigate hands Google Maps origin + destination, never the corridor.
  */
-function Drive({ drive }: { drive: RouteDrive }) {
+function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React.ReactNode }) {
   const restricted = drive.notices.length > 0;
   return (
     <View
@@ -338,6 +404,7 @@ function Drive({ drive }: { drive: RouteDrive }) {
         <View style={{ marginLeft: "auto" }}>
           <Button onPress={() => void Linking.openURL(drive.navUrl)}>Navigate</Button>
         </View>
+        {trailing}
       </View>
       {restricted && (
         <>
@@ -406,6 +473,16 @@ const styles = StyleSheet.create({
   mono: { fontFamily: F.mono, color: C.inkFaded, fontSize: 12 },
   stopName: { color: C.ink, fontSize: 17, fontWeight: "700" },
   drive: { marginLeft: 12, paddingVertical: 6, paddingHorizontal: 10, borderRadius: R.md, gap: 8 },
+  rowmenu: {
+    width: 26,
+    height: 26,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: R.md,
+    backgroundColor: C.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   notice: {
     backgroundColor: C.warningSoft,
     borderRadius: R.sm,

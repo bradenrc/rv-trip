@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { eq, and, inArray, isNull, max, ne, notExists, sql } from "drizzle-orm";
+import { eq, and, inArray, isNull, max, ne, notExists, or, sql } from "drizzle-orm";
 import { db } from "./index";
 import {
   legs,
@@ -30,6 +30,7 @@ import type {
   IdeaStatus,
   IsoDate,
   LatLng,
+  LodgingKind,
   NavCheck,
   PlaceSummary,
   RigProfile,
@@ -40,6 +41,7 @@ import type {
   SavedPlaceCreate,
   SavedPlacePatch,
   SurfaceRadiusMi,
+  TravelMode,
   TripStatus,
   UserPrefs,
   UserPrefsPatch,
@@ -48,9 +50,13 @@ import type {
   SegmentTrip,
 } from "@rv-trip/core";
 import {
+  clashMoveIsValid,
+  clashOf,
+  clashStopPatch,
   diffSegments,
   newSegmentDateConflicts,
   reconcileSegments,
+  retimedSegment,
   suggestedPlaceFromSearch,
 } from "@rv-trip/core";
 import {
@@ -95,6 +101,26 @@ const ownedStopIds = (owner: string) =>
 const ownedTripIds = (owner: string) =>
   db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
 
+/** The ownership path for a HOP and the bookings on it (#104): a segment
+ * carries `trip_id`, so it scopes through the trip like an idea does. */
+const ownedSegmentIds = (owner: string) =>
+  db
+    .select({ id: travelSegments.id })
+    .from(travelSegments)
+    .where(inArray(travelSegments.tripId, ownedTripIds(owner)));
+
+/** A reservation the caller owns — through its stop OR (#104) its hop. The
+ * segment arm is why a flight can be edited and removed at all (vet MED: the
+ * stop-only scope made both a 404). */
+const ownedReservation = (owner: string, resId: string) =>
+  and(
+    eq(reservations.id, resId),
+    or(
+      inArray(reservations.stopId, ownedStopIds(owner)),
+      inArray(reservations.segmentId, ownedSegmentIds(owner)),
+    ),
+  );
+
 // ── the journey's hops (#110 · docs/design/110 §6) ─────────────────────────
 //
 // Every write that can move the ROUTE SEQUENCE — a stop created, deleted,
@@ -115,6 +141,19 @@ export class SegmentDateMismatch extends Error {
   constructor(readonly conflict: SegmentDateConflict) {
     super("segment_date_mismatch");
     this.name = "SegmentDateMismatch";
+  }
+}
+
+/**
+ * A hop switched back to Drive while flights or ferries hang on it (#104 · vet
+ * MED "switching back to drive"). Refused rather than silently orphaning the
+ * bookings on a drive row that cannot draw them — remove them first.
+ * `PATCH /api/segments/:id` answers it as 409 `segment_has_bookings`.
+ */
+export class SegmentHasBookings extends Error {
+  constructor() {
+    super("segment_has_bookings");
+    this.name = "SegmentHasBookings";
   }
 }
 
@@ -325,6 +364,12 @@ export async function createTrip(
     homeBaseLat?: number | null;
     homeBaseLng?: number | null;
     homeBasePlaceId?: string | null;
+    // #103 · the setup's three answers (vet HIGH: the insert lists its values
+    // explicitly, so a key not named here never reaches the row). Optional, so
+    // a caller with none keeps the columns' own defaults.
+    defaultMode?: TravelMode;
+    lodgingDefault?: LodgingKind | null;
+    rigOn?: boolean;
   },
 ) {
   // One empty leg in the SAME transaction: RouteView renders per leg, so a trip
@@ -341,6 +386,9 @@ export async function createTrip(
         homeBaseLat: input.homeBaseLat ?? null,
         homeBaseLng: input.homeBaseLng ?? null,
         homeBasePlaceId: input.homeBasePlaceId ?? null,
+        ...(input.defaultMode !== undefined && { defaultMode: input.defaultMode }),
+        ...(input.lodgingDefault !== undefined && { lodgingDefault: input.lodgingDefault }),
+        ...(input.rigOn !== undefined && { rigOn: input.rigOn }),
       })
       .returning();
     await tx.insert(legs).values({ tripId: row!.id, title: "Leg 1", sortOrder: 0 });
@@ -365,6 +413,11 @@ export async function updateTripFields(
     note?: string | null;
     /** #111 i3 — the review sheet's radius chip (core's `surfaceRadiusMi`). */
     surfaceRadiusMi?: SurfaceRadiusMi | null;
+    /** #103 · Trip settings' three defaults. A new `defaultMode` reaches only
+     * the hops reconciled from now on — no existing segment is re-moded. */
+    defaultMode?: TravelMode;
+    lodgingDefault?: LodgingKind | null;
+    rigOn?: boolean;
   },
 ): Promise<boolean> {
   const scope = and(eq(trips.id, tripId), eq(trips.ownerId, owner));
@@ -777,42 +830,234 @@ async function assertStopInTrip(
   if (!found.length) throw new Error("stop not found");
 }
 
+/** The paperwork columns a create writes, parent aside. */
+interface ReservationFields {
+  type: ReservationType;
+  name: string;
+  checkIn: IsoDate | null;
+  checkOut: IsoDate | null;
+  confirmationNumber: string | null;
+  cost: number | null;
+  rating: number | null;
+  notes: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  startsTz?: string | null;
+  endsTz?: string | null;
+  lodgingKind?: LodgingKind | null;
+}
+
+const reservationValues = (input: ReservationFields) => ({
+  type: input.type,
+  name: input.name,
+  checkIn: input.checkIn,
+  checkOut: input.checkOut,
+  confirmationNumber: input.confirmationNumber,
+  cost: input.cost == null ? null : String(input.cost),
+  rating: input.rating,
+  notes: input.notes,
+  startsAt: input.startsAt ? new Date(input.startsAt) : null,
+  endsAt: input.endsAt ? new Date(input.endsAt) : null,
+  startsTz: input.startsTz ?? null,
+  endsTz: input.endsTz ?? null,
+  lodgingKind: input.lodgingKind ?? null,
+});
+
 /**
- * The stop sheet's reservation form — and the body an undone DELETE re-POSTs,
- * which is why every column travels rather than the four the form used to
- * collect. `cost` is a numeric column: it arrives as a number and is written
- * as a string, exactly the way `mapReservation` reads it back.
+ * The stop sheet's reservation form, a hop's Add flight / Add ferry (#104) —
+ * and the body an undone DELETE re-POSTs, which is why every column travels.
+ * `cost` is a numeric column: it arrives as a number and is written as a
+ * string, exactly the way `mapReservation` reads it back.
+ *
+ * A STOP parent is proved with `assertOwnedStop` and inserted, as it always
+ * was. A SEGMENT parent is `createSegmentReservation` below.
  */
 export async function createReservation(
   owner: string,
-  input: {
-    stopId: string;
-    type: ReservationType;
-    name: string;
-    checkIn: IsoDate | null;
-    checkOut: IsoDate | null;
-    confirmationNumber: string | null;
-    cost: number | null;
-    rating: number | null;
-    notes: string | null;
+  input: ReservationFields & {
+    stopId?: string | null;
+    segmentId?: string | null;
+    moveStop?: boolean;
   },
 ): Promise<Reservation> {
+  if (input.segmentId) return createSegmentReservation(owner, { ...input, segmentId: input.segmentId });
+  if (!input.stopId) throw new Error("stop not found");
   await assertOwnedStop(db, owner, input.stopId);
   const [row] = await db
     .insert(reservations)
-    .values({
-      stopId: input.stopId,
-      type: input.type,
-      name: input.name,
-      checkIn: input.checkIn,
-      checkOut: input.checkOut,
-      confirmationNumber: input.confirmationNumber,
-      cost: input.cost == null ? null : String(input.cost),
-      rating: input.rating,
-      notes: input.notes,
-    })
+    .values({ stopId: input.stopId, ...reservationValues(input) })
     .returning();
   return mapReservation(row!);
+}
+
+/** A hop the caller owns, proved before an insert can point at it — an INSERT
+ * has no WHERE, so the trip's owner is checked explicitly (vet MED). */
+async function ownedSegment(
+  tx: { select: typeof db.select },
+  owner: string,
+  segmentId: string,
+): Promise<{ id: string; tripId: string } | null> {
+  const [seg] = await tx
+    .select({ id: travelSegments.id, tripId: travelSegments.tripId })
+    .from(travelSegments)
+    .innerJoin(trips, eq(travelSegments.tripId, trips.id))
+    .where(and(eq(travelSegments.id, segmentId), eq(trips.ownerId, owner)));
+  return seg ?? null;
+}
+
+/** Every booking on a hop, as its clock reads them. */
+async function segmentBookings(tx: Tx, segmentId: string) {
+  const rows = await tx
+    .select({
+      startsAt: reservations.startsAt,
+      endsAt: reservations.endsAt,
+      startsTz: reservations.startsTz,
+      endsTz: reservations.endsTz,
+    })
+    .from(reservations)
+    .where(eq(reservations.segmentId, segmentId));
+  return rows.map((r) => ({
+    startsAt: r.startsAt?.toISOString() ?? null,
+    endsAt: r.endsAt?.toISOString() ?? null,
+    startsTz: r.startsTz,
+    endsTz: r.endsTz,
+  }));
+}
+
+/** Write a segment's clock. */
+async function writeSegmentClock(tx: Tx, seg: Segment): Promise<void> {
+  await tx
+    .update(travelSegments)
+    .set({
+      departAt: seg.departAt === null ? null : new Date(seg.departAt),
+      arriveAt: seg.arriveAt === null ? null : new Date(seg.arriveAt),
+      departTz: seg.departTz,
+      arriveTz: seg.arriveTz,
+    })
+    .where(eq(travelSegments.id, seg.id));
+}
+
+/**
+ * A flight or a ferry booked on a hop (#104), in ONE transaction:
+ *
+ *  1. prove the hop is the caller's (its trip's owner — an insert has no WHERE);
+ *  2. insert the booking;
+ *  3. re-time the hop from ALL its bookings (core's `retimedSegment`: earliest
+ *     departure, latest arrival, each in its own zone);
+ *  4. judge it with `newSegmentDateConflicts(before, after)` — stop dates win
+ *     (Q3 A), so a clash throws `SegmentDateMismatch` and the insert rolls
+ *     back, UNLESS `moveStop` (Q8 A's "Check out of … on … instead"): then the
+ *     touched stop's date — its check-out for a hop home, its check-in
+ *     otherwise — is set to the booking's own date, its stay row moves with it
+ *     (vet MED c), and the hops are reconciled exactly as a stop re-date is
+ *     (vet MED b: a new arrive date can reorder the route). After the move the
+ *     check must find nothing new, or the whole write is refused.
+ */
+async function createSegmentReservation(
+  owner: string,
+  input: ReservationFields & { segmentId: string; moveStop?: boolean },
+): Promise<Reservation> {
+  return db.transaction(async (tx) => {
+    const seg = await ownedSegment(tx, owner, input.segmentId);
+    if (!seg) throw new Error("segment not found");
+
+    const [row] = await tx
+      .insert(reservations)
+      .values({ segmentId: seg.id, ...reservationValues(input) })
+      .returning();
+
+    const before = (await loadSegmentTrip(tx, seg.tripId))!;
+    const current = before.segments.find((s) => s.id === seg.id)!;
+    const retimed = retimedSegment(current, await segmentBookings(tx, seg.id));
+    const after: SegmentTrip = {
+      ...before,
+      segments: before.segments.map((s) => (s.id === seg.id ? retimed : s)),
+    };
+    const [conflict] = newSegmentDateConflicts(before, after).filter((c) => c.segmentId === seg.id);
+
+    if (!conflict) {
+      await writeSegmentClock(tx, retimed);
+      return mapReservation(row!);
+    }
+    const clash = input.moveStop ? clashOf(after, retimed, conflict) : null;
+    if (!clash) throw new SegmentDateMismatch(conflict);
+
+    // Q8 A · move the stop. Refused (as the same 409) when the move would turn
+    // the stop's range backwards or push it outside the trip.
+    const stop = after.legs.flatMap((l) => l.stops).find((s) => s.id === clash.stopId)!;
+    const patch = clashStopPatch(clash);
+    const [window] = await tx
+      .select({ startDate: trips.startDate, endDate: trips.endDate })
+      .from(trips)
+      .where(eq(trips.id, seg.tripId));
+    const moved = Object.values(patch)[0] as IsoDate;
+    if (!clashMoveIsValid(stop, clash) || moved < window!.startDate || moved > window!.endDate) {
+      throw new SegmentDateMismatch(conflict);
+    }
+    const wouldBe = patchedStop(after, stop.id, patch);
+    const next = reconcileSegments(wouldBe, randomUUID);
+    if (newSegmentDateConflicts(before, { ...wouldBe, segments: next }).length > 0) {
+      throw new SegmentDateMismatch(conflict);
+    }
+
+    await tx.update(stops).set(patch).where(eq(stops.id, stop.id));
+    // The stop's own stay follows it, so the card and the stop agree.
+    const { expected, actual } = conflict;
+    const stay = and(
+      eq(reservations.stopId, stop.id),
+      inArray(reservations.type, ["campground", "lodging"]),
+    );
+    if (clash.side === "checkout") {
+      await tx
+        .update(reservations)
+        .set({ checkOut: actual })
+        .where(and(stay, eq(reservations.checkOut, expected)));
+    } else {
+      await tx
+        .update(reservations)
+        .set({ checkIn: actual })
+        .where(and(stay, eq(reservations.checkIn, expected)));
+    }
+    await writeSegments(tx, before.segments, next);
+    if (next.some((s) => s.id === seg.id)) await writeSegmentClock(tx, retimed);
+    return mapReservation(row!);
+  });
+}
+
+/**
+ * A hop's mode switch (#104 · Q7 B) — `PATCH /api/segments/:id`. Owner-scoped
+ * in the UPDATE itself (vet MED): the segment's trip must be the caller's.
+ *
+ * Back to Drive (vet MED): refused with `SegmentHasBookings` while a flight or
+ * a ferry hangs on the hop, and otherwise the hop's clock is cleared with the
+ * mode — an untimed drive borrows its day from the stop it arrives at, where a
+ * timed one would keep judging the stop dates by a flight that is gone.
+ */
+export async function updateSegmentMode(
+  owner: string,
+  segmentId: string,
+  mode: TravelMode,
+): Promise<boolean> {
+  const scope = and(eq(travelSegments.id, segmentId), inArray(travelSegments.tripId, ownedTripIds(owner)));
+  return db.transaction(async (tx) => {
+    const [seg] = await tx.select({ id: travelSegments.id }).from(travelSegments).where(scope);
+    if (!seg) return false;
+    if (mode === "drive") {
+      const [booked] = await tx
+        .select({ id: reservations.id })
+        .from(reservations)
+        .where(eq(reservations.segmentId, segmentId))
+        .limit(1);
+      if (booked) throw new SegmentHasBookings();
+      await tx
+        .update(travelSegments)
+        .set({ mode, departAt: null, arriveAt: null, departTz: null, arriveTz: null })
+        .where(scope);
+      return true;
+    }
+    await tx.update(travelSegments).set({ mode }).where(scope);
+    return true;
+  });
 }
 
 /**
@@ -832,13 +1077,12 @@ export async function updateReservationFields(
     cost?: number | null;
     rating?: number | null;
     notes?: string | null;
+    /** #105 · the stay form's kind switch. */
+    lodgingKind?: LodgingKind | null;
   },
   actor: string,
 ): Promise<boolean> {
-  const scope = and(
-    eq(reservations.id, resId),
-    inArray(reservations.stopId, ownedStopIds(owner)),
-  );
+  const scope = ownedReservation(owner, resId);
   if (Object.keys(patch).length === 0) {
     const rows = await db.select({ id: reservations.id }).from(reservations).where(scope);
     return rows.length > 0;
@@ -879,11 +1123,33 @@ export async function updateReservationFields(
 /** A leaf delete — nothing cascades from it, which is why the client offers an
  * undo toast instead of a confirm dialog. */
 export async function deleteReservation(owner: string, resId: string): Promise<boolean> {
-  const deleted = await db
-    .delete(reservations)
-    .where(and(eq(reservations.id, resId), inArray(reservations.stopId, ownedStopIds(owner))))
-    .returning({ id: reservations.id });
-  return deleted.length > 0;
+  return db.transaction(async (tx) => {
+    const deleted = await tx
+      .delete(reservations)
+      .where(ownedReservation(owner, resId))
+      .returning({ id: reservations.id, segmentId: reservations.segmentId });
+    const [gone] = deleted;
+    if (!gone) return false;
+    // A flight removed from its hop (#104): the hop re-times from what is
+    // left. A hop left with no timed booking keeps its clock, and a re-time
+    // that would itself clash with the stop dates is not applied.
+    if (gone.segmentId) {
+      const [seg] = await tx
+        .select({ tripId: travelSegments.tripId })
+        .from(travelSegments)
+        .where(eq(travelSegments.id, gone.segmentId));
+      if (seg) {
+        const before = (await loadSegmentTrip(tx, seg.tripId))!;
+        const current = before.segments.find((s) => s.id === gone.segmentId)!;
+        const retimed = retimedSegment(current, await segmentBookings(tx, gone.segmentId));
+        const after = { ...before, segments: before.segments.map((s) => (s.id === retimed.id ? retimed : s)) };
+        if (retimed !== current && newSegmentDateConflicts(before, after).length === 0) {
+          await writeSegmentClock(tx, retimed);
+        }
+      }
+    }
+    return true;
+  });
 }
 
 /**
