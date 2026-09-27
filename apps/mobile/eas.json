@@ -27,7 +27,8 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "support@groupcaddie.com"
+        "appleId": "support@groupcaddie.com",
+        "ascAppId": "6816554893"
       }
     }
   }

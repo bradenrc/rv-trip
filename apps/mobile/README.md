@@ -188,3 +188,23 @@ Two things to know about what you see:
 Capture adds two native modules — `@react-native-community/netinfo` and
 `expo-location` — so a tree that predates them needs `pnpm --filter
 @rv-trip/mobile ios` (a dev-client rebuild) before the sheet can open.
+
+## Release (TestFlight)
+
+```bash
+make release-mobile          # from the repo root: survey → EAS build → auto-submit
+```
+
+One command, adapted from btrip's: it checks the checkout is on a fresh
+`main`, asks for the marketing version (build numbers are auto-incremented
+on EAS), then runs `eas build --profile production --auto-submit`. The
+build lands in App Store Connect → TestFlight (app id `6816554893`) a few
+minutes after it finishes; internal testers get it with no Apple review.
+`scripts/release-mobile.sh --dry-run` prints the command without running it.
+
+What's baked where: the API URL is in `eas.json`; the Clerk and Mapbox
+publishable keys are EAS environment variables (this repo is public, so
+they stay out of the tree); Apple signing + the App Store Connect API key
+are stored on EAS for the Group Caddie team. The root `.easignore` keeps
+the upload to source — without it the monorepo's worktrees ship too.
+
