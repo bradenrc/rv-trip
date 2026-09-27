@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  tripRig,
   RIG_PRESETS,
   feetInchesToMeters,
   metersToFeetInches,
@@ -250,5 +251,14 @@ describe("routingHash", () => {
   /** Two different questions about one rig, so never the same answer. */
   it("is not rigHash", async () => {
     expect(await routingHash(rig)).not.toBe(await rigHash(rig));
+  });
+});
+
+describe("tripRig — the rig a trip routes with (#103)", () => {
+  it("is the account's rig only when the trip brings it", () => {
+    const rig = { id: "r" };
+    expect(tripRig({ rigOn: true }, rig)).toBe(rig);
+    expect(tripRig({ rigOn: false }, rig)).toBeNull();
+    expect(tripRig({ rigOn: true }, null)).toBeNull();
   });
 });

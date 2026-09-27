@@ -7,6 +7,7 @@ import type { IsoDate } from "../domain/types";
  */
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const WD = ["S", "M", "T", "W", "T", "F", "S"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function parts(d: IsoDate) {
   const [y, m, day] = d.split("-").map(Number);
@@ -22,6 +23,11 @@ export function monthDay(d: IsoDate): string {
 export function weekdayLetter(d: IsoDate): string {
   const dt = new Date(`${d}T00:00:00Z`);
   return WD[dt.getUTCDay()]!;
+}
+/** "Sat Jan 16" — a hop's day (#104). */
+export function weekdayMonthDay(d: IsoDate): string {
+  const dt = new Date(`${d}T00:00:00Z`);
+  return `${WEEKDAYS[dt.getUTCDay()]} ${monthDay(d)}`;
 }
 /** "Aug 2–5" from a start/end; single day if equal. */
 export function dateRange(start: IsoDate, end: IsoDate): string {

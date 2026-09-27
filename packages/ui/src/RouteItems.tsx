@@ -9,15 +9,20 @@ export function ReservationLineItem({
   type,
   name,
   cost,
+  label,
 }: {
   type: ReservationType;
   name: string;
   cost: number | null;
+  /** #105 · a stay's kind ("Friends", "Hotel"), printed mono after the name.
+   * Optional — every shipped caller passes none and renders as before. */
+  label?: string | null;
 }) {
   return (
     <div className="flex items-center gap-2.5 py-[7px]">
       <CategoryTile type={type} />
       <span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-rv-ink">{name}</span>
+      {label && <span className="flex-none font-mono text-[11px] text-rv-ink-faded">{label}</span>}
       <span className="w-[60px] flex-none text-right font-mono text-[13px] font-semibold text-rv-accent">
         {cost != null ? money(cost) : ""}
       </span>

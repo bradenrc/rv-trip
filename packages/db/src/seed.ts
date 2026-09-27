@@ -181,6 +181,7 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
         endsAt: instant(r.endsAt),
         startsTz: r.startsTz,
         endsTz: r.endsTz,
+        lodgingKind: r.lodgingKind,
       })),
     );
   }

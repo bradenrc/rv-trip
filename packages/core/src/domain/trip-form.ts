@@ -5,6 +5,7 @@ import {
   tripCreateInput,
   type IsoDate,
   type Leg,
+  type LodgingKind,
   type Place,
   type Stop,
   type StopPatchInput,
@@ -12,6 +13,7 @@ import {
   type TripCreateInput,
   type TripPatchInput,
   type TripStatus,
+  type TravelMode,
 } from "./types";
 import { daysUntil, formatDateSpan } from "./trip-status";
 
@@ -35,16 +37,75 @@ export function tripDayCount(start: string, end: string): number | null {
 
 // ── /trips/new ─────────────────────────────────────────────────────────────
 
+// ── #103 · the setup's three questions ─────────────────────────────────────
+
+/**
+ * How the trip mostly moves — the answer to question 1. Three cards, two
+ * stored values: "A mix" is stored as `fly` (Q2 A, the Greece seed's own
+ * answer), so reopening it in Trip settings reads "Fly & stay".
+ */
+export type TripModeChoice = "road" | "air" | "mixed";
+
+/** The three cards, with the design's copy — shared by the web page and the
+ * phone screen so the two never drift. */
+export const TRIP_MODE_CHOICES: readonly { value: TripModeChoice; label: string; sub: string }[] = [
+  { value: "road", label: "Road trip", sub: "Driving between stops. Camping, RV, or car." },
+  { value: "air", label: "Fly & stay", sub: "Fly there, stay put or fly between stops." },
+  { value: "mixed", label: "A mix", sub: "Flights, ferries, and drives. You set each hop." },
+];
+
+/** Question 2's cards. The ORDER follows the mode (see `lodgingChoices`). */
+export const LODGING_CHOICE_LABEL: Record<LodgingKind, string> = {
+  campground: "Campgrounds",
+  hotel: "Hotels",
+  airbnb: "Airbnbs",
+  friends: "With friends",
+};
+
+/** Question 3 — only a road trip is asked. `sub` is what the card promises. */
+export const RIG_CHOICES: readonly { value: boolean; label: string; sub: string }[] = [
+  { value: true, label: "Yes, the rig comes", sub: "Routes are checked against its size." },
+  // HERE is always asked for a truck-profile route; with no rig it simply
+  // carries no dimensions (providers/here.ts). The design's "Ordinary car
+  // routing." promised a car profile the code does not send (vet MED), so the
+  // card says what is true.
+  { value: false, label: "No, just the car", sub: "Routes aren't checked against a rig." },
+];
+
+/** The stored default a mode card writes. */
+export function tripModeDefault(choice: TripModeChoice): TravelMode {
+  return choice === "road" ? "drive" : "fly";
+}
+
+/** The card a stored default reopens on — "A mix" cannot be told from "Fly &
+ * stay" once stored (Q2 A), so every fly/ferry default reads "Fly & stay". */
+export function tripModeChoice(mode: TravelMode): TripModeChoice {
+  return mode === "drive" ? "road" : "air";
+}
+
+/** Question 2's cards, ordered by mode: campgrounds lead a road trip, hotels
+ * lead everything else. */
+export function lodgingChoices(choice: TripModeChoice | null): LodgingKind[] {
+  return choice === "road"
+    ? ["campground", "hotel", "airbnb", "friends"]
+    : ["hotel", "airbnb", "friends", "campground"];
+}
+
 /**
  * What the create form holds. The dates and the title are strings, the way an
  * input holds them; home base is the PlacePicker's value (#60 Q4 → B) — the
  * free-text field is gone, so a home base is either a whole place or nothing.
+ * `mode` is null until question 1 is answered, which is what keeps the rest of
+ * the page (and Create) hidden.
  */
 export interface TripDraft {
   title: string;
   startDate: string;
   endDate: string;
   homeBasePlace: PickedPlace | null;
+  mode: TripModeChoice | null;
+  lodgingDefault: LodgingKind | null;
+  rigOn: boolean;
 }
 
 export const BLANK_TRIP_DRAFT: TripDraft = {
@@ -52,13 +113,32 @@ export const BLANK_TRIP_DRAFT: TripDraft = {
   startDate: "",
   endDate: "",
   homeBasePlace: null,
+  mode: null,
+  lodgingDefault: null,
+  rigOn: false,
 };
+
+/**
+ * A mode card pressed. It preselects the lodging a trip like that mostly uses
+ * (campgrounds for a road trip, hotels otherwise) and, for a road trip, "Yes,
+ * the rig comes" — defaults, so the next two questions are one tap or none.
+ */
+export function withTripMode(draft: TripDraft, mode: TripModeChoice): TripDraft {
+  return {
+    ...draft,
+    mode,
+    lodgingDefault: mode === "road" ? "campground" : "hotel",
+    rigOn: mode === "road",
+  };
+}
 
 /**
  * The `POST /api/trips` body, or `null` while the form is not submittable —
  * which is also what disables the Create button, so there is one rule, not two.
+ * No mode picked is not submittable: the mode is the question the page opens on.
  */
 export function tripDraftInput(draft: TripDraft): TripCreateInput | null {
+  if (draft.mode === null) return null;
   if (tripDayCount(draft.startDate, draft.endDate) === null) return null;
   const parsed = tripCreateInput.safeParse({
     title: draft.title.trim(),
@@ -67,6 +147,10 @@ export function tripDraftInput(draft: TripDraft): TripCreateInput | null {
     // `homeBase` (the name) and `homeBasePlace` (the anchor) travel together so
     // the two can never disagree — a cleared picker clears both.
     ...homeBasePatch(draft.homeBasePlace),
+    defaultMode: tripModeDefault(draft.mode),
+    lodgingDefault: draft.lodgingDefault,
+    // A fly trip or a mix is never asked about the rig — its answer is off.
+    rigOn: draft.mode === "road" ? draft.rigOn : false,
   });
   return parsed.success ? parsed.data : null;
 }
@@ -86,6 +170,10 @@ export interface TripSettingsDraft {
   status: TripStatusChoice;
   rating: number;
   note: string;
+  /** #103 · the three defaults (klunk row 7). A stored `fly` reads "Fly & stay". */
+  mode: TripModeChoice;
+  lodgingDefault: LodgingKind | null;
+  rigOn: boolean;
 }
 
 /** A pre-#60 trip's bare `home_base` string, as a coordless place — so the
@@ -115,7 +203,31 @@ export function tripSettingsDraft(t: Trip): TripSettingsDraft {
     status: t.statusAuto ? "auto" : t.status,
     rating: t.rating ?? 0,
     note: t.note ?? "",
+    mode: tripModeChoice(t.defaultMode),
+    lodgingDefault: t.lodgingDefault,
+    rigOn: t.rigOn,
   };
+}
+
+/**
+ * The three defaults alone, as a PATCH — what the phone's "Trip defaults"
+ * sheet saves and what the web dialog folds into its patch. Only what changed;
+ * a mode that leaves the road turns the rig off with it (a fly trip never
+ * brings the rig), and a road trip keeps whatever the rig answer is.
+ */
+export function tripDefaultsPatch(
+  t: Pick<Trip, "defaultMode" | "lodgingDefault" | "rigOn">,
+  d: { mode: TripModeChoice; lodgingDefault: LodgingKind | null; rigOn: boolean },
+): TripPatchInput {
+  const patch: TripPatchInput = {};
+  const mode = tripModeDefault(d.mode);
+  // "A mix" and "Fly & stay" store the same `fly`; switching between the two
+  // is not a change.
+  if (mode !== t.defaultMode) patch.defaultMode = mode;
+  if (d.lodgingDefault !== t.lodgingDefault) patch.lodgingDefault = d.lodgingDefault;
+  const rigOn = d.mode === "road" ? d.rigOn : false;
+  if (rigOn !== t.rigOn) patch.rigOn = rigOn;
+  return patch;
 }
 
 /**
@@ -161,6 +273,8 @@ export function tripSettingsPatch(t: Trip, d: TripSettingsDraft): TripPatchInput
     patch.status = d.status;
     patch.statusAuto = false;
   }
+
+  Object.assign(patch, tripDefaultsPatch(t, d));
 
   return patch;
 }

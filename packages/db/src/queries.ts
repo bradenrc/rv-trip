@@ -7,6 +7,7 @@ import {
   routeCacheKey,
   routeSummary,
   routingHash,
+  tripRig,
   suggestionsFromTrips,
   surfaceRadiusMi,
   todayIso,
@@ -401,13 +402,31 @@ export async function listTripsForOwner(ownerId: string): Promise<TripSummary[]>
   ]);
   const today = todayIso();
   const mapped = rows.map((r) => mapTripRow(r, today));
-  const hash = await routingHash(rig);
+  // Two hashes at most, not one: a trip that leaves the rig at home (#103 ·
+  // `rigOn: false`) is routed — and cached — without it, so its miles are
+  // looked up on the no-rig key (`tripRig`, the same rule the planner uses).
+  const rigHash = await routingHash(rig);
+  const noRig = await routingHash(null);
+  const hashOf = (trip: Trip) => (tripRig(trip, rig) ? rigHash : noRig);
   // Driven hops only (#110 §6): a flight has no road in the cache.
   const keys = mapped.flatMap((trip) =>
-    drivePairs(trip).map((p) => routeCacheKey(p.from, p.to, hash)),
+    drivePairs(trip).map((p) => routeCacheKey(p.from, p.to, hashOf(trip))),
   );
   const routes = await getCachedRoutes(keys);
-  return mapped.map((trip) => summarize(trip, routes, hash));
+  return mapped.map((trip) => summarize(trip, routes, hashOf(trip)));
+}
+
+/**
+ * Whether a trip brings the rig (#103), owner-scoped — what `POST /api/routes`
+ * keys a post-reorder upgrade with, so the reply's hash matches the page's
+ * (vet HIGH). `null` when the owner has no such trip.
+ */
+export async function getTripRigOn(ownerId: string, tripId: string): Promise<boolean | null> {
+  const [row] = await db
+    .select({ rigOn: trips.rigOn })
+    .from(trips)
+    .where(and(eq(trips.ownerId, ownerId), eq(trips.id, tripId)));
+  return row ? row.rigOn : null;
 }
 
 /**
@@ -701,6 +720,7 @@ interface MapReservationRow {
   endsAt: Date | null;
   startsTz: string | null;
   endsTz: string | null;
+  lodgingKind: Reservation["lodgingKind"];
 }
 
 /** Exported so a create/promote can hand its INSERT ... returning row back in
@@ -726,6 +746,7 @@ export function mapReservation(
     endsAt: instant(r.endsAt),
     startsTz: r.startsTz,
     endsTz: r.endsTz,
+    lodgingKind: r.lodgingKind,
     lastChange: lastChangeOf(last, "reservation", r.id),
   };
 }

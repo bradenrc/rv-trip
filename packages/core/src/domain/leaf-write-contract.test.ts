@@ -5,6 +5,7 @@ import {
   ideaPromoteInput,
   reservationCreateInput,
   reservationPatchInput,
+  segmentPatchInput,
 } from "./types";
 
 /**
@@ -34,6 +35,11 @@ describe("reservationCreateInput", () => {
       cost: null,
       rating: null,
       notes: null,
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
+      lodgingKind: null,
     });
   });
 
@@ -48,6 +54,11 @@ describe("reservationCreateInput", () => {
       cost: 64,
       rating: 4,
       notes: "Sit outside.",
+      startsAt: null,
+      endsAt: null,
+      startsTz: null,
+      endsTz: null,
+      lodgingKind: null,
     };
     expect(reservationCreateInput.parse(body)).toEqual(body);
   });
@@ -59,6 +70,54 @@ describe("reservationCreateInput", () => {
     expect(reservationCreateInput.safeParse({ ...base, checkIn: "Aug 18" }).success).toBe(false);
     expect(reservationCreateInput.safeParse({ ...base, cost: -1 }).success).toBe(false);
     expect(reservationCreateInput.safeParse({ ...base, stopId: "not-a-uuid" }).success).toBe(false);
+  });
+});
+
+describe("reservationCreateInput · #104 a stop OR a segment parent", () => {
+  const SEG = "6f1c5b4e-0000-4000-8000-0000000000b1";
+  const flight = {
+    segmentId: SEG,
+    type: "transport",
+    name: "AA 1190 LIR→DFW",
+    startsAt: "2027-01-25T01:30:00.000Z",
+    startsTz: "America/Costa_Rica",
+    endsAt: "2027-01-25T05:55:00.000Z",
+    endsTz: "America/Chicago",
+  };
+
+  it("takes a segment parent with its clock", () => {
+    expect(reservationCreateInput.parse(flight)).toMatchObject({ segmentId: SEG, startsTz: "America/Costa_Rica" });
+    expect(reservationCreateInput.parse({ ...flight, moveStop: true }).moveStop).toBe(true);
+  });
+
+  it("rejects a body with both parents, or neither — the CHECK, at the boundary", () => {
+    expect(reservationCreateInput.safeParse({ ...flight, stopId: STOP }).success).toBe(false);
+    const { segmentId: _, ...orphan } = flight;
+    expect(reservationCreateInput.safeParse(orphan).success).toBe(false);
+    expect(reservationCreateInput.safeParse({ ...orphan, stopId: null, segmentId: null }).success).toBe(false);
+  });
+
+  it("refuses half a clock and a booking that lands before it leaves", () => {
+    expect(reservationCreateInput.safeParse({ ...flight, startsTz: null }).success).toBe(false);
+    expect(reservationCreateInput.safeParse({ ...flight, startsAt: "2027-01-24 19:30" }).success).toBe(false);
+    expect(
+      reservationCreateInput.safeParse({ ...flight, endsAt: "2027-01-24T01:30:00.000Z" }).success,
+    ).toBe(false);
+  });
+
+  it("carries a stay's kind", () => {
+    expect(
+      reservationCreateInput.parse({ stopId: STOP, type: "lodging", name: "Jane & Rick", lodgingKind: "friends" })
+        .lodgingKind,
+    ).toBe("friends");
+  });
+});
+
+describe("segmentPatchInput", () => {
+  it("is the mode, and only the mode", () => {
+    expect(segmentPatchInput.parse({ mode: "fly", departAt: "x", tripId: "t" })).toEqual({ mode: "fly" });
+    expect(segmentPatchInput.safeParse({ mode: "train" }).success).toBe(false);
+    expect(segmentPatchInput.safeParse({}).success).toBe(false);
   });
 });
 

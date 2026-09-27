@@ -170,6 +170,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 endsAt: null,
                 startsTz: null,
                 endsTz: null,
+              lodgingKind: null,
               },
               {
                 id: "res-museum",
@@ -189,6 +190,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 endsAt: null,
                 startsTz: null,
                 endsTz: null,
+              lodgingKind: null,
               },
             ],
             ideas: [],
@@ -222,6 +224,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 endsAt: null,
                 startsTz: null,
                 endsTz: null,
+              lodgingKind: null,
               },
             ],
             ideas: [],
