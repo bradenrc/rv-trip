@@ -1,6 +1,39 @@
-# #113 · W3 Journal: dev notes (i1, one pass)
+# #113 · W3 Journal: dev notes (i1)
 
 This implements the signed wireframe (`mc/wireframe/issue-113-v0:docs/design/113/index.html`) and plan item i1. It also addresses every vet finding in `mc/vet/issue-113-v0:docs/design/113/vet-verdict.json`.
+
+## Round 2: the walk's iOS FN
+
+The walk (`.mc/walk/113-walk-report.md`) passed on Android and failed on iOS with one FN. On iOS the keyboard covered the whole How was it? sheet. The only way out was the dim, which counts as Skip, so the typed note was lost. The vet findings listed again in this round's feedback were already addressed in round 1 (see below). This round changes one file.
+
+- **`apps/mobile/src/hops.tsx:131-142` (`Sheet`).** The surface now sits inside a `KeyboardAvoidingView` with `behavior="padding"` on iOS and no behavior on Android, the same pattern as `app/sign-in.tsx:105`. Android already resizes its window.
+- **`hops.tsx:388`.** The new `sheetHost` style is `{ flex: 1, justifyContent: "flex-end" }`. The surface's `position: absolute; left/right/bottom: 0` is gone, so it is bottom-anchored in normal flow. This matters because the KAV's bottom padding only moves in-flow children. An absolutely positioned sheet would stay behind the keyboard.
+- **Taps above the sheet.** The host has `pointerEvents="box-none"`, so a tap above the sheet still reaches the dim, and dismiss is still Skip.
+- **Unchanged.** The surface, grab handle, `maxHeight: "88%"`, inset padding and ScrollView `keyboardShouldPersistTaps="handled"` are unchanged. There is no visual change when the keyboard is down.
+- **Blast radius.** `Sheet` is shared, so the fix also covers `HowWasItSheet` (`src/journal.tsx:131`), the Add flight / ferry `HopBookingSheet` (`hops.tsx`), `HopActionSheet`, and the stop screen's sheet (`stops/[stopId].tsx:346`).
+
+**Test coverage:** none that executes. `apps/mobile` has no test runner (only `tsc --noEmit`), and this is keyboard layout on a real iOS Modal, which static checks cannot prove. It is **render-required at the re-walk**:
+- On the iPhone sim, check off an idea, tap the note, and type. The sheet should ride above the keyboard with ★, the Again pair and ✓ Log it all reachable.
+- Log it, and the note should land.
+- Tapping the dim should still Skip.
+- Re-check the reservation "How was it?" Log it on iOS, which the walk did not reach.
+- Check that Android is unchanged.
+
+**Not addressed this round (walk non-FN items, left for the operator's call):**
+- **CN:** seed a completed trip's journal.
+- **CL:** the toast covers the H1 on Android, as already recorded in round 1's decision.
+- **CL:** a bare Skip'd journal row. Adding a "done" word would be copy the design doesn't have.
+- **CL:** the Metro "state update on a component that hasn't mounted" warning. `useTodaysStop` already runs `hydrateInProgress()` and `loadTrips()` inside `useEffect` (`src/store.ts:151-154`), so the cause isn't the one the walk suspected. It is not reproducible without a device.
+
+Round-2 checks:
+- `pnpm install --frozen-lockfile`, needed because the fresh worktree had no `node_modules`: `Done in 9.3s`.
+- `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total`.
+  - core: `Tests 1239 passed (1239)`.
+  - ui: `Tests 48 passed (48)`.
+  - web: `Tests 365 passed (365)`.
+- `pnpm typecheck` in `apps/mobile`: `tsc --noEmit` exited 0.
+
+# Round 1
 
 ## What changed
 
