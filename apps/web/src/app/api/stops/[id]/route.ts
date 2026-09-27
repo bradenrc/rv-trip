@@ -12,6 +12,7 @@ import {
   updateStopFields,
 } from "@rv-trip/db";
 import { getActor, getOwner } from "@/lib/owner";
+import { destinationResolver } from "@/lib/places";
 
 /**
  * The widened stop write: the whole place (`place` — "Change place…"), rename
@@ -73,7 +74,10 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   }
 
   try {
-    const matched = await updateStopFields(owner, id, stopPatchColumns(patch), await getActor());
+    // #113 · a rated / Again stop writes through to a Been save.
+    const matched = await updateStopFields(owner, id, stopPatchColumns(patch), await getActor(), {
+      resolveDestination: destinationResolver(),
+    });
     if (!matched) return NextResponse.json({ error: "stop not found" }, { status: 404 });
   } catch (err) {
     if (err instanceof SegmentDateMismatch) {

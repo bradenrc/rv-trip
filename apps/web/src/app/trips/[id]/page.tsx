@@ -9,6 +9,7 @@ import {
 import { nearbySaves, tripRig } from "@rv-trip/core";
 import { TripPlanner } from "@/components/trip/TripPlanner";
 import { getOwner } from "@/lib/owner";
+import { nextTimeFor } from "@/lib/next-time";
 import { unitsFromPrefs } from "@/lib/units";
 import { routeTrip } from "@/lib/routing";
 
@@ -40,6 +41,11 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // SAME seam rather than inventing a client fetch, so picking a place is one
   // POST and not a round-trip to discover what there is to pick.
   const savedPlaces = await listSavedPlacesForOwner(owner);
+  // #113 · #107 "Last time here": the past trips' Been saves near this one —
+  // the same seam GET /api/trips/:id/for-next-time answers with. Its saves are
+  // left out of the nearby banner below (and in the nearby route, so a refresh
+  // agrees with this first paint).
+  const nextTime = await nextTimeFor(owner, trip, savedPlaces);
   // #111 i4 · trip surfacing, on the SAME seam: the saves near this trip at
   // its radius, minus the ones dismissed here — core's `nearbySaves`, the very
   // function GET /api/trips/:id/nearby-saves answers with — so the banner is
@@ -49,6 +55,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
     savedPlaces,
     await listDismissedSaveIds(owner, trip.id),
     trip.surfaceRadiusMi,
+    nextTime.saveIds,
   );
 
   return (
@@ -61,6 +68,7 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       units={units}
       savedPlaces={savedPlaces}
       nearby={nearby}
+      nextTime={nextTime}
     />
   );
 }

@@ -593,6 +593,8 @@ export function mapSavedPlaceRow(
     note: string | null;
     source: string | null;
     rating: number | null;
+    /** #113 · absent (a caller that selected columns) reads as not said. */
+    again?: boolean | null;
     tripId: string | null;
     anchor: SavedPlace["anchor"];
     areaLabel: string | null;
@@ -616,6 +618,7 @@ export function mapSavedPlaceRow(
     note: r.note,
     source: r.source,
     rating: r.rating,
+    again: r.again ?? null,
     tripId: r.tripId,
     tripName,
     lastChange: lastChangeOf(last, "save", r.id),
@@ -682,6 +685,7 @@ export interface MapStopRow {
   departDate: string | null;
   sortOrder: number;
   rating: number | null;
+  again: boolean | null;
   notes: string | null;
   reservations: MapReservationRow[];
   ideas: MapIdeaRow[];
@@ -696,6 +700,7 @@ export function mapStop(s: MapStopRow, last: LastChangeIndex = NO_CHANGES): Stop
     departDate: s.departDate,
     sortOrder: s.sortOrder,
     rating: s.rating,
+    again: s.again,
     notes: s.notes,
     reservations: s.reservations.map((r) => mapReservation(r, last)),
     ideas: s.ideas.map((i) => mapIdea(i, last)),
@@ -715,6 +720,7 @@ interface MapReservationRow {
   confirmationNumber: string | null;
   cost: string | null;
   rating: number | null;
+  again: boolean | null;
   notes: string | null;
   startsAt: Date | null;
   endsAt: Date | null;
@@ -741,6 +747,7 @@ export function mapReservation(
     confirmationNumber: r.confirmationNumber,
     cost: r.cost === null ? null : Number(r.cost),
     rating: r.rating,
+    again: r.again,
     notes: r.notes,
     startsAt: instant(r.startsAt),
     endsAt: instant(r.endsAt),
@@ -763,6 +770,7 @@ interface MapIdeaRow {
   lng: number | null;
   googlePlaceId: string | null;
   rating: number | null;
+  again: boolean | null;
   notes: string | null;
   sortOrder: number;
 }
@@ -782,6 +790,7 @@ export function mapIdea(i: MapIdeaRow, last: LastChangeIndex = NO_CHANGES): Idea
         ? null
         : mapPlace(i.placeName, i.lat, i.lng, i.googlePlaceId),
     rating: i.rating,
+    again: i.again,
     notes: i.notes,
     sortOrder: i.sortOrder,
     lastChange: lastChangeOf(last, "idea", i.id),

@@ -39,6 +39,7 @@ function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
     reservations: [],
     ideas: [],
     lastChange: null,
+    again: null,
   };
 }
 
@@ -255,6 +256,7 @@ function mkIdea(over: Partial<Idea> & { id: string }): Idea {
     notes: over.notes ?? null,
     sortOrder: over.sortOrder ?? 0,
     lastChange: null,
+    again: null,
   };
 }
 
@@ -354,6 +356,7 @@ describe("buildMapModel — the third pin kind", () => {
           tripId: null,
           tripName: null,
           lastChange: null,
+          again: null,
           anchor: "area",
           areaLabel: null,
           destination: null,

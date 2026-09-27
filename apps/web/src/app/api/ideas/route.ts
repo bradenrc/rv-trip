@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { ideaCreateInput } from "@rv-trip/core";
 import { createIdea } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
+import { destinationResolver } from "@/lib/places";
 
 /**
  * "Add idea" — appended to the end of the list it joins (its stop's, or the
@@ -18,6 +19,12 @@ import { getOwner } from "@/lib/owner";
  * null and an idea is owner-scoped through `trip_id` either way — and the stop
  * as well when one is sent. The 404 says which of the two was not found rather
  * than answering "stop not found" to a body that named no stop.
+ *
+ * #113 · "Did it" (Q1 B · Q5 A): the phone queues a born-done idea with a
+ * `clientId`, and a replay of one that already landed answers 200 with the row
+ * that exists — never a second idea (the `POST /api/places` contract). A
+ * journal-worthy create writes through to a Been save, resolved with the live
+ * destination resolver handed in here.
  */
 export async function POST(req: Request) {
   const parsed = ideaCreateInput.safeParse(await req.json());
@@ -25,8 +32,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const idea = await createIdea(await getOwner(), parsed.data);
-    return NextResponse.json(idea, { status: 201 });
+    const { idea, replayed } = await createIdea(await getOwner(), parsed.data, {
+      resolveDestination: destinationResolver(),
+      actor: await getActor(),
+    });
+    return NextResponse.json(idea, { status: replayed ? 200 : 201 });
   } catch (e) {
     const error = e instanceof Error && e.message === "trip not found" ? e.message : "stop not found";
     return NextResponse.json({ error }, { status: 404 });

@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type {
+  ForNextTime,
+  Idea,
   NearbySave,
   NearbySaves,
+  NextTimeRow,
   Reservation,
   ReservationCreateInput,
   TravelMode,
@@ -16,20 +20,29 @@ import type {
 import {
   appendReservation,
   appendShelfIdea,
+  localIsoDate,
+  markRowOnShelf,
+  nextTimeIdeaBody,
+  todaysStop,
   applyHopBooking,
   applySavedPlacePatch,
   nearbyIdeaBody,
   setSegmentMode,
   withReconciledSegments,
 } from "@rv-trip/core";
-import type { TripBundle } from "@rv-trip/core/api-client";
+import { tripBundleSchema, type TripBundle } from "@rv-trip/core/api-client";
 import { api } from "./api";
+import { onQueueSent } from "./capture";
 
 /**
  * A tiny in-memory store: the last-fetched trip bundles and the trips list,
  * read through useSyncExternalStore so a rating set on the stop screen shows
- * on the trip screen behind it without a refetch. Nothing persists — offline
- * is out of scope for v1 (spec §Decisions).
+ * on the trip screen behind it without a refetch.
+ *
+ * #113 (Q5 A · vet HIGH "the Did-it chip has no data path"): the bundle of a
+ * trip IN PROGRESS — its dates cover today — is persisted, so the capture
+ * sheet can find today's stop and the stop screen can check things off with
+ * no signal, even after a relaunch. Nothing else persists.
  */
 interface State {
   trips: TripSummary[] | null;
@@ -38,10 +51,12 @@ interface State {
   bundles: Record<string, TripBundle>;
   /** Each trip's nearby saves (#111 i3) — the banner and the review sheet. */
   nearby: Record<string, NearbySaves>;
+  /** Each trip's "Last time here" cards (#113 · #107). */
+  nextTime: Record<string, ForNextTime>;
   errors: Record<string, string>;
 }
 
-let state: State = { trips: null, saves: null, bundles: {}, nearby: {}, errors: {} };
+let state: State = { trips: null, saves: null, bundles: {}, nearby: {}, nextTime: {}, errors: {} };
 const listeners = new Set<() => void>();
 
 function set(next: State) {
@@ -68,6 +83,7 @@ export async function loadBundle(id: string): Promise<void> {
   try {
     const bundle = await api.trips.get(id);
     set({ ...state, bundles: { ...state.bundles, [id]: bundle }, errors: { ...state.errors, [id]: "" } });
+    void persistInProgress();
   } catch (e) {
     set({ ...state, errors: { ...state.errors, [id]: message(e) } });
   }
@@ -78,6 +94,108 @@ export function updateTrip(id: string, fn: (t: Trip) => Trip): void {
   const b = state.bundles[id];
   if (!b) return;
   set({ ...state, bundles: { ...state.bundles, [id]: { ...b, trip: fn(b.trip) } } });
+  void persistInProgress();
+}
+
+// ── #113 · the trip in progress, on the phone ───────────────────────────────
+
+/** AsyncStorage key for the in-progress bundles. Bump on a shape change. */
+const IN_PROGRESS_KEY = "rv.inProgressTrips.v1";
+
+const inProgress = (t: Pick<Trip, "startDate" | "endDate">, today = localIsoDate()) =>
+  t.startDate <= today && today <= t.endDate;
+
+/** Write every loaded bundle whose trip covers today. Best effort: a failed
+ * write only costs the offline-after-relaunch case. */
+async function persistInProgress(): Promise<void> {
+  const keep = Object.values(state.bundles).filter((b) => inProgress(b.trip));
+  try {
+    await AsyncStorage.setItem(IN_PROGRESS_KEY, JSON.stringify(keep));
+  } catch {
+    // nothing better to do
+  }
+}
+
+let hydrated: Promise<void> | null = null;
+
+/** Read the persisted in-progress bundles back, once. A bundle already loaded
+ * this session wins (it is fresher); an unreadable store is no bundles. */
+export function hydrateInProgress(): Promise<void> {
+  if (!hydrated) {
+    hydrated = AsyncStorage.getItem(IN_PROGRESS_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        const list: unknown = JSON.parse(raw);
+        if (!Array.isArray(list)) return;
+        const bundles = { ...state.bundles };
+        for (const item of list) {
+          const parsed = tripBundleSchema.safeParse(item);
+          if (parsed.success && !bundles[parsed.data.trip.id]) bundles[parsed.data.trip.id] = parsed.data;
+        }
+        set({ ...state, bundles });
+      })
+      .catch(() => undefined);
+  }
+  return hydrated;
+}
+
+/**
+ * Today's stop (#113 · "Did it"): the stop the chip files onto, from every
+ * bundle the phone holds — loaded this session or persisted from the last.
+ * Online, the trips list is read and each in-progress trip's bundle loaded
+ * (and so persisted) if it isn't already.
+ */
+export function useTodaysStop() {
+  const bundles = useSyncExternalStore(subscribe, () => state.bundles);
+  const trips = useSyncExternalStore(subscribe, () => state.trips);
+  useEffect(() => {
+    void hydrateInProgress();
+    if (trips === null) void loadTrips();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    for (const t of trips ?? []) if (inProgress(t) && !state.bundles[t.id]) void loadBundle(t.id);
+  }, [trips]);
+  return useMemo(() => todaysStop(Object.values(bundles).map((b) => b.trip), localIsoDate()), [bundles]);
+}
+
+/** A Did-it's provisional idea (id = its clientId) onto today's stop, so the
+ * stop screen shows it before — or without — signal. */
+export function addProvisionalIdea(tripId: string, stopId: string, idea: Idea): void {
+  updateTrip(tripId, (t) => ({
+    ...t,
+    legs: t.legs.map((l) => ({
+      ...l,
+      stops: l.stops.map((s) => (s.id === stopId ? { ...s, ideas: [...s.ideas, idea] } : s)),
+    })),
+  }));
+}
+
+/** A Did-it idea still waiting for its POST: its id is its `cap_…` client id,
+ * which no PATCH can address yet (the stop screen leaves it alone). */
+export function isProvisionalIdea(idea: Pick<Idea, "id">): boolean {
+  return idea.id.startsWith("cap_");
+}
+
+// When a queued Did-it lands, its provisional row becomes the created one.
+onQueueSent((item, value) => {
+  if (item.kind !== "idea" || !value || !("tripId" in value) || !("title" in value)) return;
+  replaceIdea(value.tripId, item.clientId, value as Idea);
+});
+
+/** …swapped for the created row once the POST lands (or removed on Undo). */
+export function replaceIdea(tripId: string, oldId: string, next: Idea | null): void {
+  updateTrip(tripId, (t) => ({
+    ...t,
+    legs: t.legs.map((l) => ({
+      ...l,
+      stops: l.stops.map((s) => ({
+        ...s,
+        ideas: next
+          ? s.ideas.map((i) => (i.id === oldId ? next : i))
+          : s.ideas.filter((i) => i.id !== oldId),
+      })),
+    })),
+  }));
 }
 
 export function useTrips() {
@@ -186,6 +304,36 @@ export async function setSurfaceRadius(tripId: string, radius: SurfaceRadiusMi):
   } finally {
     await loadNearby(tripId);
   }
+}
+
+// ── #113 · #107 "Last time here" ────────────────────────────────────────────
+
+/** Refetch a trip's Last-time cards. Quiet on failure, like the banner. */
+export async function loadNextTime(tripId: string): Promise<void> {
+  try {
+    const nt = await api.trips.forNextTime(tripId);
+    set({ ...state, nextTime: { ...state.nextTime, [tripId]: nt } });
+  } catch {
+    // quiet — no card
+  }
+}
+
+export function useNextTime(tripId: string) {
+  const nextTime = useSyncExternalStore(subscribe, () => state.nextTime[tripId] ?? null);
+  useEffect(() => {
+    void loadNextTime(tripId);
+  }, [tripId]);
+  const reload = useCallback(() => loadNextTime(tripId), [tripId]);
+  return { nextTime, reload };
+}
+
+/** A Last-time row's Add — the nearby sheet's copy — and the row reads
+ * "On shelf ✓". Throws on a refusal so the row can put Add back. */
+export async function addNextTimeIdea(tripId: string, row: NextTimeRow): Promise<void> {
+  const created = await api.ideas.create(nextTimeIdeaBody(tripId, row));
+  updateTrip(tripId, (t) => appendShelfIdea(t, created));
+  const nt = state.nextTime[tripId];
+  if (nt) set({ ...state, nextTime: { ...state.nextTime, [tripId]: markRowOnShelf(nt, row.saveId) } });
 }
 
 /** Add: copy the save into the trip's ideas (`POST /api/ideas`) and splice the

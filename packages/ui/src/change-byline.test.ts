@@ -27,6 +27,8 @@ describe("changeVerb — the verb comes from last.field", () => {
   it("rating → rated", () => expect(changeVerb("rating")).toBe("rated"));
   it("notes → noted", () => expect(changeVerb("notes")).toBe("noted"));
   it("status → moved", () => expect(changeVerb("status")).toBe("moved"));
+  it("again → marked (#113 — the act, since the answer may be either)", () =>
+    expect(changeVerb("again")).toBe("marked"));
 });
 
 describe("bylineLabel", () => {
@@ -106,6 +108,12 @@ describe("the popover's own vocabulary", () => {
       changeValueLabel("notes", "Riverfront sites 41–48. Ask for one facing the channel."),
     ).toBe("“Riverfront sites 41–48…”");
     expect(changeValueLabel("notes", null)).toBe("—");
+  });
+
+  it("an again answer reads as its badge (#113)", () => {
+    expect(changeValueLabel("again", "true")).toBe("again");
+    expect(changeValueLabel("again", "false")).toBe("once was enough");
+    expect(changeValueLabel("again", null)).toBe("—");
   });
 
   it("a status is its own word", () => {

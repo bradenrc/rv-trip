@@ -150,6 +150,8 @@ export interface PlaceSeed {
   note: string | null;
   source: string | null;
   rating: number | null;
+  /** #113: "Do it again?" on a been save. */
+  again: boolean | null;
   tripId: string | null;
   /** #111: the phone's capture id. */
   clientId: string | null;
@@ -307,6 +309,7 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
       note: p.note ?? null,
       source: p.source ?? null,
       rating: p.rating ?? null,
+      again: p.again ?? null,
       tripId: p.tripId ?? null,
       clientId: p.clientId ?? null,
     })

@@ -103,8 +103,9 @@ describe("createApiClient", () => {
       endsTz: null,
       lodgingKind: null,
       // A create carries no history: the byline is joined on the READ path
-      // (#78 §6), so a just-made row comes back with `lastChange: null`.
+      // (#78 §6), so a just-made row comes back with `lastChange: null, again: null`.
       lastChange: null,
+      again: null,
     });
   });
 
@@ -204,6 +205,20 @@ describe("createApiClient", () => {
     expect(Object.keys(b.routes)).toEqual(["1,2|3,4|no-rig"]);
   });
 
+  it("#113 · GETs for-next-time and validates it; DELETEs an idea for Did it's Undo", async () => {
+    const f = fakeFetch(200, { cards: [], saveIds: [] });
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    await expect(api.trips.forNextTime("t1")).resolves.toEqual({ cards: [], saveIds: [] });
+    expect(f.calls[0]!.url).toBe("http://x/api/trips/t1/for-next-time");
+    const d = fakeFetch(204);
+    await createApiClient({ baseUrl: "http://x", fetch: d.fn }).ideas.remove("i1");
+    expect(d.calls[0]!.url).toBe("http://x/api/ideas/i1");
+    expect(d.calls[0]!.init.method).toBe("DELETE");
+    // A malformed answer is drift, and drift throws.
+    const bad = fakeFetch(200, { cards: "nope" });
+    await expect(createApiClient({ baseUrl: "http://x", fetch: bad.fn }).trips.forNextTime("t1")).rejects.toThrow();
+  });
+
   it("URL-encodes ids", async () => {
     const f = fakeFetch(204);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
@@ -274,6 +289,7 @@ const SAVED_ROW = {
   tripId: null,
   tripName: null,
   lastChange: null,
+  again: null,
   anchor: "place",
   areaLabel: null,
   destination: {
@@ -433,6 +449,7 @@ describe("createApiClient — trip surfacing (#111 i3)", () => {
       notes: "Jane & Rick",
       sortOrder: 0,
       lastChange: null,
+      again: null,
     };
     const f = fakeFetch(201, created);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });

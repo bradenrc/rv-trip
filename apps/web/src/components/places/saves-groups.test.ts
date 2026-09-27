@@ -40,6 +40,7 @@ function save(
     type: "other",
     rating: null,
     lastChange: null,
+    again: null,
     destination,
     createdAt,
     ...extra,

@@ -152,6 +152,7 @@ describe("ideaCreateInput", () => {
       status: "idea",
       place: null,
       rating: null,
+      again: null,
       notes: null,
     });
   });
@@ -175,6 +176,7 @@ describe("ideaCreateInput", () => {
       status: "idea",
       place: null,
       rating: null,
+      again: null,
       notes: null,
     });
   });

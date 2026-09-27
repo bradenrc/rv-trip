@@ -101,6 +101,7 @@ describe("reconcileSegments", () => {
           endsTz: null,
           lodgingKind: null,
           lastChange: null,
+          again: null,
         },
       ],
     });

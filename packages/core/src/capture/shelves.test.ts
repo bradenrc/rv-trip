@@ -46,6 +46,7 @@ function save(
     type: "campground",
     rating: null,
     lastChange: null,
+    again: null,
     destination,
     createdAt,
     ...extra,

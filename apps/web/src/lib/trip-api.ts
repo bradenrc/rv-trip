@@ -1,6 +1,6 @@
 import type {
   Idea,
-  IdeaCreateInput,
+  IdeaCreateBody,
   IdeaPatchInput,
   LatLng,
   Leg,
@@ -118,7 +118,7 @@ export const tripApi = {
   deleteReservation: (id: string) => req(`/api/reservations/${id}`, "DELETE"),
 
   /** "Add idea". 201 carries the created idea, for the same reason. */
-  createIdea: (input: IdeaCreateInput): Promise<Idea> =>
+  createIdea: (input: IdeaCreateBody): Promise<Idea> =>
     req(`/api/ideas`, "POST", input) as Promise<Idea>,
 
   /** The status pill, the stars, the note — and (#69) the place the row's

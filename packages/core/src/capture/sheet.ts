@@ -1,5 +1,12 @@
 import { reservationTypeOfGoogle } from "../domain/places";
-import type { ReservationType, SavedPlace, SavedPlaceCreateInput, SavedPlaceStatus } from "../domain/types";
+import type {
+  IdeaCreateBody,
+  ReservationType,
+  SavedPlace,
+  SavedPlaceCreateInput,
+  SavedPlaceStatus,
+} from "../domain/types";
+import { ideaCategoryOfSaveType } from "../planner/nearby-saves";
 import type { PlaceSummary } from "../providers/index";
 
 /**
@@ -174,6 +181,68 @@ export function pinCaptureBody(
   };
 }
 
+// ── #113 · "Did it" ─────────────────────────────────────────────────────────
+
+/** What "Did it" logs: the sheet's own three controls. */
+export interface DidItAnswers {
+  rating: number | null;
+  again: boolean | null;
+  note: string;
+}
+
+/** The queued `POST /api/ideas` body — born done, on today's stop. */
+export type DidItBody = IdeaCreateBody & { clientId: string; status: "done" };
+
+/**
+ * "Did it" (#113 · Q1 B, docs/design/113 Screen 2): the capture's confirm
+ * step writes an idea that is BORN DONE onto today's stop, through the same
+ * queue a save goes through. The idea keeps the capture's own place:
+ *
+ * - a Google row → its name, point and place id, filed under the kind its
+ *   Google type reads as (`reservationTypeOfGoogle` → `ideaCategoryOfSaveType`);
+ * - a note → the typed text at the phone's fix, a Do (a note is `type: "other"`),
+ *   and the resolved area name ("Playa Flamingo") riding along as `areaLabel`
+ *   so its Been save is anchored to the AREA.
+ */
+export function didItBody(
+  where: { clientId: string; tripId: string; stopId: string },
+  target:
+    | { kind: "place"; hit: PlaceSummary }
+    | { kind: "note"; text: string; at: { lat: number; lng: number } | null; areaLabel: string | null },
+  a: DidItAnswers,
+): DidItBody {
+  const common = {
+    clientId: where.clientId,
+    tripId: where.tripId,
+    stopId: where.stopId,
+    status: "done" as const,
+    rating: a.rating,
+    again: a.again,
+    notes: blank(a.note),
+  };
+  if (target.kind === "place") {
+    return {
+      ...common,
+      title: target.hit.name,
+      category: ideaCategoryOfSaveType(reservationTypeOfGoogle(target.hit.primaryType)),
+      place: {
+        name: target.hit.name,
+        lat: target.hit.location?.lat ?? null,
+        lng: target.hit.location?.lng ?? null,
+        googlePlaceId: target.hit.googlePlaceId,
+      },
+    };
+  }
+  const name = target.text.trim();
+  return {
+    ...common,
+    title: name,
+    category: "do",
+    place: target.at ? { name, lat: target.at.lat, lng: target.at.lng, googlePlaceId: null } : null,
+    areaLabel: target.areaLabel,
+  };
+}
+
 // ── the toasts ─────────────────────────────────────────────────────────────
 
 export interface ToastCopy {
@@ -206,6 +275,17 @@ export function syncedToast(sent: Pick<SavedPlace, "place" | "destination">[]): 
     sub: anchored ? `${anchored.place.name} → ${anchored.destination!.name}` : null,
   };
 }
+
+/** #113 · green, with Undo: "In your journal" · "Costa Rica Fly & Stay". */
+export function journalToast(tripTitle: string): ToastCopy {
+  return { title: "In your journal", sub: tripTitle };
+}
+
+/** #113 · amber, no signal (Q5 A): the check-off waits in the queue. */
+export const JOURNAL_QUEUED_TOAST: ToastCopy = {
+  title: "Saved on this phone",
+  sub: "logs to your journal when you’re back in signal",
+};
 
 /** The offline strip inside the sheet. */
 export const OFFLINE_NOTICE: ToastCopy = {

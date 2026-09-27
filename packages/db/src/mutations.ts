@@ -20,6 +20,8 @@ import {
   householdInvites,
 } from "./schema";
 import type {
+  BeenDecision,
+  BeenThing,
   Idea,
   Leg,
   Stop,
@@ -50,6 +52,8 @@ import type {
   SegmentTrip,
 } from "@rv-trip/core";
 import {
+  beenWriteThrough,
+  isJournalWorthy,
   clashMoveIsValid,
   clashOf,
   clashStopPatch,
@@ -251,13 +255,18 @@ function withoutStops(t: SegmentTrip, gone: (s: { id: string; legId: string }) =
 
 // ── the change log ────────────────────────────────────────────────────────
 //
-// #78 · docs/design/81 §6. Three fields on four things — not an every-write
-// firehose. Everything below this comment is the ONLY code in this file that
+// #78 · docs/design/81 §6. Four fields on four things — not an every-write
+// firehose. (`again` joined in #113: "marked by Jess" names a personal answer
+// the same way "rated by Jess" does.) Everything below this comment is the ONLY code in this file that
 // touches `change_log`: the four `update*Fields` mutations each hand it a
 // before/after pair, and it decides what (if anything) is worth a row.
 
-/** The three shared-voice fields, as the LOG names them (schema.ts). */
-type LoggedField = "rating" | "notes" | "status";
+/** The shared-voice fields, as the LOG names them (schema.ts `change_field`). */
+type LoggedField = "rating" | "notes" | "status" | "again";
+
+/** Every logged field, in one list — the two loops below read it, so a new
+ * field lands in the log by being added here and to the pgEnum/Zod enum. */
+const LOGGED_FIELDS = ["rating", "notes", "status", "again"] as const satisfies readonly LoggedField[];
 
 /** A before/after pair per field the patch actually NAMED. A field the patch
  * left absent never appears here, so it can never be logged. */
@@ -277,7 +286,7 @@ const logValue = (v: unknown): string | null => (v === null || v === undefined ?
  * cost stays the single statement it has always been.
  */
 const logs = (patch: object, map: Partial<Record<LoggedField, string>> = {}): boolean =>
-  (["rating", "notes", "status"] as const).some((field) => (map[field] ?? field) in patch);
+  LOGGED_FIELDS.some((field) => (map[field] ?? field) in patch);
 
 /**
  * Pick the logged fields a patch NAMED, pairing each with what the row held
@@ -295,7 +304,7 @@ function loggedPairs<P extends object, B extends object>(
   map: Partial<Record<LoggedField, string>> = {},
 ): LoggedPair {
   const pairs: LoggedPair = {};
-  for (const field of ["rating", "notes", "status"] as const) {
+  for (const field of LOGGED_FIELDS) {
     const key = map[field] ?? field;
     if (!(key in patch)) continue;
     pairs[field] = {
@@ -674,10 +683,26 @@ export async function updateStopFields(
     legId?: string;
     sortOrder?: number;
     rating?: number | null;
+    again?: boolean | null;
     notes?: string | null;
     arriveDate?: IsoDate | null;
     departDate?: IsoDate | null;
   },
+  actor: string,
+  deps: Pick<SaveDeps, "resolveDestination"> = {},
+): Promise<boolean> {
+  const matched = await writeStopFields(owner, stopId, patch, actor);
+  // #113 · a rated / Again stop writes through to a Been save.
+  if (matched && namesJournalField(patch)) {
+    await writeThroughBeen(owner, { kind: "stop", id: stopId }, { ...deps, actor });
+  }
+  return matched;
+}
+
+async function writeStopFields(
+  owner: string,
+  stopId: string,
+  patch: Parameters<typeof updateStopFields>[2],
   actor: string,
 ): Promise<boolean> {
   if (patch.legId !== undefined) await assertOwnedLeg(db, owner, patch.legId);
@@ -699,7 +724,7 @@ export async function updateStopFields(
   }
   return db.transaction(async (tx) => {
     const [before] = await tx
-      .select({ rating: stops.rating, notes: stops.notes, tripId: legs.tripId })
+      .select({ rating: stops.rating, notes: stops.notes, again: stops.again, tripId: legs.tripId })
       .from(stops)
       .innerJoin(legs, eq(stops.legId, legs.id))
       .where(scope);
@@ -1076,10 +1101,26 @@ export async function updateReservationFields(
     confirmationNumber?: string | null;
     cost?: number | null;
     rating?: number | null;
+    again?: boolean | null;
     notes?: string | null;
     /** #105 · the stay form's kind switch. */
     lodgingKind?: LodgingKind | null;
   },
+  actor: string,
+  deps: Pick<SaveDeps, "resolveDestination"> = {},
+): Promise<boolean> {
+  const matched = await writeReservationFields(owner, resId, patch, actor);
+  // #113 · "How was it?" on a stay / meal / thing to do writes through.
+  if (matched && namesJournalField(patch)) {
+    await writeThroughBeen(owner, { kind: "reservation", id: resId }, { ...deps, actor });
+  }
+  return matched;
+}
+
+async function writeReservationFields(
+  owner: string,
+  resId: string,
+  patch: Parameters<typeof updateReservationFields>[2],
   actor: string,
 ): Promise<boolean> {
   const scope = ownedReservation(owner, resId);
@@ -1100,7 +1141,7 @@ export async function updateReservationFields(
   }
   return db.transaction(async (tx) => {
     const [before] = await tx
-      .select({ rating: reservations.rating, notes: reservations.notes })
+      .select({ rating: reservations.rating, notes: reservations.notes, again: reservations.again })
       .from(reservations)
       .where(scope);
     const updated = await tx
@@ -1166,6 +1207,27 @@ export async function deleteReservation(owner: string, resId: string): Promise<b
  * row's own list (its stop's, or the shelf's), so two concurrent adds cannot
  * claim the same position.
  */
+export interface CreateIdeaResult {
+  idea: Idea;
+  /** True when `clientId` matched an idea this trip already has (answer 200). */
+  replayed: boolean;
+}
+
+/** A trip's idea by its phone client id, or null. Owner-scoped via the trip. */
+async function ideaByClientId(owner: string, tripId: string, clientId: string): Promise<Idea | null> {
+  const [row] = await db
+    .select()
+    .from(ideas)
+    .where(
+      and(
+        eq(ideas.tripId, tripId),
+        eq(ideas.clientId, clientId),
+        inArray(ideas.tripId, ownedTripIds(owner)),
+      ),
+    );
+  return row ? mapIdea(row) : null;
+}
+
 export async function createIdea(
   owner: string,
   input: {
@@ -1177,8 +1239,36 @@ export async function createIdea(
     place: Place | null;
     rating: number | null;
     notes: string | null;
+    /** #113 · "Do it again?". */
+    again?: boolean | null;
+    /** #113 · "Did it"'s replay key: idempotent on (trip, clientId). */
+    clientId?: string;
+    /** #113 · the capture's area name — rides to the write-through only. */
+    areaLabel?: string | null;
   },
-): Promise<Idea> {
+  deps: WriteThroughDeps = {},
+): Promise<CreateIdeaResult> {
+  if (input.clientId) {
+    const existing = await ideaByClientId(owner, input.tripId, input.clientId);
+    if (existing) return { idea: existing, replayed: true };
+  }
+  const created = await insertIdea(owner, input);
+  if (!created) {
+    // Lost the race to a concurrent replay of the same "Did it".
+    return { idea: (await ideaByClientId(owner, input.tripId, input.clientId!))!, replayed: true };
+  }
+  // #113 · a born-done "Did it" (or an undone delete of a logged idea) writes
+  // through to a Been save, the same way a check-off does.
+  if (isJournalWorthy(created)) {
+    await writeThroughBeen(owner, { kind: "idea", id: created.id, areaLabel: input.areaLabel ?? null }, deps);
+  }
+  return { idea: created, replayed: false };
+}
+
+async function insertIdea(
+  owner: string,
+  input: Parameters<typeof createIdea>[1],
+): Promise<Idea | null> {
   const stopId = input.stopId ?? null;
   return db.transaction(async (tx) => {
     await assertOwnedTrip(tx, owner, input.tripId);
@@ -1204,11 +1294,14 @@ export async function createIdea(
         lng: input.place?.lng ?? null,
         googlePlaceId: input.place?.googlePlaceId ?? null,
         rating: input.rating,
+        again: input.again ?? null,
         notes: input.notes,
         sortOrder: (agg?.highest ?? -1) + 1,
+        clientId: input.clientId ?? null,
       })
+      .onConflictDoNothing({ target: [ideas.tripId, ideas.clientId] })
       .returning();
-    return mapIdea(row!);
+    return row ? mapIdea(row) : null;
   });
 }
 
@@ -1245,7 +1338,23 @@ export async function updateIdeaFields(
     googlePlaceId?: string | null;
     stopId?: string | null;
     category?: IdeaCategory;
+    again?: boolean | null;
   },
+  actor: string,
+  deps: Pick<SaveDeps, "resolveDestination"> = {},
+): Promise<void> {
+  await writeIdeaFields(owner, ideaId, patch, actor);
+  // #113 · a check-off (done / ★ / Again) writes through to a Been save. A
+  // foreign idea is skipped inside (the owner-scoped read finds nothing).
+  if (namesJournalField(patch)) {
+    await writeThroughBeen(owner, { kind: "idea", id: ideaId }, { ...deps, actor });
+  }
+}
+
+async function writeIdeaFields(
+  owner: string,
+  ideaId: string,
+  patch: Parameters<typeof updateIdeaFields>[2],
   actor: string,
 ): Promise<void> {
   // An empty patch is a legal "nothing changed" on the wire, and drizzle throws
@@ -1268,6 +1377,7 @@ export async function updateIdeaFields(
         rating: ideas.rating,
         notes: ideas.notes,
         status: ideas.status,
+        again: ideas.again,
       })
       .from(ideas)
       .where(scope);
@@ -1474,6 +1584,13 @@ export type PlacesSearcher = (query: string, near: LatLng) => Promise<PlaceSumma
 export interface SaveDeps {
   resolveDestination?: DestinationResolver;
   searchPlaces?: PlacesSearcher;
+  /**
+   * #113 · the point the destination is resolved AT, when it is not the
+   * save's own. A reservation's Been save is name-only (rule 4: its lat/lng
+   * stay null) but its STOP's point still tells the resolver which town it is
+   * in — the same way an area save borrows a point for distance only.
+   */
+  resolveAt?: { lat: number | null; lng: number | null } | null;
 }
 
 export interface CreateSaveResult {
@@ -1596,7 +1713,11 @@ export async function createSave(
   const anchor = explicitAnchor ?? saveAnchorOf(input).anchor;
 
   const [resolved, suggestedPlace] = await Promise.all([
-    resolveQuietly(deps.resolveDestination, input.lat, input.lng),
+    resolveQuietly(
+      deps.resolveDestination,
+      deps.resolveAt?.lat ?? input.lat,
+      deps.resolveAt?.lng ?? input.lng,
+    ),
     suggestQuietly(deps.searchPlaces, input, anchor),
   ]);
   const destination = resolved ? await upsertDestination(owner, resolved) : null;
@@ -1718,6 +1839,7 @@ export async function updateSavedPlaceFields(
         rating: saves.rating,
         note: saves.note,
         status: saves.status,
+        again: saves.again,
       })
       .from(saves)
       .where(scope);
@@ -1745,6 +1867,233 @@ export async function deleteSavedPlace(owner: string, placeId: string): Promise<
     .where(and(eq(saves.id, placeId), eq(saves.ownerId, owner)))
     .returning({ id: saves.id });
   return rows.length > 0;
+}
+
+// ── #113 · the Been write-through ─────────────────────────────────────────
+//
+// W3 Journal, Q7 B (docs/design/113 "The data contract"): a thing checked off,
+// rated or marked Again on a trip becomes — or updates — a "been" save, so
+// #107's "Last time here" card finds it on the next trip that goes back near
+// it. Core's `beenWriteThrough` DECIDES (skip · update · create, unit-tested);
+// this writes what it decided. It runs after every idea / stop / reservation
+// write that names a journal field, and after a "Did it" create.
+//
+// - Match-or-create by the shipped `isAlreadySaved` rule (never a new unique).
+// - A reservation's save is NAME-ONLY (rule 4); its stop's point feeds the
+//   destination resolver only (`SaveDeps.resolveAt`).
+// - The destination is resolved on create AND on an update of a matched save
+//   that has none (vet HIGH) — with the resolver the ROUTE hands in; packages/db
+//   holds no provider.
+// - Never deletes: an un-check leaves the Been save in place.
+// - Never fails the write it follows: the check-off already committed, so a
+//   write-through fault is logged and swallowed (the phone's queue would
+//   otherwise retry a PATCH that has landed).
+
+/** What the write-through needs from the ROUTE: the live resolver, and the
+ * person (`getActor()`) the save's byline names when a match graduates. */
+export interface WriteThroughDeps {
+  resolveDestination?: DestinationResolver;
+  actor?: string;
+}
+
+/** The fields whose write can make a thing journal-worthy. */
+const JOURNAL_KEYS = ["status", "rating", "again", "notes"] as const;
+
+function namesJournalField(patch: object): boolean {
+  return JOURNAL_KEYS.some((k) => k in patch);
+}
+
+type WriteThroughTarget =
+  | { kind: "idea"; id: string; areaLabel?: string | null }
+  | { kind: "stop"; id: string }
+  | { kind: "reservation"; id: string };
+
+interface LoadedThing {
+  thing: BeenThing;
+  tripId: string;
+  notes: string | null;
+  /** The point the destination is resolved at: the thing's own, or — for a
+   * reservation — its stop's. */
+  point: { lat: number | null; lng: number | null };
+  /** A reservation's stop name — the save's display region (places.ts). */
+  region: string | null;
+}
+
+async function loadThing(owner: string, target: WriteThroughTarget): Promise<LoadedThing | null> {
+  if (target.kind === "idea") {
+    const [row] = await db
+      .select()
+      .from(ideas)
+      .where(and(eq(ideas.id, target.id), inArray(ideas.tripId, ownedTripIds(owner))));
+    if (!row) return null;
+    const idea = mapIdea(row);
+    return {
+      thing: {
+        kind: "idea",
+        title: idea.title,
+        category: idea.category,
+        status: idea.status,
+        place: idea.place,
+        rating: idea.rating,
+        again: idea.again,
+      },
+      tripId: idea.tripId,
+      notes: idea.notes,
+      point: { lat: row.lat, lng: row.lng },
+      region: null,
+    };
+  }
+  if (target.kind === "stop") {
+    const [row] = await db
+      .select({
+        placeName: stops.placeName,
+        lat: stops.lat,
+        lng: stops.lng,
+        googlePlaceId: stops.googlePlaceId,
+        rating: stops.rating,
+        again: stops.again,
+        notes: stops.notes,
+        tripId: legs.tripId,
+      })
+      .from(stops)
+      .innerJoin(legs, eq(stops.legId, legs.id))
+      .where(and(eq(stops.id, target.id), inArray(stops.legId, ownedLegIds(owner))));
+    if (!row) return null;
+    return {
+      thing: {
+        kind: "stop",
+        place: { name: row.placeName, lat: row.lat, lng: row.lng, googlePlaceId: row.googlePlaceId },
+        rating: row.rating,
+        again: row.again,
+      },
+      tripId: row.tripId,
+      notes: row.notes,
+      point: { lat: row.lat, lng: row.lng },
+      region: null,
+    };
+  }
+  // A reservation: only a STOP-attached one — a segment booking is travel.
+  const [row] = await db
+    .select({
+      name: reservations.name,
+      type: reservations.type,
+      rating: reservations.rating,
+      again: reservations.again,
+      notes: reservations.notes,
+      stopName: stops.placeName,
+      lat: stops.lat,
+      lng: stops.lng,
+      tripId: legs.tripId,
+    })
+    .from(reservations)
+    .innerJoin(stops, eq(reservations.stopId, stops.id))
+    .innerJoin(legs, eq(stops.legId, legs.id))
+    .where(and(eq(reservations.id, target.id), inArray(stops.legId, ownedLegIds(owner))));
+  if (!row) return null;
+  return {
+    thing: { kind: "reservation", name: row.name, type: row.type, rating: row.rating, again: row.again },
+    tripId: row.tripId,
+    notes: row.notes,
+    point: { lat: row.lat, lng: row.lng },
+    region: row.stopName,
+  };
+}
+
+/**
+ * Run the write-through for one thing. Returns what was decided (tests read
+ * it), or null when the thing is not the owner's or the write-through failed.
+ */
+export async function writeThroughBeen(
+  owner: string,
+  target: WriteThroughTarget,
+  deps: WriteThroughDeps = {},
+): Promise<BeenDecision | null> {
+  try {
+    const loaded = await loadThing(owner, target);
+    if (!loaded) return null;
+    const library = await db
+      .select({
+        id: saves.id,
+        name: saves.name,
+        lat: saves.lat,
+        lng: saves.lng,
+        googlePlaceId: saves.googlePlaceId,
+        destinationId: saves.destinationId,
+        rating: saves.rating,
+        again: saves.again,
+        note: saves.note,
+      })
+      .from(saves)
+      .where(eq(saves.ownerId, owner));
+    const decision = beenWriteThrough(loaded.thing, library);
+    const { thing, notes, tripId, point } = loaded;
+
+    if (decision.action === "update") {
+      const hit = library.find((r) => r.id === decision.saveId)!;
+      const patch: Partial<typeof saves.$inferInsert> = {
+        status: "been",
+        // A thing with no ★ / answer of its own never blanks the save's.
+        rating: thing.rating ?? hit.rating,
+        again: thing.again ?? hit.again,
+        note: notes ?? hit.note,
+        tripId,
+        // The graduation invariant (`normalizeSavedPlacePatch`): who told you
+        // about it is queue metadata, not archive metadata.
+        source: null,
+      };
+      if (hit.destinationId === null) {
+        const resolved = await resolveQuietly(deps.resolveDestination, point.lat, point.lng);
+        if (resolved) patch.destinationId = (await upsertDestination(owner, resolved)).id;
+      }
+      await db.transaction(async (tx) => {
+        const [before] = await tx
+          .select({ rating: saves.rating, note: saves.note, status: saves.status, again: saves.again })
+          .from(saves)
+          .where(eq(saves.id, hit.id));
+        await tx.update(saves).set(patch).where(and(eq(saves.id, hit.id), eq(saves.ownerId, owner)));
+        if (before && deps.actor) {
+          await logChanges(tx, {
+            owner,
+            actor: deps.actor,
+            entity: "save",
+            entityId: hit.id,
+            pairs: loggedPairs(patch, before, SAVED_PLACE_COLUMNS),
+          });
+        }
+      });
+    } else if (decision.action === "create") {
+      const { candidate } = decision;
+      // "Did it" from a note with a fix: the save is anchored to the AREA the
+      // capture resolved ("Playa Flamingo"), not a bare pin (vet HIGH).
+      const area =
+        target.kind === "idea" && target.areaLabel && !candidate.googlePlaceId
+          ? { anchor: "area" as const, areaLabel: target.areaLabel }
+          : {};
+      await createSave(
+        owner,
+        {
+          ...area,
+          name: candidate.name,
+          region: loaded.region,
+          lat: candidate.lat,
+          lng: candidate.lng,
+          googlePlaceId: candidate.googlePlaceId,
+          type: decision.type,
+          status: "been",
+          note: notes,
+          source: null,
+          rating: thing.rating,
+          again: thing.again,
+          tripId,
+        },
+        { resolveDestination: deps.resolveDestination, resolveAt: point },
+      );
+    }
+    return decision;
+  } catch (e) {
+    console.error("writeThroughBeen failed", e);
+    return null;
+  }
 }
 
 // ── the route cache ────────────────────────────────────────────────────────

@@ -295,6 +295,7 @@ export function ideaDraftInput(
     status: "idea",
     place: ideaPlace(picked),
     rating: null,
+    again: null,
     notes: null,
   };
 }
@@ -380,6 +381,7 @@ export function ideaRestoreInput(i: Idea): IdeaCreateInput {
     status: i.status,
     place: i.place,
     rating: i.rating,
+    again: i.again,
     notes: i.notes,
   };
 }

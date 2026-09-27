@@ -22,6 +22,10 @@ or new class names — the palette below is the whole vocabulary.
   never "success" in the generic sense — only a statement we can prove.
 - Borders: `rv-border`, `rv-border-soft` (hairlines), `rv-border-hi`.
 - Status: `rv-warning` / `rv-warning-soft` (amber — attention, floating); `rv-info-ink` / `rv-info-soft` (blue — activities).
+- "Do it again?" (#113 · Q9 A): **Again** is a personal opinion, not a verified claim —
+  neutral `rv-ink-muted` on `rv-border-hi` with the ↻ glyph (never green); **Once was
+  enough** stays amber, `rv-warning` / `rv-warning-soft`. Not said draws no badge. On the
+  phone these are `C.inkMuted` / `C.borderHi` and `C.warning` / `C.warningSoft` (core `RV`).
 - Travel: `rv-travel` / `rv-travel-ink` / `rv-travel-soft` (slate-violet). The
   "Travel" category color, and — as a 3px `border-l` only — the structural accent
   that marks a card as being about a *drive* (the restricted drive card in the

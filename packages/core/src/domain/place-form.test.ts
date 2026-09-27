@@ -60,6 +60,7 @@ const SAVED: SavedPlace = {
   tripId: null,
   tripName: null,
   lastChange: null,
+  again: null,
   anchor: "place",
   areaLabel: null,
   destination: null,
@@ -149,6 +150,7 @@ describe("savePlaceBody", () => {
       // the trip are the graduate sheet's, and a suggestion (which does post
       // them) is i6's payload, not this sheet's.
       rating: null,
+      again: null,
       tripId: null,
     });
     expect(savedPlaceCreate.safeParse(body).success).toBe(true);
@@ -357,6 +359,7 @@ describe("savedPlaceToCreate — the undo toast's re-save", () => {
       note: SAVED.note,
       source: null,
       rating: 5,
+      again: null,
       tripId: TRIP_ID,
     });
     // `tripName` is joined on read and never written.

@@ -165,6 +165,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 rating: 5,
                 notes: "Full hookups, site A12 backs to the trees.",
                 lastChange: null,
+                again: null,
                 segmentId: null,
                 startsAt: null,
                 endsAt: null,
@@ -185,6 +186,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 rating: null,
                 notes: null,
                 lastChange: null,
+                again: null,
                 segmentId: null,
                 startsAt: null,
                 endsAt: null,
@@ -195,6 +197,7 @@ function pnwLoop(status: Trip["status"]): Trip {
             ],
             ideas: [],
             lastChange: null,
+            again: null,
           },
           {
             id: "stop-newport",
@@ -219,6 +222,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 rating: 4,
                 notes: null,
                 lastChange: null,
+                again: null,
                 segmentId: null,
                 startsAt: null,
                 endsAt: null,
@@ -229,6 +233,7 @@ function pnwLoop(status: Trip["status"]): Trip {
             ],
             ideas: [],
             lastChange: null,
+            again: null,
           },
           {
             id: "stop-bend",
@@ -242,6 +247,7 @@ function pnwLoop(status: Trip["status"]): Trip {
             reservations: [],
             ideas: [],
             lastChange: null,
+            again: null,
           },
         ],
       },
@@ -318,6 +324,7 @@ const libraryRow = (name: string, lat: number | null, lng: number | null): Saved
   tripId: null,
   tripName: null,
   lastChange: null,
+  again: null,
   anchor: "pin",
   areaLabel: null,
   destination: null,
@@ -398,6 +405,7 @@ describe("suggestionToCreate", () => {
       note: "Full hookups, site A12 backs to the trees.",
       source: null,
       rating: 5,
+      again: null,
       tripId: "9f1c2f4a-1d3b-4a2e-8c55-0b7e6a9d1234",
     });
     // It is a real POST /api/places body, not a shape only this file believes.

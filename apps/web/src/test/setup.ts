@@ -22,6 +22,14 @@ const PLACEHOLDER_URL = "postgres://rvtrip:rvtrip@127.0.0.1:1/rvtrip_test_placeh
 const url = inject("databaseUrl");
 process.env.DATABASE_URL = url || PLACEHOLDER_URL;
 
+// #113: the idea / stop / reservation handlers now hand the live destination
+// resolver to the Been write-through, so a check-off on a located thing would
+// reach Google's geocoder on a laptop whose .env carries a key (globalSetup's
+// dotenv load puts it in every worker). The suite runs keyless — the stub,
+// exactly what CI sees; a file that needs a resolver scripts its own fake
+// (`vi.mock("@/lib/places")`, as places/route.test.ts does).
+delete process.env.GOOGLE_API_KEY;
+
 // Q5: freeze Date ONLY. `vi.useFakeTimers()` with its default toFake list also
 // fakes setTimeout/setInterval, which pg uses for its connection and query
 // timeouts — a full fake clock hangs the pool.
