@@ -1,14 +1,17 @@
 {
   "expo": {
-    "name": "RV Trip Hub",
-    "slug": "rv-trip-hub",
+    "name": "TripCaddie",
+    "slug": "tripcaddie",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.bradenrc.rvtriphub"
+      "bundleIdentifier": "com.groupcaddie.tripcaddie",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,12 +21,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.bradenrc.rvtriphub"
+      "package": "com.groupcaddie.tripcaddie"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "scheme": "rvtrip",
+    "scheme": "tripcaddie",
     "newArchEnabled": true,
     "plugins": [
       "expo-router",
@@ -31,12 +34,28 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "RV Trip Hub uses your location to drop a pin, or to file a note under the town you're in."
+          "locationWhenInUsePermission": "TripCaddie uses your location to drop a pin, or to file a note under the town you're in."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#020617"
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "owner": "bradenrc",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6cebdcf4-3ccf-47c2-9d54-4b4ad28cfae3"
+      }
     }
   }
 }

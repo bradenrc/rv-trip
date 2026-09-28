@@ -1,0 +1,20 @@
+# EAS archives the whole monorepo (git root), not just apps/mobile. Keep the
+# build input to source: everything below is either build output, local state
+# or engine/pipeline scratch that git doesn't track but doesn't ignore either.
+.claude/
+.mc/
+.playwright-mcp/
+pgdata/
+docs/
+ds-bundle/
+.design-sync/
+.ds-sync/
+**/.next/
+**/.turbo/
+**/.expo/
+**/dist/
+**/node_modules/
+**/*.png
+!apps/mobile/assets/**
+apps/mobile/ios/
+apps/mobile/android/

@@ -35,15 +35,22 @@ import { afterAll, describe, expect, it } from "vitest";
  *            merge tip's `^1` is the PRE-merge commit and unwrapping it would
  *            read STALE against the fold.
  *   rule 3   otherwise → HEAD (the pre-derivation behaviour).
- *   terminal HEAD unreadable → `none` with an empty sha; the caller writes
- *            `null`.
+ *   terminal HEAD unreadable — no repo, or a repo with no commits yet → `none`
+ *            with an empty sha; the caller writes `null`.
  *
  * Each case asserts the RULE as well as the sha: landing on the right sha via
  * the wrong rung is the bug wearing a disguise.
  *
- * Hermetic by construction — every fixture is a local `git init` under the OS
- * temp dir. No clone, no fetch, no `origin`, no real registry file, and no
- * `standup`. Every commit pins its own identity (`-c user.email/user.name`):
+ * Rule 2 is only as good as the stamp `refresh_walk_tree` puts on its merge,
+ * and a hand-rolled fixture merge cannot prove the real one carries it. So the
+ * "producer" block builds its trees through the REAL refresh (the
+ * `__refresh-tree <root> <worktree> <branch>` verb) and feeds what it leaves to
+ * the ladder — the writer→reader coupling, including under an ambient
+ * committer identity that would otherwise outrank the stamp.
+ *
+ * Hermetic by construction — every fixture is a local `git init` (or a local
+ * clone of one) under the OS temp dir. No network, no real registry file, and
+ * no `standup`. Every commit pins its own identity (`-c user.email/user.name`):
  * CI checks out with no git identity configured, so a fixture that leaned on an
  * ambient one would red there with "Please tell me who you are".
  *
@@ -59,6 +66,8 @@ const SCRIPT = join(REPO, "scripts/mc-walk-env.sh");
 const SCRIPT_IDENTITY = "mc-walk-env@localhost";
 /** Anyone else — a human, or the ship gate. The fixtures' default. */
 const HUMAN_IDENTITY = "someone@else.example";
+/** The ship gate: it merges main INTO a branch under a normal committer. */
+const SHIP_GATE_IDENTITY = "ship-gate@ci.example";
 
 const fixtures: string[] = [];
 afterAll(() => {
@@ -231,7 +240,137 @@ describe("rule 3 — the tree head is the code commit", () => {
 
 describe("terminal — an honest null beats a wrong sha", () => {
   it("answers `none` with an empty sha when HEAD cannot be read", () => {
-    // Not a git repo at all — the same answer an empty one (no commits) gives.
+    // Not a git repo at all.
     expect(deriveCodeSha(tempDir())).toEqual(["none", ""]);
+  });
+
+  it("answers `none` for a repo with no commits yet — not the literal string HEAD", () => {
+    // `git rev-parse HEAD` here PRINTS `HEAD` on stdout before it exits non-zero,
+    // so a `|| printf ''` fallback never blanks it: the ladder would answer
+    // `head\tHEAD` and the standup would write `"sha": "HEAD"` under a rule-3
+    // provenance line (#86 QA, finding CN).
+    expect(deriveCodeSha(newRepo())).toEqual(["none", ""]);
+  });
+});
+
+/**
+ * A walk tree the way `standup` stands one: a root cloned from an `origin`, a
+ * `feature` branch cut in the root, and a DETACHED worktree of the root at that
+ * branch. The refresh then re-points it and merges `origin/main` INTO it.
+ *
+ *   siblingAfterCut   origin/main moves on after the cut, so the refresh has
+ *                     something to merge (a real two-parent merge commit).
+ *                     Without it the merge is a no-op and HEAD stays at the
+ *                     tip — every standup rv-trip has actually recorded.
+ *   foreignMergeTip   the ship gate has already merged main INTO `feature`,
+ *                     so the branch tip is itself a merge that is not ours
+ *                     (the origin/feat/27-migrations shape).
+ */
+function walkFixture(opts: { siblingAfterCut: boolean; foreignMergeTip?: boolean }): {
+  root: string;
+  wt: string;
+  tip: string;
+} {
+  const upstream = newRepo();
+  commit(upstream, "base");
+  const parent = tempDir();
+  git(parent, "clone", "-q", upstream, "root");
+  const root = join(parent, "root");
+  git(root, "checkout", "-q", "-b", "feature");
+  commit(root, "the-slice");
+  if (opts.foreignMergeTip) {
+    commit(upstream, "sibling-before-ship");
+    git(root, "fetch", "-q", "origin", "main");
+    gitAs(root, SHIP_GATE_IDENTITY, "merge", "--no-edit", "-q", "origin/main");
+    // Throws when there is no second parent: a broken fixture reds as a fixture.
+    git(root, "rev-parse", "-q", "--verify", "HEAD^2");
+  }
+  const tip = git(root, "rev-parse", "HEAD");
+  git(root, "checkout", "-q", "main");
+  git(root, "worktree", "add", "-q", "--detach", join(parent, "wt"), "feature");
+  if (opts.siblingAfterCut) commit(upstream, "sibling-after-cut");
+  return { root, wt: join(parent, "wt"), tip };
+}
+
+/** Run the REAL refresh over a fixture. Returns the four tree facts it records. */
+function refreshTree(
+  root: string,
+  wt: string,
+  branch: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { mergedMain: string; sha: string; walkedHead: string; mergedMainSha: string } {
+  const out = execFileSync("bash", [SCRIPT, "__refresh-tree", root, wt, branch], {
+    encoding: "utf8",
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  expect(out.split("\n").filter(Boolean), "stdout is exactly one line").toHaveLength(1);
+  const fields = out.replace(/\n$/, "").split("\t");
+  const [mergedMain = "", sha = "", walkedHead = "", mergedMainSha = ""] = fields;
+  return { mergedMain, sha, walkedHead, mergedMainSha };
+}
+
+describe("producer — the ladder over trees the real refresh built", () => {
+  it("unwraps the refresh's own merge to the branch tip, and the stamp is the one rule 2 reads", () => {
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: true });
+
+    const facts = refreshTree(root, wt, "feature");
+    expect(facts.mergedMain).toBe("true");
+    expect(facts.sha).toBe(tip);
+    expect(facts.walkedHead, "the refresh made a real merge").not.toBe(tip);
+    expect(git(wt, "rev-parse", "HEAD")).toBe(facts.walkedHead);
+    expect(git(wt, "rev-parse", "HEAD^1")).toBe(tip);
+    expect(git(wt, "log", "-1", "--format=%ce", "HEAD"), "rv-trip's merge identity").toBe(SCRIPT_IDENTITY);
+
+    // No `known`: the seed-miss path, where only the tree can answer.
+    expect(deriveCodeSha(wt)).toEqual(["unwrap", tip]);
+    // …and the standup's own composition, where the branch rev-parse wins.
+    expect(deriveCodeSha(wt, "", facts.sha)).toEqual(["branch", tip]);
+  });
+
+  // An ambient identity outranks `-c user.email`: GIT_COMMITTER_EMAIL beats every
+  // config level, and `committer.email` beats `user.email` at any level. Either
+  // would stamp the refresh's merge as someone else's, rule 2 would refuse it as
+  // foreign, and the ladder would record the MERGE head — the #86 misread.
+  const committerInEnv = (): NodeJS.ProcessEnv => ({
+    ...process.env,
+    GIT_COMMITTER_EMAIL: SHIP_GATE_IDENTITY,
+    GIT_COMMITTER_NAME: "ship-gate",
+  });
+  const committerInConfig = (): NodeJS.ProcessEnv => {
+    const config = join(tempDir(), "gitconfig");
+    writeFileSync(config, `[committer]\n\temail = ${SHIP_GATE_IDENTITY}\n\tname = ship-gate\n`);
+    return { ...process.env, GIT_CONFIG_GLOBAL: config };
+  };
+  it.each([
+    ["GIT_COMMITTER_EMAIL in the environment", committerInEnv],
+    ["committer.email in the global git config", committerInConfig],
+  ])("keeps its stamp under an ambient identity (%s)", (_shape, ambient) => {
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: true });
+
+    const facts = refreshTree(root, wt, "feature", ambient());
+    expect(facts.mergedMain).toBe("true");
+    expect(git(wt, "log", "-1", "--format=%ce", "HEAD")).toBe(SCRIPT_IDENTITY);
+    expect(deriveCodeSha(wt)).toEqual(["unwrap", tip]);
+  });
+
+  it("leaves HEAD at the tip when main has nothing new — rule 3 answers the tip", () => {
+    // rv-trip's live case: every standup it has recorded merged a main the
+    // branch already contained, so the merge moved nothing.
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: false });
+
+    const facts = refreshTree(root, wt, "feature");
+    expect(facts.mergedMain).toBe("true");
+    expect(facts.walkedHead).toBe(tip);
+    expect(deriveCodeSha(wt)).toEqual(["head", tip]);
+  });
+
+  it("refuses to unwrap a branch whose own tip is the ship gate's merge", () => {
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: false, foreignMergeTip: true });
+
+    const facts = refreshTree(root, wt, "feature");
+    expect(facts.walkedHead, "nothing new on main — the tree stands at the foreign merge").toBe(tip);
+    expect(git(wt, "rev-parse", "HEAD^1")).not.toBe(tip);
+    expect(deriveCodeSha(wt)).toEqual(["head", tip]);
   });
 });
