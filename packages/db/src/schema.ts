@@ -152,6 +152,9 @@ export const stops = pgTable(
     departDate: date("depart_date"),
     sortOrder: integer("sort_order").notNull(),
     rating: smallint("rating"),
+    // #113 · "Do it again?" (Q2 A): true = Again, false = Once was enough,
+    // null = not said. The same nullable boolean on ideas, reservations, saves.
+    again: boolean("again"),
     notes: text("notes"),
   },
   (t) => [index("stops_leg_idx").on(t.legId)],
@@ -188,10 +191,21 @@ export const ideas = pgTable(
     lng: doublePrecision("lng"),
     googlePlaceId: text("google_place_id"),
     rating: smallint("rating"),
+    // #113 · "Do it again?" — null = not said.
+    again: boolean("again"),
     notes: text("notes"),
     sortOrder: integer("sort_order").notNull(),
+    // #113 · "Did it" (Q5 A): the phone's `cap_…` id, minted when the idea is
+    // queued. The create is idempotent on it — a replayed POST finds this row.
+    // Null for every web idea; NULLs are distinct, so the unique below
+    // constrains only the phone's ids (the `saves_owner_client_uq` shape).
+    clientId: text("client_id"),
   },
-  (t) => [index("ideas_stop_idx").on(t.stopId), index("ideas_trip_idx").on(t.tripId)],
+  (t) => [
+    index("ideas_stop_idx").on(t.stopId),
+    index("ideas_trip_idx").on(t.tripId),
+    unique("ideas_trip_client_uq").on(t.tripId, t.clientId),
+  ],
 );
 
 /**
@@ -244,6 +258,8 @@ export const reservations = pgTable(
     confirmationNumber: text("confirmation_number"),
     cost: numeric("cost", { precision: 10, scale: 2 }),
     rating: smallint("rating"),
+    // #113 · "Do it again?" — null = not said.
+    again: boolean("again"),
     notes: text("notes"),
     // A transport booking's clock, each end in its own zone. Lodging keeps the
     // day-grain check_in/check_out above.
@@ -320,6 +336,8 @@ export const saves = pgTable(
     source: text("source"),
     // "been" shelf only.
     rating: smallint("rating"),
+    // #113 · "been" shelf only: "Do it again?" — null = not said.
+    again: boolean("again"),
     tripId: uuid("trip_id").references(() => trips.id, { onDelete: "set null" }),
     // #111 capture: the phone's `cap_…` id, minted when the capture is queued.
     // The save is idempotent on it — a replayed POST finds this row instead of
@@ -583,14 +601,14 @@ export const householdInvites = pgTable("household_invites", {
 export const changeEntity = pgEnum("change_entity", ["stop", "idea", "reservation", "save"]);
 
 /**
- * The three shared-voice fields, as the LOG names them.
+ * The shared-voice fields, as the LOG names them. `again` joined in #113.
  *
  * `notes` is canonical even though `saves` spells its column `note` — one
  * vocabulary on the wire, or the /places byline could never match
  * the set it renders from. The mapping happens at the one write site
  * (`updateSavedPlaceFields`), never here.
  */
-export const changeField = pgEnum("change_field", ["rating", "notes", "status"]);
+export const changeField = pgEnum("change_field", ["rating", "notes", "status", "again"]);
 
 /**
  * One row per changed field. Two reads consume it (§6): the newest row per

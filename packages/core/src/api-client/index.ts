@@ -1,8 +1,9 @@
 import type { z } from "zod";
 import type {
   IsoDate,
+  ForNextTime,
   Idea,
-  IdeaCreateInput,
+  IdeaCreateBody,
   IdeaStatus,
   NearbySaves,
   Reservation,
@@ -22,6 +23,7 @@ import {
   tripBundleSchema,
   tripSummaryListSchema,
   nearbySavesSchema,
+  forNextTimeSchema,
   ideaSchema,
   savedPlaceListSchema,
   savedPlaceSchema,
@@ -102,19 +104,24 @@ export class ApiError extends Error {
   }
 }
 
+/** `again` on the three patches below is #113's "Do it again?" — true is
+ * Again, false is Once was enough, null clears it back to "not said". */
 export interface StopPatch {
   rating?: number | null;
+  again?: boolean | null;
   notes?: string | null;
   arriveDate?: IsoDate | null;
   departDate?: IsoDate | null;
 }
 export interface ReservationPatch {
   rating?: number | null;
+  again?: boolean | null;
   notes?: string | null;
 }
 export interface IdeaPatch {
   status?: IdeaStatus;
   rating?: number | null;
+  again?: boolean | null;
   notes?: string | null;
 }
 /**
@@ -138,6 +145,8 @@ export interface ApiClient {
     nearbySaves(id: string): Promise<NearbySaves>;
     /** The banner's Dismiss: remember these saves as dismissed for this trip. */
     dismissSaves(id: string, saveIds: string[]): Promise<void>;
+    /** "Last time here" (#113 · #107): the past trips' Been saves near this one. */
+    forNextTime(id: string): Promise<ForNextTime>;
   };
   places: {
     list(): Promise<SavedPlace[]>;
@@ -176,10 +185,13 @@ export interface ApiClient {
     patch(id: string, patch: ReservationPatch): Promise<void>;
   };
   ideas: {
-    /** POST /api/ideas → 201 Idea. The review sheet's Add copies a save
-     * (`nearbyIdeaBody`, #111 i3). */
-    create(input: IdeaCreateInput): Promise<Idea>;
+    /** POST /api/ideas → 201 Idea (200 on a replayed `clientId`, #113). The
+     * review sheet's Add copies a save (`nearbyIdeaBody`, #111 i3); "Did it"
+     * posts a born-done idea through the capture queue. */
+    create(input: IdeaCreateBody): Promise<Idea>;
     patch(id: string, patch: IdeaPatch): Promise<void>;
+    /** DELETE /api/ideas/:id → 204 — "Did it"'s Undo (#113). */
+    remove(id: string): Promise<void>;
     promote(id: string): Promise<Reservation>;
   };
   legs: {
@@ -241,6 +253,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         voidResult(
           request("POST", `/api/trips/${encodeURIComponent(id)}/dismissed-saves`, { saveIds }),
         ),
+      forNextTime: (id) =>
+        parsed(forNextTimeSchema, request("GET", `/api/trips/${encodeURIComponent(id)}/for-next-time`)),
     },
     places: {
       list: () => parsed(savedPlaceListSchema, request("GET", "/api/places")),
@@ -289,6 +303,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     ideas: {
       create: (input) => parsed(ideaSchema, request("POST", "/api/ideas", input)),
       patch: (id, patch) => voidResult(request("PATCH", `/api/ideas/${encodeURIComponent(id)}`, patch)),
+      remove: (id) => voidResult(request("DELETE", `/api/ideas/${encodeURIComponent(id)}`)),
       promote: (id) =>
         parsed(reservationRowSchema, request("POST", `/api/ideas/${encodeURIComponent(id)}/promote`)),
     },

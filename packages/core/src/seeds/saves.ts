@@ -40,6 +40,8 @@ export interface SeedSave {
   status: SavedPlaceStatus;
   source: string | null;
   rating: number | null;
+  /** #113 · "Do it again?" on a been save — null = not said. */
+  again: boolean | null;
   /** A seed trip's local id ("trip_coast") for a been save. */
   trip: string | null;
   note: string | null;
@@ -77,6 +79,7 @@ const base = {
   status: "want" as SavedPlaceStatus,
   source: null,
   rating: null,
+  again: null,
   trip: null,
   note: null,
   suggestedPlace: null,
@@ -220,6 +223,8 @@ export function seedSaves(): SeedSave[] {
       lng: -124.0631,
       status: "been",
       rating: 5,
+      // #113 · the walk's "Last time here" card draws its Again badge.
+      again: true,
       trip: "trip_coast",
       note: "Yurts are the move — book early next time. Sunset walks were the whole trip.",
       createdAt: "2025-05-26T20:00:00Z",
@@ -234,6 +239,7 @@ export function seedSaves(): SeedSave[] {
       type: "dining",
       status: "been",
       rating: 5,
+      again: true,
       trip: "trip_coast",
       note: "Bayfront, watch the boats. Go before 6 or wait an hour.",
       createdAt: "2025-05-25T02:00:00Z",

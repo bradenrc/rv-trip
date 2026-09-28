@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { reservationPatchInput } from "@rv-trip/core";
 import { deleteReservation, updateReservationFields } from "@rv-trip/db";
 import { getActor, getOwner } from "@/lib/owner";
+import { destinationResolver } from "@/lib/places";
 
 /**
  * The widened reservation write: type, name, both dates, the confirmation
@@ -21,6 +22,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
     id,
     parsed.data,
     await getActor(),
+    // #113 · "How was it?" writes through; the resolver reads the stop's point.
+    { resolveDestination: destinationResolver() },
   );
   if (!matched) return NextResponse.json({ error: "reservation not found" }, { status: 404 });
   return new NextResponse(null, { status: 204 });

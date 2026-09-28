@@ -29,6 +29,13 @@
       "when": 1790470666525,
       "tag": "0003_w2_lodging_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790513865228,
+      "tag": "0004_w3_journal",
+      "breakpoints": true
     }
   ]
 }

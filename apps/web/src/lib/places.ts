@@ -30,3 +30,15 @@ export function placesProvider(): ResolvedPlacesProvider {
   }
   return cached;
 }
+
+/**
+ * #113 · the live destination resolver, as packages/db's `DestinationResolver`
+ * — what the idea / stop / reservation handlers hand the Been write-through
+ * (vet HIGH: without it every write-through save lands unanchored and the
+ * "Last time here" card, which reads the destination point, never sees it).
+ * The keyless stub resolves nothing, exactly as it does for `POST /api/places`.
+ */
+export function destinationResolver(): (lat: number, lng: number) => ReturnType<PlacesProvider["resolveDestination"]> {
+  const { provider } = placesProvider();
+  return (lat, lng) => provider.resolveDestination(lat, lng);
+}

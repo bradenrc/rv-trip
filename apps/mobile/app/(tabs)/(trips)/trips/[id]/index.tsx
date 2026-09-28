@@ -10,9 +10,18 @@ import {
   Text,
   View,
 } from "react-native";
-import type { RouteDrive, RouteHop, RouteRow as RouteRowModel, TravelMode } from "@rv-trip/core";
+import type {
+  HowWasIt,
+  JournalEntry,
+  RouteDrive,
+  RouteHop,
+  RouteRow as RouteRowModel,
+  TravelMode,
+} from "@rv-trip/core";
 import {
   dayKindColor,
+  setIdeaFields,
+  setStopReservationFields,
   fullRange,
   routeModel,
   routeSummary,
@@ -23,7 +32,18 @@ import {
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
 import { IdeasSection, NearbyBanner, NearbySheet } from "../../../../../src/nearby";
 import { HopActionSheet, HopBookingSheet, HopRow, MODE_OPTIONS, switchHop } from "../../../../../src/hops";
-import { dismissNearby, useBundle, useNearby } from "../../../../../src/store";
+import { queuePatch } from "../../../../../src/capture";
+import { HowWasItSheet, JournalView, LastTimeHere } from "../../../../../src/journal";
+import {
+  addNextTimeIdea,
+  dismissNearby,
+  isProvisionalIdea,
+  updateTrip,
+  useBundle,
+  useNearby,
+  useNextTime,
+} from "../../../../../src/store";
+import { api } from "../../../../../src/api";
 import { C, F, R } from "../../../../../src/theme";
 import {
   Button,
@@ -39,27 +59,36 @@ import {
 } from "../../../../../src/ui";
 
 /**
- * The two lenses on one trip (#44 · q1 A): the Route rail as it has always
- * been, and the map of the same drives. The control sits in the masthead ABOVE
- * both, which is what lets the Map lens render OUTSIDE the ScrollView — a map's
- * pan gesture and a vertical scroll cannot share a box.
+ * The lenses on one trip (#44 · q1 A): the Route rail as it has always been,
+ * and the map of the same drives. The control sits in the masthead ABOVE
+ * them, which is what lets the Map lens render OUTSIDE the ScrollView — a
+ * map's pan gesture and a vertical scroll cannot share a box.
+ *
+ * #113 · Q4 B adds the third: Route · Map · Journal. A traveled trip (status
+ * `complete`) opens on its Journal; otherwise the Route default holds.
  */
-type Lens = "route" | "map";
+type Lens = "route" | "map" | "journal";
 
 const LENSES: SegmentedOption<Lens>[] = [
   { value: "route", label: "Route" },
   { value: "map", label: "Map" },
+  { value: "journal", label: "Journal" },
 ];
 
 export default function TripScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { bundle, error, reload } = useBundle(id);
   const [refreshing, setRefreshing] = useState(false);
-  const [lens, setLens] = useState<Lens>("route");
+  // Null until picked: the lens is DERIVED until then (below).
+  const [picked, setLens] = useState<Lens | null>(null);
   const [mode, setMode] = useStyleMode();
   const router = useRouter();
   // Trip surfacing (#111 i3): the saves near this trip, and the review sheet.
   const { nearby, reload: reloadNearby } = useNearby(id);
+  // #113 · #107 "Last time here" — above the banner, which leaves its saves out.
+  const { nextTime, reload: reloadNextTime } = useNextTime(id);
+  // #113 · a Journal row's "How was it?".
+  const [journalEntry, setJournalEntry] = useState<JournalEntry | null>(null);
   const [reviewing, setReviewing] = useState(false);
   // #104 · the hop sheets: a drive row's ⋯ (a drive trip) and Add flight/ferry.
   const [menuSegment, setMenuSegment] = useState<string | null>(null);
@@ -103,6 +132,8 @@ export default function TripScreen() {
   }
 
   const { trip } = bundle;
+  // The lens is derived until it is picked: a traveled trip opens on Journal.
+  const lens: Lens = picked ?? (trip.status === "complete" ? "journal" : "route");
   // Q7 B: on a drive trip the mode lives in the drive row's ⋯; on a fly trip
   // every hop shows its Segmented.
   const driveTrip = trip.defaultMode === "drive";
@@ -141,8 +172,38 @@ export default function TripScreen() {
   );
   const refresh = async () => {
     setRefreshing(true);
-    await Promise.all([reload(), reloadNearby()]);
+    await Promise.all([reload(), reloadNearby(), reloadNextTime()]);
     setRefreshing(false);
+  };
+
+  // #113 · the Journal's trip card — `trips.rating` / `trips.note`.
+  const rateTrip = (n: number) => {
+    const rating = n === 0 ? null : n;
+    updateTrip(trip.id, (t) => ({ ...t, rating }));
+    api.trips.patch(trip.id, { rating }).catch(() => void reload());
+  };
+  const noteTrip = (text: string) => {
+    const note = text.trim() === "" ? null : text;
+    updateTrip(trip.id, (t) => ({ ...t, note }));
+    api.trips.patch(trip.id, { note }).catch(() => void reload());
+  };
+  /** A Journal row's sheet → the same queued PATCH the stop screen sends. */
+  const logEntry = (e: JournalEntry, v: HowWasIt) => {
+    setJournalEntry(null);
+    const before = { rating: e.rating, again: e.again, notes: e.notes };
+    const entity = e.kind;
+    const apply = (f: HowWasIt) =>
+      updateTrip(trip.id, (t) =>
+        entity === "idea" ? setIdeaFields(t, e.id, f) : setStopReservationFields(t, e.id, f),
+      );
+    apply(v);
+    void queuePatch(entity, e.id, v, {
+      tripTitle: trip.title,
+      undo: () => {
+        apply(before);
+        void queuePatch(entity, e.id, before);
+      },
+    });
   };
   const surfaced = nearby && nearby.items.length > 0 ? nearby : null;
 
@@ -166,13 +227,15 @@ export default function TripScreen() {
         <View style={styles.masthead}>
           <Kicker color={C.accent}>Trip planner</Kicker>
           <Text style={styles.h1}>{trip.title}</Text>
-          {lens === "route" ? (
+          {lens !== "map" ? (
             <>
               <Text style={styles.mono}>
                 {fullRange(trip.startDate, trip.endDate)} · {timeline!.rhythm.length} days
                 {trip.homeBase ? ` · from ${trip.homeBase}` : ""}
               </Text>
-              <Text style={[styles.mono, { color: C.warning }]}>{timeline!.openLabel}</Text>
+              {lens === "route" && (
+                <Text style={[styles.mono, { color: C.warning }]}>{timeline!.openLabel}</Text>
+              )}
             </>
           ) : (
             <Text style={styles.mono}>
@@ -201,6 +264,24 @@ export default function TripScreen() {
             contentContainerStyle={styles.content}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
           >
+            {lens === "journal" ? (
+              <JournalView
+                trip={trip}
+                onRateTrip={rateTrip}
+                onNoteTrip={noteTrip}
+                // A Did-it still waiting for signal has no server id to PATCH.
+                onOpen={(e) => {
+                  if (!isProvisionalIdea(e)) setJournalEntry(e);
+                }}
+              />
+            ) : (
+            <>
+            {/* #113 · #107 "Last time here" — at the very top of the Route
+                lens, directly above the nearby banner (Q8 B). */}
+            <LastTimeHere
+              nextTime={nextTime}
+              onAdd={(row) => void addNextTimeIdea(trip.id, row).catch(() => undefined)}
+            />
             {/* Trip surfacing (#111 i3) — at the top of the Route lens, above
                 the stop rows: the banner (only while a save is surfaced) and
                 the compact Ideas shelf. */}
@@ -319,6 +400,8 @@ export default function TripScreen() {
                 day{summary!.openCount === 1 ? "" : "s"} in {summary!.gapCount} gap{summary!.gapCount === 1 ? "" : "s"}
               </Text>
             </Card>
+            </>
+            )}
           </ScrollView>
         )}
       </View>
@@ -332,6 +415,14 @@ export default function TripScreen() {
         }}
       />
       <HopBookingSheet trip={trip} hop={bookingHop} onClose={() => setBookingHop(null)} />
+      <HowWasItSheet
+        visible={journalEntry !== null}
+        name={journalEntry?.name ?? ""}
+        done={false}
+        initial={journalEntry ?? { rating: null, again: null, notes: null }}
+        onLog={(v) => journalEntry && logEntry(journalEntry, v)}
+        onSkip={() => setJournalEntry(null)}
+      />
       {nearby && (
         <NearbySheet
           tripId={trip.id}
@@ -341,6 +432,8 @@ export default function TripScreen() {
             setReviewing(false);
             // What was added drops out of the next read (isAlreadySaved).
             void reloadNearby();
+            // …and a Last-time row it matched now reads "On shelf ✓".
+            void reloadNextTime();
           }}
         />
       )}

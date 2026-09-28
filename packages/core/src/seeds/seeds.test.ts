@@ -142,6 +142,7 @@ describe("the seed saves (#111 i2)", () => {
       source: s.source,
       rating: s.rating,
       lastChange: null,
+      again: null,
       anchor: s.anchor,
       areaLabel: s.areaLabel,
       destination: s.destination ? { ...byKey.get(s.destination)!, id: s.destination } : null,

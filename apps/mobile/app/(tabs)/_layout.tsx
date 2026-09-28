@@ -1,7 +1,7 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Tabs, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { dismissToast, undoSave, useCaptureState } from "../../src/capture";
+import { dismissToast, undoSave, useCaptureState, type ToastTone } from "../../src/capture";
 import { C, F, R } from "../../src/theme";
 import { Toast } from "../../src/ui";
 
@@ -75,18 +75,29 @@ export default function TabsLayout() {
       {toast && (
         <View pointerEvents="box-none" style={[styles.toastLayer, { top: insets.top + 52 }]}>
           <Toast
-            tone={toast.tone === "queued" ? "amber" : "green"}
-            glyph={toast.tone === "queued" ? "◷" : "✓"}
+            tone={toast.tone === "queued" || toast.tone === "journal-queued" ? "amber" : "green"}
+            glyph={TOAST_GLYPH[toast.tone]}
             title={toast.title}
             sub={toast.sub}
-            onUndo={toast.undoId ? () => void undoSave(toast.undoId!) : undefined}
+            onUndo={toast.undoId ? () => void undoSave(toast.undoId!) : toast.onUndo}
           />
-          {!toast.undoId && <View onTouchEnd={dismissToast} style={StyleSheet.absoluteFill} />}
+          {!toast.undoId && !toast.onUndo && <View onTouchEnd={dismissToast} style={StyleSheet.absoluteFill} />}
         </View>
       )}
     </View>
   );
 }
+
+/** The toast's lead glyph per tone. #113's journal pair: the Saves tab's
+ * book (▤, docs/design/113 i-book) when it landed, the capture sheet's
+ * offline mark (⊘) when it waits for signal. */
+const TOAST_GLYPH: Record<ToastTone, string> = {
+  saved: "✓",
+  synced: "✓",
+  queued: "◷",
+  journal: "▤",
+  "journal-queued": "⊘",
+};
 
 const styles = StyleSheet.create({
   glyph: { fontSize: 16 },

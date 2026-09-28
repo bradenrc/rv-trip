@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type {
   CascadeCounts,
+  ForNextTime,
   Idea,
   IdeaCategory,
   NearbySave,
   NearbySaves,
+  NextTimeRow,
   PickedPlace,
   SavedPlace,
   SurfaceRadiusMi,
@@ -25,6 +27,8 @@ import type {
 } from "@rv-trip/core";
 import {
   UNDO_WINDOW_MS,
+  markRowOnShelf,
+  nextTimeIdeaBody,
   applyHopBooking,
   removeSegmentBooking,
   setSegmentMode,
@@ -66,6 +70,7 @@ import {
 import { CategoryTile, FieldLabel, Stars, ideaCategoryMeta, ideaCategoryOfType } from "@rv-trip/ui";
 import {
   Binoculars,
+  BookOpen,
   Compass,
   House,
   CalendarDays,
@@ -174,6 +179,8 @@ import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
 import { StopDetailSheet } from "./StopDetailSheet";
 import { NearbySavesBanner, NearbySavesSheet, sheetRows } from "./NearbySaves";
+import { JournalLens } from "./JournalLens";
+import { LastTimeHere } from "./LastTimeHere";
 import { LodgingCards, RigCards, TripModeCards } from "./choice-cards";
 
 
@@ -195,6 +202,7 @@ export function TripPlanner({
   units,
   savedPlaces = [],
   nearby: initialNearby,
+  nextTime: initialNextTime = { cards: [], saveIds: [] },
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -228,15 +236,28 @@ export function TripPlanner({
    * (trips/[id]/page.tsx) so the banner is in the first paint.
    */
   nearby: NearbySaves;
+  /**
+   * #113 · #107 "Last time here": core's `forNextTime`, computed on the same
+   * server seam. Defaulted to no cards, so a caller without it renders none.
+   */
+  nextTime?: ForNextTime;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
   const [routes, setRoutes] = useState(initialRoutes);
   // Klunk row 8 · Q4 A: the lens follows the mode — a drive trip opens on
-  // Route, a fly trip on Timeline. Derived, never stored.
-  const [lens, setLens] = useState<"timeline" | "route">(
-    initialTrip.defaultMode === "drive" ? "route" : "timeline",
+  // Route, a fly trip on Timeline. #113 · Q4 B: a traveled trip (status
+  // `complete`, the dashboard's "Traveled") opens on its Journal. Derived,
+  // never stored — the Traveled card's /trips/[id] href is the deep-link.
+  const [lens, setLens] = useState<"timeline" | "route" | "journal">(
+    initialTrip.status === "complete"
+      ? "journal"
+      : initialTrip.defaultMode === "drive"
+        ? "route"
+        : "timeline",
   );
+  /** #113 · the "Last time here" cards; a row's Add marks it "On shelf ✓". */
+  const [nextTime, setNextTime] = useState(initialNextTime);
   /** The hop whose Add flight / Add ferry form is open (#104 · Q5 A). */
   const [openHopId, setOpenHopId] = useState<string | null>(null);
   /** A fly/ferry day clicked on the Timeline: once Route has rendered, scroll
@@ -548,6 +569,33 @@ export function TripPlanner({
   const closeNearby = () => {
     setNearbyOpen(false);
     void refreshNearby();
+  };
+
+  /** #113 · a "Last time here" row's Add: the same shelf-idea copy the
+   * nearby sheet's Add makes, then the row reads "On shelf ✓". */
+  const addNextTime = async (row: NextTimeRow) => {
+    try {
+      const created = await tripApi.createIdea(nextTimeIdeaBody(trip.id, row));
+      setTrip((t) => appendShelfIdea(t, created));
+      setNextTime((nt) => markRowOnShelf(nt, row.saveId));
+      toast.success(`Added ${row.name} to this trip's ideas`);
+    } catch {
+      toast.error(`Couldn't add ${row.name}.`);
+    }
+  };
+
+  /** #113 · the Journal's trip card: `trips.rating` / `trips.note`, in place. */
+  const rateTrip = (n: number) => {
+    const undo = trip;
+    const rating = n === 0 ? null : n;
+    setTrip({ ...trip, rating });
+    persist(tripApi.updateTrip(trip.id, { rating }), undo, "Couldn't save the trip's rating.");
+  };
+  const noteTrip = (text: string) => {
+    const undo = trip;
+    const note = text.trim() === "" ? null : text;
+    setTrip({ ...trip, note });
+    persist(tripApi.updateTrip(trip.id, { note }), undo, "Couldn't save the trip's note.");
   };
 
   /** A row's Add — the shipped "Add from Places" copy (`addIdeaFromPlace`),
@@ -1382,6 +1430,10 @@ export function TripPlanner({
                 <ChartNoAxesGantt className="size-4" />
                 Timeline
               </ToggleTab>
+              <ToggleTab active={lens === "journal"} onClick={() => setLens("journal")}>
+                <BookOpen className="size-4" />
+                Journal
+              </ToggleTab>
             </div>
             <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
             {/* ONE add verb that BRANCHES (#80 Q5 → C). The masthead used to
@@ -1437,6 +1489,9 @@ export function TripPlanner({
         {/* #111 i4 · the saves near this trip. Above the lenses with the
             Add-from-Places panel — a save belongs to the trip, not a lens —
             and beside that entrance, never instead of it. */}
+        {/* #113 · #107 "Last time here" — directly above W1's banner, whose
+            count already leaves the card's saves out. */}
+        <LastTimeHere nextTime={nextTime} onAdd={(row) => void addNextTime(row)} />
         <NearbySavesBanner nearby={nearby} onOpen={openNearby} onDismiss={dismissNearby} />
         {nearbyOpen && (
           <NearbySavesSheet
@@ -1474,7 +1529,9 @@ export function TripPlanner({
           />
         )}
 
-        {lens === "timeline" ? (
+        {lens === "journal" ? (
+          <JournalLens trip={trip} onRateTrip={rateTrip} onNoteTrip={noteTrip} />
+        ) : lens === "timeline" ? (
           <Timeline
             model={timeline}
             shelf={shelf}

@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { savedPlaceCreate } from "../domain/types";
+import { ideaCreateInput, savedPlaceCreate } from "../domain/types";
 import type { PlaceSummary } from "../providers/index";
 import {
+  JOURNAL_QUEUED_TOAST,
   OFFLINE_NOTICE,
   captureFieldPlaceholder,
+  didItBody,
+  journalToast,
   captureRows,
   formatCoords,
   heardFromRecents,
@@ -141,6 +144,73 @@ describe("the toasts", () => {
     expect(OFFLINE_NOTICE).toEqual({
       title: "Offline. Saves wait on this phone.",
       sub: "Place search comes back with signal",
+    });
+  });
+});
+
+// ── #113 · "Did it" ─────────────────────────────────────────────────────────
+
+describe("didItBody (#113 · Did it)", () => {
+  const where = {
+    clientId: "cap_didit",
+    tripId: "5d3c9d7e-9b8e-4a8e-8f55-5a1f7b6d2c11",
+    stopId: "0b6c3b2a-1d4e-4f5a-9b8c-7d6e5f4a3b21",
+  };
+
+  it("files a note as a born-done Do at the phone's fix, carrying the area name", () => {
+    const body = didItBody(
+      where,
+      { kind: "note", text: " Sunset at Playa Flamingo ", at: { lat: 10.4331, lng: -85.7836 }, areaLabel: "Playa Flamingo" },
+      { rating: 5, again: true, note: "" },
+    );
+    expect(body).toEqual({
+      ...where,
+      status: "done",
+      title: "Sunset at Playa Flamingo",
+      category: "do",
+      place: { name: "Sunset at Playa Flamingo", lat: 10.4331, lng: -85.7836, googlePlaceId: null },
+      rating: 5,
+      again: true,
+      notes: null,
+      areaLabel: "Playa Flamingo",
+    });
+    expect(ideaCreateInput.safeParse(body).success).toBe(true);
+  });
+
+  it("files a Google row under the kind its type reads as, with its place id", () => {
+    const body = didItBody(
+      where,
+      {
+        kind: "place",
+        hit: {
+          googlePlaceId: "ChIJ_sunset_bar",
+          name: "Coco Loco",
+          location: { lat: 10.43, lng: -85.78 },
+          rating: 4.5,
+          address: null,
+          primaryType: "restaurant",
+        },
+      },
+      { rating: null, again: false, note: "Loud." },
+    );
+    expect(body).toMatchObject({
+      title: "Coco Loco",
+      category: "eat",
+      status: "done",
+      again: false,
+      notes: "Loud.",
+      place: { name: "Coco Loco", lat: 10.43, lng: -85.78, googlePlaceId: "ChIJ_sunset_bar" },
+    });
+    expect(body).not.toHaveProperty("areaLabel");
+  });
+});
+
+describe("the journal toasts (#113)", () => {
+  it("green 'In your journal' names the trip; amber waits for signal", () => {
+    expect(journalToast("Costa Rica Fly & Stay")).toEqual({ title: "In your journal", sub: "Costa Rica Fly & Stay" });
+    expect(JOURNAL_QUEUED_TOAST).toEqual({
+      title: "Saved on this phone",
+      sub: "logs to your journal when you’re back in signal",
     });
   });
 });

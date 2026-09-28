@@ -50,6 +50,10 @@ export * from "./map-pins";
 export * from "./shelf";
 /** Trip surfacing — the saves near a trip (#111 i3). */
 export * from "./nearby-saves";
+/** The Journal lens and "Did it"'s today's stop (#113 · #106). */
+export * from "./journal";
+/** "Last time here" — the saves a past trip left near this one (#113 · #107). */
+export * from "./for-next-time";
 
 export function allStops(trip: Trip): Stop[] {
   return trip.legs.flatMap((l) => l.stops);

@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { trip, tripSummary, savedPlace, reservation, idea, nearbySavesResponse } from "../domain/types";
+import {
+  trip,
+  tripSummary,
+  savedPlace,
+  reservation,
+  idea,
+  nearbySavesResponse,
+  forNextTimeResponse,
+} from "../domain/types";
 import { rigProfile } from "../domain/rig";
 
 /**
@@ -46,6 +54,9 @@ export const savedPlaceSchema = savedPlace;
 
 /** `GET /api/trips/:id/nearby-saves` (#111 i3) — core's `nearbySaves` result. */
 export const nearbySavesSchema = nearbySavesResponse;
+
+/** `GET /api/trips/:id/for-next-time` (#113 · #107) — core's `forNextTime`. */
+export const forNextTimeSchema = forNextTimeResponse;
 
 /** `POST /api/ideas` → 201: the created idea, already in the domain shape
  * (`createIdea` returns `mapIdea` of the inserted row). */
@@ -114,6 +125,7 @@ export const reservationRowSchema = z
     confirmationNumber: z.string().nullable().optional(),
     cost: z.union([z.number(), z.string()]).nullable().optional(),
     rating: z.number().nullable().optional(),
+    again: z.boolean().nullable().optional(),
     notes: z.string().nullable().optional(),
     startsAt: z.string().nullable().optional(),
     endsAt: z.string().nullable().optional(),
@@ -133,6 +145,7 @@ export const reservationRowSchema = z
     confirmationNumber: r.confirmationNumber ?? null,
     cost: r.cost == null ? null : Number(r.cost),
     rating: r.rating ?? null,
+    again: r.again ?? null,
     notes: r.notes ?? null,
     startsAt: r.startsAt ?? null,
     endsAt: r.endsAt ?? null,

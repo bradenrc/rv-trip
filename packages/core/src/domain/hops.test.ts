@@ -159,6 +159,7 @@ describe("the date clash (Q8 A)", () => {
       notes: null,
       lodgingKind: null,
       lastChange: null,
+      again: null,
       ...redeye23,
     };
     const next = applyHopBooking(costaRicaTrip(), r, true);

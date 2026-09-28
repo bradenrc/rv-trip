@@ -82,7 +82,10 @@ const oneDecimal = (mi: number) => Math.round(mi * 10) / 10;
  * nearest first, and the `beyond` hint for the next ring out.
  *
  * - `radiusMi` null → `NEAR_RADIUS_MI` (the trip has never picked a chip).
- * - Left out: dismissed ids, and saves already on the trip as an idea.
+ * - Left out: dismissed ids, saves already on the trip as an idea, and
+ *   `excludedSaveIds` — #113's "Last time here" card's saves (`forNextTime`'s
+ *   `saveIds`), so a been save is never counted in both the card and the
+ *   banner. One seam: the route handler and the web page both pass it.
  * - Items carry distance at the shelf's precision (`shelfMiles`); membership
  *   and order use the RAW miles, so 6.17 sorts before 6.20 though both print
  *   "6.2".
@@ -95,12 +98,13 @@ export function nearbySaves(
   saves: SavedPlace[],
   dismissedSaveIds: Iterable<string>,
   radiusMi: number | null,
+  excludedSaveIds: Iterable<string> = [],
 ): NearbySaves {
   const radius = radiusMi ?? NEAR_RADIUS_MI;
   const anchors = locatedStops(trip);
   if (anchors.length === 0) return { radiusMi: radius, items: [], beyond: null };
 
-  const dismissed = new Set(dismissedSaveIds);
+  const dismissed = new Set([...dismissedSaveIds, ...excludedSaveIds]);
   const onTrip = ideaPlaces(trip);
 
   const measured: Measured[] = [];
@@ -205,8 +209,9 @@ export const IDEAS_EMPTY_COPY = "No ideas yet. Your saves above are the fastest 
 /** A save's type as the idea category it is born with — the five-category
  * language (`categoryOf(type).cat`): Stay → stay, Eat → eat, the rest → do.
  * The same bridge as the DS's `ideaCategoryOfType` (packages/ui/src/category.ts),
- * which the phone cannot import. */
-function ideaCategoryOf(type: NearbySave["type"]): IdeaCategory {
+ * which the phone cannot import. #113 exports it: a "Did it" made from a
+ * place capture files its idea under this, and the Last-time card's Add. */
+export function ideaCategoryOfSaveType(type: NearbySave["type"]): IdeaCategory {
   switch (categoryOf(type).cat) {
     case "Stay":
       return "stay";
@@ -227,11 +232,12 @@ export function nearbyIdeaBody(tripId: string, item: NearbySave): IdeaCreateInpu
   return {
     tripId,
     stopId: null,
-    category: ideaCategoryOf(item.type),
+    category: ideaCategoryOfSaveType(item.type),
     title: item.name,
     status: "idea",
     place: item.place,
     rating: null,
+    again: null,
     notes: item.source,
   };
 }

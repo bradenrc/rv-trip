@@ -2,14 +2,17 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import * as Location from "expo-location";
-import type { CaptureDraft, PlaceSummary, ReservationType, SavedPlaceStatus } from "@rv-trip/core";
+import type { CaptureDraft, DidItBody, Idea, PlaceSummary, ReservationType, SavedPlaceStatus } from "@rv-trip/core";
 import {
   DEFAULT_STYLE_MODE,
   OFFLINE_NOTICE,
+  didItBody,
+  didItContext,
   PIN_KINDS,
   captureFieldPlaceholder,
   captureRows,
   formatCoords,
+  newClientId,
   noteCaptureBody,
   noteRowSubline,
   noteRowTitle,
@@ -20,10 +23,12 @@ import {
   reservationTypeOfGoogle,
 } from "@rv-trip/core";
 import { api } from "../src/api";
-import { capture, loadRecents, useCaptureState } from "../src/capture";
+import { capture, loadRecents, queueDidIt, useCaptureState } from "../src/capture";
+import { AgainPair, LogCta } from "../src/journal";
+import { addProvisionalIdea, replaceIdea, useTodaysStop } from "../src/store";
 import { PinMap, useStyleMode } from "../src/map";
 import { C, F, R } from "../src/theme";
-import { CategoryTile, Chip, Toast } from "../src/ui";
+import { CategoryTile, Chip, Stars, Toast } from "../src/ui";
 
 /**
  * The capture sheet (#111 · docs/design/111 #100, Q2 A) — a root formSheet the
@@ -188,7 +193,14 @@ function Confirm({
   onSave: (draft: CaptureDraft) => void;
 }) {
   const { recents } = useCaptureState();
-  const [status, setStatus] = useState<SavedPlaceStatus>("want");
+  const router = useRouter();
+  // #113 · "Did it" — only while a trip is in progress and one of its stops
+  // covers today (core's `todaysStop`, over the bundles the phone holds —
+  // persisted for the trip in progress, so this works with no signal).
+  const today = useTodaysStop();
+  const [status, setStatus] = useState<SavedPlaceStatus | "did">("want");
+  const [rating, setRating] = useState(0);
+  const [again, setAgain] = useState<boolean | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [addingWho, setAddingWho] = useState(false);
   const [who, setWho] = useState("");
@@ -201,7 +213,32 @@ function Confirm({
   const dest = target.kind === "place" ? placeDest : online ? areaName : null;
   const chosenSource = addingWho ? who : source;
 
+  const didIt = status === "did" && today !== null;
   const submit = () => {
+    if (status === "did") {
+      if (!today) return;
+      const clientId = newClientId();
+      const body = didItBody(
+        { clientId, tripId: today.trip.id, stopId: today.stop.id },
+        target.kind === "place"
+          ? { kind: "place", hit: target.hit }
+          : { kind: "note", text: target.text, at: fix, areaLabel: online ? areaName : null },
+        { rating: rating === 0 ? null : rating, again, note },
+      );
+      const tripId = today.trip.id;
+      // The idea is on today's stop at once (provisional id = its clientId);
+      // the created row replaces it when the POST lands.
+      addProvisionalIdea(tripId, today.stop.id, provisionalIdea(body));
+      router.back();
+      void queueDidIt(body, {
+        tripTitle: today.trip.title,
+        undo: (created) => {
+          replaceIdea(tripId, created?.id ?? clientId, null);
+          if (created) void api.ideas.remove(created.id).catch(() => undefined);
+        },
+      });
+      return;
+    }
     const c = { status, source: chosenSource, note };
     onSave(
       target.kind === "place"
@@ -229,7 +266,21 @@ function Confirm({
         <Chip on={status === "been"} onPress={() => setStatus("been")}>
           Been there
         </Chip>
+        {today && (
+          <Chip on={status === "did"} onPress={() => setStatus("did")}>
+            Did it
+          </Chip>
+        )}
       </View>
+
+      {didIt && (
+        <>
+          <Text style={styles.mono}>{didItContext(today.trip.title, today.stop.place.name)}</Text>
+          <Stars value={rating} size={28} onSet={setRating} />
+          <Text style={styles.lbl}>Do it again?</Text>
+          <AgainPair value={again} onChange={setAgain} />
+        </>
+      )}
 
       {status === "want" && (
         <>
@@ -268,16 +319,41 @@ function Confirm({
       <TextInput
         value={note}
         onChangeText={setNote}
-        placeholder="Why? (optional)"
+        placeholder={didIt ? "For next time…" : "Why? (optional)"}
         placeholderTextColor={C.inkSubtle}
         style={styles.note}
         multiline
         selectionColor={C.green}
       />
 
-      <Cta onPress={submit}>Save</Cta>
+      {didIt ? <LogCta onPress={submit} /> : <Cta onPress={submit}>Save</Cta>}
     </ScrollView>
   );
+}
+
+/** The idea as the stop screen shows it before the POST lands. */
+function provisionalIdea(body: DidItBody): Idea {
+  return {
+    id: body.clientId,
+    tripId: body.tripId,
+    stopId: body.stopId ?? null,
+    title: body.title,
+    category: body.category ?? "do",
+    status: "done",
+    place: body.place
+      ? {
+          name: body.place.name,
+          lat: body.place.lat ?? null,
+          lng: body.place.lng ?? null,
+          googlePlaceId: body.place.googlePlaceId ?? null,
+        }
+      : null,
+    rating: body.rating ?? null,
+    again: body.again ?? null,
+    notes: body.notes ?? null,
+    sortOrder: Number.MAX_SAFE_INTEGER,
+    lastChange: null,
+  };
 }
 
 // ── the pin sub-screen ─────────────────────────────────────────────────────

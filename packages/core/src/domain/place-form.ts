@@ -166,6 +166,7 @@ export function savePlaceBody(
     source: blank(form.source),
     note: blank(form.note),
     rating: null,
+    again: null,
     tripId: null,
   };
 }
@@ -282,6 +283,7 @@ export function savedPlaceToCreate(p: SavedPlace): SavedPlaceCreate {
     note: p.note,
     source: p.source,
     rating: p.rating,
+    again: p.again,
     tripId: p.tripId,
   };
 }

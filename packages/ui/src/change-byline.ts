@@ -36,6 +36,10 @@ const VERBS: Record<ChangeField, string> = {
   rating: "rated",
   notes: "noted",
   status: "moved",
+  // #113 · "Do it again?". The byline carries no value, and the answer may be
+  // Again OR Once was enough, so the verb names the act, not the answer; the
+  // popover's value column says which ("again" / "once was enough").
+  again: "marked",
 };
 
 export function changeVerb(field: ChangeField): string {
@@ -105,6 +109,8 @@ export function changeValueLabel(field: ChangeField, value: string | null): stri
     return Number.isInteger(n) && n >= 1 && n <= 5 ? "★".repeat(n) : value;
   }
   if (field === "notes") return `“${notePreview(value)}”`;
+  // #113 · the log stores the boolean as its text.
+  if (field === "again") return value === "true" ? "again" : value === "false" ? "once was enough" : value;
   return value;
 }
 

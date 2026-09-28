@@ -255,6 +255,7 @@ export function suggestionToCreate(s: PlaceSuggestion): SavedPlaceCreate {
     note: s.note,
     source: null,
     rating: s.rating,
+    again: null,
     tripId: s.tripId,
   };
 }

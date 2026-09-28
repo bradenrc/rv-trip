@@ -1,17 +1,22 @@
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { Idea, LodgingKind, Reservation, ReservationDraft } from "@rv-trip/core";
+import type { HowWasIt, Idea, LodgingKind, Reservation, ReservationDraft } from "@rv-trip/core";
 import {
   LODGING_KIND_LABEL,
+  SHELF_CATEGORY_LABEL,
   STAY_KINDS,
-  cycleIdeaStatus,
+  checkOffStatus,
+  isRateableReservation,
   reservationDraftInput,
+  saveTypeOfIdeaCategory,
+  setIdeaFields,
+  setStopFields,
+  setStopReservationFields,
   stayDraft,
   stayNameLabel,
   withStayKind,
   dateRange,
-  ideaStatusColor,
   isScheduled,
   resDates,
   scheduledOrder,
@@ -20,9 +25,10 @@ import {
   stopMap,
   tripStopPins,
 } from "@rv-trip/core";
-import { api } from "../../../../../../src/api";
+import { queuePatch } from "../../../../../../src/capture";
+import { AgainPair, HowWasItSheet, LoggedMeta } from "../../../../../../src/journal";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../../src/map";
-import { addStay, updateTrip, useBundle } from "../../../../../../src/store";
+import { addStay, isProvisionalIdea, updateTrip, useBundle } from "../../../../../../src/store";
 import { C, F, R } from "../../../../../../src/theme";
 import { Input, Label, Sheet } from "../../../../../../src/hops";
 import { Button, Card, CategoryTile, Centered, Kicker, Muted, Segmented, Stars } from "../../../../../../src/ui";
@@ -32,6 +38,12 @@ import { Button, Card, CategoryTile, Centered, Kicker, Muted, Segmented, Stars }
 const MINI_MAP_HEIGHT = 150;
 
 const failed = (what: string) => Alert.alert("Didn’t save", `${what} — check your connection and try again.`);
+
+/** The "How was it?" sheet's target: a checked-off idea (with what it held
+ * before the check, for Undo) or a reservation's pill. */
+type Rating =
+  | { kind: "idea"; id: string; done: boolean; before: HowWasIt & { status: Idea["status"] } }
+  | { kind: "reservation"; id: string; done: false; before: HowWasIt };
 
 export default function StopScreen() {
   const { id, stopId } = useLocalSearchParams<{ id: string; stopId: string }>();
@@ -66,6 +78,9 @@ export default function StopScreen() {
   // #105 · Add stay — the sheet, opened on the trip's lodging default (Q3 A).
   const [stayOpen, setStayOpen] = useState(false);
 
+  // #113 · the "How was it?" sheet, when open.
+  const [rating, setRating] = useState<Rating | null>(null);
+
   // The note is edited locally and persisted on blur, like the web sheet.
   const [note, setNote] = useState("");
   useEffect(() => {
@@ -83,21 +98,69 @@ export default function StopScreen() {
   const scheduled = isScheduled(stop);
   const costTotal = stop.reservations.reduce((a, r) => a + (r.cost ?? 0), 0);
 
+  // #113 · Q5 A: every Our-take write goes through the capture queue, so it
+  // lands with no signal too; the local store updates straight away and the
+  // amber "Saved on this phone" toast replaces the old "Didn't save" alert.
   const rate = (n: number) => {
     updateTrip(id, (t) => setStopRating(t, stop.id, n));
-    api.stops.patch(stop.id, { rating: n === 0 ? null : n }).catch(() => failed("Your rating"));
+    void queuePatch("stop", stop.id, { rating: n === 0 ? null : n });
   };
   const commitNote = () => {
     if (note === (stop.notes ?? "")) return;
     updateTrip(id, (t) => setStopNote(t, stop.id, note));
-    api.stops.patch(stop.id, { notes: note }).catch(() => failed("Your note"));
+    void queuePatch("stop", stop.id, { notes: note });
   };
-  const cycle = (idea: Idea) => {
-    updateTrip(id, (t) => cycleIdeaStatus(t, stop.id, idea.id));
-    const order: Idea["status"][] = ["idea", "planned", "done"];
-    const next = order[(order.indexOf(idea.status) + 1) % 3]!;
-    api.ideas.patch(idea.id, { status: next }).catch(() => failed("That idea"));
+  const setAgain = (again: boolean | null) => {
+    updateTrip(id, (t) => setStopFields(t, stop.id, { again }));
+    void queuePatch("stop", stop.id, { again });
   };
+
+  /** The check circle (Q3 B): one tap commits done and opens the optional
+   * sheet; tapping a done idea un-checks it back to `idea`. */
+  const check = (idea: Idea) => {
+    const status = checkOffStatus(idea.status);
+    updateTrip(id, (t) => setIdeaFields(t, idea.id, { status }));
+    void queuePatch("idea", idea.id, { status });
+    if (status === "done") {
+      setRating({
+        kind: "idea",
+        id: idea.id,
+        done: true,
+        before: { status: idea.status, rating: idea.rating, again: idea.again, notes: idea.notes },
+      });
+    }
+  };
+
+  /** "✓ Log it": the sheet's three fields, then the green toast whose Undo
+   * puts the thing back the way it was before the check (or the pill). */
+  const log = (target: Rating, v: HowWasIt) => {
+    setRating(null);
+    const journal = {
+      tripTitle: bundle.trip.title,
+      undo: () => {
+        if (target.kind === "idea") {
+          updateTrip(id, (t) => setIdeaFields(t, target.id, target.before));
+          void queuePatch("idea", target.id, target.before);
+        } else {
+          updateTrip(id, (t) => setStopReservationFields(t, target.id, target.before));
+          void queuePatch("reservation", target.id, target.before);
+        }
+      },
+    };
+    if (target.kind === "idea") {
+      updateTrip(id, (t) => setIdeaFields(t, target.id, v));
+      void queuePatch("idea", target.id, v, journal);
+    } else {
+      updateTrip(id, (t) => setStopReservationFields(t, target.id, v));
+      void queuePatch("reservation", target.id, v, journal);
+    }
+  };
+  const ratingName =
+    rating?.kind === "idea"
+      ? (stop.ideas.find((i) => i.id === rating.id)?.title ?? "")
+      : rating
+        ? (stop.reservations.find((r) => r.id === rating.id)?.name ?? "")
+        : "";
 
   return (
     <>
@@ -129,7 +192,20 @@ export default function StopScreen() {
           {stop.reservations.length === 0 ? (
             <Muted>Nothing booked here yet.</Muted>
           ) : (
-            stop.reservations.map((r) => <ReservationCard key={r.id} r={r} />)
+            stop.reservations.map((r) => (
+              <ReservationCard
+                key={r.id}
+                r={r}
+                onRate={() =>
+                  setRating({
+                    kind: "reservation",
+                    id: r.id,
+                    done: false,
+                    before: { rating: r.rating, again: r.again, notes: r.notes },
+                  })
+                }
+              />
+            ))
           )}
           <Button tone="ghost" onPress={() => setStayOpen(true)}>
             Add stay
@@ -141,26 +217,45 @@ export default function StopScreen() {
           )}
         </Section>
 
-        {/* Ideas — tap to cycle idea → planned → done */}
+        {/* Ideas — #113 · a check circle: tap ○ when you've done it (Q3 B).
+            The whole row is the tap target, at least 44pt tall. */}
         {stop.ideas.length > 0 && (
-          <Section title="Ideas" count={stop.ideas.length}>
-            {stop.ideas.map((it) => (
-              <Pressable key={it.id} onPress={() => cycle(it)} accessibilityRole="button">
-                {({ pressed }) => (
-                  <View style={[styles.idea, { opacity: pressed ? 0.8 : 1 }]}>
-                    <Text style={{ color: ideaStatusColor(it.status), fontSize: 16 }}>
-                      {it.status === "done" ? "●" : it.status === "planned" ? "◐" : "○"}
-                    </Text>
-                    <View style={{ flex: 1, gap: 2 }}>
-                      <Text style={{ color: C.ink, fontSize: 15, fontWeight: "600" }}>{it.title}</Text>
-                      {it.notes ? <Text style={{ color: C.inkMuted, fontSize: 12 }}>{it.notes}</Text> : null}
+          <Section title="Ideas" count={stop.ideas.length} hint="tap ○ when you’ve done it">
+            {stop.ideas.map((it) => {
+              const done = it.status === "done";
+              const logged = it.rating !== null || it.again !== null;
+              return (
+                <Pressable
+                  key={it.id}
+                  onPress={() => check(it)}
+                  // A Did-it still waiting for signal has no server id to PATCH.
+                  disabled={isProvisionalIdea(it)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: done }}
+                  accessibilityLabel={it.title}
+                >
+                  {({ pressed }) => (
+                    <View style={[styles.idea, { opacity: pressed ? 0.8 : 1 }]}>
+                      <View style={[styles.chk, done && styles.chkDone]}>
+                        {done && <Text style={styles.chkMark}>✓</Text>}
+                      </View>
+                      <View style={{ flex: 1, gap: 2 }}>
+                        <Text style={{ color: C.ink, fontSize: 15, fontWeight: "600" }}>{it.title}</Text>
+                        {logged ? (
+                          <LoggedMeta rating={it.rating} again={it.again} />
+                        ) : (
+                          <Text style={styles.mono}>
+                            {it.status} · {SHELF_CATEGORY_LABEL[it.category]}
+                          </Text>
+                        )}
+                        {it.notes ? <Text style={{ color: C.inkMuted, fontSize: 12 }}>{it.notes}</Text> : null}
+                      </View>
+                      <CategoryTile type={saveTypeOfIdeaCategory(it.category)} size={26} />
                     </View>
-                    <Text style={[styles.mono, { color: ideaStatusColor(it.status) }]}>{it.status}</Text>
-                  </View>
-                )}
-              </Pressable>
-            ))}
-            <Muted>Tap an idea to move it along.</Muted>
+                  )}
+                </Pressable>
+              );
+            })}
           </Section>
         )}
 
@@ -173,6 +268,8 @@ export default function StopScreen() {
             <Stars value={stop.rating ?? 0} size={26} onSet={rate} />
             <Text style={styles.mono}>Tap to rate this stop</Text>
           </View>
+          {/* #113 · Q2 A — the Again / Once was enough pair. */}
+          <AgainPair value={stop.again} onChange={setAgain} />
           <TextInput
             value={note}
             onChangeText={setNote}
@@ -184,6 +281,15 @@ export default function StopScreen() {
           />
         </Section>
       </ScrollView>
+      <HowWasItSheet
+        visible={rating !== null}
+        name={ratingName}
+        done={rating?.done ?? false}
+        initial={rating?.before ?? { rating: null, again: null, notes: null }}
+        onLog={(v) => rating && log(rating, v)}
+        // Dismissing counts as Skip: the check has already landed.
+        onSkip={() => setRating(null)}
+      />
       {stayOpen && (
         <AddStaySheet
           tripId={id}
@@ -274,7 +380,7 @@ function AddStaySheet({
   );
 }
 
-function ReservationCard({ r }: { r: Reservation }) {
+function ReservationCard({ r, onRate }: { r: Reservation; onRate: () => void }) {
   const dates = resDates(r);
   return (
     <Card style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
@@ -289,6 +395,8 @@ function ReservationCard({ r }: { r: Reservation }) {
         {r.confirmationNumber ? (
           <Text style={[styles.mono, { color: C.inkMuted }]}>Conf. {r.confirmationNumber}</Text>
         ) : null}
+        {/* #113 · a logged stay/meal/thing shows its ★ and its Again badge. */}
+        <LoggedMeta rating={r.rating} again={r.again} />
         {r.notes ? <Text style={{ color: C.inkMuted, fontSize: 12.5 }}>{r.notes}</Text> : null}
       </View>
       <View style={{ alignItems: "flex-end", gap: 4 }}>
@@ -297,18 +405,35 @@ function ReservationCard({ r }: { r: Reservation }) {
             ${r.cost.toLocaleString("en-US")}
           </Text>
         )}
-        {r.rating ? <Stars value={r.rating} size={11} /> : null}
+        {/* #113 · a stay, a meal or a thing to do: "How was it?" (never Travel). */}
+        {isRateableReservation(r) && (
+          <Pressable onPress={onRate} accessibilityRole="button" hitSlop={8} style={styles.ratelink}>
+            <Text style={styles.ratelinkText}>How was it?</Text>
+          </Pressable>
+        )}
       </View>
     </Card>
   );
 }
 
-function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+function Section({
+  title,
+  count,
+  hint,
+  children,
+}: {
+  title: string;
+  count?: number;
+  /** #113 · a quiet mono hint on the right of the heading. */
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <View style={{ gap: 10, marginTop: 10 }}>
       <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
         <Text style={styles.h2}>{title}</Text>
         {count != null && <Text style={styles.mono}>{count}</Text>}
+        {hint ? <Text style={[styles.mono, { marginLeft: "auto", fontSize: 10 }]}>{hint}</Text> : null}
       </View>
       {children}
     </View>
@@ -328,7 +453,8 @@ const styles = StyleSheet.create({
   },
   idea: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
+    minHeight: 44,
     gap: 10,
     backgroundColor: C.surface,
     borderWidth: 1,
@@ -337,6 +463,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
+  // #113 · the check circle — 22pt, border-hi; done fills green with a navy ✓.
+  chk: {
+    width: 22,
+    height: 22,
+    borderRadius: R.pill,
+    borderWidth: 1.5,
+    borderColor: C.borderHi,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 2,
+  },
+  chkDone: { backgroundColor: C.green, borderColor: C.green },
+  chkMark: { color: C.navy, fontSize: 13, fontWeight: "800", lineHeight: 15 },
+  // docs/design/113 `.ratelink`.
+  ratelink: {
+    borderWidth: 1,
+    borderColor: C.borderHi,
+    borderRadius: R.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  ratelinkText: { fontFamily: F.mono, fontSize: 9.5, color: C.inkMuted },
   notes: {
     minHeight: 96,
     color: C.ink,

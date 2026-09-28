@@ -44,6 +44,7 @@ function stop(id: string, p: { name: string; lat: number | null; lng: number | n
     reservations: [],
     ideas: [],
     lastChange: null,
+    again: null,
   };
 }
 
@@ -59,6 +60,7 @@ function idea(over: Partial<Idea> & { id: string }): Idea {
     notes: null,
     sortOrder: 0,
     lastChange: null,
+    again: null,
     ...over,
   };
 }
@@ -100,6 +102,7 @@ function save(over: Partial<SavedPlace> & { id: string; name: string; lat: numbe
     tripId: null,
     tripName: null,
     lastChange: null,
+    again: null,
     anchor: "pin",
     areaLabel: null,
     destination: null,
@@ -202,6 +205,16 @@ describe("nearbySaves — the Oregon Coast fixture", () => {
 });
 
 describe("nearbySaves — what is left out", () => {
+  it("drops the excluded ids — #113's Last-time card saves — from items and beyond alike", () => {
+    const r = nearbySaves(coast(), SAVES, [], 50, ["s_south", "s_cape"]);
+    expect(names(r.items)).not.toContain("South Beach State Park");
+    expect(r.items).toHaveLength(3);
+    // Cape Lookout was the only save in the next ring; excluded, the ring is empty.
+    expect(r.beyond).toBeNull();
+    // No exclusions is the shipped behaviour.
+    expect(nearbySaves(coast(), SAVES, [], 50).items).toHaveLength(4);
+  });
+
   it("drops dismissed save ids", () => {
     const r = nearbySaves(coast(), SAVES, ["s_fort", "s_neh"], 50);
     expect(names(r.items)).toEqual(["South Beach State Park", "Beverly Beach State Park"]);
@@ -389,6 +402,7 @@ describe("nearbyIdeaBody — Add copies the save into the trip's ideas", () => {
       status: "idea",
       place: { name: "Fort Stevens State Park", lat: 46.2045, lng: -123.958, googlePlaceId: null },
       rating: null,
+      again: null,
       notes: "Jane & Rick",
     });
     expect(ideaCreateInput.safeParse(body).success).toBe(true);

@@ -80,6 +80,8 @@ async function main() {
       status: s.status,
       source: s.source,
       rating: s.rating,
+      // #113 · the two coast Been saves carry `again: true` (the Last-time card).
+      again: s.again,
       tripId: s.trip === null ? null : ids.get(s.trip)!,
       note: s.note,
       suggestedPlace: s.suggestedPlace,
@@ -134,6 +136,7 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
           departDate: s.departDate,
           sortOrder: s.sortOrder,
           rating: s.rating,
+          again: s.again,
           notes: s.notes,
         })
         .returning();
@@ -176,6 +179,7 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
         confirmationNumber: r.confirmationNumber,
         cost: r.cost === null ? null : r.cost.toFixed(2),
         rating: r.rating,
+        again: r.again,
         notes: r.notes,
         startsAt: instant(r.startsAt),
         endsAt: instant(r.endsAt),
@@ -200,6 +204,7 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
         lng: i.place?.lng ?? null,
         googlePlaceId: i.place?.googlePlaceId ?? null,
         rating: i.rating,
+        again: i.again,
         notes: i.notes,
         sortOrder: i.sortOrder,
       })),

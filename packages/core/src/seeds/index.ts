@@ -46,6 +46,7 @@ function mkStop(
     reservations: [],
     ideas: [],
     lastChange: null,
+    again: null,
     ...s,
   };
 }
@@ -69,6 +70,7 @@ function mkRes(
     endsTz: null,
     lodgingKind: null,
     lastChange: null,
+    again: null,
     ...r,
   };
 }
@@ -90,6 +92,7 @@ function mkIdea(
     rating: null,
     notes: null,
     lastChange: null,
+    again: null,
     ...i,
   };
 }

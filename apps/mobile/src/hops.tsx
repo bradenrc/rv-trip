@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type {
   HopBookingDraft,
@@ -97,7 +108,13 @@ export function HopRow({
   );
 }
 
-/** A bottom sheet on RN Modal — dim, grab handle, surface. */
+/**
+ * A bottom sheet on RN Modal — dim, grab handle, surface. The surface sits in
+ * a `KeyboardAvoidingView` (iOS `padding`) so a sheet with a TextInput — the
+ * How was it? note, the hop booking form — rides up above the keyboard
+ * instead of vanishing behind it (#113 walk FN). Android already resizes the
+ * window (adjustResize), so it gets no behavior, as on sign-in.
+ */
 export function Sheet({
   visible,
   onClose,
@@ -111,12 +128,18 @@ export function Sheet({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.dim} onPress={onClose} accessibilityLabel="Close" />
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, maxHeight: "88%" }]}>
-        <View style={styles.grab} />
-        <ScrollView contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
-          {children}
-        </ScrollView>
-      </View>
+      <KeyboardAvoidingView
+        style={styles.sheetHost}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        pointerEvents="box-none"
+      >
+        <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, maxHeight: "88%" }]}>
+          <View style={styles.grab} />
+          <ScrollView contentContainerStyle={{ gap: 8 }} keyboardShouldPersistTaps="handled">
+            {children}
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -359,11 +382,11 @@ const styles = StyleSheet.create({
   },
   pinMono: { fontFamily: F.mono, fontSize: 11.5 },
   dim: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: C.navy, opacity: 0.55 },
+  // Fills the modal and bottom-anchors the surface in normal flow, so the
+  // KeyboardAvoidingView's padding lifts it; box-none lets taps above it fall
+  // through to the dim (dismiss = Skip, unchanged).
+  sheetHost: { flex: 1, justifyContent: "flex-end" },
   sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
     backgroundColor: C.surface,
     borderTopWidth: 1,
     borderColor: C.borderHi,

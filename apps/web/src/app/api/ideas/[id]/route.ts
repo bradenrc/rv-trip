@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { ideaPatchColumns, ideaPatchInput } from "@rv-trip/core";
 import { deleteIdea, updateIdeaFields } from "@rv-trip/db";
 import { getActor, getOwner } from "@/lib/owner";
+import { destinationResolver } from "@/lib/places";
 
 /**
  * The idea PATCH. The schema is core's `ideaPatchInput` — the same grammar the
@@ -31,6 +32,8 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       id,
       ideaPatchColumns(parsed.data),
       await getActor(),
+      // #113 · the check-off's Been write-through resolves its destination.
+      { resolveDestination: destinationResolver() },
     );
   } catch (e) {
     if (e instanceof Error && e.message === "stop not found") {

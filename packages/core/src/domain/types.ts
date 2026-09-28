@@ -43,13 +43,23 @@ export type IdeaCategory = z.infer<typeof ideaCategory>;
 export const rating = z.number().int().min(1).max(5).nullable();
 
 /**
- * The three fields a household shares a VOICE on (#78 · docs/design/81 §6) —
- * the only ones a change is worth keeping. `notes` is the canonical spelling
+ * "Do it again?" (#113 · W3 Journal, Q2 A) — a separate yes/no beside the
+ * stars: `true` is Again, `false` is Once was enough, and `null` is "not said".
+ * Carried by ideas, stops, reservations and saves. Nullable with a `null`
+ * default, so a payload from before W3 (a cached bundle, an older phone) still
+ * parses and reads as "not said".
+ */
+const again = z.boolean().nullable().default(null);
+
+/**
+ * The fields a household shares a VOICE on (#78 · docs/design/81 §6) — the
+ * only ones a change is worth keeping. `again` joined in #113 (W3 Journal):
+ * "marked again" is a personal opinion the byline names, like a rating. `notes` is the canonical spelling
  * even though `saved_places` names its column `note`: one vocabulary on the
  * wire, or the /places byline could never match the set it renders from (the
  * mapping happens once, at the write site in packages/db).
  */
-export const changeField = z.enum(["rating", "notes", "status"]);
+export const changeField = z.enum(["rating", "notes", "status", "again"]);
 export type ChangeField = z.infer<typeof changeField>;
 
 /** The four things a change is logged against. `save` was `savedPlace` before
@@ -148,6 +158,7 @@ export const reservation = z.object({
   confirmationNumber: z.string().nullable().default(null),
   cost: z.number().nonnegative().nullable().default(null),
   rating,
+  again,
   notes: z.string().nullable().default(null),
   /** A transport booking's clock (#110 §6): when it leaves and lands, each in
    * its own zone. Lodging keeps the day-grain `checkIn`/`checkOut`. */
@@ -182,6 +193,7 @@ export const idea = z.object({
   status: ideaStatus.default("idea"),
   place: place.nullable().default(null),
   rating,
+  again,
   notes: z.string().nullable().default(null),
   sortOrder: z.number().int(),
   lastChange: lastChangeField,
@@ -204,6 +216,7 @@ export const stop = z.object({
   departDate: isoDate.nullable().default(null),
   sortOrder: z.number().int(),
   rating,
+  again,
   notes: z.string().nullable().default(null),
   reservations: z.array(reservation).default([]),
   ideas: z.array(idea).default([]),
@@ -411,6 +424,8 @@ export const stopPatchInput = stop
     sortOrder: true,
     rating: true,
     notes: true,
+    // #113 · the Our-take Again pair. Explicit: `.pick()` drops an unlisted key.
+    again: true,
   })
   .extend({
     placeName: place.shape.name,
@@ -526,6 +541,8 @@ export const reservationPatchInput = reservation
     // #105 · the stay form's kind switch is part of the ONE add/edit form, so
     // an edit can change it (vet HIGH: an unlisted key would parse away).
     lodgingKind: true,
+    // #113 · the "How was it?" sheet on a stay / meal / thing to do.
+    again: true,
   })
   .partial();
 export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
@@ -553,8 +570,25 @@ export const ideaCreateInput = idea
     tripId: z.string().uuid(),
     stopId: z.string().uuid().nullable().default(null),
     rating: rating.default(null),
+    /** #113 · the undo re-POSTs it, and "Did it" is born with it. */
+    again: again,
+    /**
+     * #113 · "Did it" (Q1 B · Q5 A): the phone's `cap_…` id, minted when the
+     * idea is queued. The create is idempotent on (trip, clientId) — a replay
+     * answers 200 with the row that exists, exactly like `POST /api/places`.
+     * Optional: the web never sends one.
+     */
+    clientId: z.string().min(1).max(64).optional(),
+    /**
+     * #113 · the capture's resolved area name ("Playa Flamingo"). There is no
+     * column for it: it rides to the Been write-through only, where a note
+     * with a fix lands as a save anchored to that AREA rather than a bare pin.
+     */
+    areaLabel: z.string().nullable().optional(),
   });
 export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
+/** Pre-parse: what a client sends — `again`, `rating`, `stopId` may be omitted. */
+export type IdeaCreateBody = z.input<typeof ideaCreateInput>;
 
 /**
  * `PATCH /api/ideas/:id` — the status pill, the stars, the note, and (#69) the
@@ -571,7 +605,8 @@ export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
  * stop write flattens through `stopPatchColumns`.
  */
 export const ideaPatchInput = idea
-  .pick({ status: true, rating: true, notes: true, place: true, category: true })
+  // #113 · `again` — the check-off sheet's Again / Once was enough.
+  .pick({ status: true, rating: true, notes: true, place: true, category: true, again: true })
   .extend({
     /**
      * The drop (#80). Unlike `place`, `stop_id` IS a real column, so this key
@@ -654,6 +689,8 @@ export const savedPlace = z.object({
   source: z.string().nullable().default(null),
   /** "been" shelf: the rating and the trip it was visited on. */
   rating,
+  /** "been" shelf (#113): would you go back? Null = not said. */
+  again,
   tripId: z.string().nullable().default(null),
   tripName: z.string().nullable().default(null),
   lastChange: lastChangeField,
@@ -723,6 +760,8 @@ const savedPlaceFields = z.object({
   source: z.string().nullable().default(null),
   /** Set on a POST only when a suggestion is accepted straight onto "been". */
   rating: rating.default(null),
+  /** #113 · "been" shelf only: Again / Once was enough / not said. */
+  again,
   tripId: z.string().uuid().nullable().default(null),
 });
 
@@ -845,6 +884,60 @@ export const nearbySavesResponse = z.object({
   beyond: nearbySavesBeyond.nullable(),
 });
 export type NearbySaves = z.infer<typeof nearbySavesResponse>;
+
+/**
+ * `GET /api/trips/:id/for-next-time` (#113 · #107 "Last time here", Q7 B ·
+ * Q8 B): one card per PAST trip × destination that this trip goes back near.
+ * Computed by `forNextTime` (planner/for-next-time.ts) — the web page calls
+ * the same function server-side, so the phone and the web draw one answer.
+ */
+export const nextTimeRow = z.object({
+  saveId: z.string(),
+  name: z.string(),
+  type: reservationType,
+  rating,
+  again,
+  note: z.string().nullable(),
+  /** The save's OWN place — what the row's Add copies into a trip idea. */
+  place,
+  /** "Booked ✓" (a reservation on THIS trip matches) · "On shelf ✓" (an idea
+   * does) · null → the row offers Add. `isAlreadySaved`, as everywhere. */
+  onThisTrip: z.enum(["reservation", "idea"]).nullable(),
+});
+export type NextTimeRow = z.infer<typeof nextTimeRow>;
+
+export const nextTimeCard = z.object({
+  /** The locality the saves resolved to. `id` is null when a save carries no
+   * destination (no provider key) and the card is named by its stop instead. */
+  destination: z.object({ id: z.string().nullable(), name: z.string() }),
+  /** This trip's stop nearest the destination — "you're back {its dates}". */
+  stop: z.object({
+    id: z.string(),
+    name: z.string(),
+    arriveDate: isoDate.nullable(),
+    departDate: isoDate.nullable(),
+  }),
+  pastTrip: z.object({
+    id: z.string(),
+    title: z.string(),
+    startDate: isoDate,
+    endDate: isoDate,
+    rating,
+    note: z.string().nullable(),
+  }),
+  /** again = true, or not said with ★ ≥ SUGGESTION_MIN_RATING. */
+  again: z.array(nextTimeRow),
+  /** again = false — the amber "once was enough" rows. */
+  once: z.array(nextTimeRow),
+});
+export type NextTimeCard = z.infer<typeof nextTimeCard>;
+
+export const forNextTimeResponse = z.object({
+  cards: z.array(nextTimeCard),
+  /** Every save on a card — left out of the nearby banner's count. */
+  saveIds: z.array(z.string()),
+});
+export type ForNextTime = z.infer<typeof forNextTimeResponse>;
 
 /** `POST /api/trips/:id/dismissed-saves` — the banner's Dismiss: every save
  * currently surfaced, remembered for this trip (Q6 A). */

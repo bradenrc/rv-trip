@@ -82,7 +82,9 @@ describe("capture · the queue runtime", () => {
   it("persists under core's key and flushes through core's rules", () => {
     expect(runtime).toContain("AsyncStorage.setItem(CAPTURE_QUEUE_KEY");
     expect(runtime).toContain("flushCaptureQueue");
-    expect(runtime).toContain("parseCaptureQueue");
+    // #113 · v2: the load migrates the v1 key's items (as saves) and clears it.
+    expect(runtime).toContain("migrateCaptureQueue(v2, v1)");
+    expect(runtime).toContain("AsyncStorage.removeItem(CAPTURE_QUEUE_KEY_V1)");
   });
 
   it("flushes on the way back online, on foreground, and after each enqueue", () => {

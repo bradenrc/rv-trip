@@ -302,6 +302,7 @@ describe("routeSummary — the rail counts the stops it cannot draw", () => {
     reservations: [],
     ideas: [],
     lastChange: null,
+    again: null,
   });
 
   const trip = (): Trip => ({

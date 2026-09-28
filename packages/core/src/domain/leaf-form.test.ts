@@ -51,6 +51,7 @@ function res(over: Partial<Reservation> = {}): Reservation {
     endsTz: null,
     lodgingKind: null,
     lastChange: null,
+    again: null,
     ...over,
   };
 }
@@ -68,6 +69,7 @@ function ideaFixture(over: Partial<Idea> = {}): Idea {
     notes: "Ask about the tour.",
     sortOrder: 2,
     lastChange: null,
+    again: null,
     ...over,
   };
 }
@@ -250,6 +252,7 @@ describe("ideaDraftInput / ideaRestoreInput", () => {
       status: "idea",
       place: null,
       rating: null,
+      again: null,
       notes: null,
     });
   });
@@ -268,6 +271,7 @@ describe("ideaDraftInput / ideaRestoreInput", () => {
       status: "planned",
       place: null,
       rating: null,
+      again: null,
       notes: "Ask about the tour.",
     });
     expect(ideaCreateInput.safeParse(body).success).toBe(true);

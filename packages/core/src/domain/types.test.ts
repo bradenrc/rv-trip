@@ -35,7 +35,7 @@ const SAVE_BODY = {
 describe("savedPlaceCreate — the flat POST /api/places body", () => {
   it("accepts the wireframe's save body verbatim and keeps every flat key", () => {
     const parsed = savedPlaceCreate.parse(SAVE_BODY);
-    expect(parsed).toEqual({ ...SAVE_BODY, rating: null, tripId: null });
+    expect(parsed).toEqual({ ...SAVE_BODY, rating: null, again: null, tripId: null });
   });
 
   it("is NOT the read shape — savedPlace rejects the same body", () => {
@@ -56,6 +56,7 @@ describe("savedPlaceCreate — the flat POST /api/places body", () => {
       note: null,
       source: null,
       rating: null,
+      again: null,
       tripId: null,
     });
   });
@@ -159,6 +160,7 @@ describe("savedPlace read shape — createdAt (#111 i2)", () => {
       type: "other",
       rating: null,
       lastChange: null,
+      again: null,
     });
     expect(p.createdAt).toBeNull();
   });

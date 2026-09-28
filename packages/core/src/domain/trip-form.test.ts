@@ -345,6 +345,7 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
       endsTz: null,
       lodgingKind: null,
       lastChange: null,
+      again: null,
     })),
     ideas: Array.from({ length: ideas }, (_, i) => ({
       id: `${id}-i${i}`,
@@ -358,8 +359,10 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
       notes: null,
       sortOrder: i,
       lastChange: null,
+      again: null,
     })),
     lastChange: null,
+    again: null,
   });
 
   const peopled = fixture({
@@ -411,6 +414,7 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     notes: null,
     sortOrder: i,
     lastChange: null,
+    again: null,
   });
   const res = (id: string, stopId: string) => ({
     id,
@@ -431,6 +435,7 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     endsTz: null,
     lodgingKind: null,
     lastChange: null,
+    again: null,
   });
   const stopOf = (id: string, resCount: number, ideaCount: number): Stop => ({
     id,
@@ -444,6 +449,7 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     reservations: Array.from({ length: resCount }, (_, i) => res(`${id}-r${i}`, id)),
     ideas: Array.from({ length: ideaCount }, (_, i) => idea(`${id}-i${i}`, id, i)),
     lastChange: null,
+    again: null,
   });
   const leg: Leg = {
     id: "l1",
@@ -510,6 +516,7 @@ describe("the stop-dates dialog", () => {
     reservations: [],
     ideas: [],
     lastChange: null,
+    again: null,
   });
 
   it("opens on the stop's dates, and on blanks for a floating stop", () => {
