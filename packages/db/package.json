@@ -7,12 +7,13 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
     "./load-env": "./src/load-env.ts",
+    "./preflight": "./src/preflight-verdict.ts",
     "./testing": "./src/testing/index.ts",
     "./testing/lifecycle": "./src/testing/lifecycle.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",
-    "migrate": "drizzle-kit migrate",
+    "migrate": "tsx src/preflight.ts && drizzle-kit migrate",
     "reset": "tsx src/reset.ts",
     "push": "drizzle-kit push",
     "studio": "drizzle-kit studio",

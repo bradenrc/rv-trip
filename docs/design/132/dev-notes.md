@@ -175,3 +175,104 @@ gh issue create --repo bradenrc/mc-dev \
 - A known limit, deliberate: a blank line inside a finding ends that finding. The convention
   (documented in the header) is that continuation lines are indented directly under the
   bullet, which is the shape `113-walk-report.md` already uses.
+
+## i3 · Pre-v2 baseline preflight before drizzle-kit migrate (#120, Q3 · B)
+
+### What changed
+
+- `packages/db/src/preflight-verdict.ts` (new): the pure decision. It loads no env, opens no
+  connection and never exits, so it is safe to import from vitest (vet MED · import side
+  effect).
+  - `:13-31`: the types `AppliedMigrations` (`{ count, maxCreatedAt }`), `PreflightInput`
+    (`{ applied, baselineWhen, env }`) and `PreflightVerdict` (`{ ok: true }` or
+    `{ ok: false, message }`).
+  - `:35-43` `preflightTarget(url)`: `host:port/database`, never the credentials (the
+    `resetTarget` idiom from reset.ts).
+  - `:45-65` `preflightVerdict`:
+    - `applied` null, count 0, or no max → ok.
+    - max ≥ baseline → ok.
+    - Otherwise it refuses. The date is `baselineWhen` as a UTC `YYYY-MM-DD` (2026-09-25),
+      derived rather than hardcoded.
+    - With `VERCEL_ENV=preview`: `preview/<VERCEL_GIT_COMMIT_REF> predates the v2 baseline
+      (2026-09-25). Delete that Neon branch and redeploy. It re-forks from production.` With
+      no ref, the subject is `this preview's Neon branch (preview/<git-branch>)`.
+    - Otherwise: `<host:port/db> predates the v2 baseline (2026-09-25). Reset it and migrate
+      again: pnpm db:reset --yes, then pnpm db:migrate.` The target uses
+      `DATABASE_URL_UNPOOLED ?? DATABASE_URL` from `env`.
+- `packages/db/src/preflight.ts` (new): the read-only entrypoint. It imports `./load-env`
+  first, like reset.ts.
+  - `:21-29` `baselineWhen()` reads `../drizzle/meta/_journal.json`, resolved from
+    `import.meta.url` so it does not depend on cwd, and takes `when` from the entry tagged
+    `0000_v2`. It throws if that entry is missing.
+  - `:31-46` `readApplied()` checks `to_regclass('drizzle.__drizzle_migrations')`. If the
+    table exists, it reads `count(*)` and `max(created_at)`. Both come back as text because
+    created_at is a bigint, and `Number()` converts them. The pool is always ended. The only
+    statements are SELECTs.
+  - `:48-65` `main()`: the URL is `DATABASE_URL_UNPOOLED ?? DATABASE_URL`, and an unset URL
+    exits 1. A refusal goes to stderr as `preflight: <message>` and exits 1. A pass logs
+    `preflight: <host/db> is at or past the v2 baseline — migrating.`
+- `packages/db/package.json`: `migrate` is now `tsx src/preflight.ts && drizzle-kit migrate`,
+  and a new export `"./preflight": "./src/preflight-verdict.ts"` points at the pure module,
+  not the entrypoint.
+- `apps/web/src/test/preflight.test.ts` (new, 7 tests). It lives under `src/**`, so
+  `vitest.config.mts`'s `include: ["src/**/*.test.ts"]` collects it (vet HIGH: the design's
+  `apps/web/test/` would never have run). It covers every row: no journal, empty journal,
+  max = baseline, max > baseline (all ok), then max < baseline with the preview-branch
+  message, the no-ref message, and the local host/db message. The messages are matched
+  exactly, and the local row asserts that neither the password nor `user:` appears (it also
+  proves UNPOOLED wins over DATABASE_URL).
+- `packages/core/src/w0-reset.test.ts:97-129`: a new describe with 4 source-text wiring
+  tests:
+  - `migrate` equals `tsx src/preflight.ts && drizzle-kit migrate`, and the preflight comes
+    first.
+  - The `./preflight` export is `./src/preflight-verdict.ts`, and that module contains no
+    `process.exit`, `pg` import or `load-env`.
+  - preflight.ts names `"0000_v2"`, `_journal.json` and the URL precedence, and does not
+    contain the literal `1790346498719`.
+  - `apps/web/vercel.json`'s buildCommand is still
+    `pnpm --filter @rv-trip/db migrate && next build`.
+- `apps/web/vercel.json`: unchanged (`git diff --quiet HEAD -- apps/web/vercel.json`
+  succeeds).
+
+### TDD
+
+I wrote both tests first. The apps/web file failed to collect because `@rv-trip/db/preflight`
+did not resolve (`Test Files 1 failed`). w0-reset failed 3 of its 4 new tests
+(`Tests 3 failed | 9 passed (12)`; the vercel.json one already held). After the change:
+`Tests 7 passed (7)` and `Tests 12 passed (12)`.
+
+### Checks run
+
+- `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total`. core has
+  `Tests 1257 passed (1257)` and web has `Tests 372 passed (372)` (365 + 7).
+- A real entrypoint run against the local dev DB (`localhost:5433/rvtrip`, read-only):
+  `tsx src/preflight.ts` gave `preflight: localhost:5433/rvtrip predates the v2 baseline
+  (2026-09-25). Reset it and migrate again: pnpm db:reset --yes, then pnpm db:migrate.`, rc 1.
+  I confirmed that DB really is pre-v2 with a read-only SELECT: it has 10 journal rows, max
+  `1789847278247` < `1790346498719`, and no `travel_segments` table. **That developer DB
+  needs `pnpm db:reset --yes && pnpm db:migrate`. I did not touch it.** With `VERCEL_ENV=preview`
+  (with and without `VERCEL_GIT_COMMIT_REF=fix/86-walk-sha-port`), the same DB printed the two
+  preview messages exactly, rc 1.
+- End to end through the real script, on a throwaway `rvtrip_preflight_132` DB that I created
+  and then dropped:
+  - A fresh DB gives `pnpm migrate` rc 0, and drizzle-kit applied the migrations.
+  - A re-run passes the preflight, and drizzle-kit runs again.
+  - After shifting `created_at` back by 10^10 ms, `pnpm migrate` printed the local refusal,
+    and drizzle-kit did not run (its "Reading config" line is absent).
+
+### For qa / walk to check
+
+- **FLAG · render-required (vet):** the Vercel build path can't be proven statically. It
+  runs `pnpm --filter @rv-trip/db migrate` → `tsx src/preflight.ts` (tsx is a devDependency,
+  and Vercel installs devDeps by default) with `VERCEL_ENV` and `VERCEL_GIT_COMMIT_REF` in
+  the build env. The first preview deploy of the epic branch must show
+  `preflight: … is at or past the v2 baseline — migrating.` followed by drizzle-kit migrate.
+- The walk's standup migrate (`scripts/mc-walk-env.sh:502`) and CI's `pnpm db:migrate`
+  (`.github/workflows/ci.yml:67`, fresh service DB → pass) now go through the preflight. A
+  walk DB that is still pre-v2 fails standup with the remedy in
+  `.mc/walk/<N>-standup.log`, where before it failed with a raw 42710. That is the intended
+  behavior.
+- The apps/web test harness (`packages/db/src/testing/lifecycle.ts`) migrates through the
+  drizzle-orm migrator, not the script, so the preflight does not touch it.
+- Scope: i3 only. i1 and i2 have already landed and are untouched. i4 (the #79 checklist) is
+  the next dispatch.
