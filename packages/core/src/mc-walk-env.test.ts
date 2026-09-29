@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -440,5 +440,115 @@ describe("producer — the ladder over trees the real refresh built", () => {
     expect(facts.mergeNote).not.toContain("REFUSED");
     expect(facts.walkedHead).toBe(tip);
     expect(() => git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD"), "no MERGE_HEAD").toThrow();
+  });
+});
+
+// ── reject-note (#121 · Q2 · A) ───────────────────────────────────────────────
+//
+// A rejected walk's findings must travel INSIDE the reject: the dev agent reads
+// the feedback line in its brief, and a relative `.mc/walk/…` path it cannot
+// open (worktree cwd, sandbox) was the #121 bug. `reject-note <N> [report]`
+// renders that line from the report's `## Findings` section. The report path is
+// explicit here (the __derive-sha rule): the default is this repo's live
+// `.mc/walk/<N>-walk-report.md`, which a fixture must never read.
+
+const FN_BULLET = [
+  "- **FN · `apps/mobile/src/hops.tsx:112-118` (`Sheet`, shared) — iOS keyboard covers the",
+  "  How-was-it sheet.** The bottom-anchored `Modal` has no `KeyboardAvoidingView`, so on iOS the",
+  "  keyboard rises over the whole sheet (`ios-keyboard-covers-sheet.png`).",
+];
+const CN_BULLET = [
+  "- **CN · seed — no completed trip carries a journal.** The seed's coast trip opens on an",
+  "  empty Journal lens.",
+];
+const CL_BULLET = ["- **CL · toast placement** — covers the trip's H1 on Android;", "  reads fine on iOS."];
+
+function walkReport(findings: string[]): string {
+  return [
+    "# Walk 132 · report",
+    "",
+    "## Verdict",
+    "",
+    "- **FN · not a finding — this bullet sits outside the Findings section.**",
+    "",
+    "## Findings",
+    "",
+    ...findings,
+    "",
+    "## Not walked",
+    "",
+    "- **CN · also outside Findings — must not be sent.**",
+    "",
+  ].join("\n");
+}
+
+function rejectNote(args: string[], cwd = REPO): { status: number | null; stdout: string; stderr: string } {
+  const r = spawnSync("bash", [SCRIPT, "reject-note", ...args], { cwd, encoding: "utf8" });
+  return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+}
+
+const PATH_LINE = /^(full report|shots):/;
+
+describe("reject-note — a walk reject that carries its own findings", () => {
+  it("prints the FN/CN bullets verbatim, drops the rest, and names absolute paths", () => {
+    const dir = tempDir();
+    const report = join(dir, "132-walk-report.md");
+    writeFileSync(report, walkReport([...FN_BULLET, ...CL_BULLET, ...CN_BULLET]));
+    mkdirSync(join(dir, "132-shots"));
+
+    const r = rejectNote(["132", report]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe(
+      [
+        "Walk 132 · reject · full findings below",
+        ...FN_BULLET,
+        ...CN_BULLET,
+        `full report: ${report}`,
+        `shots:       ${join(dir, "132-shots")}/`,
+        "",
+      ].join("\n"),
+    );
+    expect(r.stdout).not.toContain("CL · toast placement");
+    expect(r.stdout).not.toContain("outside");
+    const pathLines = r.stdout.split("\n").filter((l) => PATH_LINE.test(l));
+    expect(pathLines).toHaveLength(2);
+    for (const line of pathLines) {
+      expect(line.replace(/^(full report|shots):\s+/, "").startsWith("/"), line).toBe(true);
+    }
+  });
+
+  it("resolves a relative report to an absolute path, and omits shots when there are none", () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "132-walk-report.md"), walkReport([...CN_BULLET]));
+
+    const r = rejectNote(["132", "132-walk-report.md"], dir);
+    expect(r.status, r.stderr).toBe(0);
+    const pathLines = r.stdout.split("\n").filter((l) => PATH_LINE.test(l));
+    expect(pathLines).toHaveLength(1);
+    expect(pathLines[0]).toMatch(/^full report: \/.*\/132-walk-report\.md$/);
+    expect(r.stdout).not.toContain("shots:");
+  });
+
+  it("refuses a report with no FN/CN finding, naming the report", () => {
+    const dir = tempDir();
+    const report = join(dir, "132-walk-report.md");
+    writeFileSync(report, walkReport([...CL_BULLET]));
+
+    const r = rejectNote(["132", report]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toBe("");
+    expect(r.stderr).toContain(`no FN/CN findings in ${report} — nothing self-contained to send`);
+  });
+
+  it("is named by the unknown-command wording, and the header documents the convention", () => {
+    const r = spawnSync("bash", [SCRIPT, "no-such-verb"], { encoding: "utf8" });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("reject-note <issue> [report]");
+
+    const header = readFileSync(SCRIPT, "utf8").split("\nset -euo pipefail")[0];
+    expect(header).toContain("reject-note <issue> [report]");
+    expect(header).toContain("## Findings");
+    expect(header).toContain("- **FN ·");
+    expect(header).toContain("<issue>-shots/");
   });
 });

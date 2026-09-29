@@ -8,6 +8,18 @@
 #                                       database, and a .mc/walk/<issue>.json registry
 #                                       entry (the URL the glass Walk link reads).
 #   down --slug <issue>                 Kill the walk's next-dev, remove the registry entry.
+#   reject-note <issue> [report]        Print a walk reject that carries its own findings
+#                                       (#121): every FN/CN bullet of the report, verbatim,
+#                                       plus the report's and shots' absolute paths. Report
+#                                       defaults to .mc/walk/<issue>-walk-report.md.
+#
+# THE WALK REPORT (#121): .mc/walk/<issue>-walk-report.md keeps a `## Findings` section. Each
+# finding is one bullet starting `- **FN ·` or `- **CN ·` (the ones a reject sends back), or
+# another tag (CL, DD, …) for what it does not; continuation lines are indented under their
+# bullet. Screenshots go in .mc/walk/<issue>-shots/, beside the report. A walk REJECT is
+# pasted from `reject-note <issue>`, never typed by hand: the dev agent then reads the
+# findings in its brief, where no worktree or sandbox rule can hide them, and every path the
+# note names is absolute.
 #
 # WHICH DATABASE: the shared docker Postgres, unless mc-dev stood an isolated one up for this
 # slice and handed it over as MC_WALK_DB_URL (#154/#155 · `engine_db_url` below · the
@@ -630,6 +642,34 @@ down)
   echo "walk down: $slug (registry entry removed; worktree kept for the ship)"
   ;;
 
+reject-note)
+  # #121 · Q2 · A: the reject IS the findings. The optional `report` is explicit for the
+  # harness (the __derive-sha rule — a fixture must never read this repo's live report), and
+  # the shots dir is derived from the REPORT's directory, not $ROOT, so a fixture's shots
+  # branch is its own and never this repo's real .mc/walk/<issue>-shots/.
+  issue="${1:?usage: reject-note <issue> [report]}"
+  report="${2:-$WALK_DIR/$issue-walk-report.md}"
+  [ -f "$report" ] || die "reject-note $issue: no walk report at $report"
+  report="$(cd "$(dirname "$report")" && pwd)/$(basename "$report")"
+  # One pass over the `## Findings` section only: a `- **FN ·` / `- **CN ·` bullet starts a
+  # kept finding, indented non-empty lines continue it, anything else (another bullet, a
+  # blank line, a sub-heading) ends it. LC_ALL=C: the `·` matches byte-for-byte.
+  findings="$(LC_ALL=C awk '
+    /^## / { inf = ($0 ~ /^## Findings[[:space:]]*$/); keep = 0; next }
+    !inf { next }
+    /^- \*\*(FN|CN) ·/ { keep = 1; print; next }
+    /^[[:space:]]+[^[:space:]]/ { if (keep) print; next }
+    { keep = 0 }
+  ' "$report")"
+  # A reject without its findings is the #121 bug itself — refuse rather than send one.
+  [ -n "$findings" ] || die "no FN/CN findings in $report — nothing self-contained to send"
+  printf 'Walk %s · reject · full findings below\n%s\nfull report: %s\n' "$issue" "$findings" "$report"
+  shots="$(dirname "$report")/$issue-shots"
+  if [ -d "$shots" ]; then
+    printf 'shots:       %s/\n' "$shots"
+  fi
+  ;;
+
 __derive-sha)
   # Un-advertised (#86): the harness's handle on the ladder, so all six rows of the contract
   # can be driven over throwaway git fixtures without running a standup. It exists for
@@ -683,6 +723,6 @@ __engine-db-url)
   ;;
 
 *)
-  die "unknown command '${cmd:-}' — use: standup <issue> --branch <b> | down --slug <issue>"
+  die "unknown command '${cmd:-}' — use: standup <issue> --branch <b> | down --slug <issue> | reject-note <issue> [report]"
   ;;
 esac
