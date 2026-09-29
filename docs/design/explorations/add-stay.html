@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Add a stay — interactive exploration</title>
+<style>
+  * { box-sizing:border-box; margin:0; }
+  :root { --canvas:#0f172a; --shell:#020617; --card:#1e293b; --high:#334155; --line:#334155;
+    --line-hi:#475569; --ink:#f1f5f9; --muted:#cbd5e1; --faded:#94a3b8; --subtle:#64748b;
+    --accent:#38bdf8; --cta:#0ea5e9; --stay:#34d399;
+    font-family:"Geist",ui-sans-serif,system-ui,-apple-system,sans-serif; }
+  .mono { font-family:"Geist Mono",ui-monospace,"SF Mono",monospace; }
+  body { background:var(--canvas); color:var(--ink); line-height:1.5; padding-bottom:60px; }
+  .hero { background:var(--shell); border-bottom:1px solid var(--line); padding:30px 28px 24px; margin-bottom:32px; }
+  .hero-in, .wrap { max-width:1080px; margin:0 auto; }
+  .wrap { padding:0 28px; }
+  .kicker { font-family:"Geist Mono",ui-monospace,monospace; font-size:11px; font-weight:600;
+            text-transform:uppercase; letter-spacing:.11em; color:var(--accent); margin-bottom:6px; }
+  h1 { font-size:22px; letter-spacing:-0.015em; margin-bottom:6px; }
+  .hero p { color:var(--muted); font-size:14px; max-width:82ch; }
+  h2 { font-size:17px; margin-bottom:4px; }
+  .lede { color:var(--faded); font-size:13px; margin-bottom:14px; max-width:76ch; }
+  section { margin-top:38px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:24px; align-items:start; }
+  @media (max-width:900px){ .cols { grid-template-columns:1fr; } }
+
+  .frame { background:var(--card); border:1px solid var(--line-hi); border-radius:14px; padding:16px 18px; }
+  .frame .fl { font-family:"Geist Mono",ui-monospace,monospace; font-size:9.5px; letter-spacing:.1em;
+               text-transform:uppercase; color:var(--subtle); margin-bottom:10px; }
+  .triphead { display:flex; align-items:baseline; gap:10px; margin-bottom:12px; }
+  .triphead b { font-size:15px; }
+  .triphead .m { font-family:"Geist Mono",ui-monospace,monospace; font-size:10.5px; color:var(--faded); }
+
+  .searchrow { position:relative; }
+  input.search { width:100%; background:var(--canvas); color:var(--ink); border:1px solid var(--line-hi);
+    border-radius:8px; padding:9px 12px; font:inherit; font-size:13.5px; }
+  input.search::placeholder { color:var(--subtle); }
+  .chip { display:inline-flex; align-items:center; gap:6px; margin-top:8px; cursor:pointer;
+          font-family:"Geist Mono",ui-monospace,monospace; font-size:10.5px; border-radius:9999px;
+          padding:3px 10px; border:1px solid var(--accent); color:var(--accent); background:rgba(56,189,248,.08); }
+  .chip.off { border-color:var(--line-hi); color:var(--subtle); background:transparent; }
+  .results { margin-top:10px; display:grid; gap:6px; }
+  .res { display:flex; align-items:center; gap:10px; background:var(--canvas); border:1px solid var(--line);
+         border-radius:8px; padding:8px 11px; cursor:pointer; font-size:13px; }
+  .res:hover { border-color:var(--accent); }
+  .res .addr { margin-left:auto; font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; color:var(--faded); }
+  .res .g { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; color:var(--faded); }
+  .wrong { color:#f87171; font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; }
+
+  .steps { display:flex; gap:6px; margin-bottom:12px; }
+  .step { font-family:"Geist Mono",ui-monospace,monospace; font-size:10px; border-radius:9999px;
+          padding:3px 10px; border:1px solid var(--line-hi); color:var(--subtle); }
+  .step.on { border-color:var(--accent); color:var(--accent); }
+  .panel { display:none; } .panel.on { display:block; }
+
+  .dates { background:var(--canvas); border:1px solid var(--line); border-radius:10px; padding:13px 15px; margin-top:6px; }
+  .dates .d1 { display:flex; align-items:center; gap:12px; }
+  .dates .big { font-size:15px; font-weight:700; }
+  .dates .cover { margin-top:5px; font-size:11.5px; color:var(--stay); font-family:"Geist Mono",ui-monospace,monospace; }
+  .stepper { display:inline-flex; align-items:center; gap:8px; margin-left:auto; }
+  .stepper button { width:26px; height:26px; border-radius:6px; border:1px solid var(--line-hi);
+    background:var(--high); color:var(--ink); font:inherit; font-size:14px; cursor:pointer; }
+  .stepper .n { font-family:"Geist Mono",ui-monospace,monospace; font-size:12px; min-width:64px; text-align:center; }
+  .cta-btn { margin-top:12px; background:var(--cta); color:var(--shell); border:none; font:inherit;
+    font-size:13px; font-weight:700; border-radius:8px; padding:9px 16px; cursor:pointer; }
+  .stayrow { display:flex; align-items:center; gap:10px; background:rgba(52,211,153,.1);
+    border:1px solid rgba(52,211,153,.35); border-radius:10px; padding:10px 13px; margin-top:10px; }
+  .stayrow .t { width:26px; height:26px; border-radius:7px; background:rgba(52,211,153,.16);
+    color:var(--stay); display:inline-flex; align-items:center; justify-content:center; }
+  .stayrow b { font-size:13.5px; }
+  .stayrow .m { font-family:"Geist Mono",ui-monospace,monospace; font-size:10.5px; color:var(--faded); }
+
+  .today { border:1px dashed #b45309; border-radius:12px; padding:14px 16px; }
+  .today .fl { color:#fbbf24; }
+  .today ol { padding-left:18px; font-size:12.5px; color:var(--muted); display:grid; gap:5px; }
+  .today .odd { color:#fbbf24; }
+
+  .rec { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; font-size:13px; color:var(--muted); }
+  .rec b { color:var(--ink); } .rec .star { color:var(--accent); }
+  .rec ul { padding-left:18px; display:grid; gap:7px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<div class="hero"><div class="hero-in">
+  <div class="kicker">Exploration · add a stay — not a stage artifact</div>
+  <h1>Booked beds aren't ideas. And search should know where the trip is.</h1>
+  <p>Live demo of both fixes on your actual repro: a Bellingham trip, adding a Holiday Inn Express.
+     Type in the search box, toggle the near-chip to feel today's bug, click a result, feel the date default.</p>
+</div></div>
+
+<div class="wrap">
+
+<section class="cols">
+  <div>
+    <div class="kicker">Fix 1 · search pegs to the trip</div>
+    <h2>Try it — type "hol"</h2>
+    <p class="lede">The trip's destination anchors the search. Click the chip to turn the anchor off —
+       that's today's behavior (Google falls back to your IP: Boise).</p>
+    <div class="frame">
+      <div class="fl">Trip · Bellingham Long Weekend</div>
+      <div class="searchrow"><input class="search" id="q" placeholder="Search lodging… try 'hol'" autocomplete="off" /></div>
+      <span class="chip" id="nearchip">📍 near Bellingham, WA — from this trip</span>
+      <div class="results" id="results"></div>
+    </div>
+    <p class="lede" style="margin-top:10px">Anchor order (★ resolved): trip's destination → first located
+       stop → <b style="color:var(--ink)">never silently your IP</b>. No anchor known yet → the chip asks
+       ("Search near…?") instead of guessing Boise.</p>
+  </div>
+
+  <div>
+    <div class="kicker">Fix 2 · "Add stay" is first-class</div>
+    <h2>Three taps, dates already right</h2>
+    <p class="lede">A booked/planned bed is a <b style="color:var(--ink)">reservation on the stop</b>, born
+       covering the whole stay. Ideas remain for maybes. Click through:</p>
+    <div class="frame">
+      <div class="triphead"><b>Bellingham Long Weekend</b><span class="m">OCT 10 – 13 · 3 NIGHTS</span></div>
+      <div class="steps"><span class="step on" id="s1">1 · add stay</span><span class="step" id="s2">2 · place</span><span class="step" id="s3">3 · dates</span></div>
+      <div class="panel on" id="p1">
+        <button class="cta-btn" id="btnAdd">🛏 Add stay</button>
+        <p class="lede" style="margin-top:8px">Lives on the stop card and the trip header (hotel-default trips lead with it).</p>
+      </div>
+      <div class="panel" id="p2">
+        <div class="res" data-pick="1">🏨 <b>Holiday Inn Express & Suites Bellingham</b><span class="addr">Bellingham</span></div>
+        <div class="res" data-pick="1" style="margin-top:6px">🏨 <b>Four Points by Sheraton Bellingham</b><span class="addr">Bellingham</span></div>
+      </div>
+      <div class="panel" id="p3">
+        <div class="dates">
+          <div class="d1"><span class="big">Oct 10 → <span id="out">Oct 13</span></span>
+            <span class="stepper"><button id="minus">−</button><span class="n" id="nights">3 nights</span><button id="plus">＋</button></span></div>
+          <div class="cover" id="cover">✓ covers your whole stay</div>
+        </div>
+        <button class="cta-btn" id="btnSave">Save stay</button>
+        <div id="saved"></div>
+      </div>
+    </div>
+    <div class="today" style="margin-top:16px">
+      <div class="fl mono" style="font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">Today's flow, for contrast</div>
+      <ol>
+        <li>Add the hotel as an <span class="odd">idea</span> (a maybe — but you've booked it)</li>
+        <li>It lands dateless on the shelf</li>
+        <li>Drag it onto the timeline</li>
+        <li>It pegs to <span class="odd">half the trip</span> (drop-day heuristics, not your stay)</li>
+        <li>Fix the dates by hand</li>
+        <li>It's still an idea, not a booking — no confirmation #, no cost</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="kicker">Resolutions I'd file (★) — react in chat</div>
+  <div class="rec">
+    <ul>
+      <li><span class="star">★</span> <b>Search anchor</b>: trip destination → first located stop → ask; IP fallback removed. When adding from a specific stop, that stop is the anchor. Chip always visible + overridable ("near ✕ / search near…").</li>
+      <li><span class="star">★</span> <b>Add stay</b> = lodging reservation on the stop, check-in/out defaulting to the stop's span ("covers your whole stay"), nights stepper for partial stays; splitting a stop's lodging (2 nights here, 1 there) creates a second stay, not a drag puzzle.</li>
+      <li><span class="star">★</span> <b>Ideas keep the maybe lane</b> — a "considering" hotel stays an idea; the stay flow has a "just considering?" escape down to the shelf, and promoting an idea to a stay inherits the span default.</li>
+      <li><b>Open for you</b>: should "Add stay" also create the stop when the trip has none yet (fresh Bellingham trip → hotel first, stop inferred from it)? My lean: yes — the hotel IS the anchor on a Fly & Stay.</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+<script>
+  const BELL = [["Holiday Inn Express & Suites Bellingham","Bellingham, WA"],["Holiday Inn Express Bellingham Airport","Bellingham, WA"],["Four Points by Sheraton Bellingham","Bellingham, WA"],["SpringHill Suites Bellingham","Bellingham, WA"]];
+  const BOISE = [["Holiday Inn Express Boise Downtown","Boise, ID"],["Holiday Inn Express & Suites Boise Airport","Boise, ID"],["Holiday Inn Boise Airport","Boise, ID"]];
+  let near = true;
+  const q = document.getElementById('q'), out = document.getElementById('results'), chip = document.getElementById('nearchip');
+  function render(){
+    const t = q.value.trim().toLowerCase();
+    out.innerHTML = '';
+    if (!t) return;
+    const set = near ? BELL : BOISE;
+    set.filter(r => r[0].toLowerCase().includes(t)).forEach(r => {
+      const d = document.createElement('div'); d.className = 'res';
+      d.innerHTML = `🏨 <b>${r[0]}</b><span class="addr ${near ? '' : 'wrong'}">${r[1]}${near ? '' : ' ← 460 mi away'}</span>`;
+      out.appendChild(d);
+    });
+  }
+  q.addEventListener('input', render);
+  chip.addEventListener('click', () => { near = !near;
+    chip.classList.toggle('off', !near);
+    chip.textContent = near ? '📍 near Bellingham, WA — from this trip' : '📍 no anchor — IP fallback (today\'s bug)';
+    render(); });
+
+  const show = i => { [1,2,3].forEach(n => { document.getElementById('p'+n).classList.toggle('on', n===i);
+    document.getElementById('s'+n).classList.toggle('on', n<=i); }); };
+  document.getElementById('btnAdd').addEventListener('click', () => show(2));
+  document.querySelectorAll('#p2 .res').forEach(r => r.addEventListener('click', () => show(3)));
+  let nights = 3;
+  const upd = () => { document.getElementById('nights').textContent = nights + (nights===1?' night':' nights');
+    const ends = {1:'Oct 11',2:'Oct 12',3:'Oct 13'}; document.getElementById('out').textContent = ends[nights] || 'Oct 13';
+    document.getElementById('cover').textContent = nights===3 ? '✓ covers your whole stay' : '↳ partial — Oct '+(10+nights)+' → 13 uncovered'; };
+  document.getElementById('minus').addEventListener('click', () => { if (nights>1){nights--;upd();} });
+  document.getElementById('plus').addEventListener('click', () => { if (nights<3){nights++;upd();} });
+  document.getElementById('btnSave').addEventListener('click', () => {
+    document.getElementById('saved').innerHTML = `<div class="stayrow"><span class="t">🛏</span><div><b>Holiday Inn Express & Suites Bellingham</b><div class="m">OCT 10 → ${document.getElementById('out').textContent.toUpperCase()} · ${document.getElementById('nights').textContent.toUpperCase()} · CONF # + COST FIELDS READY</div></div></div>`;
+  });
+</script>
+</body>
+</html>
