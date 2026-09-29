@@ -276,3 +276,70 @@ did not resolve (`Test Files 1 failed`). w0-reset failed 3 of its 4 new tests
   drizzle-orm migrator, not the script, so the preflight does not touch it.
 - Scope: i3 only. i1 and i2 have already landed and are untouched. i4 (the #79 checklist) is
   the next dispatch.
+
+## i4 · #79: verify once, then close (Q4 · A)
+
+### What changed
+
+- This section is the only change. There is no code change and no workflow change;
+  `.github/workflows/` is byte-identical to `9c911be` (`git diff --stat 9c911be -- .github/`
+  is empty).
+- The recurrence fix #79 asks for already exists:
+  `.github/workflows/neon-preview-cleanup.yml` (landed as `e533fb0`, PR #70). On
+  `pull_request: closed` it runs `neondatabase/delete-branch-action@v3` against
+  `preview/${{ github.head_ref }}`, which is the Vercel–Neon integration's branch name. So
+  every PR's preview branch is deleted the moment the PR closes, instead of months later
+  when Vercel's retention drops the last deployment.
+
+### Operator checklist (Neon dashboard) · operator-owned
+
+The dev contract bars `gh`, the board and the Neon account, and this machine has no
+`neonctl` or Neon API key. So none of these steps were run here. They are the operator's
+one look before #79 closes.
+
+1. **Count the `preview/*` branches in the Neon project.** Neon console → the rv-trip
+   project → Branches, filtered to `preview/`. CLI equivalent:
+   `neonctl branches list --project-id "$NEON_PROJECT_ID" --output json | jq -r '.[].name | select(startswith("preview/"))'`
+   (`NEON_PROJECT_ID` is the same value as the repo variable `vars.NEON_PROJECT_ID` the
+   workflow uses).
+2. **Compare with the open-PR count.** Every `preview/<branch>` should have an open PR whose
+   head is `<branch>`:
+   `gh pr list --repo bradenrc/rv-trip --state open --json headRefName --jq '.[].headRefName'`.
+   The design recorded 0 open PRs at design time, so 0 `preview/*` branches were expected
+   then. Recount at the time of the check, because this epic's own PR will be open.
+3. **Delete any stray `preview/*` branch that has no open PR.** Use the console, or
+   `neonctl branches delete "preview/<branch>" --project-id "$NEON_PROJECT_ID"`. Never delete
+   the production/default branch or any branch not under `preview/`.
+4. **Note `neon-preview-cleanup.yml` (PR #70) as #79's recurrence fix, and close #79.**
+   Ready-to-execute payload:
+
+   ```sh
+   gh issue close 79 --repo bradenrc/rv-trip --reason completed --comment \
+     "Recurrence fix: .github/workflows/neon-preview-cleanup.yml (PR #70) deletes preview/<head_ref> on every PR close. Operator check done: preview/* branches counted, compared with open PRs, strays deleted. Remaining known gap (documented, not built): a preview deployed without a PR is never cleaned — see docs/design/132/dev-notes.md (i4). Closed via #132."
+   ```
+
+   Running it is operator-owned. Per the design, #79 closes on this epic's ship, after
+   steps 1–3.
+
+### Known gap · documented, not built
+
+The cleanup triggers only on `pull_request: closed`. **A preview deployed without a PR (a
+branch pushed and deployed by Vercel but never opened as a PR) is never cleaned.** Its
+`preview/<branch>` Neon branch lives until Vercel's retention deletes the branch's last
+deployment. On the free tier's 10-branch cap, enough of these can bring back #79's "Branch
+limit reached". Q4 · A chose to document this over building a scheduled sweep. The manual
+remedy is step 3 of the checklist above. If it recurs, the follow-up is a scheduled
+workflow that deletes `preview/*` branches with no open PR.
+
+### Checks run
+
+- `git diff --stat 9c911be -- .github/`: empty output, so the workflows are unchanged.
+- `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total` (7 cached).
+- `git remote get-url origin`: `git@github.com:bradenrc/rv-trip.git`, which confirms the
+  `--repo` slug in the payload.
+
+### For qa to check
+
+- Scope: i4 only. It adds this section to dev-notes. i1–i3 are untouched.
+- The four checklist steps and the PR-less-preview gap note are both above. The close
+  command is a payload for the operator; it was not executed.
