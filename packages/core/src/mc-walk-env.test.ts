@@ -266,18 +266,25 @@ describe("terminal — an honest null beats a wrong sha", () => {
  *                     so the branch tip is itself a merge that is not ours
  *                     (the origin/feat/27-migrations shape).
  */
-function walkFixture(opts: { siblingAfterCut: boolean; foreignMergeTip?: boolean }): {
+function walkFixture(opts: {
+  siblingAfterCut: boolean;
+  foreignMergeTip?: boolean;
+  /** Both the branch and origin/main (after the cut) edit this file differently. */
+  conflictOn?: string;
+}): {
   root: string;
   wt: string;
   tip: string;
 } {
   const upstream = newRepo();
   commit(upstream, "base");
+  if (opts.conflictOn) commitContent(upstream, opts.conflictOn, "base\n");
   const parent = tempDir();
   git(parent, "clone", "-q", upstream, "root");
   const root = join(parent, "root");
   git(root, "checkout", "-q", "-b", "feature");
   commit(root, "the-slice");
+  if (opts.conflictOn) commitContent(root, opts.conflictOn, "the branch's edit\n");
   if (opts.foreignMergeTip) {
     commit(upstream, "sibling-before-ship");
     git(root, "fetch", "-q", "origin", "main");
@@ -289,16 +296,28 @@ function walkFixture(opts: { siblingAfterCut: boolean; foreignMergeTip?: boolean
   git(root, "checkout", "-q", "main");
   git(root, "worktree", "add", "-q", "--detach", join(parent, "wt"), "feature");
   if (opts.siblingAfterCut) commit(upstream, "sibling-after-cut");
+  if (opts.conflictOn) commitContent(upstream, opts.conflictOn, "main's edit\n");
   return { root, wt: join(parent, "wt"), tip };
 }
 
-/** Run the REAL refresh over a fixture. Returns the four tree facts it records. */
+/** Commit one file with the given content; returns the new HEAD sha. */
+function commitContent(dir: string, name: string, content: string): string {
+  writeFileSync(join(dir, name), content);
+  git(dir, "add", name);
+  git(dir, "commit", "-q", "-m", `edit ${name}`);
+  return git(dir, "rev-parse", "HEAD");
+}
+
+/**
+ * Run the REAL refresh over a fixture. Returns the four tree facts it records,
+ * plus the merge_note (the fifth field, #114).
+ */
 function refreshTree(
   root: string,
   wt: string,
   branch: string,
   env: NodeJS.ProcessEnv = process.env,
-): { mergedMain: string; sha: string; walkedHead: string; mergedMainSha: string } {
+): { mergedMain: string; sha: string; walkedHead: string; mergedMainSha: string; mergeNote: string } {
   const out = execFileSync("bash", [SCRIPT, "__refresh-tree", root, wt, branch], {
     encoding: "utf8",
     env,
@@ -306,8 +325,8 @@ function refreshTree(
   });
   expect(out.split("\n").filter(Boolean), "stdout is exactly one line").toHaveLength(1);
   const fields = out.replace(/\n$/, "").split("\t");
-  const [mergedMain = "", sha = "", walkedHead = "", mergedMainSha = ""] = fields;
-  return { mergedMain, sha, walkedHead, mergedMainSha };
+  const [mergedMain = "", sha = "", walkedHead = "", mergedMainSha = "", mergeNote = ""] = fields;
+  return { mergedMain, sha, walkedHead, mergedMainSha, mergeNote };
 }
 
 describe("producer — the ladder over trees the real refresh built", () => {
@@ -372,5 +391,54 @@ describe("producer — the ladder over trees the real refresh built", () => {
     expect(facts.walkedHead, "nothing new on main — the tree stands at the foreign merge").toBe(tip);
     expect(git(wt, "rev-parse", "HEAD^1")).not.toBe(tip);
     expect(deriveCodeSha(wt)).toEqual(["head", tip]);
+  });
+
+  // #114 · an opinionated git config on the walking machine must not kill the
+  // as-it-will-land merge. Both fixtures' commits are unsigned and divergent, so
+  // without `--ff --no-verify-signatures` each is a real refusal.
+  const configured = (body: string) => (): NodeJS.ProcessEnv => {
+    const config = join(tempDir(), "gitconfig");
+    writeFileSync(config, body);
+    return { ...process.env, GIT_CONFIG_GLOBAL: config };
+  };
+  it.each([
+    ["merge.ff=only", configured("[merge]\n\tff = only\n")],
+    ["merge.verifySignatures=true", configured("[merge]\n\tverifySignatures = true\n")],
+  ])("still merges origin/main under ambient %s", (_shape, ambient) => {
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: true });
+
+    const facts = refreshTree(root, wt, "feature", ambient());
+    expect(facts.mergedMain).toBe("true");
+    expect(facts.mergeNote).toMatch(/^merged origin\/main [0-9a-f]{7}$/);
+    expect(git(wt, "rev-parse", "HEAD^1")).toBe(tip);
+    expect(git(wt, "rev-parse", "HEAD^2"), "a real two-parent merge").toBe(facts.mergedMainSha);
+    expect(deriveCodeSha(wt)).toEqual(["unwrap", tip]);
+  });
+
+  it("names a non-conflict refusal as REFUSED, quoting git, and leaves no merge behind", () => {
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: true });
+    // Untracked in the walk tree, tracked on main: the merge would overwrite it.
+    writeFileSync(join(wt, "sibling-after-cut"), "a human's scratch file\n");
+
+    const facts = refreshTree(root, wt, "feature");
+    expect(facts.mergedMain).toBe("false");
+    expect(facts.mergeNote.startsWith("merging origin/main REFUSED by git (rc ")).toBe(true);
+    expect(facts.mergeNote).toContain("not a conflict");
+    expect(facts.mergeNote).toContain("untracked working tree files would be overwritten");
+    expect(facts.mergeNote).not.toContain("CONFLICTED");
+    expect(facts.walkedHead).toBe(tip);
+    expect(() => git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD"), "no MERGE_HEAD").toThrow();
+  });
+
+  it("still names a real content conflict CONFLICTED, with its path", () => {
+    const { root, wt, tip } = walkFixture({ siblingAfterCut: false, conflictOn: "shared.txt" });
+
+    const facts = refreshTree(root, wt, "feature");
+    expect(facts.mergedMain).toBe("false");
+    expect(facts.mergeNote).toContain("CONFLICTED (");
+    expect(facts.mergeNote).toContain("shared.txt");
+    expect(facts.mergeNote).not.toContain("REFUSED");
+    expect(facts.walkedHead).toBe(tip);
+    expect(() => git(wt, "rev-parse", "-q", "--verify", "MERGE_HEAD"), "no MERGE_HEAD").toThrow();
   });
 });

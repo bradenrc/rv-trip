@@ -262,9 +262,20 @@ refresh_walk_tree() { # <worktree> <branch> → 0 as-it-will-land, 1 fell back t
   # merge as someone else's, rule 2 refused it as foreign, and the ladder recorded the MERGE
   # head as `sha` — the exact misread #86 exists to prevent. The env vars outrank every config
   # level, so the stamp is unconditional.
-  if GIT_AUTHOR_NAME="$WALK_MERGE_NAME" GIT_AUTHOR_EMAIL="$WALK_MERGE_EMAIL" \
+  #
+  # `--ff --no-verify-signatures` (#114): the walking machine's own git config must not decide
+  # whether the walk lands as it will ship. An ambient `merge.ff=only` refuses every divergent
+  # merge, and `merge.verifySignatures=true` refuses main's unsigned commits — both used to
+  # fall through to the failure path below and read as a sibling conflict that didn't exist.
+  # The command-line flags outrank every config level. stdout stays discarded; stderr is
+  # captured so a refusal can quote git's own line.
+  local merge_err="" merge_rc=0 git_line=""
+  merge_err="$(GIT_AUTHOR_NAME="$WALK_MERGE_NAME" GIT_AUTHOR_EMAIL="$WALK_MERGE_EMAIL" \
     GIT_COMMITTER_NAME="$WALK_MERGE_NAME" GIT_COMMITTER_EMAIL="$WALK_MERGE_EMAIL" \
-    git -c core.hooksPath=/dev/null -C "$wt" merge --no-edit --no-gpg-sign origin/main >/dev/null 2>&1; then
+    git -c core.hooksPath=/dev/null -C "$wt" merge \
+    --no-edit --no-gpg-sign --ff --no-verify-signatures \
+    origin/main 2>&1 >/dev/null)" || merge_rc=$?
+  if [ "$merge_rc" -eq 0 ]; then
     WALK_HEAD="$(git -C "$wt" rev-parse -q --verify HEAD 2>/dev/null || printf '')"
     WALK_MERGED_MAIN=true
     WALK_MERGED_MAIN_SHA="$main_sha"
@@ -277,7 +288,19 @@ refresh_walk_tree() { # <worktree> <branch> → 0 as-it-will-land, 1 fell back t
   # The checkout above just proved the tree clean at WALK_SHA, so this reset can only ever
   # discard the failed merge.
   abort_merge_hard "$wt" "$WALK_SHA"
-  WALK_MERGE_NOTE="merging origin/main CONFLICTED (${conflicts:-unknown paths}) — merge aborted, walking branch tip. Siblings merged since the branch cut are absent, so anything that looks like a regression against current main may be one of theirs; the conflict itself is ship's fixup ladder's to resolve."
+  if [ -n "$conflicts" ]; then
+    WALK_MERGE_NOTE="merging origin/main CONFLICTED (${conflicts}) — merge aborted, walking branch tip. Siblings merged since the branch cut are absent, so anything that looks like a regression against current main may be one of theirs; the conflict itself is ship's fixup ladder's to resolve."
+  else
+    # No unmerged paths: git refused before merging anything (#114) — an untracked file the
+    # merge would overwrite, an ambient config the flags above don't cover. Calling that a
+    # conflict sent walkers hunting for a sibling that wasn't there; quote git instead. Its
+    # line is the first `fatal:`/`error:` line, else the last non-empty one.
+    git_line="$(printf '%s\n' "$merge_err" | awk '
+      !found && /^(fatal|error):/ { print; found = 1; exit }
+      NF { last = $0 }
+      END { if (!found) print last }')"
+    WALK_MERGE_NOTE="merging origin/main REFUSED by git (rc ${merge_rc}: ${git_line}) — not a conflict; walking branch tip. Fix the walking machine's git config."
+  fi
   echo "  ⚠ standup: $WALK_MERGE_NOTE" >&2
   return 1
 }
@@ -632,13 +655,16 @@ __refresh-tree)
   # refs. Reassigned here only, after the load-time `mkdir -p "$WALK_DIR"` (the same benign
   # no-op every verb pays), so no production verb ever sees it.
   #
-  # stdout is exactly one line, `<merged_main>\t<sha>\t<walked_head>\t<merged_main_sha>`; the
-  # refresh's own progress and warnings go to stderr.
+  # stdout is exactly one line,
+  # `<merged_main>\t<sha>\t<walked_head>\t<merged_main_sha>\t<merge_note>`; the refresh's own
+  # progress and warnings go to stderr. merge_note is appended LAST (#114) so the first four
+  # positions never move.
   ROOT="${1:?usage: __refresh-tree <root> <worktree> <branch>}"
   rwt="${2:?usage: __refresh-tree <root> <worktree> <branch>}"
   rbranch="${3:?usage: __refresh-tree <root> <worktree> <branch>}"
   refresh_walk_tree "$rwt" "$rbranch" >&2 || true
-  printf '%s\t%s\t%s\t%s\n' "$WALK_MERGED_MAIN" "$WALK_SHA" "$WALK_HEAD" "$WALK_MERGED_MAIN_SHA"
+  printf '%s\t%s\t%s\t%s\t%s\n' "$WALK_MERGED_MAIN" "$WALK_SHA" "$WALK_HEAD" "$WALK_MERGED_MAIN_SHA" \
+    "$(printf '%s' "$WALK_MERGE_NOTE" | tr '\t\n' '  ')"
   ;;
 
 __db-decision)
