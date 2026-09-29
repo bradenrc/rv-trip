@@ -94,6 +94,40 @@ describe("the reset script (§8)", () => {
   }, 30_000);
 });
 
+describe("the pre-v2 baseline preflight (#132 i3 · #120)", () => {
+  const pkg = JSON.parse(read("packages/db/package.json")) as {
+    scripts: Record<string, string>;
+    exports: Record<string, string>;
+  };
+
+  it("runs src/preflight.ts before drizzle-kit migrate", () => {
+    expect(pkg.scripts.migrate).toBe("tsx src/preflight.ts && drizzle-kit migrate");
+    const script = pkg.scripts.migrate ?? "";
+    expect(script.indexOf("src/preflight.ts")).toBeLessThan(script.indexOf("drizzle-kit migrate"));
+  });
+
+  it("exports the pure verdict from a module with no entrypoint side effects", () => {
+    const target = pkg.exports["./preflight"] ?? "";
+    expect(target).toBe("./src/preflight-verdict.ts");
+    const verdict = code(read(join("packages/db", target)));
+    expect(verdict).toContain("export function preflightVerdict");
+    expect(verdict).not.toMatch(/process\.exit|from "pg"|load-env/);
+  });
+
+  it("reads the baseline from the journal by tag, never a hardcoded timestamp", () => {
+    const main = code(read("packages/db/src/preflight.ts"));
+    expect(main).toContain('"0000_v2"');
+    expect(main).toContain("_journal.json");
+    expect(main).toContain("DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL");
+    expect(main).not.toContain("1790346498719");
+  });
+
+  it("leaves apps/web/vercel.json's build command alone", () => {
+    const vercel = JSON.parse(read("apps/web/vercel.json")) as { buildCommand: string };
+    expect(vercel.buildCommand).toBe("pnpm --filter @rv-trip/db migrate && next build");
+  });
+});
+
 describe('"drive" is no longer a DayKind (§4)', () => {
   function sources(dir: string): string[] {
     const out: string[] = [];
