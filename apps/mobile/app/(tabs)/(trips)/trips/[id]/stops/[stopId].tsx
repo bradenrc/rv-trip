@@ -31,7 +31,7 @@ import { MapFrame, TripMap, useStyleMode } from "../../../../../../src/map";
 import { addStay, isProvisionalIdea, updateTrip, useBundle } from "../../../../../../src/store";
 import { C, F, R } from "../../../../../../src/theme";
 import { Input, Label, Sheet } from "../../../../../../src/hops";
-import { Button, Card, CategoryTile, Centered, Kicker, Muted, Segmented, Stars } from "../../../../../../src/ui";
+import { Button, Card, CategoryTile, Centered, Kicker, Muted, RangePicker, Segmented, Stars } from "../../../../../../src/ui";
 
 /** The height packages/ui's `MapPlaceholder` has always reserved, and the web's
  * `STOP_MINI_MAP_HEIGHT` (apps/web/src/components/map/StopMiniMap.tsx:13). */
@@ -296,6 +296,8 @@ export default function StopScreen() {
           stopId={stop.id}
           title={`${stop.place.name}${scheduled ? ` · ${dateRange(stop.arriveDate, stop.departDate)}` : ""}`}
           kind={bundle.trip.lodgingDefault}
+          span={scheduled ? { start: stop.arriveDate!, end: stop.departDate! } : null}
+          tripSpan={{ start: bundle.trip.startDate, end: bundle.trip.endDate }}
           onClose={() => setStayOpen(false)}
         />
       )}
@@ -315,15 +317,24 @@ function AddStaySheet({
   stopId,
   title,
   kind,
+  span,
+  tripSpan,
   onClose,
 }: {
   tripId: string;
   stopId: string;
   title: string;
   kind: LodgingKind | null;
+  /** #128 · the stop's own dates — the stay's default. */
+  span: { start: string; end: string } | null;
+  tripSpan: { start: string; end: string };
   onClose: () => void;
 }) {
-  const [draft, setDraft] = useState<ReservationDraft>(() => stayDraft(kind));
+  const [draft, setDraft] = useState<ReservationDraft>(() => ({
+    ...stayDraft(kind),
+    checkIn: span?.start ?? "",
+    checkOut: span?.end ?? "",
+  }));
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<ReservationDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const current = draft.lodgingKind ?? "campground";
@@ -349,16 +360,13 @@ function AddStaySheet({
       <Segmented value={current} options={KIND_OPTIONS} onChange={(k) => setDraft((d) => withStayKind(d, k))} />
       <Label>{stayNameLabel(current)}</Label>
       <Input value={draft.name} onChangeText={(name) => set({ name })} autoCapitalize="words" />
-      <View style={{ flexDirection: "row", gap: 6 }}>
-        <View style={{ flex: 1, gap: 4 }}>
-          <Label>{friends ? "Nights · from" : "Check-in"}</Label>
-          <Input mono value={draft.checkIn} onChangeText={(checkIn) => set({ checkIn })} placeholder="2026-08-12" />
-        </View>
-        <View style={{ flex: 1, gap: 4 }}>
-          <Label>{friends ? "to" : "Check-out"}</Label>
-          <Input mono value={draft.checkOut} onChangeText={(checkOut) => set({ checkOut })} placeholder="2026-08-16" />
-        </View>
-      </View>
+      {/* #127 · the RangePicker twin in place of the two typed dates. */}
+      <Label>{friends ? "Nights" : "Check-in → check-out"}</Label>
+      <RangePicker
+        value={{ start: draft.checkIn || null, end: draft.checkOut || null }}
+        tripSpan={tripSpan}
+        onChange={(v) => set({ checkIn: v.start ?? "", checkOut: v.end ?? "" })}
+      />
       {friends ? (
         <Text style={styles.mono}>No cost and no confirmation number. It’s their couch.</Text>
       ) : (

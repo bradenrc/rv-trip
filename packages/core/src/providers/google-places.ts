@@ -7,6 +7,7 @@ import {
   type PlacesProvider,
   type ResolvedDestination,
 } from "./index";
+import type { PlaceSearchType } from "./places-search";
 
 /**
  * Google Places (New) — SERVER SIDE ONLY.
@@ -93,8 +94,14 @@ export function googleCredentialsFromEnv(
   return { apiKey };
 }
 
-export function buildSearchBody(query: string, near?: LatLng): Record<string, unknown> {
+export function buildSearchBody(
+  query: string,
+  near?: LatLng,
+  type?: PlaceSearchType,
+): Record<string, unknown> {
   const body: Record<string, unknown> = { textQuery: query };
+  // #128 · Q9 A — "lodging first": Text Search (New) narrows on `includedType`.
+  if (type) body.includedType = type;
   if (near) {
     body.locationBias = {
       circle: {
@@ -109,7 +116,7 @@ export function buildSearchBody(query: string, near?: LatLng): Record<string, un
 export class GooglePlacesProvider implements PlacesProvider {
   constructor(private readonly credentials: GoogleCredentials) {}
 
-  async search(query: string, near?: LatLng): Promise<PlaceSummary[]> {
+  async search(query: string, near?: LatLng, type?: PlaceSearchType): Promise<PlaceSummary[]> {
     const textQuery = query.trim();
     // A blank box is not a question. Never spend a billed request on it.
     if (!textQuery) return [];
@@ -120,7 +127,7 @@ export class GooglePlacesProvider implements PlacesProvider {
         "X-Goog-Api-Key": this.credentials.apiKey,
         "X-Goog-FieldMask": SEARCH_FIELD_MASK,
       },
-      body: JSON.stringify(buildSearchBody(textQuery, near)),
+      body: JSON.stringify(buildSearchBody(textQuery, near, type)),
     });
     if (!res.ok) throw new Error(`Google places:searchText → ${res.status}`);
     return parseSearchResponse(await res.json());

@@ -102,6 +102,11 @@ export interface TripDraft {
   title: string;
   startDate: string;
   endDate: string;
+  /** #126 · Q4 A — "Where to?", the question the page now opens on. A place
+   * with a Google id becomes the trip's destination and its spanning stop. */
+  destination?: PickedPlace | null;
+  /** The trip's OWN home base — an override. Null reads the household
+   * default (#126 · Q5 A), which the page shows as a quiet chip. */
   homeBasePlace: PickedPlace | null;
   mode: TripModeChoice | null;
   lodgingDefault: LodgingKind | null;
@@ -112,6 +117,7 @@ export const BLANK_TRIP_DRAFT: TripDraft = {
   title: "",
   startDate: "",
   endDate: "",
+  destination: null,
   homeBasePlace: null,
   mode: null,
   lodgingDefault: null,
@@ -140,8 +146,15 @@ export function withTripMode(draft: TripDraft, mode: TripModeChoice): TripDraft 
 export function tripDraftInput(draft: TripDraft): TripCreateInput | null {
   if (draft.mode === null) return null;
   if (tripDayCount(draft.startDate, draft.endDate) === null) return null;
+  const dest = draft.destination ?? null;
   const parsed = tripCreateInput.safeParse({
-    title: draft.title.trim(),
+    // An untitled trip to a picked place is named for it ("Bellingham, WA").
+    title: draft.title.trim() || dest?.name.trim() || "",
+    // Only a real Google place can be a destinations row (the unique is owner
+    // + place id); a free-text escape pick names the trip, nothing more.
+    ...(dest?.googlePlaceId && {
+      destination: { googlePlaceId: dest.googlePlaceId, name: dest.name, lat: dest.lat, lng: dest.lng },
+    }),
     startDate: draft.startDate,
     endDate: draft.endDate,
     // `homeBase` (the name) and `homeBasePlace` (the anchor) travel together so

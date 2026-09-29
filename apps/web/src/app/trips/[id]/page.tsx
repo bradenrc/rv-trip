@@ -35,7 +35,8 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
   // The account's display units, read on the SAME seam as the routes: the rail
   // and every drive row render in the right unit with no flash, and no display
   // component has to become a preference consumer (lib/units.ts).
-  const units = unitsFromPrefs(await getPrefsByOwner(owner));
+  const prefs = await getPrefsByOwner(owner);
+  const units = unitsFromPrefs(prefs);
   // The "Add from Places" entrance (#80 Q6 → A). The library is account-scoped
   // and already read server-side on /places; the trip screen reads it on the
   // SAME seam rather than inventing a client fetch, so picking a place is one
@@ -69,6 +70,10 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       savedPlaces={savedPlaces}
       nearby={nearby}
       nextTime={nextTime}
+      // #126 · Q5 A — `trip` already carries the coalesced home base
+      // (getTripById: trip override → household); the household's own is
+      // handed down for Trip settings' "Use household default".
+      householdHome={prefs?.homeBasePlace ?? null}
     />
   );
 }

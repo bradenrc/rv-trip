@@ -4,6 +4,7 @@ import {
   deriveTripStatus,
   drivePairs,
   homeBasePlaceOf,
+  resolveHomeBase,
   routeCacheKey,
   routeSummary,
   routingHash,
@@ -87,6 +88,8 @@ const TRIP_WITH = {
     where: (i, { isNull }) => isNull(i.stopId),
     orderBy: (i, { asc }) => [asc(i.sortOrder)],
   },
+  // #126 · Q4 A — the "Where to?" locality (`trips.destination_id`).
+  destination: true,
 } satisfies NonNullable<Parameters<typeof db.query.trips.findFirst>[0]>["with"];
 
 type TripRow = NonNullable<
@@ -306,6 +309,15 @@ function mapTripRow(
     // `trip.homeBasePlace` never reaches the client and the first stop of a leg
     // would silently have no search bias (#60).
     homeBasePlace: homeBasePlaceOf(row),
+    destination: row.destination
+      ? {
+          id: row.destination.id,
+          name: row.destination.name,
+          googlePlaceId: row.destination.googlePlaceId,
+          lat: row.destination.lat,
+          lng: row.destination.lng,
+        }
+      : null,
     startDate: row.startDate,
     endDate: row.endDate,
     status: deriveTripStatus(
@@ -376,7 +388,18 @@ export async function getTripById(ownerId: string, tripId: string): Promise<Trip
   // here and not in `listTripsForOwner`/`listTripsWithStopsForOwner`: the
   // dashboard throws the tree away inside `summarize()` and the map draws pins,
   // so neither renders a byline and neither should pay for one.
-  return mapTripRow(row, todayIso(), await lastChangesFor(ownerId, loggableIds(row)));
+  const trip = mapTripRow(row, todayIso(), await lastChangesFor(ownerId, loggableIds(row)));
+  // #126 · Q5 A — the home base a trip starts from: its own override, else the
+  // household default. Coalesced HERE so the page, `GET /api/trips/:id` (the
+  // phone's bundle) and the optimistic `withReconciledSegments` all see the
+  // same value `loadSegmentTrip` reconciles the hops with (vet HIGH).
+  const home = resolveHomeBase(trip, (await getPrefsByOwner(ownerId))?.homeBasePlace ?? null);
+  return {
+    ...trip,
+    homeBase: home.homeBase,
+    homeBasePlace: home.homeBasePlace,
+    homeBaseFromHousehold: home.fromHousehold,
+  };
 }
 
 /** Dashboard row — the shape is owned by @rv-trip/core so the API client can validate it. */
@@ -853,6 +876,10 @@ export function mapPrefsRow(row: {
   units: string | null;
   mapStyle: string | null;
   trackCosts: boolean | null;
+  homeBase?: string | null;
+  homeBaseLat?: number | null;
+  homeBaseLng?: number | null;
+  homeBasePlaceId?: string | null;
   updatedAt: Date;
 }): UserPrefs {
   return {
@@ -861,6 +888,16 @@ export function mapPrefsRow(row: {
     units: row.units,
     mapStyle: row.mapStyle,
     trackCosts: row.trackCosts,
+    // #126 · the household home base, as the one object the wire carries.
+    homeBasePlace:
+      row.homeBase == null
+        ? null
+        : {
+            name: row.homeBase,
+            lat: row.homeBaseLat ?? null,
+            lng: row.homeBaseLng ?? null,
+            googlePlaceId: row.homeBasePlaceId ?? null,
+          },
     updatedAt: row.updatedAt.toISOString(),
   };
 }

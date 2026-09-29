@@ -1,3 +1,4 @@
+import type { PlaceSearchType } from "./places-search";
 import type { IsoDate } from "../domain/types";
 import type { RigProfileInput } from "../domain/rig";
 import { encodeFlexiblePolyline } from "./polyline";
@@ -113,7 +114,7 @@ export interface PlaceDetails extends PlaceSummary {
 
 /** Place search + details/reviews. Implemented by Google Places in prod. */
 export interface PlacesProvider {
-  search(query: string, near?: LatLng): Promise<PlaceSummary[]>;
+  search(query: string, near?: LatLng, type?: PlaceSearchType): Promise<PlaceSummary[]>;
   details(googlePlaceId: string): Promise<PlaceDetails | null>;
   /**
    * Reverse-geocode a point to its locality (#111). `null` when there is none

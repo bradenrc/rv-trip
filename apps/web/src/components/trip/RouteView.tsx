@@ -36,11 +36,10 @@ import {
   distanceUnitLabel,
   hasCoords,
   nearLabel,
-  nearOf,
   pickedFromPlace,
+  searchAnchor,
   type NearPlace,
   type PickedPlace,
-  type Place,
   type TravelMode,
   type Trip,
   type Units,
@@ -128,13 +127,15 @@ export interface RouteViewActions {
    * and by a fly/ferry day clicked on the Timeline (Q5 A). */
   openHopId: string | null;
   hops: HopCardActions;
+
+  /** #128 · Q8 A door 2 — the stop card's "+ Add stay", dates from the stop. */
+  onAddStay: (stopId: string) => void;
 }
 
 export function RouteView({
   legs,
   trip,
   summary,
-  homeBasePlace,
   costs,
   hasRig,
   units,
@@ -151,9 +152,6 @@ export function RouteView({
    * nudge, and the Add flight form judges its date clash against it. */
   trip: Trip;
   summary: RouteSummary;
-  /** The trip's home base as a real place (#60 Q4 → B). It is the search bias
-   * for the FIRST stop of a leg — the one row with nothing above it. */
-  homeBasePlace: Place | null;
   costs: boolean;
   /** The account's display units, resolved on the server and handed down
    * through `TripPlanner`. The rail's hero converts here, at the last moment;
@@ -275,9 +273,12 @@ export function RouteView({
             {leg.leadingHop && hopCard(leg.leadingHop, true)}
 
             {leg.rows.map((row, i) => {
-              // The picker's bias: the stop ABOVE this one in the leg, and the
-              // trip's home base when there is nothing above it.
-              const near = nearOf(leg.rows[i - 1]?.stop.place, homeBasePlace);
+              // The picker's bias (#126 anchor order): the stop ABOVE this one
+              // in the leg, then the trip's destination — never the home base.
+              const near = searchAnchor(trip, { kind: "after", stopId: leg.rows[i - 1]?.stop.id ?? null });
+              const hasStay = row.reservations.some((r) => r.type === "lodging" || r.type === "campground");
+              const wholeTrip =
+                row.stop.arriveDate === trip.startDate && row.stop.departDate === trip.endDate;
               const placing = actions.placingStopId === row.stop.id;
               const mapped = hasCoords(row.stop.place);
               return (
@@ -374,7 +375,12 @@ export function RouteView({
                         </span>
                       )}
                       {row.rating > 0 && <Stars value={row.rating} />}
-                      <span className="pointer-events-auto ml-auto">
+                      {wholeTrip && (
+                        <span className="ml-auto inline-flex items-center whitespace-nowrap rounded-rv-pill border border-rv-green bg-rv-green-soft px-2 py-px font-mono text-[10px] font-semibold uppercase tracking-[0.05em] text-rv-green-ink">
+                          whole trip
+                        </span>
+                      )}
+                      <span className={`pointer-events-auto ${wholeTrip ? "" : "ml-auto"}`}>
                         <RowMenu label={`Actions for ${row.stop.place.name}`}>
                           <DropdownMenuItem
                             className={MENU_ITEM}
@@ -484,6 +490,23 @@ export function RouteView({
                       </div>
                     )}
 
+                    {/* #128 · Q8 A door 2 — a stop with no stay yet offers one,
+                        its dates arriving from the stop. */}
+                    {!hasStay && !placing && (
+                      <div className="pointer-events-auto pl-10">
+                        <button
+                          type="button"
+                          onClick={() => actions.onAddStay(row.stop.id)}
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-dashed border-rv-green bg-transparent px-2.5 py-1.5 text-[12.5px] font-bold text-rv-green-ink"
+                        >
+                          + Add stay
+                          <span className="font-mono text-[11px] font-normal text-rv-ink-faded">
+                            · dates from this stop
+                          </span>
+                        </button>
+                      </div>
+                    )}
+
                     {row.showIdeaDivider && (
                       <div className="my-0.5 flex items-center gap-2 pl-10">
                         <span className="font-mono text-[9px] uppercase tracking-[0.1em] text-rv-ink-faded">
@@ -526,7 +549,7 @@ export function RouteView({
                 <div className="min-w-0 flex-1">
                   <PlaceEditor
                     initial={null}
-                    near={nearOf(leg.rows.at(-1)?.stop.place, homeBasePlace)}
+                    near={searchAnchor(trip, { kind: "after", stopId: leg.rows.at(-1)?.stop.id ?? null })}
                     onPick={(p) => actions.onPickDraftStop(leg.id, p)}
                     onCancel={actions.onCancelDraftStop}
                     cancelLabel="Discard this stop"

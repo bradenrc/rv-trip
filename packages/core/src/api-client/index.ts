@@ -16,9 +16,14 @@ import type {
   TripCreateInput,
   TripPatchInput,
   TripSummary,
+  BoundaryFlightsBody,
+  Stop,
+  StopCreateInput,
 } from "../domain/types";
 import type { RigProfile, RigProfileInput } from "../domain/rig";
+import type { UserPrefs, UserPrefsPatch } from "../domain/prefs";
 import type { LatLng, ResolvedDestination, RouteResult } from "../providers/index";
+import type { PlaceSearchType } from "../providers/places-search";
 import {
   tripBundleSchema,
   tripSummaryListSchema,
@@ -33,6 +38,7 @@ import {
   routePairsResponseSchema,
   reservationRowSchema,
   tripSchema,
+  stopSchema,
   type PlacesSearchEnvelope,
   type TripBundle,
 } from "./schemas";
@@ -120,6 +126,8 @@ export interface ReservationPatch {
 }
 export interface IdeaPatch {
   status?: IdeaStatus;
+  /** #131 · Plan it — the stop a maybe is planned onto (null = back to the shelf). */
+  stopId?: string | null;
   rating?: number | null;
   again?: boolean | null;
   notes?: string | null;
@@ -147,6 +155,17 @@ export interface ApiClient {
     dismissSaves(id: string, saveIds: string[]): Promise<void>;
     /** "Last time here" (#113 · #107): the past trips' Been saves near this one. */
     forNextTime(id: string): Promise<ForNextTime>;
+    /** #129 · Q10 A — POST /api/trips/:id/boundary-flights → 201 Trip: both
+     * boundary hops' flights in one save (Round trip), or the outbound alone. */
+    boundaryFlights(id: string, body: BoundaryFlightsBody): Promise<Trip>;
+  };
+  prefs: {
+    /** GET /api/prefs — null when the account has never chosen anything. The
+     * phone reads the household home base (#126 · Q5 A) from it. */
+    get(): Promise<UserPrefs | null>;
+    /** PUT /api/prefs — a PARTIAL (`{ homeBasePlace }` sets the household
+     * home base). */
+    put(patch: UserPrefsPatch): Promise<UserPrefs>;
   };
   places: {
     list(): Promise<SavedPlace[]>;
@@ -156,7 +175,7 @@ export interface ApiClient {
     create(body: SavedPlaceCreateInput): Promise<SavedPlace>;
     /** The shipped search proxy. A throttled 429 still answers the degraded
      * envelope rather than throwing — its body IS that envelope. */
-    search(q: string, near?: LatLng): Promise<PlacesSearchEnvelope>;
+    search(q: string, near?: LatLng, type?: PlaceSearchType): Promise<PlacesSearchEnvelope>;
     /** PATCH /api/places/:id → 204. On the Saves tab (#111 i2) it carries
      * `{ upgradeToSuggested: true }` (tap the strip) or `{ suggestedPlace: null }`
      * (Dismiss). No body comes back: refetch `list()` for the re-resolved
@@ -175,6 +194,9 @@ export interface ApiClient {
   };
   stops: {
     patch(id: string, patch: StopPatch): Promise<void>;
+    /** POST /api/stops → 201 Stop — the phone's + Add ▸ Stop, and Plan it on a
+     * stay idea (#131). */
+    create(input: StopCreateInput): Promise<Stop>;
   };
   segments: {
     /** PATCH /api/segments/:id → 204 — a hop's mode switch (#104). */
@@ -255,13 +277,21 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         ),
       forNextTime: (id) =>
         parsed(forNextTimeSchema, request("GET", `/api/trips/${encodeURIComponent(id)}/for-next-time`)),
+      boundaryFlights: (id, body) =>
+        parsed(tripSchema, request("POST", `/api/trips/${encodeURIComponent(id)}/boundary-flights`, body)),
+    },
+    prefs: {
+      get: async () => (await request("GET", "/api/prefs")) as UserPrefs | null,
+      put: async (patch) => (await request("PUT", "/api/prefs", patch)) as UserPrefs,
     },
     places: {
       list: () => parsed(savedPlaceListSchema, request("GET", "/api/places")),
       create: (body) => parsed(savedPlaceSchema, request("POST", "/api/places", body)),
-      search: async (q, near) => {
+      search: async (q, near, type) => {
         const qs = new URLSearchParams({ q });
         if (near) qs.set("near", `${near.lat},${near.lng}`);
+        // #128 · Q9 A — the Add stay sheet's lodging-first search.
+        if (type) qs.set("type", type);
         try {
           return await parsed(placesEnvelopeSchema, request("GET", `/api/places/search?${qs}`));
         } catch (e) {
@@ -290,6 +320,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     },
     stops: {
       patch: (id, patch) => voidResult(request("PATCH", `/api/stops/${encodeURIComponent(id)}`, patch)),
+      create: (input) => parsed(stopSchema, request("POST", "/api/stops", input)),
     },
     segments: {
       patch: (id, patch) =>

@@ -21,14 +21,17 @@ const screen = code(read("app/(tabs)/(trips)/trips/[id]/index.tsx"));
 const nearby = code(read("src/nearby.tsx"));
 const store = code(read("src/store.ts"));
 
-describe("the Route lens", () => {
-  it("draws the banner and the Ideas section above the stop rows (before the Rhythm card)", () => {
+describe("the Ideas tab (#131 · Q1 A — the banner and the maybes moved off Route)", () => {
+  it("draws the banner, then the Ideas list, in the Ideas branch — before the Rhythm (Timeline) card", () => {
+    const ideasBranch = screen.indexOf('lens === "ideas" ? (');
     const banner = screen.indexOf("<NearbyBanner");
-    const ideas = screen.indexOf("<IdeasSection");
+    const ideas = screen.indexOf("<IdeasTab");
     const rhythm = screen.indexOf("<Kicker>Rhythm</Kicker>");
-    expect(banner).toBeGreaterThan(-1);
+    expect(ideasBranch).toBeGreaterThan(-1);
+    expect(banner).toBeGreaterThan(ideasBranch);
     expect(banner).toBeLessThan(ideas);
     expect(ideas).toBeLessThan(rhythm);
+    expect(screen).not.toContain("<IdeasSection");
   });
 
   it("shows the banner only while a save is surfaced, and Dismiss sends every surfaced id", () => {

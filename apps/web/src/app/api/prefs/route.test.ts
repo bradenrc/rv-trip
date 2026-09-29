@@ -33,6 +33,7 @@ describeDb("/api/prefs", () => {
       units: null, // never chosen — NOT "null", NOT absent
       mapStyle: null,
       trackCosts: null,
+      homeBasePlace: null, // #126 · the household home base, never chosen
       updatedAt: expect.any(String),
     });
     expect(await read.countPrefs(DEV_OWNER)).toBe(1);

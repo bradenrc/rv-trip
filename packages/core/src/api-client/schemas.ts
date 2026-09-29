@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  stop,
   trip,
   tripSummary,
   savedPlace,
@@ -160,3 +161,6 @@ export const reservationRowSchema = z
 
 /** `POST /api/trips` → 201: the created trip's whole tree. */
 export const tripSchema = trip;
+
+/** `POST /api/stops` → 201 Stop (#131 · the phone's + Add ▸ Stop / Plan it). */
+export const stopSchema = stop;

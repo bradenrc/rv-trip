@@ -16,6 +16,7 @@ import {
   unique,
   primaryKey,
   check,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import type { NavCheck, RouteResult, SuggestedPlace } from "@rv-trip/core";
@@ -114,6 +115,13 @@ export const trips = pgTable(
     // core's NEAR_RADIUS_MI (50). The CHECK mirrors core's `surfaceRadiusMi`
     // literal union, so a value the grammar would refuse can't land either.
     surfaceRadiusMi: smallint("surface_radius_mi"),
+    // #126 · Q4 A — where the trip is going: the household's `destinations`
+    // row for the "Where to?" pick (upserted by owner + place id at create).
+    // Nullable and additive: every trip made before it simply has none. A
+    // deleted destination leaves the trip, destination-less.
+    destinationId: uuid("destination_id").references((): AnyPgColumn => destinations.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -507,6 +515,13 @@ export const userPrefs = pgTable("user_prefs", {
   units: text("units"), // 'imperial' | 'metric'
   mapStyle: text("map_style"), // 'night' | 'day' | 'sat'
   trackCosts: boolean("track_costs"),
+  // #126 · Q5 A — the HOUSEHOLD home base: where trips start and end unless a
+  // trip overrides it (its own `trips.home_base*`, which stay). Same shape as
+  // the trip's: the name plus the anchor's three nullable columns.
+  homeBase: text("home_base"),
+  homeBaseLat: doublePrecision("home_base_lat"),
+  homeBaseLng: doublePrecision("home_base_lng"),
+  homeBasePlaceId: text("home_base_place_id"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -665,7 +680,9 @@ export const householdInvitesRelations = relations(householdInvites, ({ one }) =
   household: one(households, { fields: [householdInvites.householdId], references: [households.id] }),
 }));
 
-export const tripsRelations = relations(trips, ({ many }) => ({
+export const tripsRelations = relations(trips, ({ one, many }) => ({
+  // #126 · the "Where to?" locality, joined onto `Trip.destination`.
+  destination: one(destinations, { fields: [trips.destinationId], references: [destinations.id] }),
   legs: many(legs),
   segments: many(travelSegments),
   saves: many(saves),

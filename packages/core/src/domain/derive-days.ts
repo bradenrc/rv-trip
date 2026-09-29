@@ -22,6 +22,7 @@ import { localDate } from "./segments";
  *        - untimed into a scheduled stop: that stop's arriveDate (v1's rule);
  *        - untimed going home from a scheduled stop: its departDate;
  *        - otherwise (the date-giving endpoint is floating): no day.
+ *      A boundary fly/ferry hop (to or from home) wins its days (#124).
  *
  * Floating stops (no dates) contribute nothing — they live in the route
  * sequence view. `unscheduledStopIds` lists them so the UI can show a
@@ -130,9 +131,17 @@ export function deriveDays(
     }
   }
 
-  // 3. Travel overwrites stay, segment by segment in journey order.
+  // 3. Travel overwrites stay, segment by segment in journey order — except
+  //    that a BOUNDARY fly/ferry hop (home → first, last → home) paints last
+  //    (#124): the arrival and departure days are the trip's ✈ days, and an
+  //    untimed drive that borrows the same stop date must not paint over them.
   const stopsById = new Map(stops.map((s) => [s.id, s]));
-  for (const seg of [...segments].sort((a, b) => a.sortOrder - b.sortOrder)) {
+  const boundaryAir = (s: DaySegment) =>
+    (s.fromStopId === null || s.toStopId === null) && s.mode !== "drive" ? 1 : 0;
+  const painted = [...segments].sort(
+    (a, b) => boundaryAir(a) - boundaryAir(b) || a.sortOrder - b.sortOrder,
+  );
+  for (const seg of painted) {
     for (const date of segmentDates(seg, stopsById)) {
       if (!inRange(date)) continue;
       byDate.set(date, {

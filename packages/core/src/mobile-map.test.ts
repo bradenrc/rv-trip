@@ -324,7 +324,9 @@ describe("the trip screen's Route ⇄ Map lens", () => {
   });
 
   it("puts the lens control in the masthead, above both lenses", () => {
-    const seg = tripScreen.indexOf("<Segmented value={lens}");
+    // #131: the lens control is Itinerary's sub-lens (Route · Timeline · Map),
+    // under the Itinerary · Ideas · Journal tabs — still in the masthead.
+    const seg = tripScreen.indexOf("<Segmented value={sub}");
     const scroll = tripScreen.indexOf("contentContainerStyle={styles.content}");
     const trip = tripScreen.indexOf("<TripMap");
     expect(seg).toBeGreaterThan(-1);

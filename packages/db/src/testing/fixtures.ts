@@ -464,6 +464,11 @@ async function insertPrefs(p: {
   units?: string | null;
   mapStyle?: string | null;
   trackCosts?: boolean | null;
+  /** #126 · the household home base. */
+  homeBase?: string | null;
+  homeBaseLat?: number | null;
+  homeBaseLng?: number | null;
+  homeBasePlaceId?: string | null;
 }): Promise<UserPrefsRow> {
   const [row] = await db
     .insert(userPrefs)
@@ -473,12 +478,42 @@ async function insertPrefs(p: {
       units: p.units ?? null,
       mapStyle: p.mapStyle ?? null,
       trackCosts: p.trackCosts ?? null,
+      homeBase: p.homeBase ?? null,
+      homeBaseLat: p.homeBaseLat ?? null,
+      homeBaseLng: p.homeBaseLng ?? null,
+      homeBasePlaceId: p.homeBasePlaceId ?? null,
+    })
+    .returning();
+  return row!;
+}
+
+/** A flight on a hop (#104 / #129) — a segment-parented transport booking
+ * with its clock. */
+async function insertSegmentBooking(p: {
+  segmentId: string;
+  name?: string;
+  startsAt: string;
+  endsAt: string;
+  startsTz: string;
+  endsTz: string;
+}): Promise<ReservationRow> {
+  const [row] = await db
+    .insert(reservations)
+    .values({
+      segmentId: p.segmentId,
+      type: "transport",
+      name: p.name ?? "AS 2298 BLI→BOI",
+      startsAt: new Date(p.startsAt),
+      endsAt: new Date(p.endsAt),
+      startsTz: p.startsTz,
+      endsTz: p.endsTz,
     })
     .returning();
   return row!;
 }
 
 export const fx = {
+  segmentBooking: insertSegmentBooking,
   trip: insertTrip,
   prefs: insertPrefs,
   /** Backdate a cached route, so the 30-day TTL can be read from both sides. */
@@ -519,6 +554,10 @@ export const read = {
   async reservation(id: string): Promise<ReservationRow | null> {
     const [row] = await db.select().from(reservations).where(eq(reservations.id, id));
     return row ?? null;
+  },
+  /** A hop's bookings (#129). */
+  async segmentBookings(segmentId: string): Promise<ReservationRow[]> {
+    return db.select().from(reservations).where(eq(reservations.segmentId, segmentId));
   },
   /** A trip's hops, in journey order. */
   async segments(tripId: string): Promise<SegmentRow[]> {

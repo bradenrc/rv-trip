@@ -219,15 +219,15 @@ describeDb("#104 · PATCH /api/segments/:id — the mode switch", () => {
     expect(drivePairs(bundle.trip).some((p) => p.fromStopId === astoria.id)).toBe(false);
   });
 
-  it("refuses Drive while flights hang on the hop (409), and 404s another owner's hop", async () => {
+  it("#129 · Drive with flights on the hop is no longer refused — no choice reads as keep; and 404s another owner's hop", async () => {
     const { out } = await costaRica();
     await POST_RES(
       req(flight(out.id, "AA 2451 BOI→LAX", "2027-01-16T13:05:00.000Z", "America/Boise", "2027-01-16T23:45:00.000Z", "America/Costa_Rica")),
     );
-    const refused = await PATCH_SEGMENT(req({ mode: "drive" }, "PATCH"), ctx(out.id));
-    expect(refused.status).toBe(409);
-    expect(await refused.json()).toEqual({ error: "segment_has_bookings" });
-    expect((await read.segments(out.tripId)).find((s) => s.id === out.id)?.mode).toBe("fly");
+    const kept = await PATCH_SEGMENT(req({ mode: "drive" }, "PATCH"), ctx(out.id));
+    expect(kept.status).toBe(204);
+    expect((await read.segments(out.tripId)).find((s) => s.id === out.id)?.mode).toBe("drive");
+    expect(await segmentRes(out.id)).toHaveLength(1);
 
     const theirs = await costaRica(OTHER_OWNER);
     expect((await PATCH_SEGMENT(req({ mode: "ferry" }, "PATCH"), ctx(theirs.home.id))).status).toBe(404);

@@ -19,7 +19,7 @@ import { api } from "../../../../src/api";
 import { Input, Label } from "../../../../src/hops";
 import { createTrip, patchTripDefaults, useBundle } from "../../../../src/store";
 import { C, F, R } from "../../../../src/theme";
-import { Button, Kicker } from "../../../../src/ui";
+import { Button, Chip, Kicker, RangePicker } from "../../../../src/ui";
 
 /**
  * New trip (#103 · Q12 C) — the web's three questions in the same order,
@@ -109,20 +109,12 @@ function Question({ n, children }: { n?: number; children: string }) {
   );
 }
 
-function NewTrip() {
-  const router = useRouter();
-  const [draft, setDraft] = useState<TripDraft>(BLANK_TRIP_DRAFT);
-  const [query, setQuery] = useState("");
+/** A place search's rows — the capture sheet's `api.places.search`, one field. */
+function usePlaceResults(query: string, skip: string | null | undefined): PlaceSummary[] {
   const [results, setResults] = useState<PlaceSummary[]>([]);
-  const [saving, setSaving] = useState(false);
-  const set = (patch: Partial<TripDraft>) => setDraft((d) => ({ ...d, ...patch }));
-  const input = tripDraftInput(draft);
-  const days = tripDayCount(draft.startDate, draft.endDate);
-
-  // "Starting from" — the capture sheet's `api.places.search` rows.
   useEffect(() => {
     const q = query.trim();
-    if (!q || q === draft.homeBasePlace?.name) {
+    if (!q || q === skip) {
       setResults([]);
       return;
     }
@@ -137,7 +129,59 @@ function NewTrip() {
       live = false;
       clearTimeout(t);
     };
-  }, [query, draft.homeBasePlace?.name]);
+  }, [query, skip]);
+  return results;
+}
+
+function Results({ rows, onPick }: { rows: PlaceSummary[]; onPick: (r: PlaceSummary) => void }) {
+  if (rows.length === 0) return null;
+  return (
+    <View style={styles.results}>
+      {rows.map((r, i) => (
+        <Pressable
+          key={r.googlePlaceId}
+          onPress={() => onPick(r)}
+          style={[styles.resultRow, i > 0 && { borderTopWidth: 1, borderTopColor: C.borderSoft }]}
+          accessibilityRole="button"
+        >
+          <Text style={{ color: C.ink, fontSize: 13, fontWeight: "600" }}>{r.name}</Text>
+          {r.address ? <Text style={styles.pm}>{r.address}</Text> : null}
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * #126 · #127 (docs/design/130 frame 1): the phone asks **Where to?** first,
+ * then **When** on the RangePicker twin; home base is a quiet chip reading the
+ * household default, whose "change" writes this trip's override.
+ */
+function NewTrip() {
+  const router = useRouter();
+  const [draft, setDraft] = useState<TripDraft>(BLANK_TRIP_DRAFT);
+  const [destQuery, setDestQuery] = useState("");
+  const [homeQuery, setHomeQuery] = useState("");
+  const [changingHome, setChangingHome] = useState(false);
+  const [household, setHousehold] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const set = (patch: Partial<TripDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const input = tripDraftInput(draft);
+  const days = tripDayCount(draft.startDate, draft.endDate);
+  const destRows = usePlaceResults(destQuery, draft.destination?.name);
+  const homeRows = usePlaceResults(homeQuery, draft.homeBasePlace?.name);
+  const home = draft.homeBasePlace?.name ?? household;
+
+  useEffect(() => {
+    let live = true;
+    api.prefs
+      .get()
+      .then((p) => live && setHousehold(p?.homeBasePlace?.name ?? null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const create = async () => {
     if (!input || saving) return;
@@ -156,14 +200,67 @@ function NewTrip() {
       <Stack.Screen options={{ title: "New trip" }} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Kicker color={C.accent}>New trip</Kicker>
-        <Text style={styles.ph1}>Where to next?</Text>
+        <Text style={styles.ph1}>Where to?</Text>
 
-        <Question n={1}>How does this trip mostly move?</Question>
+        <Label>Destination</Label>
+        <Input
+          value={destQuery}
+          onChangeText={(q) => {
+            setDestQuery(q);
+            if (draft.destination && q !== draft.destination.name) set({ destination: null });
+          }}
+          placeholder="Bellingham, WA"
+          autoCapitalize="words"
+        />
+        <Results
+          rows={destRows}
+          onPick={(r) => {
+            const picked = pickedFromSummary(r);
+            set({ destination: picked });
+            setDestQuery(picked.name);
+          }}
+        />
+        {changingHome ? (
+          <>
+            <Label>Starting from · this trip</Label>
+            <Input
+              value={homeQuery}
+              onChangeText={(q) => {
+                setHomeQuery(q);
+                if (draft.homeBasePlace && q !== draft.homeBasePlace.name) set({ homeBasePlace: null });
+              }}
+              placeholder="Boise, ID"
+              autoCapitalize="words"
+            />
+            <Results
+              rows={homeRows}
+              onPick={(r) => {
+                const picked = pickedFromSummary(r);
+                set({ homeBasePlace: picked });
+                setHomeQuery(picked.name);
+              }}
+            />
+          </>
+        ) : (
+          <View style={{ alignSelf: "flex-start" }}>
+            <Chip onPress={() => setChangingHome(true)}>
+              {home ? `🏠 from ${home} · your home base · change` : "🏠 no home base yet · set one"}
+            </Chip>
+          </View>
+        )}
+
+        <Label>When</Label>
+        <RangePicker
+          value={{ start: draft.startDate || null, end: draft.endDate || null }}
+          onChange={(v) => set({ startDate: v.start ?? "", endDate: v.end ?? "" })}
+        />
+
+        <Question>Mostly</Question>
         <ModeCards value={draft.mode} onChange={(m) => setDraft((d) => withTripMode(d, m))} subs />
 
         {draft.mode !== null && (
           <>
-            <Question n={2}>Where will you mostly sleep?</Question>
+            <Question>Where will you mostly sleep?</Question>
             <RowCards<LodgingKind>
               options={lodgingOptions(draft.mode)}
               value={draft.lodgingDefault}
@@ -171,54 +268,18 @@ function NewTrip() {
             />
             {draft.mode === "road" && (
               <>
-                <Question n={3}>Bringing the rig?</Question>
+                <Question>Bringing the rig?</Question>
                 <RowCards<boolean> options={rigOptions} value={draft.rigOn} onChange={(rigOn) => set({ rigOn })} />
               </>
             )}
 
             <Label>Trip name</Label>
-            <Input value={draft.title} onChangeText={(title) => set({ title })} placeholder="Redwoods Run" autoCapitalize="words" />
-            <View style={{ flexDirection: "row", gap: 6 }}>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Label>Start</Label>
-                <Input mono value={draft.startDate} onChangeText={(startDate) => set({ startDate })} placeholder="2026-08-01" />
-              </View>
-              <View style={{ flex: 1, gap: 4 }}>
-                <Label>End</Label>
-                <Input mono value={draft.endDate} onChangeText={(endDate) => set({ endDate })} placeholder="2026-08-28" />
-              </View>
-            </View>
-
-            <Label>Starting from · optional</Label>
             <Input
-              value={query}
-              onChangeText={(q) => {
-                setQuery(q);
-                if (draft.homeBasePlace && q !== draft.homeBasePlace.name) set({ homeBasePlace: null });
-              }}
-              placeholder="Boise, ID"
+              value={draft.title}
+              onChangeText={(title) => set({ title })}
+              placeholder={draft.destination?.name ?? "Redwoods Run"}
               autoCapitalize="words"
             />
-            {results.length > 0 && (
-              <View style={styles.results}>
-                {results.map((r, i) => (
-                  <Pressable
-                    key={r.googlePlaceId}
-                    onPress={() => {
-                      const picked = pickedFromSummary(r);
-                      set({ homeBasePlace: picked });
-                      setQuery(picked.name);
-                      setResults([]);
-                    }}
-                    style={[styles.resultRow, i > 0 && { borderTopWidth: 1, borderTopColor: C.borderSoft }]}
-                    accessibilityRole="button"
-                  >
-                    <Text style={{ color: C.ink, fontSize: 13, fontWeight: "600" }}>{r.name}</Text>
-                    {r.address ? <Text style={styles.pm}>{r.address}</Text> : null}
-                  </Pressable>
-                ))}
-              </View>
-            )}
 
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 }}>
               <View style={{ flex: 1 }}>

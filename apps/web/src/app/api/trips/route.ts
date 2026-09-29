@@ -9,8 +9,10 @@ export async function GET() {
 }
 
 /**
- * Create a trip. The create seeds one empty "Leg 1" in the same transaction, so
- * the planner it redirects to has a leg header to hang "Add stop" on. Returns
+ * Create a trip. The create seeds one "Leg 1" in the same transaction, so the
+ * planner it redirects to has a leg header to hang "Add stop" on. #126 · Q4 A:
+ * a `destination` is upserted as the household's destinations row, the trip
+ * points at it, and Leg 1 opens with one stop spanning the trip. Returns
  * the full tree (201) — the same shape `GET /api/trips/:id` returns under
  * `trip`, with `status` already derived from the dates.
  */
