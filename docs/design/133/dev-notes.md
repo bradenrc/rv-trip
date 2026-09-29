@@ -112,3 +112,93 @@ Once this lands, the qa.md recipe shrinks to "your tree is ready" (a follow-up r
 There is no code to cover: the change is agent-brief and persona prose, and no test in the
 repo reads `.mc/agents/*.md` or the persona. The repo gate was run to confirm nothing
 regressed (see the report).
+
+## i2 · #85 · the wireframe emits `resolved-answers.json`; vet diffs it
+
+No product source changes: two agent briefs and these notes. `.mc/config.yaml` is unchanged.
+
+### What changed
+
+- `.mc/agents/wireframe.md:3` — frontmatter description names the manifest as an output.
+- `.mc/agents/wireframe.md:21-24` — contract: the output is now TWO files, `index.html` +
+  `resolved-answers.json` (an epic adds `plan.json`).
+- `.mc/agents/wireframe.md:93-94` — a vet survey-fidelity fail (`route: "wireframe"`)
+  re-enters this gate, like a walk-reject or `reset_to_gate`.
+- `.mc/agents/wireframe.md:113-115` — the report's answer set **and the manifest** must equal
+  the feedback block, value for value.
+- `.mc/agents/wireframe.md:122-152` — new section **"The resolved-answers manifest"**: the flat
+  `{"q1": "C", …}` example (this epic's own answers), with these rules. Every `data-q` is a
+  key, including `data-material="0"`. A non-null value is copied exactly from the feedback
+  block and must be what `index.html` renders. A null value resolves to the ★ letter and needs
+  the static "⚠ defaulted" note (never `null` in the manifest). Plain JSON, no comments, and
+  `index.html` stays script-free. The manifest is never a way to record a substitution.
+- `.mc/agents/wireframe.md:156-157` — the Epics section calls `plan.json` the THIRD output.
+- `.mc/agents/wireframe.md:205-207` — hard rule: "TWO files: index.html + resolved-answers.json"
+  (+ plan.json on an epic).
+- `.mc/agents/vet.md:16-20` — contract: `route: "wireframe"` on every survey-fidelity fail,
+  alongside the rare `route: "mock"`.
+- `.mc/agents/vet.md:100-128` — the survey-fidelity check is rewritten with three HIGH conditions:
+  **(a)** the manifest vs the feedback block (a non-null difference, or a missing question);
+  **(b)** the manifest vs the rendered `index.html`, which keeps the "diff the ARTIFACT, not
+  its self-description" rule and the ⚠-only-where-null rule; **(c)** a missing or unparseable
+  manifest, with the finding naming the path. On (c), vet still diffs the rendered HTML
+  directly. The section ends by saying that after mc-dev#170, the engine runs (a) at capture
+  and vet keeps (b) and (c).
+- `.mc/agents/vet.md:166-169` — a new `"route": "wireframe"` bullet in the route section.
+- `.mc/agents/vet.md:187-200` — a `route: "wireframe"` verdict example (the #82 q6 replay).
+  The closing rule is corrected: an omitted route, or one that is not a gate id, falls to
+  `on_fail` (dev), so a fidelity fail must name `wireframe`. When a verdict also needs `mock`,
+  `mock` wins.
+
+### Vet HIGH on routing: addressed
+
+The vet finding was right. An omitted `route` falls to `pipeline.gates[vet].on_fail: dev`. I
+checked that the engine accepts `wireframe`: `mc-dev/src/mc/engine/graph.py:182-184` (the
+reviewer-worker branch) takes `route` when it is in `{g.id for g in pipeline.gates}`, and
+otherwise uses `resolve_transition(gate, False)`. `wireframe` is a gate id in
+`.mc/config.yaml`. `mc-dev/src/mc/workers/dispatch.py:122-123` passes any non-blank string
+`route` through. The old `vet.md:102` wording ("routed back to wireframe" with no route named)
+is gone. Every fidelity HIGH now names `"route": "wireframe"`, and both the contract bullet and
+the closing rule say so. This departs from the design's own text ("no `route` on these (back
+to wireframe)") in the way the vet finding asked, to get the outcome the design wanted.
+
+### Consumer contract for mc-dev#170 (for the devops seat; the dev gate files nothing)
+
+rv-trip's side of mc-dev#170 is now in place. At wireframe capture, the engine can:
+
+1. Read `docs/design/<issue>/resolved-answers.json` from the wireframe worktree. It is a flat
+   JSON object of `question id → option letter`, with one key per survey question (the mock's
+   `data-q`), non-material ones included. It never contains `null`.
+2. Diff it against the survey verdict the engine already holds. Any non-null survey value
+   that differs, or a missing key, refuses the capture. A missing or unparseable file also
+   refuses it. Route the refusal back to `wireframe` with the diff as notes. Do not route it
+   to vet or dev.
+3. Leave the rendered-HTML half (vet check (b)) to vet. The engine does not parse
+   `index.html`.
+
+**Acceptance (the rv-trip proof):** a real rv-trip wireframe dispatch whose manifest
+substitutes a non-null survey answer (for example, the #82 q6 shape: survey `A`, manifest `B`)
+is **refused at capture** and re-enters `wireframe`, and never reaches vet. A faithful manifest
+captures normally.
+
+### Flags for the walk reviewer (i2)
+
+- **#85 closes at this epic's ship, before mc-dev#170 lands.** Until the engine check lands,
+  enforcement is vet's check only (Q5 B, interim).
+- **Run-required at the first real vet fail.** I verified statically that `route: "wireframe"`
+  is a legal transition. I did not verify at runtime that the wireframe agent receives vet's
+  findings as its feedback block on re-entry. That needs a real fidelity fail.
+- **No in-epic proof.** This epic's own wireframe predates the rule, so it wrote no manifest
+  (the wireframe branch holds `index.html` + `plan.json` only). The first wireframe dispatched
+  after ship is the first to emit one. The first vet after ship is the first to check (a)–(c).
+  Any wireframe still in flight at ship that was produced under the old brief will fail (c) at
+  vet and be redrawn. That is intended, but expect it once.
+- **The manifest's keys depend on the mock's `data-q` ids.** The rule reads them from the
+  mock. If a mock ever omits `data-q`, the key set is undefined. I did not change mock.md.
+
+### Tests
+
+There is no code to cover: the change is agent-brief prose. No test in the repo reads
+`.mc/agents/*.md`. The repo gate was run to confirm nothing regressed:
+`pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total` (web: 45 files,
+365 tests passed).

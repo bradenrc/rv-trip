@@ -1,6 +1,6 @@
 ---
 name: wireframe
-description: Engine-native Wireframe stage. Resolves the answered mock into ONE pixel-faithful wireframe of the chosen variant, writes docs/design/<issue>/index.html with Sign off / Refine buttons. Bounded — no state/board/gh/MC-server; the engine owns orchestration + verification. One issue per dispatch.
+description: Engine-native Wireframe stage. Resolves the answered mock into ONE pixel-faithful wireframe of the chosen variant, writes docs/design/<issue>/index.html with Sign off / Refine buttons, plus the docs/design/<issue>/resolved-answers.json manifest. Bounded — no state/board/gh/MC-server; the engine owns orchestration + verification. One issue per dispatch.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
@@ -18,9 +18,10 @@ work — you do NOT orchestrate.
 - You **never** self-verify success. Researching your INPUTS is fine (does an asset exist,
   what does the real production component actually render). But do NOT grep your OWN output
   to "confirm" it — that's the engine's deterministic teeth. Trust your method.
-- Your OUTPUT is exactly ONE file: **`docs/design/<issue>/index.html`** (an EPIC adds
-  exactly one more — `plan.json`, see Epics below). No git, no commits — the engine commits
-  your worktree.
+- Your OUTPUT is exactly TWO files: **`docs/design/<issue>/index.html`** and
+  **`docs/design/<issue>/resolved-answers.json`** (see "The resolved-answers manifest" below).
+  An EPIC adds exactly one more — `plan.json`, see Epics below. No git, no commits — the
+  engine commits your worktree.
 
 ## Your inputs
 
@@ -90,7 +91,8 @@ pipeline. Your wireframe is now a PURE STATIC ARTIFACT: no buttons, no textarea,
 against the answered survey — the survey answers ARE the design decision, and you render
 them; you do not re-ask and you do not await a human. Pixel-level operator feedback, when it
 ever comes, arrives as a walk-reject or a `reset_to_gate` — both re-enter this gate with
-notes threaded back to you.
+notes threaded back to you. A vet survey-fidelity fail (`route: "wireframe"`, see the
+manifest section below) re-enters this gate the same way.
 
 ## No questions — the wireframe RESOLVES, it never asks
 
@@ -108,19 +110,52 @@ exactly this way, after #60's Q5). Read the answers from the brief's FEEDBACK BL
 from the mock's ★ marks. Substituting the ★ for a non-null answer is a contract violation. If
 you believe a non-null answer is genuinely unbuildable or newly contradicted by the code,
 you do not get to resolve that yourself: fail the gate back toward the mock with the
-evidence — never silently build the other option. Your report's answer set must equal the
-brief's feedback block, value for value.
+evidence — never silently build the other option. Your report's answer set, and the
+`resolved-answers.json` manifest below, must equal the brief's feedback block, value for
+value.
 
 If a material answer came through NULL or ambiguous in your feedback, resolve it to that
 question's ★recommended default and render a **plain, NON-interactive** note —
 "⚠ defaulted — confirm at sign-off: `<question> → <default>`" — as static text, _not_ a
 control. Never re-ask.
 
+## The resolved-answers manifest — `docs/design/<issue>/resolved-answers.json`
+
+A **required** second output beside `index.html` (the `plan.json` precedent, #85). It is the
+machine-readable statement of which option you built for every survey question. Vet diffs it
+against the survey and against your rendered HTML, and the engine will diff it at wireframe
+capture once mc-dev#170 lands. Shape: a **flat JSON object**, one key per survey question id,
+each value the option letter `index.html` renders.
+
+```json
+{
+  "q1": "C",
+  "q2": "B",
+  "q3": "A",
+  "q4": "B",
+  "q5": "B",
+  "q6": "A"
+}
+```
+
+- **Keys** are the mock's question ids (each question's `data-q`), **every** question,
+  including non-material (`data-material="0"`) ones. No question left out, none added.
+- **A non-null survey value is copied exactly.** The value is the letter from the brief's
+  FEEDBACK BLOCK, never the mock's ★, and it must also be the option `index.html` renders.
+- **A null survey value resolves to that question's ★ letter**, and `index.html` carries the
+  static "⚠ defaulted" note for it (above). The manifest holds the ★ letter; it never holds
+  `null`.
+- **Plain JSON** — no comments, no trailing commas, no extra keys or nesting. Write it with
+  the Write tool. `index.html` stays script-free; the manifest never moves into the HTML.
+- The manifest describes what you rendered. It is not a place to record a different answer:
+  if a non-null answer can't be built, fail toward the mock (above), don't write the other
+  letter here.
+
 ## Epics — the plan artifact
 
 When the issue is an **epic** (its body carries a `## Children` task-list of `- [ ] #<n>`
-lines and usually a `**Mode:**` line), you have a SECOND required output beside the
-wireframe: **`docs/design/<issue>/plan.json`** — the ordered work plan the engine walks at
+lines and usually a `**Mode:**` line), you have a THIRD required output beside the
+wireframe and its manifest: **`docs/design/<issue>/plan.json`** — the ordered work plan the engine walks at
 the dev gate (one dev dispatch per item, one shared branch). Schema:
 
 ```json
@@ -167,5 +202,6 @@ the dev gate (one dev dispatch per item, one shared branch). Schema:
 - **Never edit `ds-bundle/`** — it is generated + gitignored; read it only, if present.
 - **Sign off / Refine POST to the relative `answers` url** — never `/act`, never a hardcoded
   origin/`localhost`.
-- **ONE file: `docs/design/<issue>/index.html`** (an EPIC adds exactly one more:
-  `docs/design/<issue>/plan.json` — see Epics). No git, no state, no board, no `gh`.
+- **TWO files: `docs/design/<issue>/index.html` + `docs/design/<issue>/resolved-answers.json`**
+  (an EPIC adds exactly one more: `docs/design/<issue>/plan.json` — see Epics). No git, no
+  state, no board, no `gh`.
