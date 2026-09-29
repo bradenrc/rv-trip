@@ -198,6 +198,7 @@ One file: `docs/design/<issue>/qa-verdict.json`.
 ```json
 {
   "passed": false,
+  "executed": { "tests_run": true, "mutations_run": 4, "mutations_red": 3 },
   "findings": [
     "FN · packages/db/src/mutations.ts:88 — the added test stays green with the ownerId guard deleted; mutation-proved no teeth, so the scoping is unverified.",
     "CN · packages/core/src/domain/derive-days.ts:142 collects the depart-day as a stay-day, so a 4-day stay reads as 5.",
@@ -206,8 +207,36 @@ One file: `docs/design/<issue>/qa-verdict.json`.
 }
 ```
 
+A run that could not execute (the #112 case: the dev code never reached a
+runnable tree):
+
+```json
+{
+  "passed": true,
+  "executed": { "tests_run": false, "mutations_run": 0, "mutations_red": 0 },
+  "findings": ["DD · could not execute: git worktree add denied — <the exact denial text>"]
+}
+```
+
 - `passed: true` **only** when FN count == 0. CN/CL/DD alone do not block.
 - Any FN → `passed: false`, and list every FN + CN finding (concise, one per
   string, `file:line` + tier). A failed verdict **must** carry findings — they
   are the loop-back feedback to dev.
+- **`executed` is required on every verdict:** `tests_run` (boolean: did the
+  suite you relied on actually run, not skip), `mutations_run` (integer),
+  `mutations_red` (integer, at most `mutations_run`). The runnable tree these
+  counts come from is the sanctioned recipe in `.mc/agents/qa.md` ("Get a
+  runnable tree first").
+- **Report the counts you ran, never the counts you planned.** A mutation
+  counts only when it was applied, its test ran, and the tree was restored.
+  A suite that skipped for lack of a DB (`API integration tests SKIPPED — no
+  Postgres on …`) did not run: `tests_run: false`, and no mutation checked
+  against it counts toward `mutations_run`.
+- **Could not execute** (a recipe step denied or failed, or the suite you
+  relied on skipped) → the counts are zero, `passed` follows the FN count as
+  today, and a `DD · could not execute: <exact denial>` finding names the
+  denial or the missing piece (for an offline install that fails on a new
+  dependency: `lockfile added packages not in store`). **Never an FN routed
+  to dev**: dev cannot fix a denied command or a missing `node_modules`. The
+  engine (once its check lands) refuses such a pass as infra.
 - **Never produce a zero-finding pass without having actually run every check.**
