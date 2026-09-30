@@ -47,6 +47,22 @@ export const RV = {
 
 export type RvColor = keyof typeof RV;
 
+/**
+ * The three `.rv-light-island` values a native foreign mark needs (issue #123).
+ *
+ * Provenance: `packages/ui/styles/entry.css`'s `.rv-light-island { --rv-*: … }`
+ * block — the web's rule that a third-party mark (Google's "G", a partner logo)
+ * sits on the LIGHT half even on a dark page. The phone is dark-only and `RV`
+ * mirrors only `.dark`, so the "Continue with Google" button reads its fill,
+ * label and border from here instead of hard-coding hex. `tokens.test.ts`
+ * guards these against the island block the same way it guards `RV`.
+ */
+export const RV_LIGHT_ISLAND = {
+  surface: "#ffffff",
+  ink: "#0f172a",
+  borderHi: "#cbd5e1",
+} as const;
+
 /** The five-category language (Stay / Eat / Do / Travel / Other). Mirrors
  * `categoryMeta` in @rv-trip/ui minus the icons, which are a DOM concern. */
 export type RvCategory = "Stay" | "Eat" | "Do" | "Travel" | "Other";

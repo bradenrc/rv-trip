@@ -9,6 +9,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.groupcaddie.tripcaddie",
+      "usesAppleSignIn": true,
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -31,6 +32,7 @@
     "plugins": [
       "expo-router",
       "@rnmapbox/maps",
+      "expo-apple-authentication",
       [
         "expo-location",
         {

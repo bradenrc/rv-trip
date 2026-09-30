@@ -1,6 +1,7 @@
 export * from "./domain/index";
 export * from "./providers/index";
 export * from "./planner/index";
+export * from "./auth/provider-outcome";
 export * from "./theme/tokens";
 export * from "./theme/map-palette";
 export * from "./capture/queue";

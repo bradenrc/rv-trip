@@ -176,10 +176,12 @@ describe("mobile auth · app/sign-in.tsx is the email → code screen", () => {
     expect(signIn).toContain("Use a different email");
   });
 
-  it("runs Clerk's email_code strategy — no password, no OAuth", () => {
+  // #123 added Apple + Google above the email step (guarded in
+  // mobile-sso.test.ts); the email path itself stays passwordless.
+  it("runs Clerk's email_code strategy — no password", () => {
     expect(signIn).toMatch(/strategy: "email_code"/);
     expect(signIn).not.toMatch(/password/i);
-    expect(signIn).not.toMatch(/useSSO|useOAuth/);
+    expect(signIn).not.toMatch(/useOAuth/);
   });
 
   it("is composed from the existing kit, not from new styled primitives", () => {
