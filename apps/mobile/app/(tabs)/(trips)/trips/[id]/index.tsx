@@ -41,9 +41,9 @@ import {
   HopBookingSheet,
   HopRow,
   MODE_OPTIONS,
-  RoundTripSheet,
   switchHop,
 } from "../../../../../src/hops";
+import { RoundTripSheet } from "../../../../../src/round-trip";
 import {
   AddIdeaSheet,
   AddSheet,

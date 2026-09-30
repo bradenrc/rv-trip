@@ -7,7 +7,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -32,10 +31,8 @@ import {
   instantToLocal,
   localToInstant,
   zoneChoices,
-  boundaryFlightsBody,
-  mirrorReturnDraft,
 } from "@rv-trip/core";
-import { addHopBooking, saveBoundaryFlights, setHopMode } from "./store";
+import { addHopBooking, setHopMode } from "./store";
 import { C, F, R } from "./theme";
 import { Button, Chip, Segmented, type SegmentedOption } from "./ui";
 
@@ -371,104 +368,6 @@ export function HopBookingSheet({
   );
 }
 
-/**
- * #129 · Q10 A — Add flight from the trip's + Add: the two boundary hops in one
- * save. Round trip is ON by default; the return opens with the outbound's
- * airports mirrored and the trip's last day. The same core helpers as the web
- * sheet (`boundaryFlightsBody`, `mirrorReturnDraft`).
- */
-export function RoundTripSheet({ trip, onClose }: { trip: Trip; onClose: () => void }) {
-  const [roundTrip, setRoundTrip] = useState(true);
-  const [out, setOut] = useState<HopBookingDraft>(() => ({
-    ...blankHopDraft("flight"),
-    departs: `${trip.startDate} `,
-    arrives: `${trip.startDate} `,
-  }));
-  const [back, setBack] = useState<HopBookingDraft>(() => mirrorReturnDraft(out, trip.endDate));
-  const [touched, setTouched] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const dest = trip.destination?.name ?? trip.legs.flatMap((l) => l.stops)[0]?.place.name ?? "";
-
-  const setOutbound = (patch: Partial<HopBookingDraft>) => {
-    const next = { ...out, ...patch };
-    setOut(next);
-    if (!touched && ("from" in patch || "to" in patch)) {
-      setBack((b) => ({ ...b, from: next.to, to: next.from, fromZone: next.toZone, toZone: next.fromZone }));
-    }
-  };
-  const body = boundaryFlightsBody(roundTrip, out, roundTrip ? back : null);
-  const save = async () => {
-    if (!body || saving) return;
-    setSaving(true);
-    try {
-      await saveBoundaryFlights(trip.id, body);
-      onClose();
-    } catch {
-      setSaving(false);
-      failed(trip.homeBase ? "Those flights" : "Set a home base first — those flights");
-    }
-  };
-  const leg = (title: string, d: HopBookingDraft, set: (p: Partial<HopBookingDraft>) => void, mirror = false) => {
-    const zones = hopDraftZones(d);
-    return (
-      <View style={[styles.leg, mirror && { borderStyle: "dashed" }]}>
-        <Label>{title}</Label>
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          <View style={{ flex: 1.2 }}>
-            <Input mono value={d.label} onChangeText={(label) => set({ label })} placeholder="AS 2291" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Input mono value={d.from} onChangeText={(from) => set({ from, fromZone: null })} placeholder="BOI" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Input mono value={d.to} onChangeText={(to) => set({ to, toZone: null })} placeholder="BLI" />
-          </View>
-        </View>
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          <View style={{ flex: 1 }}>
-            <Input mono value={d.departs} onChangeText={(departs) => set({ departs })} placeholder="2026-10-10 07:05" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Input mono value={d.arrives} onChangeText={(arrives) => set({ arrives })} placeholder="2026-10-10 08:10" />
-          </View>
-        </View>
-        {(zones.from.zone === null && zones.from.code !== "") || (zones.to.zone === null && zones.to.code !== "") ? (
-          <Text style={[styles.pm, { color: C.warning }]}>An airport we don’t know — add this leg on its hop to pick a zone.</Text>
-        ) : null}
-      </View>
-    );
-  };
-  return (
-    <Sheet visible onClose={onClose}>
-      <Text style={styles.st}>✈ Add flight</Text>
-      <Text style={styles.pm}>Home {roundTrip ? "⇄" : "→"} {dest}</Text>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Switch value={roundTrip} onValueChange={setRoundTrip} trackColor={{ true: C.green, false: C.borderHi }} />
-        <Text style={{ color: C.ink, fontWeight: "700", fontSize: 12 }}>Round trip</Text>
-        <Text style={[styles.pm, { marginLeft: "auto" }]}>both hops</Text>
-      </View>
-      {leg("Out", out, setOutbound)}
-      {roundTrip && (
-        <>
-          {leg(
-            "Return",
-            back,
-            (p) => {
-              if ("from" in p || "to" in p) setTouched(true);
-              setBack((b) => ({ ...b, ...p }));
-            },
-            true,
-          )}
-          <Text style={styles.pm}>↺ airports mirrored · return = trip’s last day · edit either later</Text>
-        </>
-      )}
-      <Button onPress={() => void save()} disabled={!body || saving}>
-        {roundTrip ? "Save both flights" : "Save flight"}
-      </Button>
-    </Sheet>
-  );
-}
-
 export function Label({ children }: { children: ReactNode }) {
   return <Text style={styles.fl}>{children}</Text>;
 }
@@ -592,3 +491,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
 });
+
+/** Shared with `round-trip.tsx`: the Round trip sheet lives there so it can use
+ * itinerary's PlaceSearchField without an import cycle (#142). */
+export const sheetStyles = styles;

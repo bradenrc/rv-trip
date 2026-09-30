@@ -167,3 +167,97 @@ Only item i3 is in this dispatch. i1 and i2 (above) had already landed and were 
 - Vet FLAG i3 (render-required): this needs a live Places key that returns `primaryType` for real
   lodging, campground and rv_park results. If the key returns none, every pick falls back and the
   chip reads "<default> · change".
+
+---
+
+# #138 dev notes: item i4 of 5 (#142 · Q4 C · Q5 A). Home base: an amber chip in Add flight, a Home base row on the Rig screen, and honest 409 copy
+
+Only item i4 is in this dispatch. i1–i3 (above) had already landed and were not changed.
+
+## What changed
+
+- `packages/core/src/domain/boundary-flights.ts`:
+  - :164 `roundTripSavable(trip, body)`: true only when there is a savable body **and**
+    `trip.homeBase !== null`.
+  - :169 `NO_HOME_BASE_COPY = "Set a home base first."`.
+  - :177 `isNoHomeBaseRefusal(e)`: true only for status 409 with body `{ error: "no_home_base" }`.
+    It checks the shape structurally, so the domain never imports the api-client's `ApiError`. The
+    test uses a real `ApiError`.
+- `packages/core/src/domain/prefs.ts`:
+  - :159 `homeBaseRowValue(prefs)` returns "Boise, ID ›", or "set one ›" when there is none.
+  - :169 `householdHomeBasePatch(pick)` returns `{ homeBasePlace: {name, lat, lng, googlePlaceId} }`.
+    A pick's extras (address, primaryType) are dropped.
+- **`apps/mobile/src/round-trip.tsx` (new). RoundTripSheet moved here out of `hops.tsx`.** The
+  sheet needs itinerary's `PlaceSearchField`, and `itinerary.tsx` already imports from `hops.tsx`.
+  Importing it back into hops would create the app's first `src/` import cycle, which Metro flags
+  with a "Require cycle" warning. The body is the old sheet unchanged, plus:
+  - :118-133 when `trip.homeBase === null`: `<Chip warn>🏠 no home base yet · set one</Chip>` and
+    the line "Round-trip flights start and end at home." sit under "Home ⇄ …". Tapping the chip
+    swaps both for `<Label>Home base</Label>` + `PlaceSearchField anchor={null}`.
+  - :71 `pickHome` calls `api.prefs.put(householdHomeBasePatch(p))`, then `loadBundle(trip.id)`.
+    The trip then re-reads with the household home base, so the chip goes away and Save turns on.
+    A failed PUT shows `failed("That home base")`.
+  - :154 Save is `disabled={!savable || saving}`, where `savable = roundTripSavable(trip, body)`.
+  - :67 catch: `isNoHomeBaseRefusal(e)` → `Alert.alert("Didn’t save", "Set a home base first.")`.
+    Every other failure shows `failed("Those flights")`. The string "Set a home base first — those
+    flights" no longer exists anywhere (grep checked).
+- `apps/mobile/src/hops.tsx`: RoundTripSheet and its now-unused imports (`Switch`,
+  `boundaryFlightsBody`, `mirrorReturnDraft`, `saveBoundaryFlights`) are removed. :497
+  `export const sheetStyles = styles` lets round-trip.tsx reuse `leg`/`pm`/`st` without copying
+  them.
+- `apps/mobile/src/itinerary.tsx:51`: `type Picked` is now exported (it is the onPick argument
+  type).
+- `apps/mobile/app/(tabs)/(trips)/trips/[id]/index.tsx:46`: RoundTripSheet is now imported from
+  `src/round-trip`.
+- `apps/mobile/app/rig.tsx`:
+  - :81 `HomeBaseRow`: a row card reading "🏠 Home base" / `homeBaseRowValue(prefs)`, loaded with
+    `api.prefs.get`. Tapping it toggles the same `Label` + `PlaceSearchField anchor={null}`, and a
+    pick writes `api.prefs.put(householdHomeBasePatch(p))` and shows the returned row. A failed
+    write shows `failed("That home base")`. The note under it reads "Where your trips start and
+    end. A trip can override it in Edit ▸ Starts from." (mono 10.5 inkFaded, the sheet `pm`
+    look).
+  - :55 rig branch: `<HomeBaseRow />` sits directly under `<AccountCard />`.
+  - :30-40 `rig === null` branch: this used to be only the centered "No rig yet" block. It is now
+    a ScrollView with AccountCard, then HomeBaseRow, then the unchanged "No rig yet" copy
+    (marginTop 28, as in frame ⑤).
+  - The rig rows are still read-only.
+
+## Decisions / defaults (for qa)
+
+- **Frame ② is a crop.** Frame ① already leaves out the Round trip switch, so while the search is
+  open I kept the switch and both legs rendered and swapped out only the chip and its line. Hiding
+  them would lose nothing (state persists), but it would be a redesign the frames don't clearly
+  ask for.
+- Before prefs load, the Rig row shows no value (not "set one ›"), so a slow GET never falsely
+  claims there is no home base. If the GET fails, the value stays blank and the row can still be
+  tapped.
+- Setting the household home base from the Rig screen doesn't refresh trip bundles that are already
+  cached. The Add flight chip path does, through `loadBundle`. Trips re-read on their next load.
+
+## Tests / checks (ran)
+
+- New `packages/core/src/domain/home-base-142.test.ts` (11 tests). It covers `roundTripSavable`
+  (no home base → false even with a body), `isNoHomeBaseRefusal` (409 no_home_base only; not another
+  409, a 400, a network error or a null body), `NO_HOME_BASE_COPY`, `homeBaseRowValue` and
+  `householdHomeBasePatch` (it parses against the `.strict()` `userPrefsPatch`). Red first:
+  `Tests 11 failed (11)`. Then green.
+- `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total` (core 1312 passed, web 393,
+  ui 48).
+- `apps/mobile` `npx tsc --noEmit`: `MOBILE_TSC_OK`.
+- **Not covered by an executing test:** the JSX, meaning chip render/tap, the dimmed Save, the Rig row
+  in both branches, and the alert. `apps/mobile` has no test runner. The logic those parts call is in
+  core and tested there. The evidence for the JSX is typecheck plus the walk.
+
+## For the walk
+
+- Phone, on a trip with no trip or household home base (e.g. clear the household one with
+  `PUT /api/prefs {"homeBasePlace":null}` on a trip that has no override):
+  - Open + Add ▸ Add flight. You should see the amber chip and the line, and "Save both flights"
+    should be dimmed even with both legs filled.
+  - Tap the chip, search "boise" and pick Boise. The chip should go away and Save should turn on.
+- The Rig link should show "🏠 Home base · Boise, ID ›" under Account. Tap it and pick another place.
+  The value should update.
+- On a household with no rig, the Rig screen should show Account, Home base and then "No rig yet".
+- The 409 safety net is hard to reach from the UI now that Save waits. To force it, clear the home
+  base on the server while the sheet is open, then Save. You should see "Didn’t save / Set a home
+  base first." and nothing else.

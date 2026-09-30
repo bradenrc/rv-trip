@@ -48,7 +48,7 @@ import { Button, CategoryTile, Chip, RangePicker, Segmented } from "./ui";
 
 const TILE: Record<IdeaCategory, ReservationType> = { do: "activity", eat: "dining", stay: "lodging" };
 
-type Picked = {
+export type Picked = {
   name: string;
   lat: number | null;
   lng: number | null;
