@@ -24,6 +24,11 @@ import type {
   Trip,
   TripDateRange,
   TripSettingsDraft,
+  BoundaryFlightsBody,
+  DateSpan,
+  Place,
+  ReservationPatchInput,
+  SegmentBookingsChoice,
 } from "@rv-trip/core";
 import {
   UNDO_WINDOW_MS,
@@ -40,7 +45,9 @@ import {
   ideaRestoreInput,
   isScheduled,
   LOCATE_MAX_ROWS,
-  nearOf,
+  searchAnchor,
+  resolveHomeBase,
+  editSegmentBooking,
   locateToastMessage,
   legCascadeCounts,
   nextLegTitle,
@@ -67,12 +74,23 @@ import {
   tripSettingsPatch,
   unscheduleStopPatch,
 } from "@rv-trip/core";
-import { CategoryTile, FieldLabel, Stars, ideaCategoryMeta, ideaCategoryOfType } from "@rv-trip/ui";
+import {
+  CategoryTile,
+  FieldLabel,
+  RangePicker,
+  SegmentedControl,
+  Stars,
+  ideaCategoryMeta,
+  ideaCategoryOfType,
+} from "@rv-trip/ui";
 import {
   Binoculars,
   BookOpen,
   Compass,
   House,
+  Bed,
+  Lightbulb,
+  Plane,
   CalendarDays,
   ChevronDown,
   CircleAlert,
@@ -103,7 +121,6 @@ import {
   attachIdeaToStop,
   detachIdeaToShelf,
   ideaShelf,
-  planIdeaOnGap,
   removeIdea,
   removeShelfIdea,
   setShelfIdeaFields,
@@ -130,6 +147,7 @@ import {
   setIdeaNote,
   scheduleFloating,
   reorderFloating,
+  updateStop,
   type NavMap,
   type RouteMap,
   type ShelfFilter,
@@ -171,6 +189,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { MENU_ITEM, MENU_ITEM_WARN, MENU_SURFACE, MenuHint, RowMenu } from "./row-menu";
@@ -182,6 +201,10 @@ import { NearbySavesBanner, NearbySavesSheet, sheetRows } from "./NearbySaves";
 import { JournalLens } from "./JournalLens";
 import { LastTimeHere } from "./LastTimeHere";
 import { LodgingCards, RigCards, TripModeCards } from "./choice-cards";
+import { IdeasLens, maybeCount } from "./IdeasLens";
+import { AddStaySheet } from "./AddStaySheet";
+import { AddFlightSheet } from "./AddFlightSheet";
+import { HopModePrompt } from "./HopModePrompt";
 
 
 /**
@@ -203,6 +226,7 @@ export function TripPlanner({
   savedPlaces = [],
   nearby: initialNearby,
   nextTime: initialNextTime = { cards: [], saveIds: [] },
+  householdHome = null,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -241,6 +265,12 @@ export function TripPlanner({
    * server seam. Defaulted to no cards, so a caller without it renders none.
    */
   nextTime?: ForNextTime;
+  /**
+   * #126 · Q5 A — the household home base (`user_prefs.home_base*`), read on
+   * the same server seam. Trip settings' "Use household default" falls back to
+   * it optimistically, the way `getTripById` coalesces on the next read.
+   */
+  householdHome?: Place | null;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
@@ -249,13 +279,27 @@ export function TripPlanner({
   // Route, a fly trip on Timeline. #113 · Q4 B: a traveled trip (status
   // `complete`, the dashboard's "Traveled") opens on its Journal. Derived,
   // never stored — the Traveled card's /trips/[id] href is the deep-link.
-  const [lens, setLens] = useState<"timeline" | "route" | "journal">(
-    initialTrip.status === "complete"
-      ? "journal"
-      : initialTrip.defaultMode === "drive"
-        ? "route"
-        : "timeline",
+  // #131 · Q1 A · Q2 A — three MINDSET tabs: Itinerary · Ideas · Journal.
+  // The old lenses are Itinerary's sub-lens. The derivation is kept: a
+  // traveled trip opens on Journal; otherwise Itinerary, on Route for a drive
+  // trip and Timeline for a fly trip.
+  const [tab, setTab] = useState<"itinerary" | "ideas" | "journal">(
+    initialTrip.status === "complete" ? "journal" : "itinerary",
   );
+  const [sub, setSub] = useState<"route" | "timeline">(
+    initialTrip.defaultMode === "drive" ? "route" : "timeline",
+  );
+  const lens = tab === "itinerary" ? sub : tab;
+  const showRoute = () => {
+    setTab("itinerary");
+    setSub("route");
+  };
+  /** #128 · the Add stay sheet — `stopId` null is Itinerary ▸ Add ▸ Stay. */
+  const [staySheet, setStaySheet] = useState<{ stopId: string | null } | null>(null);
+  /** #129 · the Add flight (round trip) sheet. */
+  const [flightSheetOpen, setFlightSheetOpen] = useState(false);
+  /** #129 · Q11 A — the keep-or-remove prompt for Fly → Drive. */
+  const [modePrompt, setModePrompt] = useState<{ segmentId: string; mode: TravelMode } | null>(null);
   /** #113 · the "Last time here" cards; a row's Add marks it "On shelf ✓". */
   const [nextTime, setNextTime] = useState(initialNextTime);
   /** The hop whose Add flight / Add ferry form is open (#104 · Q5 A). */
@@ -481,6 +525,7 @@ export function TripPlanner({
   /** One branch of "+ Add" opens the draft; opening it closes the other two
    * surfaces a maybe can be created from. */
   const openAddIdea = (category: IdeaCategory) => {
+    setTab("ideas");
     setDraftLegId(null);
     setPlacesPanelOpen(false);
     setShelfDraft("");
@@ -643,11 +688,18 @@ export function TripPlanner({
    * the last stop, falling back to the last leg: the "goes on the end" rule
    * every create here already follows.
    */
-  const doPlanIdea = async (ideaId: string, gap: TimelineGap) => {
+  /**
+   * #131 · Plan it on a STAY idea (vet MED): the Ideas tab has no gantt to
+   * drop on, so the RangePicker's pick is the date range — the same create +
+   * attach + Undo the drop does, with the dates handed in rather than read off
+   * a `TimelineGap`.
+   */
+  const planIdeaOnDates = async (
+    ideaId: string,
+    dates: { arriveDate: string; departDate: string },
+  ) => {
     const it = trip.ideas.find((i) => i.id === ideaId);
     if (!it) return;
-    const dates = planIdeaOnGap(trip, gap);
-    if (!dates) return;
     const legId = legOrder(trip).at(-1);
     if (!legId) return;
     const undo = trip;
@@ -697,25 +749,38 @@ export function TripPlanner({
     }
   };
 
-  /** Gesture 2 · a DO/EAT idea dropped on a stop bar. It leaves the shelf and
-   * appears under that stop. Status is untouched: attaching is not planning. */
-  const doAttachIdea = (ideaId: string, stopId: string) => {
+  /** #131 · Plan it on a do/eat idea: it goes to the stop you pick AND is
+   * planned — so it lands on the Itinerary, which lists knowns only. */
+  const planIdeaToStop = (ideaId: string, stopId: string) => {
     const it = trip.ideas.find((i) => i.id === ideaId);
     const stop = byId.get(stopId);
     if (!it || !stop) return;
     const undo = trip;
-    setTrip(attachIdeaToStop(trip, ideaId, stopId));
-    persist(
-      tripApi.updateIdea(ideaId, { stopId }),
-      undo,
-      `Couldn't move ${it.title} — it's back on the shelf.`,
+    const attached = attachIdeaToStop(trip, ideaId, stopId);
+    setTrip(
+      updateStopIdeas(attached, stopId, (x) => (x.id === ideaId ? { ...x, status: "planned" } : x)),
     );
-    toast.success(`${it.title} → ${stop.place.name}`, {
-      action: {
-        label: "Undo",
-        onClick: () => doDetachIdea(ideaId),
-      },
-    });
+    persist(
+      tripApi.updateIdea(ideaId, { stopId, status: "planned" }),
+      undo,
+      `Couldn't plan ${it.title} — it's back on Ideas.`,
+    );
+    toast.success(`Planned ${it.title} · ${stop.place.name}`);
+  };
+
+  /** #131 · Plan it on an idea already pinned to a stop — and the pinned row's
+   * pill. Both are the stop idea's status write. */
+  const setPinnedIdeaStatus = (stopId: string, ideaId: string, next: (s: Idea["status"]) => Idea["status"]) => {
+    const it = byId.get(stopId)?.ideas.find((x) => x.id === ideaId);
+    if (!it) return;
+    const status = next(it.status);
+    const undo = trip;
+    setTrip(updateStopIdeas(trip, stopId, (x) => (x.id === ideaId ? { ...x, status } : x)));
+    persist(
+      tripApi.updateIdea(ideaId, { status }),
+      undo,
+      `Couldn't change ${it.title} — put back the way it was.`,
+    );
   };
 
   /** Gesture 3 · an ATTACHED idea goes back to the shelf. Legal only now that
@@ -863,7 +928,7 @@ export function TripPlanner({
     try {
       const leg = await tripApi.createLeg({ tripId: trip.id, title: nextLegTitle(trip) });
       setTrip((t) => appendLeg(t, leg));
-      setLens("route");
+      showRoute();
       setRenamingId(leg.id);
     } catch {
       toast.error("Couldn't add a leg — nothing was created.");
@@ -920,7 +985,7 @@ export function TripPlanner({
    * that no patch could ever repair.
    */
   const openDraftStop = (legId: string) => {
-    setLens("route");
+    showRoute();
     setPlacingStopId(null);
     setDraftLegId(legId);
   };
@@ -1000,22 +1065,25 @@ export function TripPlanner({
     );
   };
 
-  /** The stop-dates dialog's Save. Both dates travel together. */
-  const saveStopDates = (stopId: string, draft: StopDatesDraft) => {
+  /** The stop-dates dialog's Save. Both dates travel together. #127 · Q7 B:
+   * with "Extend trip" pressed, the trip's dates move first, in the same save. */
+  const saveStopDates = (stopId: string, draft: StopDatesDraft, extend: DateSpan | null = null) => {
     setDatesStopId(null);
     const stop = byId.get(stopId);
     if (!stop) return;
     const patch = stopDatesPatch(stop, draft);
     if (patch === null || Object.keys(patch).length === 0) return;
     const undo = trip;
-    const next = setStopDates(trip, stopId, patch.arriveDate ?? null, patch.departDate ?? null);
+    const widened = extend ? { ...trip, startDate: extend.start, endDate: extend.end } : trip;
+    const next = setStopDates(widened, stopId, patch.arriveDate ?? null, patch.departDate ?? null);
     setTrip(next);
     upgradeRoutes(next);
-    persist(
-      tripApi.updateStop(stopId, patch),
-      undo,
-      `Couldn't save those dates — ${stop.place.name} is back where it was.`,
-    );
+    const write = extend
+      ? tripApi
+          .updateTrip(trip.id, { startDate: extend.start, endDate: extend.end })
+          .then(() => tripApi.updateStop(stopId, patch))
+      : tripApi.updateStop(stopId, patch);
+    persist(write, undo, `Couldn't save those dates — ${stop.place.name} is back where it was.`);
   };
 
   /** One PATCH setting BOTH dates to null: the stop drops back to floating. */
@@ -1085,7 +1153,27 @@ export function TripPlanner({
     const undo = trip;
     // A home base set or cleared adds or drops the home → first hop; the server
     // reconciles in the same write, so the optimistic trip does too (#110 §6).
-    setTrip(withReconciledSegments({ ...trip, ...patch }));
+    // #126 · Q5 A — a cleared override reads the household default again.
+    const merged = { ...trip, ...patch };
+    const home =
+      patch.homeBase !== undefined
+        ? resolveHomeBase(
+            { homeBase: patch.homeBase ?? null, homeBasePlace: patch.homeBasePlace ?? null },
+            householdHome,
+          )
+        : null;
+    setTrip(
+      withReconciledSegments(
+        home
+          ? {
+              ...merged,
+              homeBase: home.homeBase,
+              homeBasePlace: home.homeBasePlace,
+              homeBaseFromHousehold: home.fromHousehold,
+            }
+          : merged,
+      ),
+    );
     persist(
       tripApi.updateTrip(trip.id, patch),
       undo,
@@ -1274,24 +1362,126 @@ export function TripPlanner({
   /** Drive / Fly / Ferry — `PATCH /api/segments/:id`, optimistic. A drive that
    * flies leaves `drivePairs`, taking its Navigate, rail miles and HERE call
    * with it; a hop driven again is routed in the background. */
-  const doSetHopMode = (segmentId: string, mode: TravelMode) => {
+  const doSetHopMode = (segmentId: string, mode: TravelMode, bookings?: SegmentBookingsChoice) => {
     const seg = trip.segments.find((s) => s.id === segmentId);
     if (!seg || seg.mode === mode) return;
-    if (mode === "drive" && seg.reservations.length > 0) {
-      // The server refuses it too (409 segment_has_bookings, vet MED).
-      toast.error("Remove this hop's bookings before switching it to Drive.");
+    // #129 · Q11 A — flights on a hop going to Drive: ask, don't refuse (the
+    // toast that used to stand here is gone — vet MED 3).
+    if (mode === "drive" && seg.reservations.length > 0 && bookings === undefined) {
+      setModePrompt({ segmentId, mode });
       return;
     }
     const undo = trip;
-    const next = setSegmentMode(trip, segmentId, mode);
+    const next = setSegmentMode(trip, segmentId, mode, bookings ?? "keep");
     setTrip(next);
     if (mode === "drive") upgradeRoutes(next);
     else setOpenHopId(null);
     persist(
-      tripApi.updateSegment(segmentId, { mode }),
+      tripApi.updateSegment(segmentId, bookings ? { mode, bookings } : { mode }),
       undo,
       "Couldn't change how that hop travels — put back the way it was.",
     );
+  };
+
+  /** #124 · a hop booking's Edit — `PATCH` with its clock; the hop re-times.
+   * Awaited, not optimistic: a 409 (the new date misses the stop) keeps the
+   * form open with the old flight still on the card. */
+  const editHopBooking = async (resId: string, patch: ReservationPatchInput): Promise<boolean> => {
+    if (Object.keys(patch).length === 0) return true;
+    try {
+      await tripApi.updateReservation(resId, patch);
+      setTrip((t) =>
+        editSegmentBooking(t, resId, {
+          ...(patch.name !== undefined && { name: patch.name }),
+          ...(patch.startsAt !== undefined && { startsAt: patch.startsAt, startsTz: patch.startsTz ?? null }),
+          ...(patch.endsAt !== undefined && { endsAt: patch.endsAt, endsTz: patch.endsTz ?? null }),
+        }),
+      );
+      return true;
+    } catch {
+      toast.error("Couldn't save that flight — its date may disagree with the stop.");
+      return false;
+    }
+  };
+
+  /** #129 · Q10 A — both boundary flights in one save; the reply is the whole
+   * trip (the → home hop may be new), swapped in. */
+  const saveBoundaryFlights = async (body: BoundaryFlightsBody): Promise<boolean> => {
+    try {
+      const next = await tripApi.boundaryFlights(trip.id, body);
+      setTrip(next);
+      setFlightSheetOpen(false);
+      toast.success(body.roundTrip ? "Saved both flights" : "Saved the flight");
+      return true;
+    } catch {
+      toast.error(
+        trip.homeBase
+          ? "Couldn't save those flights — check their dates against the stop."
+          : "Set a home base first — flights go from home.",
+      );
+      return false;
+    }
+  };
+
+  /** #128 · Save stay. With no stop yet, the place and its nights BECOME the
+   * stop first (the trip's last leg), then the stay hangs on it. */
+  const saveStay = async (input: {
+    stopId: string | null;
+    place: PickedPlace;
+    draft: ReservationDraft;
+  }): Promise<boolean> => {
+    try {
+      let stopId = input.stopId;
+      let working = trip;
+      if (!stopId) {
+        const legId = legOrder(trip).at(-1);
+        const body = legId ? stopPlaceCreate(legId, input.place) : null;
+        if (!body) return false;
+        const created = await tripApi.createStop({
+          ...body,
+          arriveDate: input.draft.checkIn,
+          departDate: input.draft.checkOut,
+        });
+        working = appendStop(trip, created);
+        stopId = created.id;
+      }
+      const body = reservationDraftInput(stopId, input.draft);
+      if (!body) return false;
+      const row = await tripApi.createReservation(body);
+      const next = appendReservation(working, stopId, row);
+      setTrip(next);
+      upgradeRoutes(next);
+      setStaySheet(null);
+      toast.success(`Saved ${row.name}`);
+      return true;
+    } catch {
+      toast.error("Couldn't save that stay — nothing was saved.");
+      return false;
+    }
+  };
+
+  /** "Just considering? Save it as an idea instead." A picked place becomes a
+   * stay idea on the shelf; with nothing picked, the Ideas draft opens. */
+  const saveStayAsIdea = async (picked: PickedPlace | null) => {
+    setStaySheet(null);
+    if (!picked) {
+      openAddIdea("stay");
+      return;
+    }
+    try {
+      const created = await tripApi.createIdea({
+        tripId: trip.id,
+        stopId: null,
+        category: "stay",
+        title: picked.name,
+        status: "idea",
+        place: ideaPlace(picked),
+      });
+      setTrip((t) => appendShelfIdea(t, created));
+      toast.success(`Added ${picked.name} to this trip's ideas`);
+    } catch {
+      toast.error(`Couldn't add ${picked.name}.`);
+    }
   };
 
   /** Save flight / Save ferry — and, with `moveStop`, Q8 A's "Check out of …
@@ -1333,7 +1523,7 @@ export function TripPlanner({
    * that hop, and open its Add flight (or Add ferry) form. */
   const openHopFromTimeline = (segmentId: string) => {
     scrollHopId.current = segmentId;
-    setLens("route");
+    showRoute();
     setOpenHopId(segmentId);
   };
 
@@ -1369,6 +1559,7 @@ export function TripPlanner({
   };
 
   const dayCount = timeline.rhythm.length;
+  const ideaCount = maybeCount(trip);
 
   return (
     <div className="min-h-screen bg-rv-surface-alt font-sans text-rv-ink">
@@ -1389,6 +1580,16 @@ export function TripPlanner({
               />
             </h1>
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[15px] text-rv-ink-muted">
+              {/* #126 · Q4 A — where the trip is going leads the meta line. */}
+              {trip.destination && (
+                <>
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="size-4 text-rv-green" />
+                    {trip.destination.name}
+                  </span>
+                  <Dot />
+                </>
+              )}
               {trip.homeBase && (
                 <>
                   <span className="inline-flex items-center gap-1.5">
@@ -1422,122 +1623,152 @@ export function TripPlanner({
 
           <div className="flex w-full flex-wrap items-center gap-3 md:w-auto">
             <div className="inline-flex flex-1 rounded-rv-pill border border-rv-border bg-rv-surface p-[3px] md:flex-none">
-              <ToggleTab active={lens === "route"} onClick={() => setLens("route")}>
+              <ToggleTab active={tab === "itinerary"} onClick={() => setTab("itinerary")}>
                 <Route className="size-4" />
-                Route
+                Itinerary
               </ToggleTab>
-              <ToggleTab active={lens === "timeline"} onClick={() => setLens("timeline")}>
-                <ChartNoAxesGantt className="size-4" />
-                Timeline
+              <ToggleTab active={tab === "ideas"} onClick={() => setTab("ideas")}>
+                <Lightbulb className="size-4" />
+                Ideas
+                <small className="font-mono text-[11px] text-rv-ink-faded">{ideaCount}</small>
               </ToggleTab>
-              <ToggleTab active={lens === "journal"} onClick={() => setLens("journal")}>
+              <ToggleTab active={tab === "journal"} onClick={() => setTab("journal")}>
                 <BookOpen className="size-4" />
                 Journal
               </ToggleTab>
             </div>
             <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
-            {/* ONE add verb that BRANCHES (#80 Q5 → C). The masthead used to
-                offer "Add stop" and nothing else, which made a stop the only
-                thing you could put on a trip; a maybe is the earlier thought,
-                so the three idea kinds come first and the stop is the fourth
-                item. It still has no leg in hand, so a stop appends to the LAST
-                one — the same "goes on the end" rule every create here follows.
-                A trip always has a leg: createTrip seeds "Leg 1". */}
-            <DropdownMenu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
-              <DropdownMenuTrigger
-                disabled={trip.legs.length === 0}
-                className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
-              >
-                <Plus className="size-4" />
-                Add
-                <ChevronDown className="size-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className={MENU_SURFACE}>
-                <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("do")}>
-                  <Binoculars />
-                  Something to do
-                  <MenuHint>idea</MenuHint>
-                </DropdownMenuItem>
-                <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("eat")}>
-                  <Utensils />
-                  Somewhere to eat
-                  <MenuHint>idea</MenuHint>
-                </DropdownMenuItem>
-                <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("stay")}>
-                  <Tent />
-                  Somewhere to stay
-                  <MenuHint>idea</MenuHint>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className={MENU_ITEM}
-                  onSelect={() => {
-                    const legId = legOrder(trip).at(-1);
-                    if (legId) openDraftStop(legId);
-                  }}
+            {/* #131 · the Add verb keeps its shipped trigger and offers only
+                what fits the tab: Itinerary adds KNOWNS (a flight, a stay, a
+                stop), Ideas adds MAYBES (the three idea kinds, or a copy from
+                your Places). On Journal it is hidden — the Journal lens (#113)
+                keeps its own per-row "How was it?". A stop still has no leg in
+                hand, so it appends to the LAST one; createTrip seeds "Leg 1". */}
+            {tab !== "journal" && (
+              <DropdownMenu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
+                <DropdownMenuTrigger
+                  disabled={trip.legs.length === 0}
+                  className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
                 >
-                  <MapPin />
-                  A stop
-                  <MenuHint>on the plan</MenuHint>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <Plus className="size-4" />
+                  Add
+                  <ChevronDown className="size-3.5" />
+                </DropdownMenuTrigger>
+                {tab === "itinerary" ? (
+                  <DropdownMenuContent align="end" className={MENU_SURFACE}>
+                    <MenuHead>Add to Itinerary · the knowns</MenuHead>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => setFlightSheetOpen(true)}>
+                      <Plane />
+                      Flight
+                      <MenuHint>round trip on</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => setStaySheet({ stopId: null })}>
+                      <Bed />
+                      Stay
+                      <MenuHint>hotel · campground · friends</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className={MENU_ITEM}
+                      onSelect={() => {
+                        const legId = legOrder(trip).at(-1);
+                        if (legId) openDraftStop(legId);
+                      }}
+                    >
+                      <MapPin />
+                      A stop
+                      <MenuHint>on the plan</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border-soft" />
+                    <MenuHead>Not sure yet?</MenuHead>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => setTab("ideas")}>
+                      <span className="font-medium text-rv-ink-faded">Switch to Ideas →</span>
+                      <MenuHint>idea · save</MenuHint>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                ) : (
+                  <DropdownMenuContent align="end" className={MENU_SURFACE}>
+                    <MenuHead>Add to Ideas · the maybes</MenuHead>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("do")}>
+                      <Binoculars />
+                      Something to do
+                      <MenuHint>idea</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("eat")}>
+                      <Utensils />
+                      Somewhere to eat
+                      <MenuHint>idea</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => openAddIdea("stay")}>
+                      <Tent />
+                      Somewhere to stay
+                      <MenuHint>idea</MenuHint>
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border-soft" />
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => setPlacesPanelOpen(true)}>
+                      <Library />
+                      Add from Places
+                      <MenuHint>your saves</MenuHint>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                )}
+              </DropdownMenu>
+            )}
           </div>
         </div>
 
-        {/* The shelf's "+ Add" draft and the Add-from-Places panel both open
-            ABOVE the two lenses: a maybe belongs to the trip, not to a lens. */}
-        {/* #111 i4 · the saves near this trip. Above the lenses with the
-            Add-from-Places panel — a save belongs to the trip, not a lens —
-            and beside that entrance, never instead of it. */}
-        {/* #113 · #107 "Last time here" — directly above W1's banner, whose
-            count already leaves the card's saves out. */}
-        <LastTimeHere nextTime={nextTime} onAdd={(row) => void addNextTime(row)} />
-        <NearbySavesBanner nearby={nearby} onOpen={openNearby} onDismiss={dismissNearby} />
-        {nearbyOpen && (
-          <NearbySavesSheet
-            tripTitle={trip.title}
-            nearby={nearby}
-            rows={sheetRows(nearby.items, nearbyAdded)}
-            added={new Set(nearbyAdded.map((i) => i.saveId))}
-            onAdd={(item) => void addNearby(item)}
-            onAddAll={() => void addAllNearby()}
-            onRadius={setSurfaceRadius}
-            onClose={closeNearby}
-          />
-        )}
-        {addIdeaCategory && (
-          <ShelfIdeaDraft
-            category={addIdeaCategory}
-            title={shelfDraft}
-            picked={shelfPicked}
-            near={nearOf(allStops(trip).at(-1)?.place, trip.homeBasePlace)}
-            onTitle={setShelfDraft}
-            onPicked={setShelfPicked}
-            onSave={() => void submitShelfIdea()}
-            onCancel={() => {
-              setAddIdeaCategory(null);
-              setShelfDraft("");
-              setShelfPicked(null);
-            }}
-          />
-        )}
-        {placesPanelOpen && (
-          <AddFromPlacesPanel
-            places={savedPlaces}
-            onAdd={(p) => void addIdeaFromPlace(p)}
-            onClose={() => setPlacesPanelOpen(false)}
-          />
-        )}
-
-        {lens === "journal" ? (
+        {tab === "journal" ? (
           <JournalLens trip={trip} onRateTrip={rateTrip} onNoteTrip={noteTrip} />
-        ) : lens === "timeline" ? (
-          <Timeline
-            model={timeline}
+        ) : tab === "ideas" ? (
+          <IdeasLens
+            trip={trip}
             shelf={shelf}
             shelfFilter={shelfFilter}
             onShelfFilter={setShelfFilter}
-            onOpenStop={openStop}
+            top={
+              <>
+                {/* #131 · the maybes moved here from above the lenses:
+                    "Last time here" (#113 · #107), the saves near this trip
+                    (#111 i4), and the two ways a maybe is created. */}
+                <LastTimeHere nextTime={nextTime} onAdd={(row) => void addNextTime(row)} />
+                <NearbySavesBanner nearby={nearby} onOpen={openNearby} onDismiss={dismissNearby} />
+                {nearbyOpen && (
+                  <NearbySavesSheet
+                    tripTitle={trip.title}
+                    nearby={nearby}
+                    rows={sheetRows(nearby.items, nearbyAdded)}
+                    added={new Set(nearbyAdded.map((i) => i.saveId))}
+                    onAdd={(item) => void addNearby(item)}
+                    onAddAll={() => void addAllNearby()}
+                    onRadius={setSurfaceRadius}
+                    onClose={closeNearby}
+                  />
+                )}
+                {addIdeaCategory && (
+                  <ShelfIdeaDraft
+                    category={addIdeaCategory}
+                    title={shelfDraft}
+                    picked={shelfPicked}
+                    near={searchAnchor(trip, { kind: "ideas" })}
+                    onTitle={setShelfDraft}
+                    onPicked={setShelfPicked}
+                    onSave={() => void submitShelfIdea()}
+                    onCancel={() => {
+                      setAddIdeaCategory(null);
+                      setShelfDraft("");
+                      setShelfPicked(null);
+                    }}
+                  />
+                )}
+                {placesPanelOpen && (
+                  <AddFromPlacesPanel
+                    places={savedPlaces}
+                    onAdd={(p) => void addIdeaFromPlace(p)}
+                    onClose={() => setPlacesPanelOpen(false)}
+                  />
+                )}
+              </>
+            }
+            onAddFromPlaces={() => setPlacesPanelOpen((v) => !v)}
             onCycleIdea={cycleShelfIdeaStatus}
             onLocateIdea={(id) => setLocatingShelfIdeaId(id)}
             onRateIdea={setShelfIdeaRating}
@@ -1551,15 +1782,10 @@ export function TripPlanner({
                     setLocatingShelfIdeaId(null);
                     if (picked) doLocateShelfIdea(it.id, picked);
                   }}
-                  near={nearOf(allStops(trip).at(-1)?.place, trip.homeBasePlace)}
+                  near={searchAnchor(trip, { kind: "ideas" })}
                 />
               ) : undefined
             }
-            onSchedule={doSchedule}
-            onPlanIdea={(ideaId, gap) => void doPlanIdea(ideaId, gap)}
-            onAttachIdea={doAttachIdea}
-            onAddFromPlaces={() => setPlacesPanelOpen((v) => !v)}
-            onOpenHop={openHopFromTimeline}
             ideaActions={(it) => (
               <RowMenu label={`Actions for ${it.title}`}>
                 {/* #74 · place-state 3 only. A coordless or place-less shelf
@@ -1596,82 +1822,117 @@ export function TripPlanner({
                 </DropdownMenuItem>
               </RowMenu>
             )}
+            onCyclePinned={(stopId, ideaId) =>
+              setPinnedIdeaStatus(stopId, ideaId, (st) =>
+                st === "idea" ? "planned" : st === "planned" ? "done" : "idea",
+              )
+            }
+            onPlanStay={(ideaId, span) =>
+              void planIdeaOnDates(ideaId, { arriveDate: span.start, departDate: span.end })
+            }
+            onPlanToStop={planIdeaToStop}
+            onPlanPinned={(stopId, ideaId) => setPinnedIdeaStatus(stopId, ideaId, () => "planned")}
           />
         ) : (
-          <RouteView
-            legs={route}
-            trip={trip}
-            summary={summary}
-            homeBasePlace={trip.homeBasePlace}
-            costs={costTracking}
-            hasRig={hasRig}
-            units={units}
-            onOpenStop={openStop}
-            routeDrag={routeDrag}
-            actions={{
-              renamingId,
-              // Renaming and changing the place are two editors for one row;
-              // opening either closes the other.
-              onStartRename: (id) => {
-                setPlacingStopId(null);
-                setRenamingId(id);
-              },
-              onRenameDone: () => setRenamingId(null),
-              onRenameLeg: doRenameLeg,
-              onAddStop: openDraftStop,
-              onAddLeg: () => void addLeg(),
-              onMoveLeg: doMoveLeg,
-              canMoveLeg: (legId, delta) => canMoveLeg(trip, legId, delta),
-              onDeleteLeg: setDeleteLegId,
-              onRenameStop: doRenameStop,
-              onEditStopDates: setDatesStopId,
-              onUnscheduleStop: doUnschedule,
-              onMoveStopToLeg: doMoveStopToLeg,
-              onDeleteStop: setDeleteStopId,
-              draftLegId,
-              onPickDraftStop: (legId, picked) => void createStopFromPick(legId, picked),
-              onCancelDraftStop: () => setDraftLegId(null),
-              placingStopId,
-              onStartChangePlace: (stopId) => {
-                setDraftLegId(null);
-                setRenamingId(null);
-                setPlacingStopId(stopId);
-              },
-              onChangeStopPlace: doChangeStopPlace,
-              onCancelChangePlace: () => setPlacingStopId(null),
-              locating,
-              onLocate: locateUnmapped,
-              openHopId,
-              hops: {
-                onMode: doSetHopMode,
-                onOpenForm: setOpenHopId,
-                onSave: saveHopBooking,
-                onDelete: doDeleteHopBooking,
-              },
-            }}
-            onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
-            onRowDragEnd={() => setRouteDrag(null)}
-            onRowDrop={(legId, targetId) => {
-              if (routeDrag && routeDrag.legId === legId) {
-                const undo = trip;
-                const next = reorderFloating(trip, legId, routeDrag.stopId, targetId);
-                setTrip(next);
-                upgradeRoutes(next);
-                const leg = next.legs.find((l) => l.id === legId);
-                if (leg) {
-                  const order = [...leg.stops]
-                    .sort((a, b) => a.sortOrder - b.sortOrder)
-                    .map((s) => s.id);
-                  persist(
-                    tripApi.reorderLeg(legId, order),
-                    undo,
-                    "Couldn't save that order — put back the way it was.",
-                  );
-                }
-              }
-              setRouteDrag(null);
-            }}
-          />
+          <>
+            {/* #131 · Itinerary's sub-lens — the old Route · Timeline lenses,
+                on the DS SegmentedControl (mono). */}
+            <div className="mb-3.5">
+              <SegmentedControl
+                mono
+                value={sub}
+                onChange={setSub}
+                options={[
+                  { value: "route", label: "Route", Icon: Route },
+                  { value: "timeline", label: "Timeline", Icon: ChartNoAxesGantt },
+                ]}
+              />
+            </div>
+            {sub === "timeline" ? (
+              <Timeline
+                model={timeline}
+                onOpenStop={openStop}
+                onSchedule={doSchedule}
+                onOpenHop={openHopFromTimeline}
+              />
+            ) : (
+              <RouteView
+                legs={route}
+                trip={trip}
+                summary={summary}
+                costs={costTracking}
+                hasRig={hasRig}
+                units={units}
+                onOpenStop={openStop}
+                routeDrag={routeDrag}
+                actions={{
+                  renamingId,
+                  // Renaming and changing the place are two editors for one row;
+                  // opening either closes the other.
+                  onStartRename: (id) => {
+                    setPlacingStopId(null);
+                    setRenamingId(id);
+                  },
+                  onRenameDone: () => setRenamingId(null),
+                  onRenameLeg: doRenameLeg,
+                  onAddStop: openDraftStop,
+                  onAddLeg: () => void addLeg(),
+                  onMoveLeg: doMoveLeg,
+                  canMoveLeg: (legId, delta) => canMoveLeg(trip, legId, delta),
+                  onDeleteLeg: setDeleteLegId,
+                  onRenameStop: doRenameStop,
+                  onEditStopDates: setDatesStopId,
+                  onUnscheduleStop: doUnschedule,
+                  onMoveStopToLeg: doMoveStopToLeg,
+                  onDeleteStop: setDeleteStopId,
+                  draftLegId,
+                  onPickDraftStop: (legId, picked) => void createStopFromPick(legId, picked),
+                  onCancelDraftStop: () => setDraftLegId(null),
+                  placingStopId,
+                  onStartChangePlace: (stopId) => {
+                    setDraftLegId(null);
+                    setRenamingId(null);
+                    setPlacingStopId(stopId);
+                  },
+                  onChangeStopPlace: doChangeStopPlace,
+                  onCancelChangePlace: () => setPlacingStopId(null),
+                  locating,
+                  onLocate: locateUnmapped,
+                  openHopId,
+                  hops: {
+                    onMode: doSetHopMode,
+                    onOpenForm: setOpenHopId,
+                    onSave: saveHopBooking,
+                    onDelete: doDeleteHopBooking,
+                    onEdit: editHopBooking,
+                  },
+                  onAddStay: (stopId) => setStaySheet({ stopId }),
+                }}
+                onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
+                onRowDragEnd={() => setRouteDrag(null)}
+                onRowDrop={(legId, targetId) => {
+                  if (routeDrag && routeDrag.legId === legId) {
+                    const undo = trip;
+                    const next = reorderFloating(trip, legId, routeDrag.stopId, targetId);
+                    setTrip(next);
+                    upgradeRoutes(next);
+                    const leg = next.legs.find((l) => l.id === legId);
+                    if (leg) {
+                      const order = [...leg.stops]
+                        .sort((a, b) => a.sortOrder - b.sortOrder)
+                        .map((s) => s.id);
+                      persist(
+                        tripApi.reorderLeg(legId, order),
+                        undo,
+                        "Couldn't save that order — put back the way it was.",
+                      );
+                    }
+                  }
+                  setRouteDrag(null);
+                }}
+              />
+            )}
+          </>
         )}
       </div>
 
@@ -1742,7 +2003,12 @@ export function TripPlanner({
           }}
           ideaNoteOpen={ideaNoteOpen}
           placing={placingStopId === selectedStop.id}
-          placeNear={nearOf(stopAbove(trip, selectedStop.id)?.place, trip.homeBasePlace)}
+          placeNear={searchAnchor(trip, {
+            kind: "after",
+            stopId: stopAbove(trip, selectedStop.id)?.id ?? null,
+          })}
+          stopNear={searchAnchor(trip, { kind: "stop", stopId: selectedStop.id })}
+          tripSpan={{ start: trip.startDate, end: trip.endDate }}
           onStartChangePlace={() => setPlacingStopId(selectedStop.id)}
           onChangePlace={(picked) => doChangeStopPlace(selectedStop.id, picked)}
           onCancelChangePlace={() => setPlacingStopId(null)}
@@ -1896,15 +2162,55 @@ export function TripPlanner({
         onSave={saveStopDates}
         onUnschedule={doUnschedule}
       />
+
+      {staySheet && (
+        <AddStaySheet
+          trip={trip}
+          stopId={staySheet.stopId}
+          onClose={() => setStaySheet(null)}
+          onSave={saveStay}
+          onSaveIdea={(p) => void saveStayAsIdea(p)}
+        />
+      )}
+
+      {flightSheetOpen && (
+        <AddFlightSheet
+          trip={trip}
+          onClose={() => setFlightSheetOpen(false)}
+          onSave={saveBoundaryFlights}
+        />
+      )}
+
+      {modePrompt && (
+        <HopModePrompt
+          from={trip.segments.find((s) => s.id === modePrompt.segmentId)?.mode ?? "fly"}
+          bookings={trip.segments.find((s) => s.id === modePrompt.segmentId)?.reservations ?? []}
+          onCancel={() => setModePrompt(null)}
+          onChoose={(choice) => {
+            const { segmentId, mode } = modePrompt;
+            setModePrompt(null);
+            doSetHopMode(segmentId, mode, choice);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-/** A dialog field's chrome — the app's one input skin, in the dialog's palette.
- * Only the mono (date) variant survives #60: home base is the picker now, and
- * the picker brings its own. */
-const FIELD_MONO =
-  "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] font-mono text-[12px] text-rv-ink md:text-[12px]";
+/** A stop's ideas, rewritten one by one — the Plan it / pinned-pill writes. */
+function updateStopIdeas(trip: Trip, stopId: string, f: (i: Idea) => Idea): Trip {
+  return updateStop(trip, stopId, (s) => ({ ...s, ideas: s.ideas.map(f) }));
+}
+
+/** A menu's small mono section head ("Add to Itinerary · the knowns"). */
+function MenuHead({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-2 pb-0.5 pt-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-rv-ink-faded">
+      {children}
+    </div>
+  );
+}
+
 
 /**
  * Trip settings — the medium weight: dates, home base, status, rating, note.
@@ -1959,6 +2265,9 @@ function TripSettingsFields({
 
   const set = (patch: Partial<TripSettingsDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const rangeOk = tripDayCount(draft.startDate, draft.endDate) !== null;
+  // The dialog opened on the household's place and nothing has been picked.
+  const usesHousehold =
+    !!trip.homeBaseFromHousehold && draft.homeBasePlace?.name === trip.homeBase;
   // Refused, not clamped: deriveDays drops days outside the trip window, so a
   // range that leaves a scheduled stop outside it would make the stop invisible
   // rather than wrong. The client holds the whole tree, so it says so here —
@@ -2004,35 +2313,44 @@ function TripSettingsFields({
           </div>
         )}
 
-        <div className="flex gap-2.5">
-          <div className="flex flex-1 flex-col gap-1">
-            <FieldLabel>Start</FieldLabel>
-            <Input
-              type="date"
-              value={draft.startDate}
-              onChange={(e) => set({ startDate: e.target.value })}
-              className={FIELD_MONO}
-            />
-          </div>
-          <div className="flex flex-1 flex-col gap-1">
-            <FieldLabel>End</FieldLabel>
-            <Input
-              type="date"
-              value={draft.endDate}
-              onChange={(e) => set({ endDate: e.target.value })}
-              className={FIELD_MONO}
-            />
-          </div>
+        {/* #127 · the trip's own dates on the one RangePicker — no band: the
+            pick IS the trip span. */}
+        <div className="flex flex-col gap-1">
+          <FieldLabel>Dates</FieldLabel>
+          <RangePicker
+            value={{ start: draft.startDate || null, end: draft.endDate || null }}
+            onChange={(v) => set({ startDate: v.start ?? "", endDate: v.end ?? "" })}
+          />
         </div>
 
+        {/* #126 · Q5 A — "Starts from": the household default unless this trip
+            overrides it. Picking a place writes the trip's own home_base*
+            columns; "Use household default" clears them (reads coalesce trip →
+            prefs). */}
         <div className="flex flex-col gap-1">
-          <FieldLabel>Home base</FieldLabel>
+          <FieldLabel>
+            Starts from{" "}
+            {usesHousehold && (
+              <span className="font-sans font-normal normal-case tracking-normal text-rv-ink-faded">
+                household default
+              </span>
+            )}
+          </FieldLabel>
           {/* The same picker, unstyled by this dialog: the rv-* names re-resolve
               under the dialog's own `.dark`, exactly as its Inputs already do. */}
           <PlacePicker
             value={draft.homeBasePlace}
             onChange={(homeBasePlace) => set({ homeBasePlace })}
           />
+          {!trip.homeBaseFromHousehold && trip.homeBase !== null && draft.homeBasePlace !== null && (
+            <button
+              type="button"
+              onClick={() => set({ homeBasePlace: null })}
+              className="cursor-pointer self-start border-none bg-transparent p-0 text-[11.5px] font-semibold text-rv-ink-muted underline"
+            >
+              Use household default
+            </button>
+          )}
         </div>
 
         <div className="flex flex-col gap-1">
@@ -2188,7 +2506,7 @@ function StopDatesDialog({
   legName: string;
   range: TripDateRange;
   onOpenChange: (open: boolean) => void;
-  onSave: (stopId: string, draft: StopDatesDraft) => void;
+  onSave: (stopId: string, draft: StopDatesDraft, extend: DateSpan | null) => void;
   onUnschedule: (stopId: string) => void;
 }) {
   return (
@@ -2219,20 +2537,23 @@ function StopDatesFields({
   legName: string;
   range: TripDateRange;
   onCancel: () => void;
-  onSave: (stopId: string, draft: StopDatesDraft) => void;
+  onSave: (stopId: string, draft: StopDatesDraft, extend: DateSpan | null) => void;
   onUnschedule: (stopId: string) => void;
 }) {
   const [draft, setDraft] = useState<StopDatesDraft>(() => stopDatesDraft(stop));
   const set = (patch: Partial<StopDatesDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  /** #127 · Q7 B — "Extend trip" pressed: the trip's dates move in the same save. */
+  const [extend, setExtend] = useState<DateSpan | null>(null);
   const help = stopDatesHelp(draft);
   const patch = stopDatesPatch(stop, draft);
-  // Refused, not clamped — the mirror of the trip-side rule, and of the
-  // handler's own 409. deriveDays clamps to the trip window, so a stop dated
-  // outside it would sit in the database and nowhere on the calendar. Said
-  // here, in the server's exact sentence, before the write ever leaves.
+  // A stop dated outside the trip still needs the trip moved with it: the
+  // handler's 409 stands (deriveDays clamps to the window, so the stop would
+  // sit nowhere on the calendar). The picker's amber "Extend trip" is the way
+  // through; without it the server's own sentence says why Save is off.
+  const tripWindow = extend ? { startDate: extend.start, endDate: extend.end } : range;
   const outside =
     patch !== null &&
-    stopDatesOutsideTrip(range, {
+    stopDatesOutsideTrip(tripWindow, {
       arriveDate: draft.arriveDate,
       departDate: draft.departDate,
     });
@@ -2247,26 +2568,17 @@ function StopDatesFields({
       </DialogHeader>
 
       <div className="mt-3 flex flex-col gap-2.5">
-        <div className="flex gap-2.5">
-          <div className="flex flex-1 flex-col gap-1">
-            <FieldLabel>Arrive</FieldLabel>
-            <Input
-              type="date"
-              value={draft.arriveDate}
-              onChange={(e) => set({ arriveDate: e.target.value })}
-              className={FIELD_MONO}
-            />
-          </div>
-          <div className="flex flex-1 flex-col gap-1">
-            <FieldLabel>Depart</FieldLabel>
-            <Input
-              type="date"
-              value={draft.departDate}
-              onChange={(e) => set({ departDate: e.target.value })}
-              className={FIELD_MONO}
-            />
-          </div>
-        </div>
+        <RangePicker
+          value={{ start: draft.arriveDate || null, end: draft.departDate || null }}
+          tripSpan={extend ?? { start: range.startDate, end: range.endDate }}
+          onChange={(v) => set({ arriveDate: v.start ?? "", departDate: v.end ?? "" })}
+          onExtendTrip={setExtend}
+        />
+        {extend && (
+          <span className="font-mono text-[11px] text-rv-warning">
+            The trip moves to {fullRange(extend.start, extend.end)} when you save.
+          </span>
+        )}
         {help ? (
           <span className="text-[11.5px] text-rv-ink-faded">{help}</span>
         ) : (
@@ -2284,7 +2596,7 @@ function StopDatesFields({
       <div className="mt-[15px] flex items-center gap-[9px]">
         <button
           type="button"
-          onClick={() => onSave(stop.id, draft)}
+          onClick={() => onSave(stop.id, draft, extend)}
           disabled={patch === null || outside}
           className="cursor-pointer rounded-rv-md border-none bg-rv-accent-deep px-3.5 py-[7px] text-[12.5px] font-bold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
         >

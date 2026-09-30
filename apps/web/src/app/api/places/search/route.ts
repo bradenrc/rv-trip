@@ -37,6 +37,8 @@ export async function GET(req: Request) {
   const parsed = placesSearchQuerySchema.safeParse({
     q: params.get("q") ?? undefined,
     near: params.get("near") ?? undefined,
+    // #128 · Q9 A — the Add stay sheet's lodging-first search.
+    type: params.get("type") ?? undefined,
   });
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -48,6 +50,7 @@ export async function GET(req: Request) {
     owner: await getOwner(),
     query: parsed.data.q,
     near: parsed.data.near,
+    type: parsed.data.type,
     limiter,
   });
   return NextResponse.json(envelope, { status: placesEnvelopeStatus(envelope) });

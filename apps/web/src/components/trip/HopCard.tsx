@@ -4,6 +4,8 @@ import { useState } from "react";
 import { Car, Check, CircleAlert, Plane, Plus, Ship, Trash2 } from "lucide-react";
 import {
   blankHopDraft,
+  hopBookingPatch,
+  hopDraftFromBooking,
   fixHopDraftDates,
   formatDriveTime,
   hopBookingClash,
@@ -16,7 +18,9 @@ import {
   zoneChoices,
   type HopBookingDraft,
   type Place,
+  type Reservation,
   type ReservationCreateInput,
+  type ReservationPatchInput,
   type TravelMode,
   type Trip,
   type ZoneChip,
@@ -59,6 +63,9 @@ export interface HopCardActions {
   /** Resolves true when the booking landed (the form then closes). */
   onSave: (body: ReservationCreateInput, moveStop: boolean) => Promise<boolean>;
   onDelete: (resId: string) => void;
+  /** #124 · a booking's Edit, saved through `PATCH /api/reservations/:id`
+   * with its clock. Resolves true when it landed. */
+  onEdit: (resId: string, patch: ReservationPatchInput) => Promise<boolean>;
 }
 
 export function HopCard({
@@ -75,8 +82,13 @@ export function HopCard({
   formOpen: boolean;
   actions: HopCardActions;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  if (hop.parked > 0) return <ParkedHop hop={hop} flush={flush} actions={actions} />;
   const ModeIcon = hop.mode === "ferry" ? Ship : Plane;
   const kind = hop.mode === "ferry" ? "ferry" : "flight";
+  const editing = hop.items.find(
+    (i): i is RouteHopBooking => i.kind === "booking" && i.id === editingId,
+  );
   return (
     <div
       id={`hop-${hop.segmentId}`}
@@ -104,11 +116,39 @@ export function HopCard({
             {item.label}
           </div>
         ) : (
-          <HopBooking key={item.id} item={item} mode={hop.mode} onDelete={() => actions.onDelete(item.id)} />
+          <HopBooking
+            key={item.id}
+            item={item}
+            mode={hop.mode}
+            onEdit={() => {
+              actions.onOpenForm(null);
+              setEditingId(item.id);
+            }}
+            onDelete={() => actions.onDelete(item.id)}
+          />
         ),
       )}
 
-      {formOpen ? (
+      {editing ? (
+        <HopForm
+          key={`edit-${editing.id}`}
+          hop={hop}
+          trip={trip}
+          kind={kind}
+          editing={editing.reservation}
+          onSave={actions.onSave}
+          onEdit={async (patch) => {
+            const ok = await actions.onEdit(editing.id, patch);
+            if (ok) setEditingId(null);
+            return ok;
+          }}
+          onDelete={() => {
+            setEditingId(null);
+            actions.onDelete(editing.id);
+          }}
+          onCancel={() => setEditingId(null)}
+        />
+      ) : formOpen ? (
         <HopForm
           key={hop.segmentId}
           hop={hop}
@@ -135,13 +175,49 @@ export function HopCard({
 
 /** One flight or ferry: the Travel tile (Plane / Ship through `categoryMeta`'s
  * mode hint), its name as stored, and its local times with their zones. */
+/**
+ * #129 · Q11 A — a hop that DRIVES but kept its flights: the mode switch
+ * inline (on any trip mode — the drive row's ⋯ menu was the missing way back)
+ * and the "parked" row. The flights themselves are hidden until it flies.
+ */
+function ParkedHop({ hop, flush, actions }: { hop: RouteHop; flush: boolean; actions: HopCardActions }) {
+  return (
+    <div
+      id={`hop-${hop.segmentId}`}
+      className={`my-2 scroll-mt-6 rounded-rv-md border border-l-[3px] border-rv-border border-l-rv-travel bg-rv-surface px-[13px] pb-3 pt-2.5 shadow-rv-sm ${
+        flush ? "ml-0" : "ml-8"
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-[9px] text-[13px] text-rv-ink-muted">
+        <span className="inline-flex items-center gap-[5px] font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-rv-ink">
+          <Car className="size-[13px]" />
+          Drive
+        </span>
+        <b className="font-bold text-rv-ink">
+          {hop.fromName} → {hop.toName}
+        </b>
+        {hop.dayLabel && <span className="font-mono text-[11.5px] text-rv-ink-faded">{hop.dayLabel}</span>}
+        <span className="ml-auto inline-flex items-center gap-2">
+          <HopModeSwitch value="drive" onChange={(m) => actions.onMode(hop.segmentId, m)} />
+        </span>
+      </div>
+      <div className="ml-10 mt-2 flex items-center gap-2 rounded-rv-md border border-dashed border-rv-border-hi px-2.5 py-1.5 text-[12.5px] text-rv-ink-faded">
+        <Plane className="size-3 flex-none" />
+        {hop.parked} flight booking{hop.parked === 1 ? "" : "s"} parked — comes back if you fly
+      </div>
+    </div>
+  );
+}
+
 function HopBooking({
   item,
   mode,
+  onEdit,
   onDelete,
 }: {
   item: RouteHopBooking;
   mode: TravelMode;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const sameZone = item.departAbbr !== null && item.departAbbr === item.arriveAbbr;
@@ -176,6 +252,14 @@ function HopBooking({
           </div>
         )}
       </div>
+      {/* #124 · Edit opens the same form, prefilled; Delete stays in it. */}
+      <button
+        type="button"
+        onClick={onEdit}
+        className="cursor-pointer border-none bg-transparent p-0 text-[12px] font-semibold text-rv-ink-muted underline"
+      >
+        Edit
+      </button>
       {/* A mistyped flight re-times its hop, so it has to be removable
           (vet MED). Undo re-POSTs it onto the same hop. */}
       <RowMenu label={`Actions for ${item.name}`}>
@@ -191,12 +275,12 @@ function HopBooking({
 
 const FORM_FIELD =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] text-[13px] text-rv-ink md:text-[13px]";
-const FORM_FIELD_MONO =
+export const FORM_FIELD_MONO =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] font-mono text-[12px] text-rv-ink md:text-[12px]";
 const FORM_FIELD_RO =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-surface-alt px-2.5 py-[7px] text-[13px] text-rv-ink-muted md:text-[13px]";
-const G3 = "grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]";
-const SBTN =
+export const G3 = "grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(120px,1fr))]";
+export const SBTN =
   "inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-rv-border-hi bg-transparent px-3.5 py-[7px] text-[12.5px] font-semibold text-rv-ink";
 
 /**
@@ -213,33 +297,60 @@ function HopForm({
   hop,
   trip,
   kind,
+  editing = null,
   onSave,
+  onEdit,
+  onDelete,
   onCancel,
 }: {
   hop: RouteHop;
   trip: Trip;
   kind: "flight" | "ferry";
+  /** #124 · the booking being edited — the form opens on its values. */
+  editing?: Reservation | null;
   onSave: (body: ReservationCreateInput, moveStop: boolean) => Promise<boolean>;
+  onEdit?: (patch: ReservationPatchInput) => Promise<boolean>;
+  onDelete?: () => void;
   onCancel: () => void;
 }) {
   const stops = trip.legs.flatMap((l) => l.stops);
   const portOf = (id: string | null): Place | null => stops.find((s) => s.id === id)?.place ?? null;
   const ports = { from: portOf(hop.fromStopId), to: portOf(hop.toStopId) };
   const [draft, setDraft] = useState<HopBookingDraft>(() =>
-    blankHopDraft(kind, { from: hop.fromName, to: hop.toName }),
+    editing ? hopDraftFromBooking(editing, kind) : blankHopDraft(kind, { from: hop.fromName, to: hop.toName }),
   );
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<HopBookingDraft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const zones = hopDraftZones(draft, ports);
   const body = hopBookingInput(hop.segmentId, draft, zones);
-  const clash = body ? hopBookingClash(trip, hop.segmentId, body) : null;
+  // An edit is judged against the hop WITHOUT the booking it replaces.
+  const judged = editing
+    ? {
+        ...trip,
+        segments: trip.segments.map((s) =>
+          s.id === hop.segmentId ? { ...s, reservations: s.reservations.filter((r) => r.id !== editing.id) } : s,
+        ),
+      }
+    : trip;
+  const clash = body ? hopBookingClash(judged, hop.segmentId, body) : null;
   const copy = clash ? hopClashCopy(clash, kind) : null;
 
   const save = async (move: boolean) => {
     if (!body || saving) return;
     setSaving(true);
-    const ok = await onSave(body, move);
+    const ok =
+      editing && onEdit
+        ? await onEdit(
+            hopBookingPatch(editing, {
+              name: body.name,
+              startsAt: body.startsAt,
+              endsAt: body.endsAt,
+              startsTz: body.startsTz,
+              endsTz: body.endsTz,
+            }),
+          )
+        : await onSave(body, move);
     if (!ok) setSaving(false);
   };
 
@@ -247,7 +358,7 @@ function HopForm({
   return (
     <div className="mt-2.5 flex flex-col gap-2.5 rounded-rv-card border border-rv-border-hi bg-rv-surface p-3.5">
       <div className="font-mono text-[11.5px] text-rv-ink-faded">
-        {kind === "ferry" ? "Add ferry" : "Add flight"}
+        {editing ? `Edit ${noun}` : kind === "ferry" ? "Add ferry" : "Add flight"}
       </div>
 
       {kind === "flight" ? (
@@ -299,9 +410,12 @@ function HopForm({
             <br />
             {copy.sub}
             <div className="mt-2 flex flex-wrap gap-1.5">
-              <button type="button" disabled={saving} onClick={() => void save(true)} className={SBTN}>
-                {copy.move}
-              </button>
+              {/* The stop move rides the CREATE only; an edit fixes its date. */}
+              {!editing && (
+                <button type="button" disabled={saving} onClick={() => void save(true)} className={SBTN}>
+                  {copy.move}
+                </button>
+              )}
               <button type="button" onClick={() => setDraft((d) => fixHopDraftDates(d, clash))} className={SBTN}>
                 {copy.keep}
               </button>
@@ -323,12 +437,22 @@ function HopForm({
         <button type="button" onClick={onCancel} className={SBTN}>
           Cancel
         </button>
+        {editing && onDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-rv-warning bg-transparent px-[11px] py-[5px] text-[11.5px] font-semibold text-rv-warning"
+          >
+            <Trash2 className="size-[13px]" />
+            Delete
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1">
       <FieldLabel>{label}</FieldLabel>
@@ -343,7 +467,7 @@ function zoneLabel(zone: string, local: string): string {
   return `${zone} · ${instantToLocal(at, zone).abbr}`;
 }
 
-function ZoneRow({
+export function ZoneRow({
   draft,
   zones,
   kind,
@@ -411,7 +535,7 @@ function ZoneChipPicker({
 }
 
 /** "LIR 19:30 CST → DFW 23:55 CST · 4h 25m in the air" — the verified line. */
-function OkLine({ body, draft }: { body: ReservationCreateInput; draft: HopBookingDraft }) {
+export function OkLine({ body, draft }: { body: ReservationCreateInput; draft: HopBookingDraft }) {
   const dep = instantToLocal(body.startsAt!, body.startsTz!);
   const arr = instantToLocal(body.endsAt!, body.endsTz!);
   const mins = minutesBetween(body.startsAt!, body.endsAt!);

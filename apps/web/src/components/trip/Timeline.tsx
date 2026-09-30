@@ -69,33 +69,35 @@ export function Timeline({
 }: {
   model: TimelineModel;
   /** The rail's first section (#80) — the trip's unattached maybes, already
-   * grouped and counted by `ideaShelf` in @rv-trip/core. */
-  shelf: IdeaShelf;
-  shelfFilter: ShelfFilter;
-  onShelfFilter: (f: ShelfFilter) => void;
+   * grouped and counted by `ideaShelf` in @rv-trip/core. #131: the shelf moved
+   * to the Ideas tab, so the Itinerary's Timeline passes none and the rail keeps
+   * only "Not yet scheduled". */
+  shelf?: IdeaShelf;
+  shelfFilter?: ShelfFilter;
+  onShelfFilter?: (f: ShelfFilter) => void;
   onOpenStop: (id: string) => void;
   /** `gap` is the open span the card was DROPPED on — the stop takes its first
    * date, not the trip's longest empty run (#40). */
   onSchedule: (stopId: string, gap: TimelineGap | null) => void;
   /** A stay-idea dropped on open days: it becomes a stop with those dates. */
-  onPlanIdea: (ideaId: string, gap: TimelineGap) => void;
+  onPlanIdea?: (ideaId: string, gap: TimelineGap) => void;
   /** A do/eat idea dropped on a stop bar: it leaves the shelf and lives there. */
-  onAttachIdea: (ideaId: string, stopId: string) => void;
-  onAddFromPlaces: () => void;
+  onAttachIdea?: (ideaId: string, stopId: string) => void;
+  onAddFromPlaces?: () => void;
   /** The shelf card's own pill: idea → planned → done. */
-  onCycleIdea: (ideaId: string) => void;
+  onCycleIdea?: (ideaId: string) => void;
   /** Opens the app's place picker on a coordless shelf row — the same #69
    * entrance the stop sheet's card has. */
-  onLocateIdea: (ideaId: string) => void;
+  onLocateIdea?: (ideaId: string) => void;
   /**
    * The expanded row's research pad (#82). SHELF-SIDE handlers, not the stop
    * sheet's: an unattached idea is not in any stop's `ideas`, so the sheet's
    * `onIdeaRating`/`onIdeaNote` — which all key on `selectedStop.id` — cannot
    * reach this row at all.
    */
-  onRateIdea: (ideaId: string, n: number) => void;
-  onNoteIdea: (ideaId: string, v: string) => void;
-  onCommitIdeaNote: (ideaId: string) => void;
+  onRateIdea?: (ideaId: string, n: number) => void;
+  onNoteIdea?: (ideaId: string, v: string) => void;
+  onCommitIdeaNote?: (ideaId: string) => void;
   /** The open picker, mounted under the row the app opened it on. */
   ideaPicker?: (idea: Idea) => ReactNode;
   /** The row menu the app hangs on a shelf card (#74's door lands here). */
@@ -161,7 +163,7 @@ export function Timeline({
                         if (stopActive) e.preventDefault();
                       }}
                       onDrop={drop(() => {
-                        if (dragged?.kind === "idea") onAttachIdea(dragged.id, b.stopId);
+                        if (dragged?.kind === "idea") onAttachIdea?.(dragged.id, b.stopId);
                       })}
                     />
                   ))}
@@ -181,7 +183,7 @@ export function Timeline({
                     onDrop={drop(() => {
                       if (!dragged) return;
                       if (dragged.kind === "stop") onSchedule(dragged.id, g);
-                      else if (dragged.category === "stay") onPlanIdea(dragged.id, g);
+                      else if (dragged.category === "stay") onPlanIdea?.(dragged.id, g);
                     })}
                   />
                 ))}
@@ -204,6 +206,7 @@ export function Timeline({
         instead of it.
       */}
       <aside className="min-w-[290px] flex-[0_1_330px]">
+        {shelf && (
         <div className="mb-4">
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <div className="font-mono text-[12px] uppercase tracking-[0.1em] text-rv-ink">
@@ -243,9 +246,9 @@ export function Timeline({
                     key={c.key}
                     label={c.label}
                     count={c.count}
-                    active={sameFilter(c.filter, shelfFilter)}
+                    active={shelfFilter ? sameFilter(c.filter, shelfFilter) : false}
                     tone={c.warn ? "warn" : "default"}
-                    onClick={() => onShelfFilter(c.filter)}
+                    onClick={() => onShelfFilter?.(c.filter)}
                   />
                 ))}
               </div>
@@ -286,11 +289,11 @@ export function Timeline({
                       onClick={() =>
                         setExpandedIdeaId((id) => (id === row.idea.id ? null : row.idea.id))
                       }
-                      onCycle={() => onCycleIdea(row.idea.id)}
-                      onLocate={() => onLocateIdea(row.idea.id)}
-                      onRating={(n) => onRateIdea(row.idea.id, n)}
-                      onNote={(v) => onNoteIdea(row.idea.id, v)}
-                      onCommitNote={() => onCommitIdeaNote(row.idea.id)}
+                      onCycle={() => onCycleIdea?.(row.idea.id)}
+                      onLocate={() => onLocateIdea?.(row.idea.id)}
+                      onRating={(n) => onRateIdea?.(row.idea.id, n)}
+                      onNote={(v) => onNoteIdea?.(row.idea.id, v)}
+                      onCommitNote={() => onCommitIdeaNote?.(row.idea.id)}
                       onDragStart={() =>
                         setDragged({
                           kind: "idea",
@@ -306,6 +309,7 @@ export function Timeline({
             </>
           )}
         </div>
+        )}
 
         <div className="mb-1 font-mono text-[12px] uppercase tracking-[0.1em] text-rv-warning">
           Not yet scheduled

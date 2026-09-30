@@ -2,6 +2,13 @@ import { z } from "zod";
 import type { LatLng, PlaceDetails, PlaceSummary, PlacesProvider } from "./index";
 
 /**
+ * A place-type narrowing on search (#128 · Q9 A). One value today: the Add stay
+ * sheet's lodging-first search. A provider that cannot filter ignores it.
+ */
+export const PLACE_SEARCH_TYPES = ["lodging"] as const;
+export type PlaceSearchType = (typeof PLACE_SEARCH_TYPES)[number];
+
+/**
  * The place-search WIRE — docs/design/41 §3.
  *
  * Healthy and degraded share ONE envelope, so the picker renders one shape and
@@ -115,6 +122,9 @@ const nearSchema = z
 export const placesSearchQuerySchema = z.object({
   q: z.string().trim().min(1),
   near: nearSchema.optional(),
+  /** #128 · Q9 A — the Add stay sheet's lodging-first search. "Show all
+   * places" drops it. */
+  type: z.enum(PLACE_SEARCH_TYPES).optional(),
 });
 export type PlacesSearchQuery = z.infer<typeof placesSearchQuerySchema>;
 
@@ -164,6 +174,7 @@ export interface PlacesSearchInput {
   owner: string;
   query: string;
   near?: LatLng;
+  type?: PlaceSearchType;
   limiter: OwnerTokenBucket;
   now?: number;
 }
@@ -176,12 +187,12 @@ export interface PlacesSearchInput {
  * short-circuit to `no_provider` and never reach the bucket.
  */
 export async function searchPlacesEnvelope(input: PlacesSearchInput): Promise<PlacesEnvelope> {
-  const { provider, configured, owner, query, near, limiter, now } = input;
+  const { provider, configured, owner, query, near, type, limiter, now } = input;
   const rate = limiter.take(owner, now);
   if (!rate.allowed) return degraded("rate_limited", rate.retryAfterMs);
   let results: PlaceSummary[];
   try {
-    results = await provider.search(query, near);
+    results = type ? await provider.search(query, near, type) : await provider.search(query, near);
   } catch {
     // The provider throws on an upstream failure ON PURPOSE, so that "Google
     // is down" and "Google had nothing" stay different answers. This is where

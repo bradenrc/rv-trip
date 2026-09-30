@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { place, type Place } from "./types";
 
 /**
  * Preferences that follow the account (docs/design/45 §"Q6 · where preferences
@@ -68,6 +69,13 @@ export const userPrefsPatch = z
     units: z.string().max(32).nullable().optional(),
     mapStyle: z.string().max(32).nullable().optional(),
     trackCosts: z.boolean().nullable().optional(),
+    /**
+     * #126 · Q5 A — the HOUSEHOLD home base: where every trip starts and ends
+     * unless the trip overrides it. One object on the wire (name + point + place
+     * id), four nullable columns underneath (`user_prefs.home_base*`); `null`
+     * clears it. Not a localStorage pref — nothing in PREF_REMOTE maps to it.
+     */
+    homeBasePlace: place.nullable().optional(),
   })
   .strict();
 export type UserPrefsPatch = z.infer<typeof userPrefsPatch>;
@@ -79,6 +87,9 @@ export interface UserPrefs {
   units: string | null;
   mapStyle: string | null;
   trackCosts: boolean | null;
+  /** #126 · the household home base, or null. Optional so a row served by an
+   * older build (or a fixture) still types. */
+  homeBasePlace?: Place | null;
   /** ISO-8601 instant. A row timestamp, unlike a trip date, is a real moment. */
   updatedAt: string;
 }
@@ -111,4 +122,31 @@ export function toLocalEntries(row: UserPrefs | null | undefined): Array<[PrefLo
     out.push([key, typeof value === "boolean" ? (value ? "1" : "0") : String(value)]);
   }
   return out;
+}
+
+/**
+ * #126 · Q5 A — the home base a trip actually starts from: its OWN override
+ * (`trips.home_base*`) when it has one, else the household default
+ * (`user_prefs.home_base*`), else nothing. `fromHousehold` says which, so Trip
+ * settings can read "household default". The server's `getTripById` and the
+ * segment reconcile both read through this one rule, so the hop set and the
+ * masthead can never disagree.
+ */
+export interface ResolvedHomeBase {
+  homeBase: string | null;
+  homeBasePlace: Place | null;
+  fromHousehold: boolean;
+}
+
+export function resolveHomeBase(
+  trip: { homeBase: string | null; homeBasePlace: Place | null },
+  household: Place | null | undefined,
+): ResolvedHomeBase {
+  if (trip.homeBase !== null) {
+    return { homeBase: trip.homeBase, homeBasePlace: trip.homeBasePlace, fromHousehold: false };
+  }
+  if (household && household.name.trim() !== "") {
+    return { homeBase: household.name, homeBasePlace: household, fromHousehold: true };
+  }
+  return { homeBase: null, homeBasePlace: null, fromHousehold: false };
 }

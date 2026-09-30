@@ -20,6 +20,10 @@ import type {
   SavedPlaceCreateInput,
   SavedPlacePatch,
   SegmentPatchInput,
+  BoundaryFlightsBody,
+  PlaceSearchType,
+  Place,
+  UserPrefs,
   Stop,
   StopCreateInput,
   StopPatchInput,
@@ -105,9 +109,21 @@ export const tripApi = {
   createReservation: (input: ReservationCreateBody): Promise<Reservation> =>
     req(`/api/reservations`, "POST", input) as Promise<Reservation>,
 
-  /** A hop's mode switch (#104). 409 `segment_has_bookings` rejects like any
-   * non-2xx, so `persist()` rolls the optimistic switch back. */
+  /** A hop's mode switch (#104). #129 · Q11 A: `bookings` answers the
+   * keep-or-remove prompt when flights hang on the hop. */
   updateSegment: (id: string, patch: SegmentPatchInput) => req(`/api/segments/${id}`, "PATCH", patch),
+
+  /**
+   * #129 · Q10 A — Add flight with Round trip: both boundary hops' bookings in
+   * one save. 201 carries the whole trip (the → home hop may be new), so the
+   * planner swaps it in rather than splicing.
+   */
+  boundaryFlights: (tripId: string, body: BoundaryFlightsBody): Promise<Trip> =>
+    req(`/api/trips/${tripId}/boundary-flights`, "POST", body) as Promise<Trip>,
+
+  /** #126 · Q5 A — Settings ▸ Home base: the household default (null clears). */
+  saveHouseholdHomeBase: (homeBasePlace: Place | null): Promise<UserPrefs> =>
+    req(`/api/prefs`, "PUT", { homeBasePlace }) as Promise<UserPrefs>,
 
   /** The widened reservation write: the full field set, all optional — the edit
    * form sends what changed, the card's stars and note send one. */
@@ -196,9 +212,15 @@ export const tripApi = {
    * reported as the same degraded shape, so the picker has exactly one shape
    * to render and never a thrown error to catch.
    */
-  searchPlaces: async (q: string, near?: LatLng | null): Promise<PlacesEnvelope> => {
+  searchPlaces: async (
+    q: string,
+    near?: LatLng | null,
+    type?: PlaceSearchType | null,
+  ): Promise<PlacesEnvelope> => {
     const params = new URLSearchParams({ q });
     if (near) params.set("near", `${near.lat},${near.lng}`);
+    // #128 · Q9 A — the Add stay sheet's lodging-first search.
+    if (type) params.set("type", type);
     try {
       const res = await fetch(`/api/places/search?${params}`);
       const body = (await res.json()) as PlacesEnvelope;

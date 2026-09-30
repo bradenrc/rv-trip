@@ -8,6 +8,8 @@ import type {
   NextTimeRow,
   Reservation,
   ReservationCreateInput,
+  BoundaryFlightsBody,
+  SegmentBookingsChoice,
   TravelMode,
   TripCreateInput,
   TripPatchInput,
@@ -16,6 +18,8 @@ import type {
   SurfaceRadiusMi,
   Trip,
   TripSummary,
+  Place,
+  IsoDate,
 } from "@rv-trip/core";
 import {
   appendReservation,
@@ -29,6 +33,10 @@ import {
   nearbyIdeaBody,
   setSegmentMode,
   withReconciledSegments,
+  appendStop,
+  attachIdeaToStop,
+  updateStop,
+  legOrder,
 } from "@rv-trip/core";
 import { tripBundleSchema, type TripBundle } from "@rv-trip/core/api-client";
 import { api } from "./api";
@@ -367,10 +375,16 @@ export async function patchTripDefaults(id: string, patch: TripPatchInput): Prom
 
 /** A hop's mode switch (#104 · Q7 B), optimistic; a refusal re-reads the trip
  * (which puts the old mode back) and rethrows for the screen to say so. */
-export async function setHopMode(tripId: string, segmentId: string, mode: TravelMode): Promise<void> {
-  updateTrip(tripId, (t) => setSegmentMode(t, segmentId, mode));
+export async function setHopMode(
+  tripId: string,
+  segmentId: string,
+  mode: TravelMode,
+  /** #129 · Q11 A — the keep-or-remove answer for a hop with bookings. */
+  bookings?: SegmentBookingsChoice,
+): Promise<void> {
+  updateTrip(tripId, (t) => setSegmentMode(t, segmentId, mode, bookings ?? "keep"));
   try {
-    await api.segments.patch(segmentId, { mode });
+    await api.segments.patch(segmentId, bookings ? { mode, bookings } : { mode });
   } catch (e) {
     await loadBundle(tripId);
     throw e;
@@ -393,4 +407,59 @@ export async function addHopBooking(
 export async function addStay(tripId: string, body: ReservationCreateInput): Promise<void> {
   const r = await api.reservations.create(body);
   if (r.stopId) updateTrip(tripId, (t) => appendReservation(t, r.stopId!, r));
+}
+
+/** #129 · Q10 A — Add flight with Round trip: both boundary hops' flights in
+ * one save. The reply is the whole trip (the → home hop may be new), swapped
+ * into the bundle. Throws on a refusal (the sheet stays open). */
+export async function saveBoundaryFlights(tripId: string, body: BoundaryFlightsBody): Promise<void> {
+  const trip = await api.trips.boundaryFlights(tripId, body);
+  updateTrip(tripId, () => trip);
+}
+
+/** #131 · the phone's + Add ▸ Stop — and the stop a stay idea's "Plan it"
+ * becomes. Appended to the trip's last leg; the hops reconcile with it. */
+export async function addStop(
+  tripId: string,
+  place: Place,
+  dates: { arriveDate: IsoDate | null; departDate: IsoDate | null } = { arriveDate: null, departDate: null },
+): Promise<string | null> {
+  const trip = state.bundles[tripId]?.trip;
+  const legId = trip ? legOrder(trip).at(-1) : undefined;
+  if (!legId) return null;
+  const stop = await api.stops.create({ legId, place, ...dates });
+  updateTrip(tripId, (t) => appendStop(t, stop));
+  return stop.id;
+}
+
+const planned = (t: Trip, stopId: string, ideaId: string): Trip =>
+  updateStop(t, stopId, (s) => ({
+    ...s,
+    ideas: s.ideas.map((i) => (i.id === ideaId ? { ...i, status: "planned" as const } : i)),
+  }));
+
+/** #131 · Plan it on a do/eat maybe: onto the stop you pick, planned. */
+export async function planIdeaToStop(tripId: string, ideaId: string, stopId: string): Promise<void> {
+  await api.ideas.patch(ideaId, { stopId, status: "planned" });
+  updateTrip(tripId, (t) => planned(attachIdeaToStop(t, ideaId, stopId), stopId, ideaId));
+}
+
+/** #131 · Plan it on a maybe already pinned to its stop: just planned. */
+export async function planPinnedIdea(tripId: string, stopId: string, ideaId: string): Promise<void> {
+  await api.ideas.patch(ideaId, { status: "planned" });
+  updateTrip(tripId, (t) => planned(t, stopId, ideaId));
+}
+
+/** #131 · Plan it on a stay maybe: its nights make it a stop, and it is
+ * planned onto it (the web's `planIdeaOnDates`). */
+export async function planStayIdea(
+  tripId: string,
+  ideaId: string,
+  span: { start: IsoDate; end: IsoDate },
+): Promise<void> {
+  const it = state.bundles[tripId]?.trip.ideas.find((i) => i.id === ideaId);
+  if (!it) return;
+  const place = it.place ?? { name: it.title, lat: null, lng: null, googlePlaceId: null };
+  const stopId = await addStop(tripId, place, { arriveDate: span.start, departDate: span.end });
+  if (stopId) await planIdeaToStop(tripId, ideaId, stopId);
 }

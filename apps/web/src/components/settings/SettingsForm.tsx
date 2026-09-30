@@ -1,8 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Moon, Sun } from "lucide-react";
-import type { UserPrefs } from "@rv-trip/core";
+import { placeOf, pickedFromPlace, type PickedPlace, type Place, type UserPrefs } from "@rv-trip/core";
+import { PlacePicker } from "@/components/places/PlacePicker";
+import { tripApi } from "@/lib/trip-api";
 import { SegmentedControl, type SegmentOption } from "@rv-trip/ui";
 import { Account } from "@/components/nav/Account";
 import { HouseholdCard, type HouseholdCardProps } from "@/components/settings/HouseholdCard";
@@ -105,6 +109,15 @@ export function SettingsForm({
           </Row>
         </Card>
 
+        {/* #126 · Q5 A — the household home base: where trips start and end.
+            Each trip can override it in Trip settings ▸ Starts from. */}
+        <GroupKicker>Home base</GroupKicker>
+        <Card>
+          <Row label="Home base" help="Where your trips start and end. Each trip can override it in Trip settings.">
+            <HomeBaseField initial={prefs?.homeBasePlace ?? null} />
+          </Row>
+        </Card>
+
         <GroupKicker>Account</GroupKicker>
         <Card>
           <Row>
@@ -175,4 +188,26 @@ export function Row({
       )}
     </div>
   );
+}
+
+/**
+ * Settings ▸ Home base — the one PlacePicker, written through `PUT /api/prefs`
+ * (`homeBasePlace`; null clears). Trips with no override of their own follow
+ * it — their home → first hop is reconciled in the same write.
+ */
+function HomeBaseField({ initial }: { initial: Place | null }) {
+  const router = useRouter();
+  const [value, setValue] = useState<PickedPlace | null>(initial ? pickedFromPlace(initial) : null);
+  const save = (picked: PickedPlace | null) => {
+    const before = value;
+    setValue(picked);
+    tripApi
+      .saveHouseholdHomeBase(picked ? placeOf(picked) : null)
+      .then(() => router.refresh())
+      .catch(() => {
+        setValue(before);
+        toast.error("Couldn't save your home base — it's back as it was.");
+      });
+  };
+  return <PlacePicker value={value} onChange={save} placeholder="Your town — Boise, ID" />;
 }

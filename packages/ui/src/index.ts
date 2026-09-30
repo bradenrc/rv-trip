@@ -37,3 +37,4 @@ export {
   PlacesMapPanel,
 } from "./Places";
 export type { SegmentOption } from "./Places";
+export { RangePicker } from "./RangePicker";

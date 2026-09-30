@@ -12,6 +12,7 @@ import {
   type PickerListFrame,
   type PickerRow,
   type PlacesEnvelope,
+  type PlaceSearchType,
 } from "@rv-trip/core";
 import { cn } from "@/lib/utils";
 import { tripApi } from "@/lib/trip-api";
@@ -64,12 +65,19 @@ export function PlacePicker({
   onChange,
   placeholder,
   near,
+  type = null,
+  onShowAll,
 }: {
   value: PickedPlace | null;
   onChange: (p: PickedPlace | null) => void;
   placeholder?: string;
-  /** Search bias — a map centre today, a trip's home base later. */
+  /** Search bias — the trip's `searchAnchor` (#126), never the home base. */
   near?: { lat: number; lng: number } | null;
+  /** #128 · Q9 A — narrow the search ("lodging" first). */
+  type?: PlaceSearchType | null;
+  /** With `type` set: the "Show all places, not just lodging" row, pinned
+   * under the results — pressing it is the caller dropping `type`. */
+  onShowAll?: () => void;
 }) {
   const [query, setQuery] = useState("");
   // Both of these are stamped with the query they belong to, so "is this answer
@@ -104,7 +112,7 @@ export function PlacePicker({
     const timer = setTimeout(() => {
       const bias = nearLat !== null && nearLng !== null ? { lat: nearLat, lng: nearLng } : null;
       tripApi
-        .searchPlaces(q, bias)
+        .searchPlaces(q, bias, type)
         .then((env) => {
           if (live) setAnswer({ q, envelope: env });
         })
@@ -116,7 +124,7 @@ export function PlacePicker({
       live = false;
       clearTimeout(timer);
     };
-  }, [q, searching, nearLat, nearLng]);
+  }, [q, searching, nearLat, nearLng, type]);
 
   const view = pickerView({
     value,
@@ -331,6 +339,17 @@ export function PlacePicker({
             ) : null}
           </div>
         ))}
+        {type && onShowAll ? (
+          <div
+            role="option"
+            aria-selected={false}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onShowAll}
+            className="cursor-pointer border-t border-rv-border-soft px-3 py-[9px] text-center font-mono text-[10.5px] text-rv-ink-muted"
+          >
+            Show all places, not just lodging
+          </div>
+        ) : null}
       </div>
 
       {list.degradedMessage ? (

@@ -28,9 +28,12 @@ import { describe, it, expect } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(HERE, "TripPlanner.tsx"), "utf8");
 
-/** The body of `doPlanIdea`, from its declaration to the next one. */
-const OPENS = "const doPlanIdea =";
-const CLOSES = "const doAttachIdea =";
+/** The body of the plan gesture, from its declaration to the next one. #131
+ * moved it: the drag-to-gantt `doPlanIdea` is gone with the rail's shelf, and
+ * the Ideas tab's "Plan it" on a stay idea is `planIdeaOnDates` — the same
+ * create + attach + Undo, with the dates handed in. */
+const OPENS = "const planIdeaOnDates =";
+const CLOSES = "const planIdeaToStop =";
 const opens = source.indexOf(OPENS);
 const closes = source.indexOf(CLOSES);
 const doPlanIdea = source.slice(opens, closes);

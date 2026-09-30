@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import type {
   HowWasIt,
+  IdeaCategory,
   JournalEntry,
   RouteDrive,
   RouteHop,
@@ -23,6 +24,10 @@ import {
   setIdeaFields,
   setStopReservationFields,
   fullRange,
+  nightsLabel,
+  rangeNights,
+  tripModeChoice,
+  TRIP_MODE_CHOICES,
   routeModel,
   routeSummary,
   timelineModel,
@@ -30,8 +35,22 @@ import {
   tripStopPins,
 } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
-import { IdeasSection, NearbyBanner, NearbySheet } from "../../../../../src/nearby";
-import { HopActionSheet, HopBookingSheet, HopRow, MODE_OPTIONS, switchHop } from "../../../../../src/hops";
+import { NearbyBanner, NearbySheet } from "../../../../../src/nearby";
+import {
+  HopActionSheet,
+  HopBookingSheet,
+  HopRow,
+  MODE_OPTIONS,
+  RoundTripSheet,
+  switchHop,
+} from "../../../../../src/hops";
+import {
+  AddIdeaSheet,
+  AddSheet,
+  AddStaySheetPhone,
+  AddStopSheet,
+  IdeasTab,
+} from "../../../../../src/itinerary";
 import { queuePatch } from "../../../../../src/capture";
 import { HowWasItSheet, JournalView, LastTimeHere } from "../../../../../src/journal";
 import {
@@ -59,28 +78,36 @@ import {
 } from "../../../../../src/ui";
 
 /**
- * The lenses on one trip (#44 · q1 A): the Route rail as it has always been,
- * and the map of the same drives. The control sits in the masthead ABOVE
- * them, which is what lets the Map lens render OUTSIDE the ScrollView — a
- * map's pan gesture and a vertical scroll cannot share a box.
- *
- * #113 · Q4 B adds the third: Route · Map · Journal. A traveled trip (status
- * `complete`) opens on its Journal; otherwise the Route default holds.
+ * #131 · Q1 A (docs/design/130 frames 2, 3, 9) — three MINDSET tabs in the
+ * masthead: Itinerary · Ideas · Journal, an underline row with the trip's own
+ * "+ Add" at its end (the tab-bar + stays #112's global capture). Itinerary's
+ * sub-lens is Route · Timeline · Map: Timeline is the rhythm block that used to
+ * sit inside Route; Map still renders OUTSIDE the ScrollView — a map's pan
+ * gesture and a vertical scroll cannot share a box. A traveled trip (status
+ * `complete`) opens on its Journal; otherwise Itinerary ▸ Route.
  */
-type Lens = "route" | "map" | "journal";
+type Tab = "itinerary" | "ideas" | "journal";
+type Sub = "route" | "timeline" | "map";
 
-const LENSES: SegmentedOption<Lens>[] = [
+const SUBS: SegmentedOption<Sub>[] = [
   { value: "route", label: "Route" },
+  { value: "timeline", label: "Timeline" },
   { value: "map", label: "Map" },
-  { value: "journal", label: "Journal" },
 ];
 
 export default function TripScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { bundle, error, reload } = useBundle(id);
   const [refreshing, setRefreshing] = useState(false);
-  // Null until picked: the lens is DERIVED until then (below).
-  const [picked, setLens] = useState<Lens | null>(null);
+  // Null until picked: the tab is DERIVED until then (below).
+  const [picked, setTab] = useState<Tab | null>(null);
+  const [sub, setSub] = useState<Sub>("route");
+  // #131 · the trip's + Add and the sheets it opens.
+  const [addOpen, setAddOpen] = useState(false);
+  const [flightOpen, setFlightOpen] = useState(false);
+  const [stayFor, setStayFor] = useState<{ stopId: string | null } | null>(null);
+  const [stopOpen, setStopOpen] = useState(false);
+  const [ideaKind, setIdeaKind] = useState<IdeaCategory | null>(null);
   const [mode, setMode] = useStyleMode();
   const router = useRouter();
   // Trip surfacing (#111 i3): the saves near this trip, and the review sheet.
@@ -132,8 +159,14 @@ export default function TripScreen() {
   }
 
   const { trip } = bundle;
-  // The lens is derived until it is picked: a traveled trip opens on Journal.
-  const lens: Lens = picked ?? (trip.status === "complete" ? "journal" : "route");
+  // The tab is derived until it is picked: a traveled trip opens on Journal.
+  const tab: Tab = picked ?? (trip.status === "complete" ? "journal" : "itinerary");
+  const lens = tab === "itinerary" ? sub : tab;
+  const modeLabel =
+    TRIP_MODE_CHOICES.find((c) => c.value === tripModeChoice(trip.defaultMode))?.label ?? "";
+  const ideaCount =
+    trip.ideas.filter((i) => i.status === "idea").length +
+    trip.legs.flatMap((l) => l.stops).flatMap((s) => s.ideas).filter((i) => i.status === "idea").length;
   // Q7 B: on a drive trip the mode lives in the drive row's ⋯; on a fly trip
   // every hop shows its Segmented.
   const driveTrip = trip.defaultMode === "drive";
@@ -146,7 +179,7 @@ export default function TripScreen() {
       hop={hop}
       flush={flush}
       showSwitch
-      onMode={(m) => switchHop(trip.id, hop.segmentId, m)}
+      onMode={(m) => switchHop(trip, hop.segmentId, m)}
       onAdd={() => setBookingHop(hop)}
     />
   );
@@ -165,7 +198,7 @@ export default function TripScreen() {
             <Text style={{ color: C.inkMuted, fontSize: 13, lineHeight: 14 }}>⋯</Text>
           </Pressable>
         ) : (
-          <Segmented mono value={"drive" as TravelMode} options={MODE_OPTIONS} onChange={(m) => switchHop(trip.id, drive.segmentId!, m)} />
+          <Segmented mono value={"drive" as TravelMode} options={MODE_OPTIONS} onChange={(m) => switchHop(trip, drive.segmentId!, m)} />
         )
       }
     />
@@ -225,13 +258,16 @@ export default function TripScreen() {
             half of the screen. On the map the date line shortens to the two
             counts: there is no scroll below it to carry the rest. */}
         <View style={styles.masthead}>
-          <Kicker color={C.accent}>Trip planner</Kicker>
+          <Kicker color={C.accent}>
+            {[modeLabel, trip.destination?.name].filter(Boolean).join(" · ") || "Trip planner"}
+          </Kicker>
           <Text style={styles.h1}>{trip.title}</Text>
           {lens !== "map" ? (
             <>
               <Text style={styles.mono}>
-                {fullRange(trip.startDate, trip.endDate)} · {timeline!.rhythm.length} days
-                {trip.homeBase ? ` · from ${trip.homeBase}` : ""}
+                {fullRange(trip.startDate, trip.endDate)} ·{" "}
+                {nightsLabel(rangeNights(trip.startDate, trip.endDate))}
+                {trip.homeBase ? ` · from ${trip.homeBase.split(",")[0]}` : ""}
               </Text>
               {lens === "route" && (
                 <Text style={[styles.mono, { color: C.warning }]}>{timeline!.openLabel}</Text>
@@ -243,7 +279,29 @@ export default function TripScreen() {
               drive{arcs.length === 1 ? "" : "s"}
             </Text>
           )}
-          <Segmented value={lens} options={LENSES} onChange={setLens} />
+          {/* #131 · the mindset tabs, an underline row; the trip's + Add at its end. */}
+          <View style={styles.tabs}>
+            {(["itinerary", "ideas", "journal"] as const).map((t) => (
+              <Pressable
+                key={t}
+                onPress={() => setTab(t)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: tab === t }}
+                style={[styles.tab, tab === t && styles.tabOn]}
+              >
+                <Text style={[styles.tabText, tab === t && { color: C.ink }]}>
+                  {t === "itinerary" ? "Itinerary" : t === "ideas" ? "Ideas" : "Journal"}
+                  {t === "ideas" && <Text style={styles.tabCount}> {ideaCount}</Text>}
+                </Text>
+              </Pressable>
+            ))}
+            {tab !== "journal" && (
+              <Pressable onPress={() => setAddOpen(true)} accessibilityRole="button" style={styles.addPill}>
+                <Text style={styles.addPillText}>+ Add</Text>
+              </Pressable>
+            )}
+          </View>
+          {tab === "itinerary" && <Segmented value={sub} options={SUBS} onChange={setSub} />}
         </View>
 
         {lens === "map" ? (
@@ -275,30 +333,31 @@ export default function TripScreen() {
                 }}
               />
             ) : (
-            <>
-            {/* #113 · #107 "Last time here" — at the very top of the Route
-                lens, directly above the nearby banner (Q8 B). */}
-            <LastTimeHere
-              nextTime={nextTime}
-              onAdd={(row) => void addNextTimeIdea(trip.id, row).catch(() => undefined)}
-            />
-            {/* Trip surfacing (#111 i3) — at the top of the Route lens, above
-                the stop rows: the banner (only while a save is surfaced) and
-                the compact Ideas shelf. */}
-            {surfaced && (
-              <NearbyBanner
-                nearby={surfaced}
-                onOpen={() => setReviewing(true)}
-                onDismiss={() =>
-                  void dismissNearby(
-                    trip.id,
-                    surfaced.items.map((i) => i.saveId),
-                  ).catch(() => {})
-                }
-              />
-            )}
-            <IdeasSection trip={trip} />
-
+            lens === "ideas" ? (
+              <>
+                {/* #131 · the maybes live here now: "Last time here" (#113 ·
+                    #107), the saves near this trip (#111 i3), and the Ideas
+                    list with Plan it. */}
+                <LastTimeHere
+                  nextTime={nextTime}
+                  onAdd={(row) => void addNextTimeIdea(trip.id, row).catch(() => undefined)}
+                />
+                {surfaced && (
+                  <NearbyBanner
+                    nearby={surfaced}
+                    onOpen={() => setReviewing(true)}
+                    onDismiss={() =>
+                      void dismissNearby(
+                        trip.id,
+                        surfaced.items.map((i) => i.saveId),
+                      ).catch(() => {})
+                    }
+                  />
+                )}
+                <IdeasTab trip={trip} />
+              </>
+            ) : lens === "timeline" ? (
+              <>
             {/* Day strip — the rhythm of the trip, one cell per day */}
             <Card style={{ padding: 10, gap: 6 }}>
               <Kicker>Rhythm</Kicker>
@@ -346,6 +405,9 @@ export default function TripScreen() {
               </View>
             </Card>
 
+              </>
+            ) : (
+            <>
             {/* Route — legs → stops, drives between */}
             {legs.map((leg) => (
               <View key={leg.id} style={{ gap: 8, marginTop: 6 }}>
@@ -354,7 +416,12 @@ export default function TripScreen() {
                 {leg.leadingHop && hopRow(leg.leadingHop, true)}
                 {leg.rows.map((row) => (
                   <View key={row.stop.id} style={{ gap: 8 }}>
-                    <StopRow row={row} onPress={() => router.push(`/trips/${trip.id}/stops/${row.stop.id}`)} />
+                    <StopRow
+                      row={row}
+                      wholeTrip={row.stop.arriveDate === trip.startDate && row.stop.departDate === trip.endDate}
+                      onPress={() => router.push(`/trips/${trip.id}/stops/${row.stop.id}`)}
+                      onAddStay={() => setStayFor({ stopId: row.stop.id })}
+                    />
                     {row.drive && driveRow(row.drive)}
                     {row.hop && hopRow(row.hop, false)}
                   </View>
@@ -401,6 +468,7 @@ export default function TripScreen() {
               </Text>
             </Card>
             </>
+            )
             )}
           </ScrollView>
         )}
@@ -410,11 +478,52 @@ export default function TripScreen() {
         title={menuSeg ? `${stopName(menuSeg.fromStopId)} → ${stopName(menuSeg.toStopId)}` : ""}
         onClose={() => setMenuSegment(null)}
         onPick={(m) => {
-          if (menuSegment) switchHop(trip.id, menuSegment, m);
+          if (menuSegment) switchHop(trip, menuSegment, m);
           setMenuSegment(null);
         }}
       />
       <HopBookingSheet trip={trip} hop={bookingHop} onClose={() => setBookingHop(null)} />
+      {addOpen && tab !== "journal" && (
+        <AddSheet
+          tab={tab}
+          onClose={() => setAddOpen(false)}
+          onFlight={() => {
+            setAddOpen(false);
+            setFlightOpen(true);
+          }}
+          onStay={() => {
+            setAddOpen(false);
+            setStayFor({ stopId: null });
+          }}
+          onStop={() => {
+            setAddOpen(false);
+            setStopOpen(true);
+          }}
+          onIdea={(k) => {
+            setAddOpen(false);
+            setIdeaKind(k);
+          }}
+          onSwitchToIdeas={() => {
+            setAddOpen(false);
+            setTab("ideas");
+          }}
+        />
+      )}
+      {flightOpen && <RoundTripSheet trip={trip} onClose={() => setFlightOpen(false)} />}
+      {stayFor && (
+        <AddStaySheetPhone
+          trip={trip}
+          stopId={stayFor.stopId}
+          onClose={() => setStayFor(null)}
+          onIdeaInstead={() => {
+            setStayFor(null);
+            setTab("ideas");
+            setIdeaKind("stay");
+          }}
+        />
+      )}
+      {stopOpen && <AddStopSheet trip={trip} onClose={() => setStopOpen(false)} />}
+      {ideaKind && <AddIdeaSheet trip={trip} kind={ideaKind} onClose={() => setIdeaKind(null)} />}
       <HowWasItSheet
         visible={journalEntry !== null}
         name={journalEntry?.name ?? ""}
@@ -441,7 +550,19 @@ export default function TripScreen() {
   );
 }
 
-function StopRow({ row, onPress }: { row: RouteRowModel; onPress: () => void }) {
+function StopRow({
+  row,
+  wholeTrip,
+  onPress,
+  onAddStay,
+}: {
+  row: RouteRowModel;
+  wholeTrip: boolean;
+  onPress: () => void;
+  /** #128 · Q8 A door 2 — a stop with no stay offers one, dates from the stop. */
+  onAddStay: () => void;
+}) {
+  const hasStay = row.reservations.some((r) => r.type === "lodging" || r.type === "campground");
   return (
     <Pressable onPress={onPress} accessibilityRole="button">
       {({ pressed }) => (
@@ -449,6 +570,11 @@ function StopRow({ row, onPress }: { row: RouteRowModel; onPress: () => void }) 
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <Text style={styles.stopName}>{row.stop.place.name}</Text>
             {row.floating && <FloatingTag />}
+            {wholeTrip && (
+              <View style={styles.wholeTrip}>
+                <Text style={styles.wholeTripText}>WHOLE TRIP</Text>
+              </View>
+            )}
           </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {row.dates && <Text style={styles.mono}>{row.dates}</Text>}
@@ -469,6 +595,13 @@ function StopRow({ row, onPress }: { row: RouteRowModel; onPress: () => void }) 
               {row.note}
             </Text>
           ) : null}
+          {!hasStay && (
+            <Pressable onPress={onAddStay} accessibilityRole="button" style={styles.addStay}>
+              <Text style={styles.addStayText}>
+                + Add stay <Text style={styles.addStayHint}>· dates from this stop</Text>
+              </Text>
+            </Pressable>
+          )}
         </Card>
       )}
     </Pressable>
@@ -555,6 +688,43 @@ function Legend({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   masthead: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 12, gap: 10 },
+  tabs: { flexDirection: "row", alignItems: "flex-end", borderBottomWidth: 1, borderBottomColor: C.border },
+  tab: { flex: 1, alignItems: "center", paddingTop: 5, paddingBottom: 7, borderBottomWidth: 2, borderBottomColor: "transparent" },
+  tabOn: { borderBottomColor: C.green },
+  tabText: { fontSize: 12, fontWeight: "600", color: C.inkFaded },
+  tabCount: { fontFamily: F.mono, fontSize: 9, fontWeight: "500", color: C.inkFaded },
+  addPill: {
+    marginLeft: 8,
+    marginBottom: 6,
+    borderWidth: 1,
+    borderColor: C.green,
+    backgroundColor: C.greenSoft,
+    borderRadius: R.pill,
+    paddingVertical: 2,
+    paddingHorizontal: 9,
+  },
+  addPillText: { fontSize: 11, fontWeight: "700", color: C.greenInk },
+  wholeTrip: {
+    marginLeft: "auto",
+    borderWidth: 1,
+    borderColor: C.green,
+    backgroundColor: C.greenSoft,
+    borderRadius: R.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 1,
+  },
+  wholeTripText: { fontFamily: F.mono, fontSize: 10, fontWeight: "600", color: C.greenInk },
+  addStay: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: C.green,
+    borderRadius: R.md,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
+  addStayText: { fontSize: 11, fontWeight: "700", color: C.greenInk },
+  addStayHint: { fontFamily: F.mono, fontWeight: "400", color: C.inkFaded },
   /** Full-bleed: the map takes every point below the lens control. */
   mapLens: { flex: 1 },
   /** …except a frame, which keeps the body's own gutter. */

@@ -43,6 +43,8 @@ export const AIRPORTS: Readonly<Record<string, Airport>> = {
   RDM: { tz: "America/Los_Angeles", lat: 44.25, lng: -121.15 },
   MFR: { tz: "America/Los_Angeles", lat: 42.37, lng: -122.87 },
   GEG: { tz: "America/Los_Angeles", lat: 47.62, lng: -117.53 },
+  // #130 · the Bellingham replay's own airport (BOI → BLI).
+  BLI: { tz: "America/Los_Angeles", lat: 48.79, lng: -122.54 },
   SFO: { tz: "America/Los_Angeles", lat: 37.62, lng: -122.38 },
   OAK: { tz: "America/Los_Angeles", lat: 37.72, lng: -122.22 },
   SJC: { tz: "America/Los_Angeles", lat: 37.36, lng: -121.93 },

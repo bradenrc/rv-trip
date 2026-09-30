@@ -50,6 +50,10 @@ import type {
   Segment,
   SegmentDateConflict,
   SegmentTrip,
+  SegmentBookingsChoice,
+  TripDestinationInput,
+  BoundaryFlightsInput,
+  BoundaryBooking,
 } from "@rv-trip/core";
 import {
   beenWriteThrough,
@@ -62,6 +66,8 @@ import {
   reconcileSegments,
   retimedSegment,
   suggestedPlaceFromSearch,
+  withReturnHop,
+  boundarySegments,
 } from "@rv-trip/core";
 import {
   getHouseholdInvite,
@@ -163,11 +169,25 @@ export class SegmentHasBookings extends Error {
 
 /** The slice of a trip its hop set is a function of, read inside `tx`. */
 async function loadSegmentTrip(tx: Tx, tripId: string): Promise<SegmentTrip | null> {
-  const [trip] = await tx
-    .select({ id: trips.id, homeBase: trips.homeBase, defaultMode: trips.defaultMode })
+  // #126 · Q5 A (vet HIGH) — the home → first hop exists when the trip has an
+  // EFFECTIVE home base: its own override, else the household default. The same
+  // coalesce `getTripById` hands the client, so the optimistic reconcile agrees.
+  const [row] = await tx
+    .select({
+      id: trips.id,
+      homeBase: trips.homeBase,
+      householdHomeBase: userPrefs.homeBase,
+      defaultMode: trips.defaultMode,
+    })
     .from(trips)
+    .leftJoin(userPrefs, eq(userPrefs.ownerId, trips.ownerId))
     .where(eq(trips.id, tripId));
-  if (!trip) return null;
+  if (!row) return null;
+  const trip = {
+    id: row.id,
+    homeBase: row.homeBase ?? row.householdHomeBase ?? null,
+    defaultMode: row.defaultMode,
+  };
   const legRows = await tx
     .select({ id: legs.id, sortOrder: legs.sortOrder })
     .from(legs)
@@ -379,14 +399,20 @@ export async function createTrip(
     defaultMode?: TravelMode;
     lodgingDefault?: LodgingKind | null;
     rigOn?: boolean;
+    /** #126 · Q4 A — "Where to?". Upserted as the household's destinations
+     * row; the trip points at it and opens with one stop spanning its dates. */
+    destination?: TripDestinationInput | null;
   },
 ) {
-  // One empty leg in the SAME transaction: RouteView renders per leg, so a trip
-  // with none opens with nothing to hang "Add stop" on.
+  // One leg in the SAME transaction: RouteView renders per leg, so a trip with
+  // none opens with nothing to hang "Add stop" on.
   return db.transaction(async (tx) => {
+    const dest = input.destination ?? null;
+    const destinationId = dest ? await upsertTripDestination(tx, owner, dest) : null;
     const [row] = await tx
       .insert(trips)
       .values({
+        destinationId,
         ownerId: owner,
         title: input.title,
         startDate: input.startDate,
@@ -400,9 +426,62 @@ export async function createTrip(
         ...(input.rigOn !== undefined && { rigOn: input.rigOn }),
       })
       .returning();
-    await tx.insert(legs).values({ tripId: row!.id, title: "Leg 1", sortOrder: 0 });
+    const [leg] = await tx
+      .insert(legs)
+      .values({ tripId: row!.id, title: "Leg 1", sortOrder: 0 })
+      .returning({ id: legs.id });
+    if (dest) {
+      // #126 · Q4 A — the destination IS the first stop, spanning the whole
+      // trip (the "whole trip" pill). Its hops follow: home → it when the trip
+      // has an effective home base (override, else household), and the → home
+      // row a round trip needs (vet HIGH: only this create and the round-trip
+      // save ever birth one).
+      await tx.insert(stops).values({
+        legId: leg!.id,
+        placeName: dest.name,
+        lat: dest.lat,
+        lng: dest.lng,
+        googlePlaceId: dest.googlePlaceId,
+        arriveDate: input.startDate,
+        departDate: input.endDate,
+        sortOrder: 0,
+      });
+      await syncSegments(tx, row!.id);
+      const reconciled = await loadSegmentTrip(tx, row!.id);
+      if (reconciled && reconciled.homeBase !== null) {
+        await writeSegments(
+          tx,
+          reconciled.segments,
+          withReturnHop(reconciled, randomUUID).segments,
+        );
+      }
+    }
     return row!;
   });
+}
+
+/**
+ * The household's destinations row for a "Where to?" pick — created on first
+ * use, REUSED after (`destinations_owner_place_uq`). An existing row keeps its
+ * name and region; a pick that carries coordinates fills a point the row lacks.
+ */
+async function upsertTripDestination(
+  tx: Tx,
+  owner: string,
+  d: TripDestinationInput,
+): Promise<string> {
+  const [row] = await tx
+    .insert(destinations)
+    .values({ ownerId: owner, googlePlaceId: d.googlePlaceId, name: d.name, lat: d.lat, lng: d.lng })
+    .onConflictDoUpdate({
+      target: [destinations.ownerId, destinations.googlePlaceId],
+      set: {
+        lat: sql`coalesce(${destinations.lat}, excluded.lat)`,
+        lng: sql`coalesce(${destinations.lng}, excluded.lng)`,
+      },
+    })
+    .returning({ id: destinations.id });
+  return row!.id;
 }
 
 export async function updateTripFields(
@@ -1053,27 +1132,34 @@ async function createSegmentReservation(
  * A hop's mode switch (#104 · Q7 B) — `PATCH /api/segments/:id`. Owner-scoped
  * in the UPDATE itself (vet MED): the segment's trip must be the caller's.
  *
- * Back to Drive (vet MED): refused with `SegmentHasBookings` while a flight or
- * a ferry hangs on the hop, and otherwise the hop's clock is cleared with the
- * mode — an untimed drive borrows its day from the stop it arrives at, where a
- * timed one would keep judging the stop dates by a flight that is gone.
+ * #129 · Q11 A — reversible, and the 409 `segment_has_bookings` is gone:
+ *
+ *  - to Drive: the hop's clock is cleared with the mode (an untimed drive
+ *    borrows its day from the stop it arrives at). Its flights are KEPT on
+ *    `segment_id` — parked, hidden while it drives — or, with `remove`,
+ *    deleted. An absent choice reads as `keep`: the one that loses nothing.
+ *  - to Fly/Ferry: the hop is RE-TIMED from the bookings it kept (vet MED 2),
+ *    so the ✈ cell and `segmentDateConflicts` have a clock again — unless that
+ *    clock would now clash with the stop dates, in which case the hop stays
+ *    untimed (the same rule a booking delete follows).
  */
 export async function updateSegmentMode(
   owner: string,
   segmentId: string,
   mode: TravelMode,
+  bookings: SegmentBookingsChoice = "keep",
 ): Promise<boolean> {
   const scope = and(eq(travelSegments.id, segmentId), inArray(travelSegments.tripId, ownedTripIds(owner)));
   return db.transaction(async (tx) => {
-    const [seg] = await tx.select({ id: travelSegments.id }).from(travelSegments).where(scope);
+    const [seg] = await tx
+      .select({ id: travelSegments.id, tripId: travelSegments.tripId })
+      .from(travelSegments)
+      .where(scope);
     if (!seg) return false;
     if (mode === "drive") {
-      const [booked] = await tx
-        .select({ id: reservations.id })
-        .from(reservations)
-        .where(eq(reservations.segmentId, segmentId))
-        .limit(1);
-      if (booked) throw new SegmentHasBookings();
+      if (bookings === "remove") {
+        await tx.delete(reservations).where(eq(reservations.segmentId, segmentId));
+      }
       await tx
         .update(travelSegments)
         .set({ mode, departAt: null, arriveAt: null, departTz: null, arriveTz: null })
@@ -1081,6 +1167,98 @@ export async function updateSegmentMode(
       return true;
     }
     await tx.update(travelSegments).set({ mode }).where(scope);
+    await retimeQuietly(tx, seg.tripId, segmentId);
+    return true;
+  });
+}
+
+/** Re-time one hop from its bookings, and write the clock only when it moved
+ * and introduces no stop-date clash. */
+async function retimeQuietly(tx: Tx, tripId: string, segmentId: string): Promise<void> {
+  const before = (await loadSegmentTrip(tx, tripId))!;
+  const current = before.segments.find((s) => s.id === segmentId);
+  if (!current) return;
+  const retimed = retimedSegment(current, await segmentBookings(tx, segmentId));
+  if (retimed === current) return;
+  const after = { ...before, segments: before.segments.map((s) => (s.id === segmentId ? retimed : s)) };
+  if (newSegmentDateConflicts(before, after).length === 0) await writeSegmentClock(tx, retimed);
+}
+
+/**
+ * #129 · Q10 A (vet HIGH) — Add flight with Round trip on:
+ * `POST /api/trips/:id/boundary-flights`. ONE transaction, owner-scoped on the
+ * trip:
+ *
+ *  1. the home → first hop must exist (it does whenever the trip has an
+ *     effective home base) — else `NoHomeBase` (the handler's 409);
+ *  2. a round trip ensures the last → home hop, CREATING it when the trip has
+ *     none (`withReturnHop` — reconcileSegments never invents one);
+ *  3. both hops go Fly, each booking is inserted on its hop, and each hop is
+ *     re-timed from its bookings;
+ *  4. stop dates win (Q3 A): a clash rolls the whole save back as
+ *     `SegmentDateMismatch` (409 `segment_date_mismatch`).
+ *
+ * Returns false when the trip is not the caller's (404).
+ */
+export class NoHomeBase extends Error {
+  constructor() {
+    super("no_home_base");
+    this.name = "NoHomeBase";
+  }
+}
+
+export async function createBoundaryFlights(
+  owner: string,
+  tripId: string,
+  input: BoundaryFlightsInput,
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [owned] = await tx
+      .select({ id: trips.id })
+      .from(trips)
+      .where(and(eq(trips.id, tripId), eq(trips.ownerId, owner)));
+    if (!owned) return false;
+
+    let before = (await loadSegmentTrip(tx, tripId))!;
+    if (input.roundTrip) {
+      const withHome = withReturnHop(before, randomUUID);
+      if (withHome !== before) {
+        await writeSegments(tx, before.segments, withHome.segments);
+        before = (await loadSegmentTrip(tx, tripId))!;
+      }
+    }
+    const hops = boundarySegments(before);
+    if (!hops.outbound) throw new NoHomeBase();
+    const legs: [string, BoundaryBooking][] = [[hops.outbound.id, input.outbound]];
+    if (input.roundTrip && input.return && hops.return) legs.push([hops.return.id, input.return]);
+
+    for (const [segmentId, b] of legs) {
+      await tx.update(travelSegments).set({ mode: "fly" }).where(eq(travelSegments.id, segmentId));
+      await tx.insert(reservations).values({
+        segmentId,
+        type: "transport",
+        name: b.name,
+        confirmationNumber: b.confirmationNumber,
+        cost: b.cost == null ? null : String(b.cost),
+        startsAt: new Date(b.startsAt),
+        endsAt: new Date(b.endsAt),
+        startsTz: b.startsTz,
+        endsTz: b.endsTz,
+      });
+    }
+
+    const after = (await loadSegmentTrip(tx, tripId))!;
+    const retimed = await Promise.all(
+      after.segments.map(async (s) =>
+        legs.some(([id]) => id === s.id) ? retimedSegment(s, await segmentBookings(tx, s.id)) : s,
+      ),
+    );
+    const next = { ...after, segments: retimed };
+    const [conflict] = newSegmentDateConflicts(after, next);
+    if (conflict) throw new SegmentDateMismatch(conflict);
+    for (const s of retimed) {
+      if (legs.some(([id]) => id === s.id)) await writeSegmentClock(tx, s);
+    }
     return true;
   });
 }
@@ -1105,16 +1283,67 @@ export async function updateReservationFields(
     notes?: string | null;
     /** #105 · the stay form's kind switch. */
     lodgingKind?: LodgingKind | null;
+    /** #124 (vet HIGH) · a hop booking's Edit — the ticket's clock. */
+    startsAt?: string | null;
+    endsAt?: string | null;
+    startsTz?: string | null;
+    endsTz?: string | null;
   },
   actor: string,
   deps: Pick<SaveDeps, "resolveDestination"> = {},
 ): Promise<boolean> {
+  if (CLOCK_KEYS.some((k) => k in patch)) return writeBookingClock(owner, resId, patch);
   const matched = await writeReservationFields(owner, resId, patch, actor);
   // #113 · "How was it?" on a stay / meal / thing to do writes through.
   if (matched && namesJournalField(patch)) {
     await writeThroughBeen(owner, { kind: "reservation", id: resId }, { ...deps, actor });
   }
   return matched;
+}
+
+const CLOCK_KEYS = ["startsAt", "endsAt", "startsTz", "endsTz"] as const;
+
+/**
+ * #124 · an edited hop booking, in ONE transaction: write the fields, then —
+ * like `createSegmentReservation` — re-time its hop from ALL its bookings and
+ * judge the result against the stop dates (Q3 A). A clash rolls the edit back
+ * as `SegmentDateMismatch` (409 `segment_date_mismatch`). A parked hop (#129,
+ * mode drive) keeps no clock, so it is not re-timed.
+ */
+async function writeBookingClock(
+  owner: string,
+  resId: string,
+  patch: Parameters<typeof updateReservationFields>[2],
+): Promise<boolean> {
+  const { cost, startsAt, endsAt, ...rest } = patch;
+  const values = {
+    ...rest,
+    ...(cost !== undefined && { cost: cost === null ? null : String(cost) }),
+    ...(startsAt !== undefined && { startsAt: startsAt === null ? null : new Date(startsAt) }),
+    ...(endsAt !== undefined && { endsAt: endsAt === null ? null : new Date(endsAt) }),
+  };
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(reservations)
+      .set(values)
+      .where(ownedReservation(owner, resId))
+      .returning({ segmentId: reservations.segmentId });
+    if (!row) return false;
+    if (!row.segmentId) return true;
+    const [seg] = await tx
+      .select({ tripId: travelSegments.tripId, mode: travelSegments.mode })
+      .from(travelSegments)
+      .where(eq(travelSegments.id, row.segmentId));
+    if (!seg || seg.mode === "drive") return true;
+    const before = (await loadSegmentTrip(tx, seg.tripId))!;
+    const current = before.segments.find((s) => s.id === row.segmentId)!;
+    const retimed = retimedSegment(current, await segmentBookings(tx, row.segmentId));
+    const after = { ...before, segments: before.segments.map((s) => (s.id === retimed.id ? retimed : s)) };
+    const [conflict] = newSegmentDateConflicts(before, after).filter((c) => c.segmentId === retimed.id);
+    if (conflict) throw new SegmentDateMismatch(conflict);
+    await writeSegmentClock(tx, retimed);
+    return true;
+  });
 }
 
 async function writeReservationFields(
@@ -1128,8 +1357,9 @@ async function writeReservationFields(
     const rows = await db.select({ id: reservations.id }).from(reservations).where(scope);
     return rows.length > 0;
   }
-  // `cost` is the one column whose wire type is not its stored type.
-  const { cost, ...rest } = patch;
+  // `cost` is the one column whose wire type is not its stored type. (The
+  // clock keys never reach here — `writeBookingClock` owns them.)
+  const { cost, startsAt: _startsAt, endsAt: _endsAt, ...rest } = patch;
   const values = cost === undefined ? rest : { ...rest, cost: cost === null ? null : String(cost) };
   if (!logs(patch)) {
     const updated = await db
@@ -1509,19 +1739,42 @@ export async function upsertRig(owner: string, input: RigProfileInput): Promise<
  * a units choice made on another device one round-trip earlier.
  */
 export async function upsertPrefs(owner: string, patch: UserPrefsPatch): Promise<UserPrefs> {
-  const values: UserPrefsPatch = {};
+  const values: Partial<typeof userPrefs.$inferInsert> = {};
   for (const key of ["theme", "units", "mapStyle", "trackCosts"] as const) {
     if (patch[key] !== undefined) Object.assign(values, { [key]: patch[key] });
   }
-  const [row] = await db
-    .insert(userPrefs)
-    .values({ ownerId: owner, ...values })
-    .onConflictDoUpdate({
-      target: userPrefs.ownerId,
-      set: { ...values, updatedAt: new Date() },
-    })
-    .returning();
-  return mapPrefsRow(row!);
+  // #126 · Q5 A — the household home base: one object on the wire, four
+  // columns here (the trip's own `homeBaseColumns` shape, plus the name).
+  const home = patch.homeBasePlace;
+  if (home !== undefined) {
+    Object.assign(values, {
+      homeBase: home?.name ?? null,
+      homeBaseLat: home?.lat ?? null,
+      homeBaseLng: home?.lng ?? null,
+      homeBasePlaceId: home?.googlePlaceId ?? null,
+    });
+  }
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(userPrefs)
+      .values({ ownerId: owner, ...values })
+      .onConflictDoUpdate({
+        target: userPrefs.ownerId,
+        set: { ...values, updatedAt: new Date() },
+      })
+      .returning();
+    // Every trip that reads the household default (no override of its own)
+    // gains or loses its home → first hop with it — the same reconcile a
+    // trip's own home-base write runs (#110 §6).
+    if (home !== undefined) {
+      const following = await tx
+        .select({ id: trips.id })
+        .from(trips)
+        .where(and(eq(trips.ownerId, owner), isNull(trips.homeBase)));
+      for (const t of following) await syncSegments(tx, t.id);
+    }
+    return mapPrefsRow(row!);
+  });
 }
 
 /**

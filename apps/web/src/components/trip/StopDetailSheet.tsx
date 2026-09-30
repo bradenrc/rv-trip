@@ -20,9 +20,11 @@ import {
   Users,
 } from "lucide-react";
 import type {
+  DateSpan,
   Idea,
   LodgingKind,
   NearPlace,
+  SearchAnchor,
   PickedPlace,
   ReservationDraft,
   ReservationType,
@@ -37,7 +39,6 @@ import {
   stayNameLabel,
   withStayKind,
   nearLabel,
-  nearOf,
   pickedFromPlace,
   reservationCost,
   reservationDraftInput,
@@ -50,6 +51,7 @@ import {
   ReservationCard,
   IdeaCard,
   SegmentedControl,
+  RangePicker,
   categoryMeta,
   ideaCategoryType,
   money,
@@ -62,6 +64,17 @@ import { StopMiniMap } from "@/components/map/StopMiniMap";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { MenuHint, RowMenu, MENU_ITEM, MENU_ITEM_WARN } from "./row-menu";
+import { StayPlaceField } from "./AddStaySheet";
+
+/** A stored stay's name, as the picker's picked state shows it. */
+const pickedName = (name: string): PickedPlace => ({
+  name,
+  lat: null,
+  lng: null,
+  googlePlaceId: null,
+  address: null,
+  rating: null,
+});
 
 /**
  * The Type select (#105 · klunk row 5): "Stay" first — a UI grouping, not an
@@ -176,6 +189,8 @@ export function StopDetailSheet({
   onIdeaToggleNote,
   placing,
   placeNear,
+  stopNear,
+  tripSpan,
   onStartChangePlace,
   onChangePlace,
   onCancelChangePlace,
@@ -206,8 +221,14 @@ export function StopDetailSheet({
 
   // ── #60 · Mount B · the same inline editor the row menu opens ────────────
   placing: boolean;
-  /** The search bias — the stop above this one in the leg, else home base. */
+  /** The search bias for "Change place…" — #126's anchor for a stop: the stop
+   * above it, then the trip's destination (never the home base). */
   placeNear: NearPlace | null;
+  /** #126 · this stop's own anchor (this stop → the trip's destination) — the
+   * idea picker's and the stay search's bias. */
+  stopNear: SearchAnchor | null;
+  /** #127 · the trip's dates — the stay form's RangePicker band. */
+  tripSpan: DateSpan;
   onStartChangePlace: () => void;
   onChangePlace: (picked: PickedPlace) => void;
   onCancelChangePlace: () => void;
@@ -224,7 +245,7 @@ export function StopDetailSheet({
    * previous stop, else home base) is the fallback for a stop with no
    * coordinates of its own.
    */
-  const ideaNear = nearOf(stop.place, placeNear);
+  const ideaNear = stopNear;
   const costTotal = stop.reservations.reduce((a, r) => a + (r.cost ?? 0), 0);
 
   const editing =
@@ -346,6 +367,8 @@ export function StopDetailSheet({
                 form={leaves.form}
                 costs={costs}
                 lodgingDefault={lodgingDefault}
+                stopNear={stopNear}
+                tripSpan={tripSpan}
                 editing={editing !== null}
                 canSave={canSave}
                 onChange={leaves.onFormChange}
@@ -645,6 +668,8 @@ function ReservationForm({
   form,
   costs,
   lodgingDefault,
+  stopNear,
+  tripSpan,
   editing,
   canSave,
   onChange,
@@ -654,6 +679,8 @@ function ReservationForm({
   form: ReservationDraft;
   costs: boolean;
   lodgingDefault: LodgingKind | null;
+  stopNear: SearchAnchor | null;
+  tripSpan: DateSpan;
   editing: boolean;
   canSave: boolean;
   onChange: (patch: Partial<ReservationDraft>) => void;
@@ -700,34 +727,38 @@ function ReservationForm({
         </div>
       )}
 
-      <label className="flex flex-col gap-1">
-        <FieldLabel>{stay ? stayNameLabel(kind) : "Name"}</FieldLabel>
-        <input
-          value={form.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          placeholder={friends ? "Jane & Rick" : "e.g. Fort Stevens State Park"}
-          className={SHEET_FIELD}
+      {/* #128 · Q9 A — a stay's name field IS the anchored lodging search (the
+          Add stay sheet's own field); Friends stays a name — it's people. */}
+      {stay && !friends ? (
+        <div className="flex flex-col gap-1">
+          <FieldLabel>{stayNameLabel(kind)}</FieldLabel>
+          <StayPlaceField
+            value={form.name.trim() === "" ? null : pickedName(form.name)}
+            anchor={stopNear}
+            onChange={(p) => onChange({ name: p?.name ?? "" })}
+          />
+        </div>
+      ) : (
+        <label className="flex flex-col gap-1">
+          <FieldLabel>{stay ? stayNameLabel(kind) : "Name"}</FieldLabel>
+          <input
+            value={form.name}
+            onChange={(e) => onChange({ name: e.target.value })}
+            placeholder={friends ? "Jane & Rick" : "e.g. Fort Stevens State Park"}
+            className={SHEET_FIELD}
+          />
+        </label>
+      )}
+      {/* #127 · one RangePicker in place of the two native date inputs, the
+          trip's span as its band. A reservation's dates are optional, so the
+          picker starts empty on a new one. */}
+      <div className="flex flex-col gap-1">
+        <FieldLabel>{friends ? "Nights" : "Check-in → check-out"}</FieldLabel>
+        <RangePicker
+          value={{ start: form.checkIn || null, end: form.checkOut || null }}
+          tripSpan={tripSpan}
+          onChange={(v) => onChange({ checkIn: v.start ?? "", checkOut: v.end ?? "" })}
         />
-      </label>
-      <div className="flex flex-wrap gap-2.5">
-        <label className="flex flex-[1_1_130px] flex-col gap-1">
-          <FieldLabel>{friends ? "Nights · from" : "Check-in"}</FieldLabel>
-          <input
-            type="date"
-            value={form.checkIn}
-            onChange={(e) => onChange({ checkIn: e.target.value })}
-            className={SHEET_FIELD}
-          />
-        </label>
-        <label className="flex flex-[1_1_130px] flex-col gap-1">
-          <FieldLabel>{friends ? "to" : "Check-out"}</FieldLabel>
-          <input
-            type="date"
-            value={form.checkOut}
-            onChange={(e) => onChange({ checkOut: e.target.value })}
-            className={SHEET_FIELD}
-          />
-        </label>
       </div>
       {friends ? (
         <div className="font-mono text-[11.5px] text-rv-ink-faded">

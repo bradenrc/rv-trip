@@ -1,7 +1,20 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
-import type { ReservationType } from "@rv-trip/core";
-import { categoryOf } from "@rv-trip/core";
+import type { DateRangeValue, DateSpan, ReservationType } from "@rv-trip/core";
+import {
+  categoryOf,
+  dayCellState,
+  isCompleteRange,
+  monthGrid,
+  monthOf,
+  monthTitle,
+  nightsLabel,
+  pickDay,
+  rangeLabel,
+  rangePickState,
+  shiftMonth,
+  spanLabel,
+} from "@rv-trip/core";
 import { C, F, R } from "./theme";
 
 /** Mono uppercase kicker — the DS's label convention. */
@@ -264,7 +277,130 @@ export function Muted({ children }: { children: ReactNode }) {
   return <Text style={{ color: C.inkMuted, fontSize: 14, textAlign: "center", lineHeight: 20 }}>{children}</Text>;
 }
 
+/**
+ * The phone twin of @rv-trip/ui's `RangePicker` (#127 · Q6 A · Q7 B) — the same
+ * core arithmetic (`date-range.ts`), so the month, the nights and the amber
+ * guard read identically on both. Trip span `navySoft`, the pick `green` /
+ * `greenSoft`, outside the trip `warning` / `warningSoft`; an outside pick
+ * offers "Extend trip to …" (`onExtendTrip`). No `tripSpan` = no band.
+ */
+export function RangePicker({
+  value,
+  tripSpan = null,
+  onChange,
+  onExtendTrip,
+}: {
+  value: DateRangeValue;
+  tripSpan?: DateSpan | null;
+  onChange: (v: DateRangeValue) => void;
+  onExtendTrip?: (span: DateSpan) => void;
+}) {
+  const [month, setMonth] = useState(() =>
+    monthOf(value.start ?? tripSpan?.start ?? new Date().toISOString().slice(0, 10)),
+  );
+  const complete = isCompleteRange(value) ? value : null;
+  const state = complete ? rangePickState(complete, tripSpan) : null;
+  return (
+    <View style={styles.cal}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Pressable onPress={() => setMonth((m) => shiftMonth(m, -1))} hitSlop={8} accessibilityRole="button" accessibilityLabel="Previous month">
+          <Text style={{ color: C.inkFaded, fontSize: 14 }}>‹</Text>
+        </Pressable>
+        <Text style={{ color: C.ink, fontSize: 14, fontWeight: "700" }}>{monthTitle(month)}</Text>
+        <Pressable onPress={() => setMonth((m) => shiftMonth(m, 1))} hitSlop={8} accessibilityRole="button" accessibilityLabel="Next month">
+          <Text style={{ color: C.inkFaded, fontSize: 14 }}>›</Text>
+        </Pressable>
+        {tripSpan && (
+          <Text style={[styles.calMeta, { marginLeft: "auto" }]}>trip · {spanLabel(tripSpan)}</Text>
+        )}
+      </View>
+      <View style={styles.calRow}>
+        {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+          <Text key={i} style={[styles.calMeta, styles.calCell, { height: 16 }]}>
+            {d}
+          </Text>
+        ))}
+      </View>
+      {monthGrid(month).map((week, w) => (
+        <View key={w} style={styles.calRow}>
+          {week.map((day, i) => {
+            if (day === null) return <View key={i} style={styles.calCell} />;
+            const c = dayCellState(day, value, tripSpan);
+            const bg = c.edge
+              ? c.outside
+                ? C.warningSoft
+                : C.green
+              : c.picked
+                ? c.outside
+                  ? C.warningSoft
+                  : C.greenSoft
+                : c.inTrip
+                  ? C.navySoft
+                  : "transparent";
+            const ink = c.edge && !c.outside ? C.navy : c.outside ? C.warning : c.picked ? C.greenInk : c.inTrip ? C.ink : C.inkFaded;
+            return (
+              <Pressable
+                key={day}
+                onPress={() => onChange(pickDay(value, day))}
+                accessibilityRole="button"
+                accessibilityLabel={day}
+                accessibilityState={{ selected: c.picked }}
+                style={[
+                  styles.calCell,
+                  { backgroundColor: bg },
+                  c.edge && { borderRadius: R.pill },
+                  c.edge && c.outside && { borderWidth: 2, borderColor: C.warning },
+                ]}
+              >
+                <Text style={{ fontFamily: F.mono, fontSize: 12, color: ink, fontWeight: c.edge ? "800" : c.inTrip ? "600" : "400" }}>
+                  {Number(day.slice(8, 10))}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ))}
+      <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
+        {complete && state ? (
+          <>
+            <Text style={{ fontFamily: F.mono, fontSize: 13, fontWeight: "700", color: C.ink }}>{rangeLabel(complete)}</Text>
+            <Text style={styles.calMeta}>{nightsLabel(state.nights)}</Text>
+            {state.outsideDays > 0 ? (
+              <Text style={[styles.calMeta, { color: C.warning }]}>
+                ⚠ {state.outsideDays} day{state.outsideDays === 1 ? "" : "s"} outside the trip
+              </Text>
+            ) : state.wholeTrip ? (
+              <Text style={[styles.calMeta, { color: C.greenInk }]}>✓ whole trip</Text>
+            ) : null}
+            {state.extendTo && onExtendTrip ? (
+              <Chip warn onPress={() => onExtendTrip(state.extendTo!)}>
+                Extend trip to {spanLabel(state.extendTo)}
+              </Chip>
+            ) : tripSpan && !state.wholeTrip ? (
+              <Chip onPress={() => onChange({ start: tripSpan.start, end: tripSpan.end })}>Whole trip</Chip>
+            ) : null}
+          </>
+        ) : (
+          <Text style={styles.calMeta}>{value.start ? "Pick the last day" : "Pick the first day"}</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
+  cal: {
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.surface,
+    borderRadius: R.card,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 2,
+  },
+  calRow: { flexDirection: "row" },
+  calCell: { flex: 1, height: 32, alignItems: "center", justifyContent: "center", textAlign: "center" },
+  calMeta: { fontFamily: F.mono, fontSize: 10, color: C.inkFaded },
   kicker: {
     fontFamily: F.mono,
     fontSize: 10,

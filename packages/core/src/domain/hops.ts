@@ -228,18 +228,62 @@ export function removeSegmentBooking<T extends Pick<Trip, "segments">>(trip: T, 
   };
 }
 
-/** The mode switch, applied optimistically (`PATCH /api/segments/:id`). A hop
- * switched to Drive drops its clock too — the server does the same. */
-export function setSegmentMode<T extends Pick<Trip, "segments">>(trip: T, segmentId: string, mode: TravelMode): T {
+/**
+ * The mode switch, applied optimistically (`PATCH /api/segments/:id`) — the
+ * server's `updateSegmentMode` does the same three things (#129 · Q11 A):
+ *
+ *  - to Drive: the clock goes (an untimed drive borrows its day from the stop);
+ *    its bookings are KEPT, parked on the hop, unless `bookings` is `remove`.
+ *  - to Fly/Ferry: the hop is re-timed from whatever bookings it kept, so a
+ *    flight parked and brought back paints its ✈ day again.
+ */
+export function setSegmentMode<T extends Pick<Trip, "segments">>(
+  trip: T,
+  segmentId: string,
+  mode: TravelMode,
+  bookings: "keep" | "remove" = "keep",
+): T {
   return {
     ...trip,
-    segments: trip.segments.map((s) =>
-      s.id !== segmentId
-        ? s
-        : mode === "drive"
-          ? { ...s, mode, departAt: null, arriveAt: null, departTz: null, arriveTz: null }
-          : { ...s, mode },
-    ),
+    segments: trip.segments.map((s) => {
+      if (s.id !== segmentId) return s;
+      if (mode === "drive") {
+        return {
+          ...s,
+          mode,
+          departAt: null,
+          arriveAt: null,
+          departTz: null,
+          arriveTz: null,
+          reservations: bookings === "remove" ? [] : s.reservations,
+        };
+      }
+      return retimedSegment({ ...s, mode }, s.reservations);
+    }),
+  };
+}
+
+/** A hop that DRIVES but still carries flights (#129 · Q11 A "keep") — the
+ * "1 flight booking parked" row. 0 for every other hop. */
+export function parkedBookings(seg: Pick<Segment, "mode" | "reservations">): number {
+  return seg.mode === "drive" ? seg.reservations.length : 0;
+}
+
+/** #124 · a hop booking edited in place, and its hop re-timed from the result
+ * — what the server's `updateReservationFields` writes. */
+export function editSegmentBooking<T extends Pick<Trip, "segments">>(
+  trip: T,
+  resId: string,
+  patch: Partial<Pick<Reservation, "name" | "startsAt" | "endsAt" | "startsTz" | "endsTz">>,
+): T {
+  return {
+    ...trip,
+    segments: trip.segments.map((s) => {
+      if (!s.reservations.some((r) => r.id === resId)) return s;
+      const reservations = s.reservations.map((r) => (r.id === resId ? { ...r, ...patch } : r));
+      const next = { ...s, reservations };
+      return s.mode === "drive" ? next : retimedSegment(next, reservations);
+    }),
   };
 }
 

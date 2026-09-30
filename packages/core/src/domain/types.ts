@@ -277,6 +277,27 @@ export type SurfaceRadiusMi = z.infer<typeof surfaceRadiusMi>;
 export const tripStatus = z.enum(["planning", "upcoming", "complete"]);
 export type TripStatus = z.infer<typeof tripStatus>;
 
+/**
+ * Where a trip is GOING (#126 · Q4 A) — the locality-grain place the "Where
+ * to?" question picked, stored as a `destinations` row (one per household +
+ * Google place id) that `trips.destination_id` points at. Its point is the
+ * second choice of every trip-context place search (`searchAnchor`), so a
+ * search never falls back to the caller's IP.
+ */
+export const tripDestination = z.object({
+  id: z.string().nullable().default(null),
+  name: z.string().min(1),
+  googlePlaceId: z.string().min(1),
+  lat: z.number().nullable().default(null),
+  lng: z.number().nullable().default(null),
+});
+export type TripDestination = z.infer<typeof tripDestination>;
+
+/** The create body's destination — the picked place, never an id: the server
+ * upserts the row by owner + place id. */
+export const tripDestinationInput = tripDestination.omit({ id: true });
+export type TripDestinationInput = z.infer<typeof tripDestinationInput>;
+
 export const trip = z.object({
   id: z.string(),
   ownerId: z.string(),
@@ -292,6 +313,17 @@ export const trip = z.object({
    * (`pickedCoordLabel`: half a coordinate is no coordinate).
    */
   homeBasePlace: place.nullable().default(null),
+  /**
+   * #126 · Q5 A — true when `homeBase`/`homeBasePlace` above were READ from the
+   * household default (`user_prefs.home_base*`) because the trip has no
+   * override of its own. Trip settings reads it to say "household default" and
+   * to offer "Use household default". Never written. Optional (absent =
+   * false) so a payload from an older server, and every fixture, still types.
+   */
+  homeBaseFromHousehold: z.boolean().optional(),
+  /** #126 · Q4 A — where the trip is going; null/absent for a trip made
+   * before it. Optional for the same reason. */
+  destination: tripDestination.nullable().optional(),
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus.default("planning"),
@@ -345,6 +377,14 @@ export const tripCreateInput = trip.pick({
   defaultMode: true,
   lodgingDefault: true,
   rigOn: true,
+}).extend({
+  /**
+   * #126 · Q4 A — "Where to?". Optional (an older client sends none); when
+   * present the server upserts the `destinations` row, points the trip at it and
+   * writes one stop spanning the whole trip on Leg 1. The picked coordinates
+   * travel with it (vet MED): they are the "near …" anchor's point.
+   */
+  destination: tripDestinationInput.nullable().optional(),
 });
 export type TripCreateInput = z.infer<typeof tripCreateInput>;
 
@@ -543,17 +583,94 @@ export const reservationPatchInput = reservation
     lodgingKind: true,
     // #113 · the "How was it?" sheet on a stay / meal / thing to do.
     again: true,
+    // #124 (vet HIGH) · a hop booking's Edit re-times the flight. Explicit —
+    // `.pick()` drops an unlisted key, and a dropped clock would save a stale
+    // flight without an error.
+    startsTz: true,
+    endsTz: true,
   })
-  .partial();
+  .extend({
+    startsAt: z.string().datetime({ offset: true }).nullable(),
+    endsAt: z.string().datetime({ offset: true }).nullable(),
+  })
+  .partial()
+  .superRefine((b, ctx) => {
+    // The create's zone pairing (reservationCreateInput): half a clock is no
+    // clock, so an instant that is SENT must travel with its zone.
+    if (b.startsAt != null && !b.startsTz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["startsTz"], message: "startsAt needs its zone" });
+    }
+    if (b.endsAt != null && !b.endsTz) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endsTz"], message: "endsAt needs its zone" });
+    }
+    if (b.startsAt != null && b.endsAt != null && Date.parse(b.endsAt) < Date.parse(b.startsAt)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["endsAt"], message: "lands before it leaves" });
+    }
+  });
 export type ReservationPatchInput = z.infer<typeof reservationPatchInput>;
+
+/**
+ * What happens to a hop's flights when it is switched to Drive (#129 · Q11 A):
+ * `keep` parks them on the hop (hidden while it drives, back when it flies),
+ * `remove` deletes them.
+ */
+export const segmentBookingsChoice = z.enum(["keep", "remove"]);
+export type SegmentBookingsChoice = z.infer<typeof segmentBookingsChoice>;
 
 /**
  * `PATCH /api/segments/:id` (#104 · Q7 B) — a hop's mode switch. The mode is
  * the only thing a client writes on a segment: its ends are reconciled from
- * the stop sequence and its clock is re-timed from its bookings.
+ * the stop sequence and its clock is re-timed from its bookings. `bookings`
+ * (#129) answers the keep-or-remove prompt; absent reads as `keep`, the
+ * choice that loses nothing.
  */
-export const segmentPatchInput = z.object({ mode: travelMode });
+export const segmentPatchInput = z.object({
+  mode: travelMode,
+  bookings: segmentBookingsChoice.optional(),
+});
 export type SegmentPatchInput = z.infer<typeof segmentPatchInput>;
+
+/**
+ * One flight of a round trip (#129 · Q10 A) — a timed booking with no parent:
+ * the server hangs it on the boundary hop it belongs to. Both ends carry their
+ * zone (the create's pairing rule, made required here — a boundary flight with
+ * no clock cannot time the hop that makes the ✈ day).
+ */
+export const boundaryBooking = z
+  .object({
+    name: z.string().min(1),
+    startsAt: z.string().datetime({ offset: true }),
+    endsAt: z.string().datetime({ offset: true }),
+    startsTz: z.string().min(1),
+    endsTz: z.string().min(1),
+    confirmationNumber: z.string().nullable().default(null),
+    cost: z.number().nonnegative().nullable().default(null),
+  })
+  .refine((b) => Date.parse(b.endsAt) >= Date.parse(b.startsAt), {
+    path: ["endsAt"],
+    message: "lands before it leaves",
+  });
+export type BoundaryBooking = z.infer<typeof boundaryBooking>;
+
+/**
+ * `POST /api/trips/:id/boundary-flights` (#129 · Q10 A · vet HIGH) — Add flight
+ * with Round trip on: BOTH boundary hops' bookings in one transactional save.
+ * `outbound` lands on home → first stop; `return` on last stop → home, which
+ * the server creates when the trip has none (reconcileSegments never invents
+ * one). Round trip off sends `return: null` and books the outbound alone.
+ */
+export const boundaryFlightsInput = z
+  .object({
+    roundTrip: z.boolean(),
+    outbound: boundaryBooking,
+    return: boundaryBooking.nullable().default(null),
+  })
+  .refine((b) => !b.roundTrip || b.return !== null, {
+    path: ["return"],
+    message: "a round trip needs its return flight",
+  });
+export type BoundaryFlightsInput = z.infer<typeof boundaryFlightsInput>;
+export type BoundaryFlightsBody = z.input<typeof boundaryFlightsInput>;
 
 /**
  * `POST /api/ideas` — the stop sheet's "Add idea", the shelf's "+ Add", the

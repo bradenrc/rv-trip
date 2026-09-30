@@ -378,6 +378,13 @@ export interface RouteHop {
   items: RouteHopItem[];
   /** How many bookings (flights/ferries) hang on the hop. */
   bookings: number;
+  /**
+   * #129 · Q11 A — flights KEPT on a hop that now drives: "1 flight booking
+   * parked — comes back if you fly". Such a hop is drawn (mode `drive`, no
+   * items) so its inline mode switch is always reachable, on any trip mode.
+   * 0 for every fly/ferry hop.
+   */
+  parked: number;
 }
 
 /**
@@ -601,13 +608,18 @@ export function routeModel(
         dates: resDates(r),
         lodgingKind: r.lodgingKind,
       })),
-      ideas: stop.ideas.map((it) => ({
-        id: it.id,
-        title: it.title,
-        category: it.category,
-        status: it.status,
-      })),
-      showIdeaDivider: stop.reservations.length > 0 && stop.ideas.length > 0,
+      // #131 · Itinerary lists KNOWNS only: an idea still at status `idea` is a
+      // maybe, and maybes live on the Ideas tab (grouped under their stop).
+      ideas: stop.ideas
+        .filter((it) => it.status !== "idea")
+        .map((it) => ({
+          id: it.id,
+          title: it.title,
+          category: it.category,
+          status: it.status,
+        })),
+      showIdeaDivider:
+        stop.reservations.length > 0 && stop.ideas.some((it) => it.status !== "idea"),
       drive: byFromStop.get(stop.id) ?? null,
       hop: hops.byFromStop.get(stop.id) ?? null,
     }));
@@ -643,7 +655,9 @@ function resolveHops(trip: Trip) {
   let leading: { legId: string; hop: RouteHop } | null = null;
   let home: { legId: string; hop: RouteHop } | null = null;
   for (const seg of trip.segments) {
-    if (seg.mode === "drive") continue;
+    // A drive is drawn by `resolveDrives` — unless it carries parked flights
+    // (#129), which need their row and their way back to Fly.
+    if (seg.mode === "drive" && seg.reservations.length === 0) continue;
     const from = seg.fromStopId ? stops.get(seg.fromStopId) : undefined;
     const to = seg.toStopId ? stops.get(seg.toStopId) : undefined;
     if (seg.fromStopId === null && to) {
@@ -680,7 +694,8 @@ function toHop(trip: Trip, seg: Segment, from: Stop | undefined, to: Stop | unde
       ? weekdayMonthDay(borrowed)
       : null;
 
-  const bookings = [...seg.reservations].sort(
+  const parked = seg.mode === "drive" ? seg.reservations.length : 0;
+  const bookings = [...(parked > 0 ? [] : seg.reservations)].sort(
     (a, b) => (a.startsAt ? Date.parse(a.startsAt) : Infinity) - (b.startsAt ? Date.parse(b.startsAt) : Infinity),
   );
   const items: RouteHopItem[] = [];
@@ -733,6 +748,7 @@ function toHop(trip: Trip, seg: Segment, from: Stop | undefined, to: Stop | unde
     meta,
     items,
     bookings: bookings.length,
+    parked,
   };
 }
 

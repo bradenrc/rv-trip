@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { House } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -8,9 +9,11 @@ import {
   tripDayCount,
   tripDraftInput,
   withTripMode,
+  type Place,
   type TripDraft,
+  type UserPrefs,
 } from "@rv-trip/core";
-import { FieldLabel } from "@rv-trip/ui";
+import { FieldLabel, RangePicker } from "@rv-trip/ui";
 import { PageShell } from "@/components/nav/PageShell";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { Input } from "@/components/ui/input";
@@ -24,8 +27,6 @@ import {
 
 const FIELD =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] text-[13px] text-rv-ink md:text-[13px]";
-const FIELD_MONO =
-  "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] font-mono text-[12px] text-rv-ink md:text-[12px]";
 
 /**
  * /trips/new — three questions, in order, on one page (#103 · Q1 A).
@@ -36,15 +37,35 @@ const FIELD_MONO =
  * fly trip or a mix is never asked about the rig; its answer is stored as off.
  * Create stays disabled until a mode is picked (`tripDraftInput` is null).
  *
- * The create seeds one empty "Leg 1" server-side (POST /api/trips), so the
- * planner this redirects into always has a leg header to hang "Add stop" on.
- * There is no date picker in the app, so the dates are the native
- * `<input type="date">` rather than a new dependency.
+ * The create seeds one "Leg 1" server-side (POST /api/trips), so the planner
+ * this redirects into always has a leg header to hang "Add stop" on.
+ *
+ * #126 · #127 (docs/design/130 §4): the page now asks **Where to?** first (a
+ * PlacePicker — the pick becomes the trip's destination and one stop spanning
+ * its dates), then **When** on the one `RangePicker`. "Starting from" is no
+ * longer asked: the household home base renders as a quiet chip whose
+ * "change" writes this trip's override.
  */
 export default function NewTripPage() {
   const router = useRouter();
   const [draft, setDraft] = useState<TripDraft>(BLANK_TRIP_DRAFT);
   const [saving, setSaving] = useState(false);
+  /** The household home base (#126 · Q5 A) — the chip's default. */
+  const [household, setHousehold] = useState<Place | null>(null);
+  const [changingHome, setChangingHome] = useState(false);
+  useEffect(() => {
+    let live = true;
+    fetch("/api/prefs")
+      .then((r) => (r.ok ? (r.json() as Promise<UserPrefs | null>) : null))
+      .then((p) => {
+        if (live) setHousehold(p?.homeBasePlace ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const home = draft.homeBasePlace?.name ?? household?.name ?? null;
 
   // One rule for "is this submittable": the body it would send, or null.
   const input = tripDraftInput(draft);
@@ -100,7 +121,44 @@ export default function NewTripPage() {
         </p>
 
         <div className="mb-4">
-          <QuestionLabel n={1}>How does this trip mostly move?</QuestionLabel>
+          <QuestionLabel n={1}>Where to?</QuestionLabel>
+          <PlacePicker
+            value={draft.destination ?? null}
+            onChange={(destination) => set({ destination })}
+            placeholder="A town, a park, a region…"
+          />
+          <div className="mt-2">
+            {changingHome ? (
+              <div className="flex flex-col gap-1">
+                <FieldLabel>Starting from · this trip</FieldLabel>
+                <PlacePicker
+                  value={draft.homeBasePlace}
+                  onChange={(homeBasePlace) => set({ homeBasePlace })}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setChangingHome(true)}
+                className="inline-flex cursor-pointer items-center gap-[5px] rounded-rv-pill border border-rv-border-hi bg-transparent px-[9px] py-[3px] font-mono text-[11px] text-rv-ink-muted"
+              >
+                <House className="size-3" />
+                {home ? `from ${home} · your home base · change` : "no home base yet · set one"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <QuestionLabel n={2}>When</QuestionLabel>
+          <RangePicker
+            value={{ start: draft.startDate || null, end: draft.endDate || null }}
+            onChange={(v) => set({ startDate: v.start ?? "", endDate: v.end ?? "" })}
+          />
+        </div>
+
+        <div className="mb-4">
+          <QuestionLabel n={3}>How does this trip mostly move?</QuestionLabel>
           <TripModeCards value={draft.mode} onChange={(m) => setDraft((d) => withTripMode(d, m))} />
         </div>
 
@@ -109,7 +167,7 @@ export default function NewTripPage() {
         ) : (
           <div className="ml-1 border-l-2 border-rv-border-hi pl-3.5">
             <div className="mb-4">
-              <QuestionLabel n={2}>Where will you mostly sleep?</QuestionLabel>
+              <QuestionLabel n={4}>Where will you mostly sleep?</QuestionLabel>
               <LodgingCards
                 mode={draft.mode}
                 value={draft.lodgingDefault}
@@ -119,52 +177,19 @@ export default function NewTripPage() {
 
             {draft.mode === "road" && (
               <div className="mb-4">
-                <QuestionLabel n={3}>Bringing the rig?</QuestionLabel>
+                <QuestionLabel n={5}>Bringing the rig?</QuestionLabel>
                 <RigCards value={draft.rigOn} onChange={(rigOn) => set({ rigOn })} />
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="col-span-2 flex flex-col gap-1">
-                <FieldLabel>Trip name</FieldLabel>
-                <Input
-                  value={draft.title}
-                  onChange={(e) => set({ title: e.target.value })}
-                  placeholder="Redwoods Run"
-                  className={FIELD}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <FieldLabel>Start</FieldLabel>
-                <Input
-                  type="date"
-                  value={draft.startDate}
-                  onChange={(e) => set({ startDate: e.target.value })}
-                  className={FIELD_MONO}
-                />
-              </div>
-              <div className="flex flex-col gap-1">
-                <FieldLabel>End</FieldLabel>
-                <Input
-                  type="date"
-                  value={draft.endDate}
-                  onChange={(e) => set({ endDate: e.target.value })}
-                  className={FIELD_MONO}
-                />
-              </div>
-              <div className="col-span-2 flex flex-col gap-1">
-                <FieldLabel>
-                  Starting from{" "}
-                  <span className="font-normal normal-case text-rv-ink-faded">optional</span>
-                </FieldLabel>
-                {/* The picker (#60): home base is a real place, so the first
-                    stop of a trip can be searched near home. The rv-* names
-                    re-resolve on the navy field surface as the Inputs do. */}
-                <PlacePicker
-                  value={draft.homeBasePlace}
-                  onChange={(homeBasePlace) => set({ homeBasePlace })}
-                />
-              </div>
+            <div className="flex flex-col gap-1">
+              <FieldLabel>Trip name</FieldLabel>
+              <Input
+                value={draft.title}
+                onChange={(e) => set({ title: e.target.value })}
+                placeholder={draft.destination?.name ?? "Redwoods Run"}
+                className={FIELD}
+              />
             </div>
 
             {buttons}
