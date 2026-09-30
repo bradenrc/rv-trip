@@ -14,10 +14,6 @@ import {
   Pencil,
   Trash2,
   CornerRightUp,
-  Tent,
-  BedDouble,
-  House,
-  Users,
 } from "lucide-react";
 import type {
   DateSpan,
@@ -31,8 +27,6 @@ import type {
   Stop,
 } from "@rv-trip/core";
 import {
-  LODGING_KIND_LABEL,
-  STAY_KINDS,
   ideaIsLocated,
   isScheduled,
   isStayType,
@@ -65,6 +59,7 @@ import { PlacePicker } from "@/components/places/PlacePicker";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { MenuHint, RowMenu, MENU_ITEM, MENU_ITEM_WARN } from "./row-menu";
 import { StayPlaceField } from "./AddStaySheet";
+import { KIND_OPTIONS } from "./stay-kinds";
 
 /** A stored stay's name, as the picker's picked state shows it. */
 const pickedName = (name: string): PickedPlace => ({
@@ -74,6 +69,7 @@ const pickedName = (name: string): PickedPlace => ({
   googlePlaceId: null,
   address: null,
   rating: null,
+  primaryType: null,
 });
 
 /**
@@ -105,8 +101,6 @@ const RES_TYPES: ReservationType[] = [
   "other",
 ];
 
-const KIND_ICON = { campground: Tent, hotel: BedDouble, airbnb: House, friends: Users } as const;
-const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABEL[k], Icon: KIND_ICON[k] }));
 
 /** The sheet's one input skin — the surface palette, not the dialog's navy. */
 const SHEET_FIELD =
