@@ -82,6 +82,8 @@ function mkIdea(
     status?: IdeaStatus;
     place?: Place | null;
     notes?: string | null;
+    rating?: number | null;
+    again?: boolean | null;
   },
 ): Idea {
   return {
@@ -489,6 +491,11 @@ type SecondaryStop = {
   lng: number;
   arriveDate: IsoDate | null;
   departDate: IsoDate | null;
+  /** The stop's own journal fields + entries (#146) — default to empty. */
+  rating?: number | null;
+  again?: boolean | null;
+  reservations?: Reservation[];
+  ideas?: Idea[];
 };
 
 function secondary(
@@ -514,6 +521,10 @@ function secondary(
             arriveDate: s.arriveDate,
             departDate: s.departDate,
             sortOrder: si,
+            rating: s.rating ?? null,
+            again: s.again ?? null,
+            reservations: s.reservations ?? [],
+            ideas: s.ideas ?? [],
           }),
         ),
       ),
@@ -565,7 +576,66 @@ export function coastWeekendTrip(): Trip {
       {
         title: "Coast",
         stops: [
-          { name: "Newport, OR", lat: 44.6365, lng: -124.053, arriveDate: "2025-05-23", departDate: "2025-05-26" },
+          {
+            name: "Newport, OR",
+            lat: 44.6365,
+            lng: -124.053,
+            arriveDate: "2025-05-23",
+            departDate: "2025-05-26",
+            // The design's journal specimen (#146): 4 · 3 · 1 · 1.
+            rating: 5,
+            again: true,
+            reservations: [
+              mkRes({
+                id: "res_coast_southbeach",
+                stopId: "trip_coast_leg0_stp0",
+                type: "campground",
+                name: "South Beach State Park",
+                checkIn: "2025-05-23",
+                checkOut: "2025-05-26",
+                rating: 5,
+                again: true,
+                notes: "Yurts are the move — book early next time.",
+              }),
+            ],
+            ideas: [
+              mkIdea({
+                id: "idea_coast_localocean",
+                tripId: "trip_coast",
+                stopId: "trip_coast_leg0_stp0",
+                sortOrder: 0,
+                title: "Local Ocean Seafoods",
+                category: "eat",
+                status: "done",
+                rating: 5,
+                again: true,
+                place: at("Local Ocean Seafoods", 44.6297, -124.0526),
+                notes: "Bayfront, watch the boats. Go before 6 or wait an hour.",
+              }),
+              mkIdea({
+                id: "idea_coast_aquarium",
+                tripId: "trip_coast",
+                stopId: "trip_coast_leg0_stp0",
+                sortOrder: 1,
+                title: "Oregon Coast Aquarium",
+                category: "do",
+                status: "done",
+                rating: 3,
+                again: false,
+                place: at("Oregon Coast Aquarium", 44.6177, -124.047),
+                notes: "Once was plenty — the otters, then done in an hour.",
+              }),
+              mkIdea({
+                id: "idea_coast_yaquina",
+                tripId: "trip_coast",
+                stopId: "trip_coast_leg0_stp0",
+                sortOrder: 2,
+                title: "Yaquina Head tide pools",
+                category: "do",
+                status: "idea",
+              }),
+            ],
+          },
         ],
       },
     ],
@@ -587,7 +657,42 @@ export function yellowstoneTrip(): Trip {
       {
         title: "Yellowstone",
         stops: [
-          { name: "Fishing Bridge, WY", lat: 44.5647, lng: -110.3735, arriveDate: "2024-09-08", departDate: "2024-09-14" },
+          {
+            name: "Fishing Bridge, WY",
+            lat: 44.5647,
+            lng: -110.3735,
+            arriveDate: "2024-09-08",
+            departDate: "2024-09-14",
+            // Journals only what its two Been saves already say (#146 Q2 B):
+            // notes verbatim from saves.ts, no Again, no stop rating.
+            reservations: [
+              mkRes({
+                id: "res_ystone_fishingbridge",
+                stopId: "trip_ystone_leg0_stp0",
+                type: "campground",
+                name: "Fishing Bridge RV Park",
+                checkIn: "2024-09-08",
+                checkOut: "2024-09-14",
+                rating: 4,
+                notes: "Only full-hookup in-park. Worth the early reservation; tight but level.",
+              }),
+            ],
+            ideas: [
+              mkIdea({
+                id: "idea_ystone_oldfaithful",
+                tripId: "trip_ystone",
+                stopId: "trip_ystone_leg0_stp0",
+                sortOrder: 0,
+                title: "Old Faithful Loop",
+                category: "do",
+                status: "done",
+                rating: 4,
+                place: at("Old Faithful Loop", 44.4605, -110.8281),
+                notes:
+                  "Beat the crowd — first eruption after opening. Biscuit Basin boardwalk was quieter.",
+              }),
+            ],
+          },
         ],
       },
       {
