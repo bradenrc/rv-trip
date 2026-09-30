@@ -152,10 +152,13 @@ export function HopRow({
 
 /**
  * A bottom sheet on RN Modal — dim, grab handle, surface. The surface sits in
- * a `KeyboardAvoidingView` (iOS `padding`) so a sheet with a TextInput — the
- * How was it? note, the hop booking form — rides up above the keyboard
- * instead of vanishing behind it (#113 walk FN). Android already resizes the
- * window (adjustResize), so it gets no behavior, as on sign-in.
+ * a `KeyboardAvoidingView` so a sheet with a TextInput — the How was it?
+ * note, the hop booking form, Add stay, Round trip — rides up above the
+ * keyboard instead of vanishing behind it (#113 walk FN, #140). iOS uses
+ * `padding`; Android uses `height`, because an RN Modal is its own window and
+ * the activity's adjustResize never reaches it — without a behavior the IME
+ * simply covers the lower fields. The 88% cap and the inner ScrollView keep a
+ * long form scrollable once the sheet has shrunk above the keyboard.
  */
 export function Sheet({
   visible,
@@ -172,7 +175,7 @@ export function Sheet({
       <Pressable style={styles.dim} onPress={onClose} accessibilityLabel="Close" />
       <KeyboardAvoidingView
         style={styles.sheetHost}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
         pointerEvents="box-none"
       >
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 18, maxHeight: "88%" }]}>
