@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { ClerkProvider, SignedIn, SignedOut, useAuth } from "@clerk/clerk-expo";
+import { ClerkProvider, Show, useAuth } from "@clerk/expo";
 import { CLERK_KEY, clerkEnabled, secureStoreTokenCache, setTokenGetter } from "../src/auth";
 import { useCaptureRuntime } from "../src/capture";
 import { STACK_OPTIONS } from "../src/nav";
@@ -10,8 +10,8 @@ import SignInScreen from "./sign-in";
 
 /**
  * The navigator, lifted into one component so the app is mounted from exactly
- * one place — bare when there is no Clerk key, and behind `<SignedIn>` when
- * there is.
+ * one place — bare when there is no Clerk key, and behind
+ * `<Show when="signed-in">` when there is.
  *
  * #111 (Q1 A): the root Stack holds the bottom tabs — Trips · + · Saves, whose
  * Trips tab nests the stack that used to live here, so `/` and `/trips/[id]`
@@ -66,20 +66,21 @@ function TokenBridge() {
  * `clerkEnabled()` keeps on the web (`apps/web/src/lib/owner.ts`), and it is
  * what keeps the mc-dev walk worktrees and CI key-free.
  *
- * Key present → the navigator is unreachable without a session: `<SignedOut>`
- * renders the sign-in screen and nothing else.
+ * Key present → the navigator is unreachable without a session:
+ * `<Show when="signed-out">` renders the sign-in screen and nothing else — the
+ * same core-3 gate the web uses (`apps/web/src/components/nav/Account.tsx`, #147).
  */
 export default function RootLayout() {
   if (!clerkEnabled) return <Shell />;
   return (
     <ClerkProvider publishableKey={CLERK_KEY} tokenCache={secureStoreTokenCache}>
       <TokenBridge />
-      <SignedIn>
+      <Show when="signed-in">
         <Shell />
-      </SignedIn>
-      <SignedOut>
+      </Show>
+      <Show when="signed-out">
         <SignInScreen />
-      </SignedOut>
+      </Show>
     </ClerkProvider>
   );
 }

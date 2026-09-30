@@ -9,21 +9,28 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { isClerkAPIResponseError, useSignIn } from "@clerk/clerk-expo";
+import { isClerkAPIResponseError, useSignIn } from "@clerk/expo";
 import { C, F, R } from "../src/theme";
 import { Button, Kicker } from "../src/ui";
 
 /**
  * Sign-in — one screen, two steps (issue #44, item 2).
  *
- * Email → 6-digit code, Clerk's `email_code` strategy: the only first factor
- * that needs no dashboard configuration, and the one the web instance already
- * allows. Rendered by `app/_layout.tsx` inside `<SignedOut>`, so while there is
- * no session this is the whole app — the navigator is not mounted at all.
+ * Email → 6-digit code, Clerk's email-code first factor: the only one that
+ * needs no dashboard configuration, and the one the web instance already
+ * allows. Rendered by `app/_layout.tsx` inside `<Show when="signed-out">`, so
+ * while there is no session this is the whole app — the navigator is not
+ * mounted at all.
  *
  * It is also a route file (`/sign-in`), which is why it default-exports a plain
- * screen component and never navigates: `setActive` flips `<SignedOut>` to
- * `<SignedIn>` and the Stack mounts itself.
+ * screen component and never navigates: `signIn.finalize()` flips
+ * `<Show when="signed-out">` to `<Show when="signed-in">` and the Stack mounts
+ * itself.
+ *
+ * #147 (Q1 B): core-3's signal API. `signIn.emailCode.sendCode` / `verifyCode`
+ * and `signIn.finalize` resolve `{ error }` rather than throwing, so each
+ * returned error goes through the same `messageFor` precedence a thrown one
+ * does.
  */
 
 /** Seconds before "Resend" becomes tappable. The wireframe draws this mid-count
@@ -33,13 +40,22 @@ const RESEND_SECONDS = 30;
 /** The one failure string we author. Clerk's own message wins when it has one. */
 const GENERIC_ERROR = "Something went wrong — check your connection and try again.";
 
+/** Clerk's own message wins; anything else — a network throw — is GENERIC_ERROR. */
+function messageFor(e: unknown): string {
+  if (isClerkAPIResponseError(e)) {
+    const first = e.errors[0];
+    return first?.longMessage ?? first?.message ?? GENERIC_ERROR;
+  }
+  return GENERIC_ERROR;
+}
+
 export default function SignInScreen() {
-  const { isLoaded, signIn, setActive } = useSignIn();
+  const { signIn, fetchStatus } = useSignIn();
   const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const busy = fetchStatus === "fetching";
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const codeField = useRef<TextInput>(null);
 
@@ -50,47 +66,41 @@ export default function SignInScreen() {
     return () => clearTimeout(t);
   }, [step, seconds]);
 
-  function failed(e: unknown) {
-    if (isClerkAPIResponseError(e)) {
-      const first = e.errors[0];
-      setError(first?.longMessage ?? first?.message ?? GENERIC_ERROR);
-      return;
-    }
-    setError(GENERIC_ERROR);
-  }
-
   async function sendCode() {
-    if (!isLoaded || !signIn || busy) return;
-    setBusy(true);
+    if (busy) return;
     setError("");
     try {
-      await signIn.create({ strategy: "email_code", identifier: email.trim() });
+      const { error } = await signIn.emailCode.sendCode({ emailAddress: email.trim() });
+      if (error) return setError(messageFor(error));
       setCode("");
       setSeconds(RESEND_SECONDS);
       setStep("code");
     } catch (e) {
-      failed(e);
-    } finally {
-      setBusy(false);
+      setError(messageFor(e));
     }
   }
 
   async function verify(entered: string) {
-    if (!isLoaded || !signIn || busy) return;
-    setBusy(true);
+    if (busy) return;
     setError("");
     try {
-      const attempt = await signIn.attemptFirstFactor({ strategy: "email_code", code: entered });
-      if (attempt.status === "complete") {
-        await setActive({ session: attempt.createdSessionId });
-        return; // <SignedIn> takes over; this screen unmounts.
+      const { error } = await signIn.emailCode.verifyCode({ code: entered });
+      if (error) {
+        setError(messageFor(error));
+        setCode("");
+        return;
+      }
+      if (signIn.status === "complete") {
+        // finalize resolves { error } too — a failure here must not leave the
+        // person on step 2 with no message (#147 vet finding 3).
+        const { error: finalizeError } = await signIn.finalize();
+        if (finalizeError) setError(messageFor(finalizeError));
+        return; // <Show when="signed-in"> takes over; this screen unmounts.
       }
       setError(GENERIC_ERROR);
     } catch (e) {
-      failed(e);
+      setError(messageFor(e));
       setCode("");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -164,6 +174,7 @@ export default function SignInScreen() {
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable
               onPress={() => {
+                void signIn.reset();
                 setStep("email");
                 setCode("");
                 setError("");
