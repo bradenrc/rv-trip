@@ -261,3 +261,49 @@ Only item i4 is in this dispatch. i1–i3 (above) had already landed and were no
 - The 409 safety net is hard to reach from the UI now that Save waits. To force it, clear the home
   base on the server while the sheet is open, then Save. You should see "Didn’t save / Set a home
   base first." and nothing else.
+
+---
+
+# #138 dev notes: item i5 of 5 (#143 · Q6 B · Q7 A · Q8 A). Re-edit on the phone
+
+Only item i5 is in this dispatch. i1 to i4 (above) had already landed and were not changed.
+
+## What changed
+
+**Server + core (tested)**
+- `packages/core/src/domain/types.ts:413-423`: `tripPatchInput` is now `.partial().extend({ destination: tripDestinationInput.nullable().optional() })`.
+- `packages/db/src/mutations.ts:512-555`: `updateTripFields` takes `destination?: TripDestinationInput | null` (vet HIGH). The destination is split off the column patch. When `destination` or `homeBase` is present, the update runs in one transaction. The transaction checks ownership first, so another owner's trip id never plants a destinations row. It then calls the module-private `upsertTripDestination(tx, owner, d)` (null clears the pointer) and sets `destinationId`. `syncSegments` still runs only when `homeBase` moved. No stop is written.
+- `apps/web/src/app/api/trips/[id]/route.ts:75-77`: comment only. `destination` passes through `fields` to the mutation, which now handles it, so it no longer reaches `.set()` as an unknown key.
+- `packages/core/src/api-client/index.ts:209,335`: `reservations.remove(id)` → `DELETE /api/reservations/:id`.
+- `packages/core/src/domain/trip-form.ts:278-370`: a new pure builder for the phone screen (vet MED: logic moved to core so it runs under vitest). `PhoneTripSettingsDraft`, `phoneTripSettingsDraft(t)` and `phoneTripSettingsPatch(t, d)` handle destination, dates, Starts from and the three defaults. Status, rating and note are not in the type. The dates and home-base diff was extracted into `rangeAndHomePatch`, which the web `tripSettingsPatch` now shares. That function returns the new `TripSettingsPatch = Omit<TripPatchInput, "destination">`, because the web dialog never edits the destination and its optimistic spread in TripPlanner.tsx:1157 would otherwise fail to typecheck.
+
+**Phone (typecheck + walk only, since apps/mobile has no test runner)**
+- `apps/mobile/src/stays.tsx` (new): `StaySheet` is the old `[stopId].tsx` AddStaySheet, moved without other changes, plus an optional `editing: Reservation`. Editing seeds from `reservationDraft(r)`, is titled "Edit stay", and saves `reservationDraftPatch` through the new store `editStay` (optimistic `setReservationFields`; on failure it re-reads the trip, then `failed("That stay")`). An amber `Button tone="warn"` "Delete stay" opens `Alert.alert("Are you sure?", undefined, [Cancel, {text:"Delete stay", style:"destructive"}])`. Confirming closes the sheet and runs `deleteStay` (optimistic `removeReservation` → `api.reservations.remove`; on failure it re-reads, then `failed("That stay")`).
+- `apps/mobile/app/(tabs)/(trips)/trips/[id]/stops/[stopId].tsx:292-305, 312-345`: the AddStaySheet and KIND_OPTIONS are removed and `StaySheet` is mounted for both Add and Edit. `ReservationCard` wraps only `isStayType` rows in a Pressable with a trailing `›`. "How was it?" is still its own inner Pressable, and non-stay rows render unchanged.
+- `apps/mobile/src/hops.tsx:87-160`: `HopRow` takes `onEdit?(bookingId)`. Each booking line is a Pressable with `›`.
+- `apps/mobile/src/hops.tsx:250-420`: `HopBookingSheet` takes `editing?: Reservation`. Editing seeds from `hopDraftFromBooking` (the effect re-seeds on `editing?.id`), is titled "Edit flight"/"Edit ferry", and saves `hopBookingPatch(...)` through the new store `editHopBooking` (optimistic `editSegmentBooking`). The clash check runs against the hop without the edited booking (the web HopCard.tsx:328 precedent). Following the web, the "move the stop" clash fix is hidden on an edit and only the date fix is offered. An amber "Delete flight"/"Delete ferry" gets the same "Are you sure?" confirm and then runs `deleteHopBooking` (`removeSegmentBooking` → `api.reservations.remove`).
+- `apps/mobile/app/(tabs)/(trips)/trips/[id]/index.tsx:124, 177-192, 495-507`: `editingBookingId` state. `onEdit` sets it and the hop, and the sheet's `editing` is looked up by id in `trip.segments[].reservations`. This is the vet MED about `HopRow`/`onEdit` threading.
+- `apps/mobile/src/ui.tsx:94-120`: `Button` `tone="warn"` has a transparent fill with `C.warning` border and text (wireframe `.pbtn.warn`).
+- `apps/mobile/src/store.ts:374-393, 427-492`: adds `editStay`, `deleteStay`, `editHopBooking` and `deleteHopBooking`. `patchTripDefaults` now maps an optimistic `destination` to `{...picked, id: null}` until the reload.
+- `apps/mobile/app/(tabs)/(trips)/trips/new.tsx:300-480`: `TripDefaults` is now `TripSettings`, with the header title "Trip settings". A new block sits above "How it moves":
+  - Destination: New trip's Input and Results, prefilled with `trip.destination?.name`. Emptying the box clears the destination. Typed text stays a search until you pick a result.
+  - Dates: the RangePicker twin.
+  - Starts from: labelled "Starts from · household default" when it is using the household place, otherwise "Starts from". The chip reads "🏠 <name> · change" and opens the place search. When the trip has its own override, "Use household default" sets `homeBasePlace` to null, which becomes `{homeBase: null, homeBasePlace: null}`, the same as on web.
+  - Save sends `phoneTripSettingsPatch`. A 409 `date_range_orphans_stops` shows `Alert.alert("Didn’t save", body.message)`. Any other failure shows "Your trip settings — check your connection and try again."
+
+## Tests (TDD: each was red first, then green)
+- `packages/core/src/domain/trip-write-contract.test.ts:104-113`: `tripPatchInput` accepts a destination, null clears it, an absent key stays absent, and a blank name is refused.
+- `apps/web/src/app/api/trips/[id]/route.test.ts:125-170` (real Postgres): PATCH `{destination}` upserts one destinations row, repoints `trips.destination_id`, keeps the stop and leg counts unchanged, and reuses the row when the same place is picked again. GET returns the destination and `{destination:null}` clears it. On another owner's trip it returns 404, writes no row and does not repoint. Red run before the fix: `expected [] to have a length of 1`.
+- `packages/core/src/api-client/api-client.test.ts:222-229`: `reservations.remove("r 1")` sends DELETE to `/api/reservations/r%201`.
+- `packages/core/src/domain/trip-settings-143.test.ts` (new, 6 tests): no-op on open; a new destination is sent as the picked place; null clears it; a pick without a Google id is not a change; only changed dates are sent and a backwards range never is; a Starts from pick writes the override and Use household default sends nulls; the defaults are folded in and status, rating and note are never sent.
+- Not unit-testable: the StaySheet `editing` prop, the HopBookingSheet `editing` prop, `Button tone="warn"` and the "Trip settings" title and blocks all live in apps/mobile, which has no `test` script (vet MED). Their evidence is `@rv-trip/mobile#typecheck` plus the walk. I also ran `tsc --noEmit --noUnusedLocals` on apps/mobile and it reported nothing in the touched files.
+
+## Gate (ran)
+- `pnpm turbo run lint typecheck test --continue`: `Tasks: 10 successful, 10 total`. The counts were core `1320 passed`, web `395 passed` (the DB suite ran, not skipped) and ui `48 passed`.
+- One earlier run failed `@rv-trip/web#typecheck` (TripPlanner.tsx:1166, destination in the optimistic spread). The `TripSettingsPatch` type above fixed it.
+
+## Defaults / flags for the walk
+- The wireframe's green left rule on the Trip settings block (`.newblk`) is treated as the design's "this is new" marker, like the dashed `.newt` outline, so it is not drawn. If it was meant as real chrome, it is a one-line style.
+- After "Use household default" the chip shows the household's name, fetched from `api.prefs.get()` the same way New trip does, or "🏠 no home base yet · set one" when there is none. The wireframe has no frame for this.
+- The Route card has no stay line (vet CHECKED Q6 B). Edit stay opens from the stop screen's Reservations row only.
+- Walk checks: tap a stay row, change its kind to Hotel and save; the row should reprint "Hotel". Delete stay → Cancel should keep the row, Delete stay should remove it. Tap a flight line and check the title "Edit flight", the prefilled AS/BOI/BLI fields and the amber Delete flight. Editing its time must not raise a clash against itself. In Trip settings, pick a new destination; the masthead kicker should show it after Save and no new stop should appear. Shorten the dates so a stop is stranded; the alert should read "Didn’t save" with the server's sentence and the screen should stay open.

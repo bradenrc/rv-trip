@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type {
   HopBookingDraft,
   Place,
+  Reservation,
   RouteHop,
   RouteHopBooking,
   TravelMode,
@@ -26,13 +27,15 @@ import {
   fixHopDraftDates,
   hopBookingClash,
   hopBookingInput,
+  hopBookingPatch,
   hopClashCopy,
+  hopDraftFromBooking,
   hopDraftZones,
   instantToLocal,
   localToInstant,
   zoneChoices,
 } from "@rv-trip/core";
-import { addHopBooking, setHopMode } from "./store";
+import { addHopBooking, deleteHopBooking, editHopBooking, setHopMode } from "./store";
 import { C, F, R } from "./theme";
 import { Button, Chip, Segmented, type SegmentedOption } from "./ui";
 
@@ -90,12 +93,15 @@ export function HopRow({
   showSwitch,
   onMode,
   onAdd,
+  onEdit,
 }: {
   hop: RouteHop;
   flush: boolean;
   showSwitch: boolean;
   onMode: (m: TravelMode) => void;
   onAdd: () => void;
+  /** #143 · a booking line tapped — opens Edit flight / Edit ferry on it. */
+  onEdit?: (bookingId: string) => void;
 }) {
   const bookings = hop.items.filter((i): i is RouteHopBooking => i.kind === "booking");
   // #129 · Q11 A — a hop that DRIVES but kept its flights: the switch inline
@@ -130,16 +136,26 @@ export function HopRow({
       </View>
       {showSwitch && <Segmented mono value={hop.mode} options={MODE_OPTIONS} onChange={onMode} />}
       {bookings.map((b) => (
-        <Text key={b.id} style={styles.pfl}>
-          {b.name}
-          {b.departTime && b.arriveTime ? (
-            <>
-              {"\n"}
-              {b.departTime} <Text style={styles.z}>{b.departAbbr}</Text> → {b.arriveTime}{" "}
-              <Text style={styles.z}>{b.arriveAbbr}</Text>
-            </>
-          ) : null}
-        </Text>
+        <Pressable
+          key={b.id}
+          onPress={() => onEdit?.(b.id)}
+          disabled={!onEdit}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${hop.mode === "ferry" ? "ferry" : "flight"} ${b.name}`}
+          style={styles.flRow}
+        >
+          <Text style={[styles.pfl, { flex: 1 }]}>
+            {b.name}
+            {b.departTime && b.arriveTime ? (
+              <>
+                {"\n"}
+                {b.departTime} <Text style={styles.z}>{b.departAbbr}</Text> → {b.arriveTime}{" "}
+                <Text style={styles.z}>{b.arriveAbbr}</Text>
+              </>
+            ) : null}
+          </Text>
+          {onEdit && <Text style={styles.chev}>›</Text>}
+        </Pressable>
       ))}
       <Pressable onPress={onAdd} accessibilityRole="button" hitSlop={6}>
         <Text style={[styles.pm, { color: C.ink }]}>+ {hop.mode === "ferry" ? "Add ferry" : "Add flight"}</Text>
@@ -229,14 +245,23 @@ function zoneLabel(zone: string, local: string): string {
  * zones when tapped; Save stays disabled until both ends have a zone; a date
  * clash names the stop and offers the two fixes, and nothing saves until one
  * is picked.
+ *
+ * #143 — given `editing`, the same sheet is **Edit flight / Edit ferry** (the
+ * web's #124): seeded by `hopDraftFromBooking`, saved via `hopBookingPatch`,
+ * the clash judged against the hop WITHOUT the booking it replaces, and an
+ * amber Delete behind "Are you sure?" (Q7 A). The stop move rides the create
+ * only, so an edit offers just the date fix.
  */
 export function HopBookingSheet({
   trip,
   hop,
+  editing = null,
   onClose,
 }: {
   trip: Trip;
   hop: RouteHop | null;
+  /** #143 — the booking being edited (from `trip.segments[].reservations`). */
+  editing?: Reservation | null;
   onClose: () => void;
 }) {
   const kind = hop?.mode === "ferry" ? "ferry" : "flight";
@@ -244,12 +269,16 @@ export function HopBookingSheet({
   const [picking, setPicking] = useState<"from" | "to" | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // A fresh open starts clean, on this hop's ports.
+  // A fresh open starts clean, on this hop's ports — or on the booking edited.
   useEffect(() => {
-    if (hop) setDraft(blankHopDraft(kind, { from: hop.fromName, to: hop.toName }));
+    if (hop) {
+      setDraft(
+        editing ? hopDraftFromBooking(editing, kind) : blankHopDraft(kind, { from: hop.fromName, to: hop.toName }),
+      );
+    }
     setPicking(null);
     setSaving(false);
-  }, [hop?.segmentId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [hop?.segmentId, editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ports = useMemo(() => {
     const stops = trip.legs.flatMap((l) => l.stops);
@@ -261,19 +290,59 @@ export function HopBookingSheet({
   const set = (patch: Partial<HopBookingDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const zones = hopDraftZones(draft, ports);
   const body = hopBookingInput(hop.segmentId, draft, zones);
-  const clash = body ? hopBookingClash(trip, hop.segmentId, body) : null;
+  // An edit is judged against the hop WITHOUT the booking it replaces.
+  const judged = editing
+    ? {
+        ...trip,
+        segments: trip.segments.map((s) =>
+          s.id === hop.segmentId ? { ...s, reservations: s.reservations.filter((r) => r.id !== editing.id) } : s,
+        ),
+      }
+    : trip;
+  const clash = body ? hopBookingClash(judged, hop.segmentId, body) : null;
   const copy = clash ? hopClashCopy(clash, kind) : null;
+  const noun = kind === "ferry" ? "ferry" : "flight";
+  const what = kind === "ferry" ? "That ferry" : "That flight";
 
   const save = async (move: boolean) => {
     if (!body || saving) return;
     setSaving(true);
     try {
-      await addHopBooking(trip.id, body, move);
+      if (editing) {
+        await editHopBooking(
+          trip.id,
+          editing.id,
+          hopBookingPatch(editing, {
+            name: body.name,
+            startsAt: body.startsAt,
+            endsAt: body.endsAt,
+            startsTz: body.startsTz,
+            endsTz: body.endsTz,
+          }),
+        );
+      } else {
+        await addHopBooking(trip.id, body, move);
+      }
       onClose();
     } catch {
       setSaving(false);
-      failed(kind === "ferry" ? "That ferry" : "That flight");
+      failed(what);
     }
+  };
+
+  const remove = () => {
+    if (!editing) return;
+    Alert.alert("Are you sure?", undefined, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: `Delete ${noun}`,
+        style: "destructive",
+        onPress: () => {
+          onClose();
+          deleteHopBooking(trip.id, editing.id).catch(() => failed(what));
+        },
+      },
+    ]);
   };
 
   const chip = (which: "from" | "to", c: ZoneChip, local: string) => (
@@ -286,7 +355,7 @@ export function HopBookingSheet({
 
   return (
     <Sheet visible onClose={onClose}>
-      <Text style={styles.st}>{kind === "ferry" ? "Add ferry" : "Add flight"}</Text>
+      <Text style={styles.st}>{editing ? `Edit ${noun}` : kind === "ferry" ? "Add ferry" : "Add flight"}</Text>
       <Text style={styles.pm}>
         {hop.fromName} → {hop.toName}
       </Text>
@@ -348,9 +417,12 @@ export function HopBookingSheet({
         <View style={styles.pconf}>
           <Text style={styles.w}>⚠ {copy.headline}</Text>
           <Text style={{ color: C.ink, fontSize: 11.5 }}>{copy.sub}</Text>
-          <Pressable onPress={() => void save(true)} disabled={saving} style={styles.pconfA} accessibilityRole="button">
-            <Text style={styles.pconfAText}>{copy.move}</Text>
-          </Pressable>
+          {/* The stop move rides the CREATE only; an edit fixes its date. */}
+          {!editing && (
+            <Pressable onPress={() => void save(true)} disabled={saving} style={styles.pconfA} accessibilityRole="button">
+              <Text style={styles.pconfAText}>{copy.move}</Text>
+            </Pressable>
+          )}
           <Pressable
             onPress={() => setDraft((d) => fixHopDraftDates(d, clash))}
             style={styles.pconfA}
@@ -364,6 +436,11 @@ export function HopBookingSheet({
       <Button onPress={() => void save(false)} disabled={!body || clash !== null || saving}>
         {kind === "ferry" ? "Save ferry" : "Save flight"}
       </Button>
+      {editing && (
+        <Button tone="warn" onPress={remove} disabled={saving}>
+          {`Delete ${noun}`}
+        </Button>
+      )}
     </Sheet>
   );
 }
@@ -403,6 +480,8 @@ const styles = StyleSheet.create({
   hh: { flexDirection: "row", gap: 6, alignItems: "center", flexWrap: "wrap" },
   hhBold: { color: C.ink, fontWeight: "700", fontSize: 12 },
   pfl: { fontFamily: F.mono, fontSize: 10.5, color: C.ink },
+  flRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  chev: { fontFamily: F.mono, color: C.inkFaded, fontSize: 14 },
   z: { color: C.inkFaded },
   pm: { fontFamily: F.mono, fontSize: 10.5, color: C.inkFaded },
   st: { fontSize: 16, fontWeight: "800", color: C.ink },

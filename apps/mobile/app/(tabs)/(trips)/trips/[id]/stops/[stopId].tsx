@@ -1,21 +1,17 @@
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { HowWasIt, Idea, LodgingKind, Reservation, ReservationDraft } from "@rv-trip/core";
+import type { HowWasIt, Idea, Reservation } from "@rv-trip/core";
 import {
   LODGING_KIND_LABEL,
   SHELF_CATEGORY_LABEL,
-  STAY_KINDS,
   checkOffStatus,
   isRateableReservation,
-  reservationDraftInput,
+  isStayType,
   saveTypeOfIdeaCategory,
   setIdeaFields,
   setStopFields,
   setStopReservationFields,
-  stayDraft,
-  stayNameLabel,
-  withStayKind,
   dateRange,
   isScheduled,
   resDates,
@@ -28,10 +24,10 @@ import {
 import { queuePatch } from "../../../../../../src/capture";
 import { AgainPair, HowWasItSheet, LoggedMeta } from "../../../../../../src/journal";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../../src/map";
-import { addStay, isProvisionalIdea, updateTrip, useBundle } from "../../../../../../src/store";
+import { isProvisionalIdea, updateTrip, useBundle } from "../../../../../../src/store";
+import { StaySheet } from "../../../../../../src/stays";
 import { C, F, R } from "../../../../../../src/theme";
-import { Input, Label, Sheet, failed } from "../../../../../../src/hops";
-import { Button, Card, CategoryTile, Centered, Kicker, Muted, RangePicker, Segmented, Stars } from "../../../../../../src/ui";
+import { Button, Card, CategoryTile, Centered, Kicker, Muted, Stars } from "../../../../../../src/ui";
 
 /** The height packages/ui's `MapPlaceholder` has always reserved, and the web's
  * `STOP_MINI_MAP_HEIGHT` (apps/web/src/components/map/StopMiniMap.tsx:13). */
@@ -76,6 +72,8 @@ export default function StopScreen() {
 
   // #105 · Add stay — the sheet, opened on the trip's lodging default (Q3 A).
   const [stayOpen, setStayOpen] = useState(false);
+  // #143 · Q6 B — the stay row whose Edit stay sheet is open.
+  const [editingStayId, setEditingStayId] = useState<string | null>(null);
 
   // #113 · the "How was it?" sheet, when open.
   const [rating, setRating] = useState<Rating | null>(null);
@@ -95,6 +93,7 @@ export default function StopScreen() {
   }
 
   const scheduled = isScheduled(stop);
+  const editingStay = editingStayId ? (stop.reservations.find((r) => r.id === editingStayId) ?? null) : null;
   const costTotal = stop.reservations.reduce((a, r) => a + (r.cost ?? 0), 0);
 
   // #113 · Q5 A: every Our-take write goes through the capture queue, so it
@@ -203,6 +202,7 @@ export default function StopScreen() {
                     before: { rating: r.rating, again: r.again, notes: r.notes },
                   })
                 }
+                onEdit={() => setEditingStayId(r.id)}
               />
             ))
           )}
@@ -289,105 +289,45 @@ export default function StopScreen() {
         // Dismissing counts as Skip: the check has already landed.
         onSkip={() => setRating(null)}
       />
-      {stayOpen && (
-        <AddStaySheet
+      {(stayOpen || editingStay) && (
+        <StaySheet
+          key={editingStay?.id ?? "add"}
           tripId={id}
           stopId={stop.id}
           title={`${stop.place.name}${scheduled ? ` · ${dateRange(stop.arriveDate, stop.departDate)}` : ""}`}
           kind={bundle.trip.lodgingDefault}
           span={scheduled ? { start: stop.arriveDate!, end: stop.departDate! } : null}
           tripSpan={{ start: bundle.trip.startDate, end: bundle.trip.endDate }}
-          onClose={() => setStayOpen(false)}
+          editing={editingStay}
+          onClose={() => {
+            setStayOpen(false);
+            setEditingStayId(null);
+          }}
         />
       )}
     </>
   );
 }
 
-const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABEL[k] }));
-
 /**
- * Add stay (#105 · Q9 A): the kind first. Friends asks only who you're staying
- * with and the nights — no cost, no confirmation number. The body is core's
- * `reservationDraftInput`, the same one the web form sends.
+ * A Reservations row. #143 · Q6 B — a STAY row (campground or lodging) is the
+ * tap target for Edit stay, with a trailing ›; "How was it?" keeps its own
+ * inner target. Other rows have no phone form, so they don't change.
  */
-function AddStaySheet({
-  tripId,
-  stopId,
-  title,
-  kind,
-  span,
-  tripSpan,
-  onClose,
-}: {
-  tripId: string;
-  stopId: string;
-  title: string;
-  kind: LodgingKind | null;
-  /** #128 · the stop's own dates — the stay's default. */
-  span: { start: string; end: string } | null;
-  tripSpan: { start: string; end: string };
-  onClose: () => void;
-}) {
-  const [draft, setDraft] = useState<ReservationDraft>(() => ({
-    ...stayDraft(kind),
-    checkIn: span?.start ?? "",
-    checkOut: span?.end ?? "",
-  }));
-  const [saving, setSaving] = useState(false);
-  const set = (patch: Partial<ReservationDraft>) => setDraft((d) => ({ ...d, ...patch }));
-  const current = draft.lodgingKind ?? "campground";
-  const friends = current === "friends";
-  const body = reservationDraftInput(stopId, draft);
-
-  const save = async () => {
-    if (!body || saving) return;
-    setSaving(true);
-    try {
-      await addStay(tripId, body);
-      onClose();
-    } catch {
-      setSaving(false);
-      failed("That stay");
-    }
-  };
-
+function ReservationCard({ r, onRate, onEdit }: { r: Reservation; onRate: () => void; onEdit: () => void }) {
+  if (!isStayType(r.type)) return <ReservationCardBody r={r} onRate={onRate} />;
   return (
-    <Sheet visible onClose={onClose}>
-      <Text style={{ fontSize: 16, fontWeight: "800", color: C.ink }}>Add stay</Text>
-      <Text style={styles.mono}>{title}</Text>
-      <Segmented value={current} options={KIND_OPTIONS} onChange={(k) => setDraft((d) => withStayKind(d, k))} />
-      <Label>{stayNameLabel(current)}</Label>
-      <Input value={draft.name} onChangeText={(name) => set({ name })} autoCapitalize="words" />
-      {/* #127 · the RangePicker twin in place of the two typed dates. */}
-      <Label>{friends ? "Nights" : "Check-in → check-out"}</Label>
-      <RangePicker
-        value={{ start: draft.checkIn || null, end: draft.checkOut || null }}
-        tripSpan={tripSpan}
-        onChange={(v) => set({ checkIn: v.start ?? "", checkOut: v.end ?? "" })}
-      />
-      {friends ? (
-        <Text style={styles.mono}>No cost and no confirmation number. It’s their couch.</Text>
-      ) : (
-        <View style={{ flexDirection: "row", gap: 6 }}>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Label>Confirmation #</Label>
-            <Input mono value={draft.confirmationNumber} onChangeText={(confirmationNumber) => set({ confirmationNumber })} placeholder="optional" />
-          </View>
-          <View style={{ flex: 1, gap: 4 }}>
-            <Label>Cost $</Label>
-            <Input mono value={draft.cost} onChangeText={(cost) => set({ cost })} placeholder="0" keyboardType="decimal-pad" />
-          </View>
+    <Pressable onPress={onEdit} accessibilityRole="button" accessibilityLabel={`Edit stay ${r.name}`}>
+      {({ pressed }) => (
+        <View style={{ opacity: pressed ? 0.8 : 1 }}>
+          <ReservationCardBody r={r} onRate={onRate} chevron />
         </View>
       )}
-      <Button onPress={() => void save()} disabled={!body || saving}>
-        Save
-      </Button>
-    </Sheet>
+    </Pressable>
   );
 }
 
-function ReservationCard({ r, onRate }: { r: Reservation; onRate: () => void }) {
+function ReservationCardBody({ r, onRate, chevron = false }: { r: Reservation; onRate: () => void; chevron?: boolean }) {
   const dates = resDates(r);
   return (
     <Card style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
@@ -419,6 +359,7 @@ function ReservationCard({ r, onRate }: { r: Reservation; onRate: () => void }) 
           </Pressable>
         )}
       </View>
+      {chevron && <Text style={styles.chev}>›</Text>}
     </Card>
   );
 }
@@ -492,6 +433,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   ratelinkText: { fontFamily: F.mono, fontSize: 9.5, color: C.inkMuted },
+  chev: { fontFamily: F.mono, color: C.inkFaded, fontSize: 14, alignSelf: "center" },
   notes: {
     minHeight: 96,
     color: C.ink,
