@@ -57,7 +57,8 @@ export const MODE_OPTIONS: SegmentedOption<TravelMode>[] = [
 
 export const modeGlyph = (mode: TravelMode) => (mode === "ferry" ? "⛴" : "✈");
 
-const failed = (what: string) => Alert.alert("Didn’t save", `${what} — check your connection and try again.`);
+/** The app's one "didn't save" alert: every failed write says so, never silently. */
+export const failed = (what: string) => Alert.alert("Didn’t save", `${what} — check your connection and try again.`);
 
 /**
  * Switch a hop. #129 · Q11 A: Fly → Drive on a hop with bookings ASKS —

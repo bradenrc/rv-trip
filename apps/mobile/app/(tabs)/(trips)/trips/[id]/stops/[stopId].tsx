@@ -1,6 +1,6 @@
 import { Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { HowWasIt, Idea, LodgingKind, Reservation, ReservationDraft } from "@rv-trip/core";
 import {
   LODGING_KIND_LABEL,
@@ -30,14 +30,13 @@ import { AgainPair, HowWasItSheet, LoggedMeta } from "../../../../../../src/jour
 import { MapFrame, TripMap, useStyleMode } from "../../../../../../src/map";
 import { addStay, isProvisionalIdea, updateTrip, useBundle } from "../../../../../../src/store";
 import { C, F, R } from "../../../../../../src/theme";
-import { Input, Label, Sheet } from "../../../../../../src/hops";
+import { Input, Label, Sheet, failed } from "../../../../../../src/hops";
 import { Button, Card, CategoryTile, Centered, Kicker, Muted, RangePicker, Segmented, Stars } from "../../../../../../src/ui";
 
 /** The height packages/ui's `MapPlaceholder` has always reserved, and the web's
  * `STOP_MINI_MAP_HEIGHT` (apps/web/src/components/map/StopMiniMap.tsx:13). */
 const MINI_MAP_HEIGHT = 150;
 
-const failed = (what: string) => Alert.alert("Didn’t save", `${what} — check your connection and try again.`);
 
 /** The "How was it?" sheet's target: a checked-off idea (with what it held
  * before the check, for Undo) or a reservation's pill. */

@@ -24,7 +24,7 @@ import {
 } from "@rv-trip/core";
 import type { PlacesSearchEnvelope } from "@rv-trip/core/api-client";
 import { api } from "./api";
-import { Input, Label, Sheet } from "./hops";
+import { Input, Label, Sheet, failed } from "./hops";
 import { addStay, addStop, planIdeaToStop, planPinnedIdea, planStayIdea, updateTrip } from "./store";
 import { appendShelfIdea } from "@rv-trip/core";
 import { C, F, R } from "./theme";
@@ -192,7 +192,7 @@ export function AddStopSheet({ trip, onClose }: { trip: Trip; onClose: () => voi
         anchor={anchor}
         onPick={(p) => {
           onClose();
-          void addStop(trip.id, placeOf(p)).catch(() => undefined);
+          void addStop(trip.id, placeOf(p)).catch(() => failed("That stop"));
         }}
       />
     </Sheet>
@@ -213,7 +213,7 @@ export function AddIdeaSheet({ trip, kind, onClose }: { trip: Trip; kind: IdeaCa
           void api.ideas
             .create({ tripId: trip.id, stopId: null, category: kind, title: p.name, status: "idea", place: placeOf(p) })
             .then((idea) => updateTrip(trip.id, (t) => appendShelfIdea(t, idea)))
-            .catch(() => undefined);
+            .catch(() => failed("That idea"));
         }}
       />
     </Sheet>
@@ -274,6 +274,7 @@ export function AddStaySheetPhone({
       onClose();
     } catch {
       setSaving(false);
+      failed("That stay");
     }
   };
 
@@ -364,7 +365,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
             Pinned to {stop.place.name} · {ideas.length}
           </Label>
           {ideas.map((i) => (
-            <View key={i.id}>{row(i.title, i.category, () => void planPinnedIdea(trip.id, stop.id, i.id).catch(() => undefined))}</View>
+            <View key={i.id}>{row(i.title, i.category, () => void planPinnedIdea(trip.id, stop.id, i.id).catch(() => failed("Plan it")))}</View>
           ))}
         </View>
       ))}
@@ -384,7 +385,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
               onPress={() => {
                 const id = pickFor;
                 setPickFor(null);
-                void planIdeaToStop(trip.id, id, s.id).catch(() => undefined);
+                void planIdeaToStop(trip.id, id, s.id).catch(() => failed("Plan it"));
               }}
               accessibilityRole="button"
               style={styles.mi}
@@ -404,7 +405,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
               const id = stayFor;
               setStayFor(null);
               if (range.start && range.end) {
-                void planStayIdea(trip.id, id, { start: range.start, end: range.end }).catch(() => undefined);
+                void planStayIdea(trip.id, id, { start: range.start, end: range.end }).catch(() => failed("Plan it"));
               }
             }}
           >
