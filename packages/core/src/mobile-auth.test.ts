@@ -18,7 +18,9 @@ import { describe, it, expect } from "vitest";
  *
  * What this guards, criterion for criterion against the item's acceptance:
  *
- *   1. `@clerk/clerk-expo` + `expo-secure-store` are real dependencies.
+ *   1. `@clerk/expo` (core-3, #147) + `expo-secure-store` are real
+ *      dependencies, the deprecated `@clerk/clerk-expo` is gone, and the
+ *      package's own native module has its iOS floor met via its config plugin.
  *   2. `src/auth.ts` reads the key from `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and
  *      nothing else, and `clerkEnabled` is that key's presence — the mobile
  *      mirror of `clerkEnabled()`.
@@ -27,7 +29,7 @@ import { describe, it, expect } from "vitest";
  *      is handed in from a provider-side effect.
  *   4. `app/_layout.tsx` returns `<Shell />` bare when keyless (no provider
  *      mounted), and the one `<Stack>` in the file lives inside `Shell`, so
- *      `<SignedOut>` cannot reach it.
+ *      `<Show when="signed-out">` cannot reach it.
  *   5. `app/rig.tsx` renders an Account card ABOVE the rig card in both states —
  *      a Sign out when there is a session, the web's dashed `dev-user` stub when
  *      there is not.
@@ -46,6 +48,7 @@ const MOBILE = join(REPO, "apps/mobile");
 const read = (p: string) => readFileSync(join(MOBILE, p), "utf8");
 
 const pkg = JSON.parse(read("package.json")) as { dependencies: Record<string, string> };
+const appJson = JSON.parse(read("app.json")) as { expo: { plugins: (string | [string, unknown])[] } };
 const auth = read("src/auth.ts");
 const apiTs = read("src/api.ts");
 const layout = read("app/_layout.tsx");
@@ -62,25 +65,47 @@ const sources: [string, string][] = [
   ["app/rig.tsx", rig],
 ];
 
+const NATIVE_PEERS = ["expo-web-browser", "expo-auth-session"];
+
 describe("mobile auth · the dependencies", () => {
-  it("declares @clerk/clerk-expo and expo-secure-store", () => {
-    expect(pkg.dependencies["@clerk/clerk-expo"]).toBeTruthy();
+  it("declares @clerk/expo (core-3) and expo-secure-store", () => {
+    expect(pkg.dependencies["@clerk/expo"]).toBeTruthy();
     expect(pkg.dependencies["expo-secure-store"]).toBeTruthy();
   });
 
+  it("no longer declares the deprecated @clerk/clerk-expo", () => {
+    expect(pkg.dependencies["@clerk/clerk-expo"]).toBeUndefined();
+  });
+
   /**
-   * `@clerk/clerk-expo` *statically* requires both of these — `expo-web-browser`
-   * from `dist/provider/ClerkProvider.js`, and `expo-auth-session` from the
-   * `useSSO` / `useOAuth` hooks that `dist/hooks/index.js` re-exports. They are
-   * therefore in the runtime module graph the moment anything is imported from
-   * the package, even though this app uses neither browser nor OAuth flow — and
-   * they are native modules, so they have to autolink into the iOS build rather
-   * than sit undeclared in pnpm's store.
+   * Re-derived from `@clerk/expo@4.7.2`'s dist (#147 Q4 B), walking the static
+   * `require(...)` graph from `dist/index.js` — the one entry the app imports —
+   * with Metro's `.ios.js` / `.android.js` resolution. The only native modules
+   * it reaches are `expo` (`dist/specs/NativeClerkModule{,.android}.js:1`,
+   * declared anyway) and these two, from `dist/hooks/ssoDependencies.js:9-10`
+   * (reached via `useSSO`, which `dist/hooks/index.js` re-exports). They sit in
+   * a lazy try/catch now, but a string-literal require is still resolved by
+   * Metro at bundle time, so they are in the module graph and have to autolink
+   * rather than sit undeclared in pnpm's store — even though this app uses no
+   * browser or OAuth flow.
    */
   it("declares the native peers Clerk pulls into the graph, SDK-aligned", () => {
-    for (const dep of ["expo-web-browser", "expo-auth-session"]) {
+    for (const dep of NATIVE_PEERS) {
       expect(pkg.dependencies[dep], `${dep} must be declared`).toMatch(/^~?57\./);
     }
+  });
+
+  /**
+   * `@clerk/expo` 4.x is an autolinked Expo native module in its own right
+   * (`expo-module.config.json` registers `ClerkExpoModule`), and its
+   * `ios/ClerkExpo.podspec` pins `:ios => '17.0'` — above Expo 57's 16.4
+   * floor. Its config plugin (`app.plugin.js`) raises the Podfile's deployment
+   * target to 17.0 and adds the Android packaging exclusions, so without it the
+   * dev-client rebuild fails at `pod install` (#147 vet finding 2).
+   */
+  it("registers the @clerk/expo config plugin, which lifts the iOS floor to 17.0", () => {
+    const names = appJson.expo.plugins.map((p) => (Array.isArray(p) ? p[0] : p));
+    expect(names).toContain("@clerk/expo");
   });
 });
 
@@ -157,9 +182,11 @@ describe("mobile auth · app/_layout.tsx is the hard gate", () => {
     expect(layout.indexOf("<ClerkProvider")).toBeGreaterThan(bare!.index);
   });
 
-  it("wraps Shell in SignedIn and the sign-in screen in SignedOut", () => {
-    expect(layout).toMatch(/<SignedIn>\s*<Shell \/>\s*<\/SignedIn>/);
-    expect(layout).toMatch(/<SignedOut>\s*<SignInScreen \/>\s*<\/SignedOut>/);
+  // #147 (Q2 A): core-3's <Show>, the same gate the web uses.
+  it("wraps Shell in Show signed-in and the sign-in screen in Show signed-out", () => {
+    expect(layout).toMatch(/<Show when="signed-in">\s*<Shell \/>\s*<\/Show>/);
+    expect(layout).toMatch(/<Show when="signed-out">\s*<SignInScreen \/>\s*<\/Show>/);
+    expect(layout).not.toMatch(/<SignedIn>|<SignedOut>/);
   });
 
   it("hands the provider the publishable key and the secure-store token cache", () => {
@@ -176,8 +203,11 @@ describe("mobile auth · app/sign-in.tsx is the email → code screen", () => {
     expect(signIn).toContain("Use a different email");
   });
 
-  it("runs Clerk's email_code strategy — no password, no OAuth", () => {
-    expect(signIn).toMatch(/strategy: "email_code"/);
+  // #147 (Q1 B): core-3's signal API — signIn.emailCode, then finalize().
+  it("runs Clerk's email-code flow on the signal API — no password, no OAuth", () => {
+    expect(signIn).toMatch(/signIn\.emailCode\.sendCode/);
+    expect(signIn).toMatch(/signIn\.emailCode\.verifyCode/);
+    expect(signIn).toMatch(/signIn\.finalize\(/);
     expect(signIn).not.toMatch(/password/i);
     expect(signIn).not.toMatch(/useSSO|useOAuth/);
   });
@@ -186,6 +216,19 @@ describe("mobile auth · app/sign-in.tsx is the email → code screen", () => {
     expect(signIn).toMatch(/from "\.\.\/src\/ui"/);
     expect(signIn).toMatch(/\bKicker\b/);
     expect(signIn).toMatch(/\bButton\b/);
+  });
+});
+
+describe("mobile auth · one SDK, no shim (#147)", () => {
+  it("imports only @clerk/expo — never @clerk/clerk-expo, never /legacy", () => {
+    for (const [name, src] of sources) {
+      expect(src, `${name} must not import @clerk/clerk-expo`).not.toMatch(/@clerk\/clerk-expo/);
+      expect(src, `${name} must not import the /legacy shim`).not.toMatch(/@clerk\/expo\/legacy/);
+    }
+    for (const name of ["app/_layout.tsx", "app/sign-in.tsx", "app/rig.tsx"]) {
+      const src = sources.find(([n]) => n === name)![1];
+      expect(src, `${name} imports from @clerk/expo`).toMatch(/from "@clerk\/expo"/);
+    }
   });
 });
 
