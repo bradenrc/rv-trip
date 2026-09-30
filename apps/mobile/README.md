@@ -48,6 +48,7 @@ to build without it (`rnmapbox-maps.podspec:39-42`). `app.json` already has
 ```bash
 pnpm dev                            # repo root: the web app + API on http://localhost:3000
 pnpm --filter @rv-trip/mobile ios   # expo run:ios — build (first time), install, boot, attach Metro
+pnpm --filter @rv-trip/mobile android # expo run:android — the same loop on the Android emulator
 ```
 
 The first `ios` in a tree is a real Xcode build: **~4–8 minutes**. It runs
