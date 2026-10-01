@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { RigProfile } from "@rv-trip/core";
 import { formatFeetInches, formatPounds } from "@rv-trip/core";
-import { useClerk, useUser } from "@clerk/clerk-expo";
+import { useClerk, useUser } from "@clerk/expo";
 import { api } from "../src/api";
 import { clerkEnabled } from "../src/auth";
 import { C, F, R } from "../src/theme";
