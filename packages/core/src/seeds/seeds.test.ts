@@ -3,15 +3,17 @@ import { segmentDateConflicts, reconcileSegments } from "../domain/segments";
 import { savedPlace, trip as tripSchema } from "../domain/types";
 import { savesShelves, shelfCounts } from "../capture/shelves";
 import { DESTINATION_MAX_MILES, haversineMeters } from "../providers/index";
-import { timelineModel } from "../planner/index";
+import { timelineModel, tripJournal } from "../planner/index";
 import {
   SEED_OWNER,
+  coastWeekendTrip,
   costaRicaTrip,
   greeceTrip,
   pnwTrip,
   seedDestinations,
   seedSaves,
   seedTrips,
+  yellowstoneTrip,
 } from "./index";
 
 /**
@@ -210,5 +212,33 @@ describe("the seed saves (#111 i2)", () => {
 
   it("keeps destination place ids unique — the (owner, google_place_id) unique", () => {
     expect(new Set(dests.map((d) => d.googlePlaceId)).size).toBe(dests.length);
+  });
+});
+
+describe("the complete trips' journals (#146)", () => {
+  it("Oregon Coast Weekend journals the design's 4 · 3 · 1 · 1", () => {
+    const j = tripJournal(coastWeekendTrip());
+    expect(j.tally).toEqual({ logged: 4, again: 3, once: 1, skipped: 1 });
+    expect(j.stops.map((g) => [g.stop.place.name, g.rating, g.again])).toEqual([
+      ["Newport, OR", 5, true],
+    ]);
+    expect(j.stops[0]!.entries.map((e) => e.name)).toEqual([
+      "Local Ocean Seafoods",
+      "South Beach State Park",
+      "Oregon Coast Aquarium",
+    ]);
+    expect(j.didntGetTo.map((i) => i.title)).toEqual(["Yaquina Head tide pools"]);
+    expect(j.travel).toEqual([]);
+  });
+
+  it("Yellowstone & Tetons journals its two Been saves, 2 · 0 · 0 · 0", () => {
+    const j = tripJournal(yellowstoneTrip());
+    expect(j.tally).toEqual({ logged: 2, again: 0, once: 0, skipped: 0 });
+    expect(j.stops.map((g) => g.stop.place.name)).toEqual(["Fishing Bridge, WY"]);
+    expect(j.stops[0]!.entries.map((e) => e.name)).toEqual([
+      "Fishing Bridge RV Park",
+      "Old Faithful Loop",
+    ]);
+    expect(j.didntGetTo).toEqual([]);
   });
 });
