@@ -72,6 +72,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   // The nested `homeBasePlace` becomes its three columns; an ABSENT key stays
   // absent, so a patch that never mentions home base leaves the anchor alone.
+  // `destination` (#143 · Q8 A) rides through as the picked place: the
+  // mutation upserts its destinations row and repoints `destination_id` in one
+  // transaction (null clears it) — no stop is written on a PATCH.
   const { homeBasePlace, ...fields } = patch;
   const columns =
     homeBasePlace === undefined ? fields : { ...fields, ...homeBaseColumns(homeBasePlace) };

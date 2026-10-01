@@ -506,9 +506,14 @@ export async function updateTripFields(
     defaultMode?: TravelMode;
     lodgingDefault?: LodgingKind | null;
     rigOn?: boolean;
+    /** #143 · Q8 A — phone Trip settings' Destination. Upserts the household's
+     * destinations row and repoints `trips.destination_id`; null clears the
+     * pointer. Unlike the create, NO stop is written. */
+    destination?: TripDestinationInput | null;
   },
 ): Promise<boolean> {
   const scope = and(eq(trips.id, tripId), eq(trips.ownerId, owner));
+  const { destination, ...fields } = patch;
   // An empty patch is a legal no-op, but `.set({})` is not a legal statement —
   // fall back to the existence check so the answer is still 204 vs 404.
   if (Object.keys(patch).length === 0) {
@@ -516,22 +521,37 @@ export async function updateTripFields(
     return rows.length > 0;
   }
   // Setting or clearing the home base adds or removes the home → first hop
-  // (#110 §6), so that write reconciles in the same transaction.
-  if (patch.homeBase !== undefined) {
+  // (#110 §6), and a destination pick upserts its row first — both write in
+  // one transaction with the trip update.
+  if (fields.homeBase !== undefined || destination !== undefined) {
     return db.transaction(async (tx) => {
+      // Ownership first: the destinations row is the household's, so a
+      // stranger's trip id must not plant one.
+      const owned = await tx.select({ id: trips.id }).from(trips).where(scope);
+      if (owned.length === 0) return false;
+      const destinationId =
+        destination === undefined
+          ? undefined
+          : destination === null
+            ? null
+            : await upsertTripDestination(tx, owner, destination);
       const updated = await tx
         .update(trips)
-        .set({ ...patch, updatedAt: new Date() })
+        .set({
+          ...fields,
+          ...(destinationId === undefined ? {} : { destinationId }),
+          updatedAt: new Date(),
+        })
         .where(scope)
         .returning({ id: trips.id });
       if (updated.length === 0) return false;
-      await syncSegments(tx, tripId);
+      if (fields.homeBase !== undefined) await syncSegments(tx, tripId);
       return true;
     });
   }
   const updated = await db
     .update(trips)
-    .set({ ...patch, updatedAt: new Date() })
+    .set({ ...fields, updatedAt: new Date() })
     .where(scope)
     .returning({ id: trips.id });
   return updated.length > 0;

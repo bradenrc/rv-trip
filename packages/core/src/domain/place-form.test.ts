@@ -29,6 +29,7 @@ const KALALOCH: PickedPlace = {
   googlePlaceId: "ChIJvT2R2rSjkFQRRJgVJZ2Xk1Q",
   address: "156954 US-101, Forks, WA 98331",
   rating: 4.4,
+  primaryType: null,
 };
 
 const FREE_TEXT: PickedPlace = {
@@ -38,6 +39,7 @@ const FREE_TEXT: PickedPlace = {
   googlePlaceId: null,
   address: null,
   rating: null,
+  primaryType: null,
 };
 
 const TRIP_ID = "8c2b2c1e-6a4e-4f0e-9a0b-6f2b1d0a7c31";

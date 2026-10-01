@@ -411,7 +411,16 @@ export const tripPatchInput = trip
     lodgingDefault: true,
     rigOn: true,
   })
-  .partial();
+  .partial()
+  .extend({
+    /**
+     * #143 · Q8 A — phone Trip settings' Destination. Same picked-place shape as
+     * the create's; the server upserts the household's `destinations` row and
+     * repoints `trips.destination_id` (null clears it). Unlike the create, a
+     * PATCH writes NO stop — the itinerary is already the user's.
+     */
+    destination: tripDestinationInput.nullable().optional(),
+  });
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
 
 /**

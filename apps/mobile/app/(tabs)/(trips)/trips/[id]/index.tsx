@@ -41,9 +41,9 @@ import {
   HopBookingSheet,
   HopRow,
   MODE_OPTIONS,
-  RoundTripSheet,
   switchHop,
 } from "../../../../../src/hops";
+import { RoundTripSheet } from "../../../../../src/round-trip";
 import {
   AddIdeaSheet,
   AddSheet,
@@ -120,6 +120,8 @@ export default function TripScreen() {
   // #104 · the hop sheets: a drive row's ⋯ (a drive trip) and Add flight/ferry.
   const [menuSegment, setMenuSegment] = useState<string | null>(null);
   const [bookingHop, setBookingHop] = useState<RouteHop | null>(null);
+  // #143 · the booking line tapped — its hop's sheet opens as Edit flight/ferry.
+  const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
 
   // The same two models the web planner renders — from @rv-trip/core/planner.
   const timeline = useMemo(() => (bundle ? timelineModel(bundle.trip) : null), [bundle]);
@@ -180,7 +182,14 @@ export default function TripScreen() {
       flush={flush}
       showSwitch
       onMode={(m) => switchHop(trip, hop.segmentId, m)}
-      onAdd={() => setBookingHop(hop)}
+      onAdd={() => {
+        setEditingBookingId(null);
+        setBookingHop(hop);
+      }}
+      onEdit={(bookingId) => {
+        setEditingBookingId(bookingId);
+        setBookingHop(hop);
+      }}
     />
   );
   const driveRow = (drive: RouteDrive) => (
@@ -245,7 +254,8 @@ export default function TripScreen() {
       <Stack.Screen
         options={{
           title: trip.title,
-          // #103 · Edit opens Trip defaults — the setup's three blocks.
+          // #103 · #143 · Edit opens Trip settings — Destination · Dates ·
+          // Starts from, then the setup's three blocks.
           headerRight: () => (
             <Pressable onPress={() => router.push(`/trips/new?edit=${trip.id}`)} hitSlop={8} accessibilityRole="button">
               <Text style={{ color: C.green, fontWeight: "700", fontSize: 14 }}>Edit</Text>
@@ -482,7 +492,19 @@ export default function TripScreen() {
           setMenuSegment(null);
         }}
       />
-      <HopBookingSheet trip={trip} hop={bookingHop} onClose={() => setBookingHop(null)} />
+      <HopBookingSheet
+        trip={trip}
+        hop={bookingHop}
+        editing={
+          editingBookingId
+            ? (trip.segments.flatMap((s) => s.reservations).find((r) => r.id === editingBookingId) ?? null)
+            : null
+        }
+        onClose={() => {
+          setBookingHop(null);
+          setEditingBookingId(null);
+        }}
+      />
       {addOpen && tab !== "journal" && (
         <AddSheet
           tab={tab}

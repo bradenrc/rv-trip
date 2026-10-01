@@ -1,20 +1,21 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { LodgingKind, PlaceSummary, TripDraft, TripModeChoice } from "@rv-trip/core";
+import type { LodgingKind, PhoneTripSettingsDraft, PlaceSummary, TripDraft, TripModeChoice } from "@rv-trip/core";
 import {
   BLANK_TRIP_DRAFT,
   LODGING_CHOICE_LABEL,
   RIG_CHOICES,
   TRIP_MODE_CHOICES,
   lodgingChoices,
+  phoneTripSettingsDraft,
+  phoneTripSettingsPatch,
   pickedFromSummary,
   tripDayCount,
-  tripDefaultsPatch,
   tripDraftInput,
-  tripModeChoice,
   withTripMode,
 } from "@rv-trip/core";
+import { ApiError } from "@rv-trip/core/api-client";
 import { api } from "../../../../src/api";
 import { Input, Label } from "../../../../src/hops";
 import { createTrip, patchTripDefaults, useBundle } from "../../../../src/store";
@@ -23,14 +24,15 @@ import { Button, Chip, Kicker, RangePicker } from "../../../../src/ui";
 
 /**
  * New trip (#103 · Q12 C) — the web's three questions in the same order,
- * stacked. With `?edit=<id>` it is "Trip defaults": only the three blocks,
- * prefilled, and Save PATCHes only what changed (Greece reads "Fly & stay",
- * Q2 A). Copy and rules are core's (`TRIP_MODE_CHOICES`, `tripDraftInput`,
- * `tripDefaultsPatch`), so the two apps cannot drift.
+ * stacked. With `?edit=<id>` it is "Trip settings" (#143 · Q8 A): Destination,
+ * Dates and Starts from above the three blocks, prefilled, and Save PATCHes
+ * only what changed (Greece reads "Fly & stay", Q2 A). Copy and rules are
+ * core's (`TRIP_MODE_CHOICES`, `tripDraftInput`, `phoneTripSettingsPatch`), so
+ * the two apps cannot drift.
  */
 export default function NewTripScreen() {
   const { edit } = useLocalSearchParams<{ edit?: string }>();
-  return edit ? <TripDefaults id={edit} /> : <NewTrip />;
+  return edit ? <TripSettings id={edit} /> : <NewTrip />;
 }
 
 const MODE_GLYPH: Record<TripModeChoice, string> = { road: "🚐", air: "✈", mixed: "⇄" };
@@ -296,31 +298,67 @@ function NewTrip() {
   );
 }
 
-/** "Trip defaults" — the three blocks alone, prefilled; Save sends what changed. */
-function TripDefaults({ id }: { id: string }) {
+/**
+ * "Trip settings" (#103 · #143 · Q8 A) — Destination · Dates · Starts from,
+ * then the three defaults, prefilled; Save sends only what changed (core's
+ * `phoneTripSettingsPatch`). Status, rating and note stay on the web.
+ */
+function TripSettings({ id }: { id: string }) {
   const router = useRouter();
   const { bundle } = useBundle(id);
   const trip = bundle?.trip ?? null;
-  const [mode, setMode] = useState<TripModeChoice | null>(null);
-  const [lodging, setLodging] = useState<LodgingKind | null>(null);
-  const [rigOn, setRigOn] = useState(false);
-  const [seeded, setSeeded] = useState(false);
+  const [draft, setDraft] = useState<PhoneTripSettingsDraft | null>(null);
+  const [destQuery, setDestQuery] = useState("");
+  const [homeQuery, setHomeQuery] = useState("");
+  const [changingHome, setChangingHome] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [household, setHousehold] = useState<string | null>(null);
+  const destRows = usePlaceResults(destQuery, draft?.destination?.name);
+  const homeRows = usePlaceResults(homeQuery, draft?.homeBasePlace?.name);
 
   useEffect(() => {
-    if (!trip || seeded) return;
-    setMode(tripModeChoice(trip.defaultMode));
-    setLodging(trip.lodgingDefault);
-    setRigOn(trip.rigOn);
-    setSeeded(true);
-  }, [trip, seeded]);
+    if (!trip || draft) return;
+    const d = phoneTripSettingsDraft(trip);
+    setDraft(d);
+    setDestQuery(d.destination?.name ?? "");
+  }, [trip, draft]);
+
+  // The household default's name — what "Use household default" falls back to.
+  useEffect(() => {
+    let live = true;
+    api.prefs
+      .get()
+      .then((p) => live && setHousehold(p?.homeBasePlace?.name ?? null))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const set = (patch: Partial<PhoneTripSettingsDraft>) => setDraft((d) => (d ? { ...d, ...patch } : d));
+  // Opened on the household's place and nothing picked since (the web's
+  // rule), or this trip's override just cleared back to it.
+  const usesHousehold =
+    draft?.homeBasePlace === null
+      ? household !== null
+      : !!trip?.homeBaseFromHousehold && (draft?.homeBasePlace?.name ?? null) === trip.homeBase;
+  const home = draft?.homeBasePlace?.name ?? household;
 
   const save = async () => {
-    if (!trip || !mode) return;
+    if (!trip || !draft || saving) return;
+    setSaving(true);
     try {
-      await patchTripDefaults(id, tripDefaultsPatch(trip, { mode, lodgingDefault: lodging, rigOn }));
+      await patchTripDefaults(id, phoneTripSettingsPatch(trip, draft));
       router.back();
-    } catch {
-      Alert.alert("Didn’t save", "Your trip defaults — check your connection and try again.");
+    } catch (e) {
+      setSaving(false);
+      // A range that strands a scheduled stop: the server's own sentence.
+      const body = e instanceof ApiError ? (e.body as { error?: string; message?: string } | null) : null;
+      if (e instanceof ApiError && e.status === 409 && body?.error === "date_range_orphans_stops" && body.message) {
+        Alert.alert("Didn’t save", body.message);
+      } else {
+        Alert.alert("Didn’t save", "Your trip settings — check your connection and try again.");
+      }
     }
   };
 
@@ -328,39 +366,113 @@ function TripDefaults({ id }: { id: string }) {
     <>
       <Stack.Screen
         options={{
-          title: "Trip defaults",
+          title: "Trip settings",
           headerLeft: () => (
             <Pressable onPress={() => router.back()} hitSlop={8} accessibilityRole="button">
               <Text style={{ color: C.inkMuted, fontSize: 14 }}>Cancel</Text>
             </Pressable>
           ),
           headerRight: () => (
-            <Pressable onPress={() => void save()} hitSlop={8} accessibilityRole="button">
+            <Pressable onPress={() => void save()} hitSlop={8} accessibilityRole="button" disabled={saving}>
               <Text style={{ color: C.green, fontWeight: "700", fontSize: 14 }}>Save</Text>
             </Pressable>
           ),
         }}
       />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {trip && <Text style={styles.pm}>{trip.title}</Text>}
-        <Question>How it moves</Question>
-        <ModeCards
-          value={mode}
-          onChange={(m) => {
-            setMode(m);
-            if (m !== "road") setRigOn(false);
-          }}
-          subs={false}
-        />
-        <Question>Mostly sleeping in</Question>
-        <RowCards<LodgingKind> options={lodgingOptions(mode)} value={lodging} onChange={setLodging} />
-        {mode === "road" && (
+        {draft && (
           <>
-            <Question>Bringing the rig?</Question>
-            <RowCards<boolean> options={rigOptions} value={rigOn} onChange={setRigOn} />
+            <Label>Destination</Label>
+            <Input
+              value={destQuery}
+              onChangeText={(q) => {
+                setDestQuery(q);
+                // An emptied box clears the destination; typed text is a
+                // search until a result is picked.
+                if (q.trim() === "") set({ destination: null });
+              }}
+              placeholder="Bellingham, WA"
+              autoCapitalize="words"
+            />
+            <Results
+              rows={destRows}
+              onPick={(r) => {
+                const picked = pickedFromSummary(r);
+                set({ destination: picked });
+                setDestQuery(picked.name);
+              }}
+            />
+
+            <Label>Dates</Label>
+            <RangePicker
+              value={{ start: draft.startDate || null, end: draft.endDate || null }}
+              onChange={(v) => set({ startDate: v.start ?? "", endDate: v.end ?? "" })}
+            />
+
+            <Label>{usesHousehold ? "Starts from · household default" : "Starts from"}</Label>
+            {changingHome ? (
+              <>
+                <Input
+                  value={homeQuery}
+                  onChangeText={setHomeQuery}
+                  placeholder="Boise, ID"
+                  autoCapitalize="words"
+                  autoFocus
+                />
+                <Results
+                  rows={homeRows}
+                  onPick={(r) => {
+                    set({ homeBasePlace: pickedFromSummary(r) });
+                    setHomeQuery("");
+                    setChangingHome(false);
+                  }}
+                />
+              </>
+            ) : (
+              <View style={{ alignSelf: "flex-start" }}>
+                <Chip onPress={() => setChangingHome(true)}>
+                  {home ? `🏠 ${home} · change` : "🏠 no home base yet · set one"}
+                </Chip>
+              </View>
+            )}
+            {trip && !trip.homeBaseFromHousehold && trip.homeBase !== null && draft.homeBasePlace !== null && (
+              <Pressable
+                onPress={() => {
+                  set({ homeBasePlace: null });
+                  setChangingHome(false);
+                }}
+                accessibilityRole="button"
+                hitSlop={6}
+                style={{ alignSelf: "flex-start" }}
+              >
+                <Text style={[styles.pm, { color: C.inkMuted, textDecorationLine: "underline" }]}>
+                  Use household default
+                </Text>
+              </Pressable>
+            )}
+
+            <Question>How it moves</Question>
+            <ModeCards
+              value={draft.mode}
+              onChange={(m) => set(m !== "road" ? { mode: m, rigOn: false } : { mode: m })}
+              subs={false}
+            />
+            <Question>Mostly sleeping in</Question>
+            <RowCards<LodgingKind>
+              options={lodgingOptions(draft.mode)}
+              value={draft.lodgingDefault}
+              onChange={(lodgingDefault) => set({ lodgingDefault })}
+            />
+            {draft.mode === "road" && (
+              <>
+                <Question>Bringing the rig?</Question>
+                <RowCards<boolean> options={rigOptions} value={draft.rigOn} onChange={(rigOn) => set({ rigOn })} />
+              </>
+            )}
+            <Text style={[styles.pm, { marginTop: 6 }]}>Changes apply to hops you add from now on.</Text>
           </>
         )}
-        <Text style={[styles.pm, { marginTop: 6 }]}>Changes apply to hops you add from now on.</Text>
       </ScrollView>
     </>
   );

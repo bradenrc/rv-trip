@@ -31,6 +31,7 @@ const BOISE = {
   googlePlaceId: "ChIJnbRH",
   address: "Boise, ID, USA",
   rating: null,
+  primaryType: null,
 };
 
 /** The trip the settings dialog opens over — the seed trip, unpinned. */
@@ -226,6 +227,7 @@ describe("tripSettingsDraft", () => {
         googlePlaceId: null,
         address: null,
         rating: null,
+        primaryType: null,
       },
       status: "auto",
       rating: 0,

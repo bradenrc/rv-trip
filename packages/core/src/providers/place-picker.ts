@@ -28,6 +28,9 @@ export interface PickedPlace {
   googlePlaceId: string | null;
   address: string | null;
   rating: number | null;
+  /** Google's `primaryType` ("lodging", "campground") — #144 seeds a new stay's
+   * kind from it. Null for the free-text escape and for a stored place. */
+  primaryType: string | null;
 }
 
 /** How long the box sits still before it becomes a billed question (§4 state 2). */
@@ -56,6 +59,7 @@ export function pickedFromSummary(summary: PlaceSummary): PickedPlace {
     googlePlaceId: summary.googlePlaceId,
     address: summary.address,
     rating: summary.rating,
+    primaryType: summary.primaryType ?? null,
   };
 }
 
@@ -67,6 +71,7 @@ export function pickedFromFreeText(query: string): PickedPlace {
     googlePlaceId: null,
     address: null,
     rating: null,
+    primaryType: null,
   };
 }
 
@@ -233,6 +238,7 @@ export function pickedFromPlace(place: {
     googlePlaceId: place.googlePlaceId,
     address: null,
     rating: null,
+    primaryType: null,
   };
 }
 

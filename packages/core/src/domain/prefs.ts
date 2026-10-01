@@ -150,3 +150,26 @@ export function resolveHomeBase(
   }
   return { homeBase: null, homeBasePlace: null, fromHousehold: false };
 }
+
+/**
+ * #142 · Q5 A — the Rig screen's "🏠 Home base" row value: the household home
+ * base's name and a chevron, or "set one ›" when there is none (or no prefs
+ * row at all).
+ */
+export function homeBaseRowValue(prefs: Pick<UserPrefs, "homeBasePlace"> | null | undefined): string {
+  const name = prefs?.homeBasePlace?.name?.trim();
+  return name ? `${name} ›` : "set one ›";
+}
+
+/**
+ * #142 — a place-search pick as the `PUT /api/prefs` partial that sets the
+ * HOUSEHOLD home base. Only the four `Place` fields go on the wire; a pick's
+ * extras (address, Google's primaryType) are dropped.
+ */
+export function householdHomeBasePatch(
+  picked: Pick<Place, "name" | "lat" | "lng" | "googlePlaceId">,
+): { homeBasePlace: Place } {
+  return {
+    homeBasePlace: { name: picked.name, lat: picked.lat, lng: picked.lng, googlePlaceId: picked.googlePlaceId },
+  };
+}
