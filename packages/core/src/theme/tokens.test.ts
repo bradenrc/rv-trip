@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { RV, categoryOf, dayKindColor } from "./tokens";
+import { RV, RV_LIGHT_ISLAND, categoryOf, dayKindColor } from "./tokens";
 
 /**
  * `tokens.ts` mirrors `packages/ui/styles/entry.css` by hand. This test reads
@@ -22,10 +22,20 @@ const css = readFileSync(join(here, "../../../ui/styles/entry.css"), "utf8");
 /** The raw dark half — `.dark { --rv-*: <literal>; }`. */
 const darkHalf = css.slice(css.indexOf(".dark {"), css.indexOf("}", css.indexOf(".dark {")));
 
-function cssVar(name: string): string {
-  const m = darkHalf.match(new RegExp(`--rv-${name}:\\s*(#[0-9a-fA-F]{6})`));
-  if (!m) throw new Error(`--rv-${name} not found in the .dark half of entry.css`);
+/** The light island — `.rv-light-island { --rv-*: <literal>; }` (issue #123). */
+const islandHalf = css.slice(
+  css.indexOf(".rv-light-island {"),
+  css.indexOf("}", css.indexOf(".rv-light-island {")),
+);
+
+function varIn(block: string, where: string, name: string): string {
+  const m = block.match(new RegExp(`--rv-${name}:\\s*(#[0-9a-fA-F]{6})`));
+  if (!m) throw new Error(`--rv-${name} not found in the ${where} of entry.css`);
   return m[1]!.toLowerCase();
+}
+
+function cssVar(name: string): string {
+  return varIn(darkHalf, ".dark half", name);
 }
 
 const MIRROR: Record<keyof typeof RV, string> = {
@@ -60,6 +70,22 @@ describe("RV tokens", () => {
   it("mirror entry.css exactly", () => {
     for (const [key, name] of Object.entries(MIRROR) as [keyof typeof RV, string][]) {
       expect({ [key]: RV[key] }).toEqual({ [key]: cssVar(name) });
+    }
+  });
+
+  it("mirror the .rv-light-island half for foreign marks", () => {
+    const island: Record<keyof typeof RV_LIGHT_ISLAND, string> = {
+      surface: "surface",
+      ink: "ink",
+      borderHi: "border-hi",
+    };
+    for (const [key, name] of Object.entries(island) as [
+      keyof typeof RV_LIGHT_ISLAND,
+      string,
+    ][]) {
+      expect({ [key]: RV_LIGHT_ISLAND[key] }).toEqual({
+        [key]: varIn(islandHalf, ".rv-light-island block", name),
+      });
     }
   });
 

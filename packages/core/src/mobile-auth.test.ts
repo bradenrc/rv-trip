@@ -204,12 +204,14 @@ describe("mobile auth · app/sign-in.tsx is the email → code screen", () => {
   });
 
   // #147 (Q1 B): core-3's signal API — signIn.emailCode, then finalize().
-  it("runs Clerk's email-code flow on the signal API — no password, no OAuth", () => {
+  // #123 added Apple + Google above the email step (guarded in
+  // mobile-sso.test.ts); the email path itself stays passwordless.
+  it("runs Clerk's email-code flow on the signal API — no password", () => {
     expect(signIn).toMatch(/signIn\.emailCode\.sendCode/);
     expect(signIn).toMatch(/signIn\.emailCode\.verifyCode/);
     expect(signIn).toMatch(/signIn\.finalize\(/);
     expect(signIn).not.toMatch(/password/i);
-    expect(signIn).not.toMatch(/useSSO|useOAuth/);
+    expect(signIn).not.toMatch(/useOAuth/);
   });
 
   it("is composed from the existing kit, not from new styled primitives", () => {
