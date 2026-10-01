@@ -252,8 +252,38 @@ export function tripDefaultsPatch(
  * alone and leaves the stored `status` where it is — the derivation ignores it
  * from then on.
  */
-export function tripSettingsPatch(t: Trip, d: TripSettingsDraft): TripPatchInput {
-  const patch: TripPatchInput = {};
+export function tripSettingsPatch(t: Trip, d: TripSettingsDraft): TripSettingsPatch {
+  const patch: TripSettingsPatch = rangeAndHomePatch(t, d);
+
+  const note = d.note.trim() === "" ? null : d.note;
+  if (note !== t.note) patch.note = note;
+
+  const rating = d.rating === 0 ? null : d.rating;
+  if (rating !== t.rating) patch.rating = rating;
+
+  if (d.status === "auto") {
+    if (!t.statusAuto) patch.statusAuto = true;
+  } else if (t.statusAuto || d.status !== t.status) {
+    patch.status = d.status;
+    patch.statusAuto = false;
+  }
+
+  Object.assign(patch, tripDefaultsPatch(t, d));
+
+  return patch;
+}
+
+/** The web dialog's patch — it never edits the destination (#143 added that
+ * to the phone's Trip settings only), so the key is not in its type. */
+export type TripSettingsPatch = Omit<TripPatchInput, "destination">;
+
+/** The dates + "Starts from" half of a settings patch — shared by the web
+ * dialog and the phone's Trip settings (#143) so the two rules cannot drift. */
+function rangeAndHomePatch(
+  t: Trip,
+  d: Pick<TripSettingsDraft, "startDate" | "endDate" | "homeBasePlace">,
+): TripSettingsPatch {
+  const patch: TripSettingsPatch = {};
 
   // A backwards or half-typed range is never sent; the dialog disables Save on
   // it, and dropping it here means a bad date can't ride along with a good note.
@@ -274,21 +304,67 @@ export function tripSettingsPatch(t: Trip, d: TripSettingsDraft): TripPatchInput
     patch.homeBasePlace = home.homeBasePlace;
   }
 
-  const note = d.note.trim() === "" ? null : d.note;
-  if (note !== t.note) patch.note = note;
+  return patch;
+}
 
-  const rating = d.rating === 0 ? null : d.rating;
-  if (rating !== t.rating) patch.rating = rating;
+// ── #143 · Q8 A — the phone's Trip settings ────────────────────────────────
 
-  if (d.status === "auto") {
-    if (!t.statusAuto) patch.statusAuto = true;
-  } else if (t.statusAuto || d.status !== t.status) {
-    patch.status = d.status;
-    patch.statusAuto = false;
+/**
+ * What the phone's "Trip settings" screen holds: Destination · Dates · Starts
+ * from above the three defaults. Status, rating and note stay web-only, so
+ * they are not in it and can never ride along on its Save.
+ */
+export interface PhoneTripSettingsDraft
+  extends Pick<
+    TripSettingsDraft,
+    "startDate" | "endDate" | "homeBasePlace" | "mode" | "lodgingDefault" | "rigOn"
+  > {
+  /** "Where to?" — a place picked from the search, or null for none. */
+  destination: PickedPlace | null;
+}
+
+/** The trip, as the phone screen's opening state. */
+export function phoneTripSettingsDraft(t: Trip): PhoneTripSettingsDraft {
+  const { startDate, endDate, homeBasePlace, mode, lodgingDefault, rigOn } = tripSettingsDraft(t);
+  const dest = t.destination ?? null;
+  return {
+    startDate,
+    endDate,
+    homeBasePlace,
+    mode,
+    lodgingDefault,
+    rigOn,
+    destination: dest
+      ? {
+          name: dest.name,
+          lat: dest.lat,
+          lng: dest.lng,
+          googlePlaceId: dest.googlePlaceId,
+          address: null,
+          rating: null,
+          primaryType: null,
+        }
+      : null,
+  };
+}
+
+/**
+ * The phone's Save — only what changed. A new destination is sent as the
+ * picked place (the server upserts the household's row and repoints the trip;
+ * no stop is written); null clears it. A pick with no Google id cannot be a
+ * destinations row, so it is not a change. "Use household default" is a null
+ * home base, exactly as on the web.
+ */
+export function phoneTripSettingsPatch(t: Trip, d: PhoneTripSettingsDraft): TripPatchInput {
+  const patch: TripPatchInput = rangeAndHomePatch(t, d);
+  const current = t.destination ?? null;
+  if (d.destination === null) {
+    if (current !== null) patch.destination = null;
+  } else if (d.destination.googlePlaceId && d.destination.googlePlaceId !== current?.googlePlaceId) {
+    const { name, googlePlaceId, lat, lng } = d.destination;
+    patch.destination = { name, googlePlaceId, lat, lng };
   }
-
   Object.assign(patch, tripDefaultsPatch(t, d));
-
   return patch;
 }
 

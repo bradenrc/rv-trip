@@ -288,6 +288,7 @@ describeDb("POST /api/places — the web's escape row (#111 i4)", () => {
     googlePlaceId: null,
     address: null,
     rating: null,
+    primaryType: null,
   });
 
   it("saves the escape row's body as an AREA note with the browser's locality", async () => {

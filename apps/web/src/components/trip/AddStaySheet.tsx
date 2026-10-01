@@ -4,25 +4,32 @@ import { useState } from "react";
 import { Bed, MapPin, Minus, Plus, Search } from "lucide-react";
 import {
   isScheduled,
+  lodgingKindOfGoogle,
   nightsLabel,
   rangeNights,
   reservationDraftInput,
   searchAnchor,
   searchAnchorChip,
   stayDraft,
+  stayKindChipLabel,
+  stayKindIsFromGoogle,
+  stayKindType,
   stepNights,
   orderedStops,
+  withStayKind,
   type DateRangeValue,
+  type LodgingKind,
   type PickedPlace,
   type ReservationDraft,
   type SearchAnchor,
   type Stop,
   type Trip,
 } from "@rv-trip/core";
-import { CategoryTile, FieldLabel, RangePicker } from "@rv-trip/ui";
+import { CategoryTile, FieldLabel, RangePicker, SegmentedControl } from "@rv-trip/ui";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { PlacePicker } from "@/components/places/PlacePicker";
+import { KIND_OPTIONS } from "./stay-kinds";
 
 /**
  * #128 · Q8 A · Q9 A — the name field of a stay IS an anchored search.
@@ -111,6 +118,18 @@ export function AddStaySheet({
     ? searchAnchor(trip, { kind: "stop", stopId: target.id })
     : searchAnchor(trip, { kind: "trip" });
   const [picked, setPicked] = useState<PickedPlace | null>(null);
+  // #144 · Q9 B — the kind is Google's when its type says lodging/campground,
+  // else the trip's default; the chip says which, and opens the switch.
+  const [kind, setKind] = useState<LodgingKind>(() => lodgingKindOfGoogle(null, trip.lodgingDefault));
+  const [fromGoogle, setFromGoogle] = useState(false);
+  const [kindOpen, setKindOpen] = useState(false);
+  const pick = (p: PickedPlace | null) => {
+    setPicked(p);
+    setKind(lodgingKindOfGoogle(p?.primaryType, trip.lodgingDefault));
+    setFromGoogle(stayKindIsFromGoogle(p?.primaryType));
+    setKindOpen(false);
+  };
+  const friends = kind === "friends";
   const span = target && isScheduled(target)
     ? { start: target.arriveDate, end: target.departDate }
     : { start: trip.startDate, end: trip.endDate };
@@ -126,12 +145,13 @@ export function AddStaySheet({
   const draft: ReservationDraft | null =
     picked && complete
       ? {
-          ...stayDraft(trip.lodgingDefault ?? "hotel"),
+          ...withStayKind(stayDraft(kind), kind),
           name: picked.name,
           checkIn: complete.start,
           checkOut: complete.end,
-          confirmationNumber: conf,
-          cost,
+          // Friends has no paperwork (withStayKind) — the fields hide below.
+          confirmationNumber: friends ? "" : conf,
+          cost: friends ? "" : cost,
         }
       : null;
   // The same rule the POST body is built with disables Save.
@@ -184,7 +204,7 @@ export function AddStaySheet({
 
           {!picked ? (
             <>
-              <StayPlaceField value={null} anchor={anchor} onChange={setPicked} />
+              <StayPlaceField value={null} anchor={anchor} onChange={pick} />
               <button
                 type="button"
                 onClick={() => onSaveIdea(null)}
@@ -196,7 +216,7 @@ export function AddStaySheet({
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <CategoryTile type="lodging" />
+                <CategoryTile type={stayKindType(kind)} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px] font-bold text-rv-ink">{picked.name}</div>
                   <div className="truncate font-mono text-[10px] text-rv-ink-faded">
@@ -205,13 +225,37 @@ export function AddStaySheet({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setPicked(null)}
+                  onClick={() => pick(null)}
                   aria-label="Search again"
                   className="inline-flex cursor-pointer items-center border-none bg-transparent p-0 text-rv-ink-faded"
                 >
                   <Search className="size-3.5" />
                 </button>
               </div>
+              <button
+                type="button"
+                onClick={() => setKindOpen((o) => !o)}
+                aria-expanded={kindOpen}
+                className={`inline-flex cursor-pointer items-center gap-[5px] self-start rounded-rv-pill border px-[9px] py-[3px] font-mono text-[9.5px] ${
+                  fromGoogle
+                    ? "border-rv-green bg-rv-green-soft text-rv-green-ink"
+                    : "border-rv-border-hi bg-transparent text-rv-ink-muted"
+                }`}
+              >
+                {stayKindChipLabel(kind, fromGoogle)}
+              </button>
+              {kindOpen && (
+                <div>
+                  <SegmentedControl
+                    value={kind}
+                    options={KIND_OPTIONS}
+                    onChange={(k) => {
+                      setKind(k);
+                      setFromGoogle(false);
+                    }}
+                  />
+                </div>
+              )}
 
               <FieldLabel>Check-in → check-out</FieldLabel>
               <RangePicker
@@ -250,17 +294,21 @@ export function AddStaySheet({
                 </div>
               )}
 
-              <FieldLabel>Confirmation # · cost</FieldLabel>
-              <div className="flex gap-2">
-                <Input value={conf} onChange={(e) => setConf(e.target.value)} placeholder="optional" className="font-mono text-[12px]" />
-                <Input
-                  value={cost}
-                  onChange={(e) => setCost(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="optional"
-                  className="max-w-[110px] font-mono text-[12px]"
-                />
-              </div>
+              {!friends && (
+                <>
+                  <FieldLabel>Confirmation # · cost</FieldLabel>
+                  <div className="flex gap-2">
+                    <Input value={conf} onChange={(e) => setConf(e.target.value)} placeholder="optional" className="font-mono text-[12px]" />
+                    <Input
+                      value={cost}
+                      onChange={(e) => setCost(e.target.value)}
+                      inputMode="numeric"
+                      placeholder="optional"
+                      className="max-w-[110px] font-mono text-[12px]"
+                    />
+                  </div>
+                </>
+              )}
 
               <button
                 type="button"

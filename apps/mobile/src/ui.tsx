@@ -99,11 +99,14 @@ export function Button({
 }: {
   children: ReactNode;
   onPress: () => void;
-  tone?: "accent" | "ghost";
+  /** `warn` (#143 · Q7 A) — transparent, amber border + text: Delete stay /
+   * Delete flight, the destructive door inside an edit form. */
+  tone?: "accent" | "ghost" | "warn";
   /** Dims and deadens the button — an in-flight submit, or an incomplete field. */
   disabled?: boolean;
 }) {
   const accent = tone === "accent";
+  const warn = tone === "warn";
   return (
     <Pressable
       onPress={onPress}
@@ -112,11 +115,13 @@ export function Button({
       accessibilityState={{ disabled }}
       style={({ pressed }) => [
         styles.button,
-        accent ? { backgroundColor: pressed ? C.accentBright : C.accent } : { borderWidth: 1, borderColor: C.borderHi },
+        accent
+          ? { backgroundColor: pressed ? C.accentBright : C.accent }
+          : { borderWidth: 1, borderColor: warn ? C.warning : C.borderHi },
         disabled && { opacity: 0.5 },
       ]}
     >
-      <Text style={[styles.buttonText, { color: accent ? C.navy : C.ink }]}>{children}</Text>
+      <Text style={[styles.buttonText, { color: accent ? C.navy : warn ? C.warning : C.ink }]}>{children}</Text>
     </Pressable>
   );
 }

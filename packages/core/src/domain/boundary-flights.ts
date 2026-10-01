@@ -154,3 +154,33 @@ export function hopBookingPatch(
   }
   return patch;
 }
+
+/**
+ * #142 · Q4 C — "Save both flights" waits for a home base. A round-trip flight
+ * starts and ends at home, so with no effective home base (`trip.homeBase`
+ * already coalesces the trip's own → the household's) the save would only
+ * come back a 409; the phone flags it before Save instead.
+ */
+export function roundTripSavable(trip: Pick<Trip, "homeBase">, body: BoundaryFlightsBody | null): boolean {
+  return body !== null && trip.homeBase !== null;
+}
+
+/** #142 — the 409 safety net's one sentence (the glued "— those flights" is gone). */
+export const NO_HOME_BASE_COPY = "Set a home base first.";
+
+/**
+ * #142 — is this failure the boundary-flights route's 409 `no_home_base`?
+ * Structural (status + parsed body, as the api-client's `ApiError` carries
+ * them), so the domain never imports the client. Anything else — another 409,
+ * a network error — is an ordinary failed save.
+ */
+export function isNoHomeBaseRefusal(e: unknown): boolean {
+  if (typeof e !== "object" || e === null) return false;
+  const { status, body } = e as { status?: unknown; body?: unknown };
+  return (
+    status === 409 &&
+    typeof body === "object" &&
+    body !== null &&
+    (body as { error?: unknown }).error === "no_home_base"
+  );
+}

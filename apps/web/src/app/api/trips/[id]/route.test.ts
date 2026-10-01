@@ -122,6 +122,52 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
     expect(bundle.routes[key]).toEqual(estimateRoute(astoria, newport));
   });
 
+  /**
+   * #143 · Q8 A — phone Trip settings edits "Where to?". The PATCH upserts the
+   * household's destinations row and repoints `trips.destination_id`; unlike
+   * the create it writes NO stop. `null` clears the pointer.
+   */
+  it("repoints the destination without writing a stop, and null clears it", async () => {
+    const { trip, legCoast, legMountains } = await fx.pacificNorthwestLoop();
+    const stopCount = async () =>
+      (await read.countStops(legCoast.id)) + (await read.countStops(legMountains.id));
+    const before = await stopCount();
+
+    const destination = { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 };
+    const res = await PATCH(req({ destination }, "PATCH"), ctx(trip.id));
+    expect(res.status).toBe(204);
+
+    const rows = await read.destinations(DEV_OWNER);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ googlePlaceId: "ChIJbli", name: "Bellingham, WA" });
+    expect((await read.trip(trip.id))!.destinationId).toBe(rows[0]!.id);
+    expect(await read.countLegs(trip.id)).toBe(2);
+    expect(await stopCount()).toBe(before);
+
+    // The same pick again REUSES the row (owner + place id).
+    await PATCH(req({ destination }, "PATCH"), ctx(trip.id));
+    expect(await read.destinations(DEV_OWNER)).toHaveLength(1);
+
+    const bundle = tripBundleSchema.parse(await (await GET(req(undefined, "GET"), ctx(trip.id))).json());
+    expect(bundle.trip.destination).toMatchObject({ name: "Bellingham, WA", googlePlaceId: "ChIJbli" });
+
+    const cleared = await PATCH(req({ destination: null }, "PATCH"), ctx(trip.id));
+    expect(cleared.status).toBe(204);
+    expect((await read.trip(trip.id))!.destinationId).toBeNull();
+    expect(await stopCount()).toBe(before);
+  });
+
+  it("refuses a destination PATCH on another owner's trip — no row, no repoint", async () => {
+    const theirs = await fx.trip({ owner: OTHER_OWNER });
+    const res = await PATCH(
+      req({ destination: { name: "Bellingham, WA", googlePlaceId: "ChIJbli" } }, "PATCH"),
+      ctx(theirs.id),
+    );
+    expect(res.status).toBe(404);
+    expect((await read.trip(theirs.id))!.destinationId).toBeNull();
+    expect(await read.destinations(DEV_OWNER)).toHaveLength(0);
+  });
+
   it("404s a GET on another owner's trip, which never reaches the schema", async () => {
     const theirs = await fx.trip({ owner: OTHER_OWNER });
     const res = await GET(req(undefined, "GET"), ctx(theirs.id));

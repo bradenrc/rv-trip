@@ -119,6 +119,7 @@ export function savePlaceFormFromSaved(p: SavedPlace): SavePlaceForm {
       // persisted, so a row read back has neither.
       address: null,
       rating: null,
+      primaryType: null,
     },
     type: p.type,
     region: p.region ?? "",

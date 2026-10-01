@@ -219,6 +219,15 @@ describe("createApiClient", () => {
     await expect(createApiClient({ baseUrl: "http://x", fetch: bad.fn }).trips.forNextTime("t1")).rejects.toThrow();
   });
 
+  it("#143 · DELETEs a reservation for Delete stay / Delete flight", async () => {
+    const d = fakeFetch(204);
+    await expect(
+      createApiClient({ baseUrl: "http://x", fetch: d.fn }).reservations.remove("r 1"),
+    ).resolves.toBeUndefined();
+    expect(d.calls[0]!.url).toBe("http://x/api/reservations/r%201");
+    expect(d.calls[0]!.init.method).toBe("DELETE");
+  });
+
   it("URL-encodes ids", async () => {
     const f = fakeFetch(204);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });

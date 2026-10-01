@@ -1,6 +1,8 @@
 import { haversineMeters } from "../providers/index";
+import { LODGING_KIND_LABEL } from "./leaf-form";
 import type {
   IsoDate,
+  LodgingKind,
   ReservationType,
   SavedPlace,
   SavedPlaceCreate,
@@ -292,4 +294,43 @@ export function reservationTypeOfGoogle(primaryType: string | null | undefined):
   if (GOOGLE_LODGING.has(t)) return "lodging";
   if (GOOGLE_ACTIVITY.has(t)) return "activity";
   return "other";
+}
+
+/**
+ * #144 · Q9 B — the kind a NEW stay takes from the picked place's Google
+ * `primaryType`: a campground or RV park is a "campground", any lodging family
+ * (lodging · hotel · motel) is a "hotel" — Google has no "airbnb"/"friends" —
+ * and anything else (an as-typed name, a park via "Show all places") falls
+ * back to the trip's lodging default, else "hotel". Both Add-stay sheets seed
+ * their kind from this; it never rewrites a saved row (Q10 A).
+ */
+export function lodgingKindOfGoogle(
+  primaryType: string | null | undefined,
+  fallback: LodgingKind | null,
+): LodgingKind {
+  switch (reservationTypeOfGoogle(primaryType)) {
+    case "campground":
+      return "campground";
+    case "lodging":
+      return "hotel";
+    default:
+      return fallback ?? "hotel";
+  }
+}
+
+/** Did Google's type decide the kind (rather than the trip default)? */
+export function stayKindIsFromGoogle(primaryType: string | null | undefined): boolean {
+  const t = reservationTypeOfGoogle(primaryType);
+  return t === "campground" || t === "lodging";
+}
+
+/**
+ * The Add-stay step-2 chip: "Hotel · from Google · change" while the kind is
+ * Google's, "<Kind> · change" for an as-typed / non-lodging pick or after a
+ * manual switch.
+ */
+export function stayKindChipLabel(kind: LodgingKind, fromGoogle: boolean): string {
+  return fromGoogle
+    ? `${LODGING_KIND_LABEL[kind]} · from Google · change`
+    : `${LODGING_KIND_LABEL[kind]} · change`;
 }

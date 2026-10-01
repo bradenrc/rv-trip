@@ -8,6 +8,7 @@ import type {
   NextTimeRow,
   Reservation,
   ReservationCreateInput,
+  ReservationPatchInput,
   BoundaryFlightsBody,
   SegmentBookingsChoice,
   TravelMode,
@@ -24,6 +25,10 @@ import type {
 import {
   appendReservation,
   appendShelfIdea,
+  editSegmentBooking,
+  removeReservation,
+  removeSegmentBooking,
+  setReservationFields,
   localIsoDate,
   markRowOnShelf,
   nextTimeIdeaBody,
@@ -361,11 +366,24 @@ export async function createTrip(input: TripCreateInput): Promise<Trip> {
   return trip;
 }
 
-/** Trip defaults' Save — only what changed. The bundle is re-read after, so a
- * rig answer that moved re-routes the drives on the server (`tripRig`). */
+/** Trip settings' Save (#103 · #143) — only what changed. The bundle is
+ * re-read after, so a rig answer that moved re-routes the drives on the server
+ * (`tripRig`), and a new destination or home base comes back resolved (the
+ * destinations row id, the household coalesce). A refusal (a 409 included)
+ * rethrows for the screen after the same re-read has put the trip back. */
 export async function patchTripDefaults(id: string, patch: TripPatchInput): Promise<void> {
   if (Object.keys(patch).length === 0) return;
-  updateTrip(id, (t) => ({ ...t, ...patch }) as Trip);
+  const { destination, ...fields } = patch;
+  updateTrip(
+    id,
+    (t) =>
+      ({
+        ...t,
+        ...fields,
+        // The picked place has no row id until the server upserts it.
+        ...(destination !== undefined && { destination: destination && { ...destination, id: null } }),
+      }) as Trip,
+  );
   try {
     await api.trips.patch(id, patch);
   } finally {
@@ -407,6 +425,68 @@ export async function addHopBooking(
 export async function addStay(tripId: string, body: ReservationCreateInput): Promise<void> {
   const r = await api.reservations.create(body);
   if (r.stopId) updateTrip(tripId, (t) => appendReservation(t, r.stopId!, r));
+}
+
+/** #143 · Q6 B — Edit stay's Save: the same patch the PATCH carries, applied
+ * optimistically (`setReservationFields`). A refusal re-reads the trip (which
+ * puts the row back) and rethrows for the sheet to say so. */
+export async function editStay(
+  tripId: string,
+  stopId: string,
+  resId: string,
+  patch: ReservationPatchInput,
+): Promise<void> {
+  if (Object.keys(patch).length === 0) return;
+  updateTrip(tripId, (t) => setReservationFields(t, stopId, resId, patch));
+  try {
+    await api.reservations.patch(resId, patch);
+  } catch (e) {
+    await loadBundle(tripId);
+    throw e;
+  }
+}
+
+/** #143 · Q7 A — Delete stay, after "Are you sure?". Optimistic; a refusal
+ * re-reads the trip (the row comes back) and rethrows. */
+export async function deleteStay(tripId: string, stopId: string, resId: string): Promise<void> {
+  updateTrip(tripId, (t) => removeReservation(t, stopId, resId));
+  try {
+    await api.reservations.remove(resId);
+  } catch (e) {
+    await loadBundle(tripId);
+    throw e;
+  }
+}
+
+/** #143 · Edit flight / Edit ferry's Save (the web's #124 edit): the hop is
+ * re-timed from the edited booking (`editSegmentBooking`). A refusal re-reads
+ * the trip and rethrows. */
+export async function editHopBooking(tripId: string, resId: string, patch: ReservationPatchInput): Promise<void> {
+  if (Object.keys(patch).length === 0) return;
+  updateTrip(tripId, (t) =>
+    editSegmentBooking(t, resId, {
+      ...(patch.name !== undefined && { name: patch.name }),
+      ...(patch.startsAt !== undefined && { startsAt: patch.startsAt, startsTz: patch.startsTz ?? null }),
+      ...(patch.endsAt !== undefined && { endsAt: patch.endsAt, endsTz: patch.endsTz ?? null }),
+    }),
+  );
+  try {
+    await api.reservations.patch(resId, patch);
+  } catch (e) {
+    await loadBundle(tripId);
+    throw e;
+  }
+}
+
+/** #143 · Q7 A — Delete flight / Delete ferry, after "Are you sure?". */
+export async function deleteHopBooking(tripId: string, resId: string): Promise<void> {
+  updateTrip(tripId, (t) => removeSegmentBooking(t, resId));
+  try {
+    await api.reservations.remove(resId);
+  } catch (e) {
+    await loadBundle(tripId);
+    throw e;
+  }
 }
 
 /** #129 · Q10 A — Add flight with Round trip: both boundary hops' flights in
