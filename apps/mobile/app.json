@@ -34,6 +34,12 @@
       "@rnmapbox/maps",
       "expo-apple-authentication",
       [
+        "@clerk/expo",
+        {
+          "appleSignIn": false
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "TripCaddie uses your location to drop a pin, or to file a note under the town you're in."

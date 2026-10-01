@@ -32,6 +32,7 @@ const CAPE: PickedPlace = {
   googlePlaceId: "ChIJlXc1RkoPlVQR",
   address: "13000 Whiskey Creek Rd W, Tillamook, OR 97141",
   rating: 4.7,
+  primaryType: null,
 };
 
 /** What the picker's free-text escape row emits. */
@@ -42,6 +43,7 @@ const ROGUE: PickedPlace = {
   googlePlaceId: null,
   address: null,
   rating: null,
+  primaryType: null,
 };
 
 describe("placeOf — the picked place as the grammar's Place", () => {
@@ -268,6 +270,7 @@ describe("pickedFromPlace / nearOf — what the mounted picker opens on, and whe
         googlePlaceId: null,
         address: null,
         rating: null,
+        primaryType: null,
       });
     expect(pickedFromPlace(null)).toBeNull();
   });

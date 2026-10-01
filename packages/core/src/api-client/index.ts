@@ -205,6 +205,8 @@ export interface ApiClient {
   reservations: {
     create(input: CreateReservationInput): Promise<Reservation>;
     patch(id: string, patch: ReservationPatch): Promise<void>;
+    /** DELETE /api/reservations/:id → 204 — Edit stay / Edit flight's Delete (#143 · Q7 A). */
+    remove(id: string): Promise<void>;
   };
   ideas: {
     /** POST /api/ideas → 201 Idea (200 on a replayed `clientId`, #113). The
@@ -330,6 +332,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       create: (input) => parsed(reservationRowSchema, request("POST", "/api/reservations", input)),
       patch: (id, patch) =>
         voidResult(request("PATCH", `/api/reservations/${encodeURIComponent(id)}`, patch)),
+      remove: (id) =>
+        voidResult(request("DELETE", `/api/reservations/${encodeURIComponent(id)}`)),
     },
     ideas: {
       create: (input) => parsed(ideaSchema, request("POST", "/api/ideas", input)),

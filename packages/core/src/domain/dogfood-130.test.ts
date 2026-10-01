@@ -409,7 +409,7 @@ describe("#131 · Route rows show planned/done ideas only", () => {
 
 // ── #126 · the create form's "Where to?" ────────────────────────────────────
 describe("#126 · tripDraftInput carries the destination", () => {
-  const picked = { ...BELLINGHAM, address: null, rating: null };
+  const picked = { ...BELLINGHAM, address: null, rating: null, primaryType: null };
   const base = { ...withTripMode(BLANK_TRIP_DRAFT, "air"), startDate: "2026-10-10", endDate: "2026-10-13" };
   it("a Google place becomes the destination, and names an untitled trip", () => {
     expect(tripDraftInput({ ...base, destination: picked })).toMatchObject({

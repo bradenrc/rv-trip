@@ -10,13 +10,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import {
-  isClerkAPIResponseError,
-  useSignIn,
-  useSignInWithApple,
-  useSignUp,
-  useSSO,
-} from "@clerk/clerk-expo";
+import { isClerkAPIResponseError, useClerk, useSignIn, useSSO } from "@clerk/expo";
+import { useSignInWithApple } from "@clerk/expo/apple";
 import * as AppleAuthentication from "expo-apple-authentication";
 import * as AuthSession from "expo-auth-session";
 import * as WebBrowser from "expo-web-browser";
@@ -31,13 +26,20 @@ import { Button, Kicker } from "../src/ui";
  * "or" divider: Continue with Apple (the native iOS button, only where
  * `isAvailableAsync()` says Sign in with Apple exists — never on Android), then
  * Continue with Google (Clerk's `useSSO`, `oauth_google`). Below the divider,
- * unchanged: email → 6-digit code, Clerk's `email_code` strategy, the only
- * first factor that needs no dashboard configuration. Rendered by `app/_layout.tsx` inside `<SignedOut>`, so while there is
- * no session this is the whole app — the navigator is not mounted at all.
+ * unchanged: email → 6-digit code, Clerk's email-code first factor, the only
+ * one that needs no dashboard configuration. Rendered by `app/_layout.tsx`
+ * inside `<Show when="signed-out">`, so while there is no session this is the
+ * whole app — the navigator is not mounted at all.
  *
  * It is also a route file (`/sign-in`), which is why it default-exports a plain
- * screen component and never navigates: `setActive` flips `<SignedOut>` to
- * `<SignedIn>` and the Stack mounts itself.
+ * screen component and never navigates: `signIn.finalize()` flips
+ * `<Show when="signed-out">` to `<Show when="signed-in">` and the Stack mounts
+ * itself.
+ *
+ * #147 (Q1 B): core-3's signal API. `signIn.emailCode.sendCode` / `verifyCode`
+ * and `signIn.finalize` resolve `{ error }` rather than throwing, so each
+ * returned error goes through the same `messageFor` precedence a thrown one
+ * does.
  */
 
 /** Seconds before "Resend" becomes tappable. The wireframe draws this mid-count
@@ -53,12 +55,21 @@ const GENERIC_ERROR = "Something went wrong — check your connection and try ag
 /** Which slot an error renders in: under the provider stack, or inside the form. */
 type ErrorFrom = "provider" | "email";
 
+/** Clerk's own message wins; anything else — a network throw — is GENERIC_ERROR. */
+function messageFor(e: unknown): string {
+  if (isClerkAPIResponseError(e)) {
+    const first = e.errors[0];
+    return first?.longMessage ?? first?.message ?? GENERIC_ERROR;
+  }
+  return GENERIC_ERROR;
+}
+
 // Closes the Google auth tab when the redirect lands back in the app.
 WebBrowser.maybeCompleteAuthSession();
 
 export default function SignInScreen() {
-  const { isLoaded, signIn, setActive } = useSignIn();
-  const { signUp } = useSignUp();
+  const { signIn, fetchStatus } = useSignIn();
+  const clerk = useClerk();
   const { startAppleAuthenticationFlow } = useSignInWithApple();
   const { startSSOFlow } = useSSO();
   const [step, setStep] = useState<"email" | "code">("email");
@@ -66,9 +77,10 @@ export default function SignInScreen() {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [errorFrom, setErrorFrom] = useState<ErrorFrom>("email");
-  const [busy, setBusy] = useState(false);
   /** The provider flow in flight — only Google relabels (Apple's label is iOS's). */
   const [via, setVia] = useState<"apple" | "google" | null>(null);
+  /** One busy flag for all three controls: an email-code request or a provider. */
+  const busy = fetchStatus === "fetching" || via !== null;
   const [appleAvailable, setAppleAvailable] = useState(false);
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
   const codeField = useRef<TextInput>(null);
@@ -95,12 +107,7 @@ export default function SignInScreen() {
 
   function failed(e: unknown, from: ErrorFrom = "email") {
     setErrorFrom(from);
-    if (isClerkAPIResponseError(e)) {
-      const first = e.errors[0];
-      setError(first?.longMessage ?? first?.message ?? GENERIC_ERROR);
-      return;
-    }
-    setError(GENERIC_ERROR);
+    setError(messageFor(e));
   }
 
   /**
@@ -108,26 +115,39 @@ export default function SignInScreen() {
    * when she backs out (no error — backing out isn't a failure) and when the
    * exchange ran but ended without a session; `providerOutcome` tells them apart
    * by whether a sign-in / sign-up was actually started (its id changed).
+   *
+   * The provider hooks run on Clerk's classic resources (`clerk.client`'s
+   * signIn / signUp, mutated in place and handed back on the result), not on
+   * the signal `signIn` the email step uses — so the before-ids are read from
+   * `clerk.client` and compared against the resources the hook returns.
    */
   async function runProvider(
     which: "apple" | "google",
-    start: () => Promise<{ createdSessionId: string | null; browserResultType?: string | null }>,
+    start: () => Promise<{
+      createdSessionId: string | null;
+      browserResultType?: string | null;
+      signIn?: { id?: string | null } | null;
+      signUp?: { id?: string | null } | null;
+    }>,
   ) {
-    if (!isLoaded || busy) return;
-    setBusy(true);
+    if (busy) return;
     setVia(which);
     setError("");
-    const before = { signIn: signIn?.id, signUp: signUp?.id };
+    const before = {
+      signIn: clerk.client?.signIn?.id ?? null,
+      signUp: clerk.client?.signUp?.id ?? null,
+    };
     try {
       const res = await start();
       const outcome = providerOutcome({
         createdSessionId: res.createdSessionId,
-        attempted: signIn?.id !== before.signIn || signUp?.id !== before.signUp,
+        attempted:
+          (res.signIn?.id ?? null) !== before.signIn || (res.signUp?.id ?? null) !== before.signUp,
         browserResultType: res.browserResultType,
       });
       if (outcome === "session") {
-        await setActive({ session: res.createdSessionId });
-        return; // <SignedIn> takes over; this screen unmounts.
+        await clerk.setActive({ session: res.createdSessionId });
+        return; // <Show when="signed-in"> takes over; this screen unmounts.
       }
       if (outcome === "incomplete") {
         setErrorFrom("provider");
@@ -136,7 +156,6 @@ export default function SignInScreen() {
     } catch (e) {
       failed(e, "provider");
     } finally {
-      setBusy(false);
       setVia(null);
     }
   }
@@ -154,42 +173,48 @@ export default function SignInScreen() {
       return {
         createdSessionId: res.createdSessionId,
         browserResultType: res.authSessionResult?.type ?? null,
+        signIn: res.signIn,
+        signUp: res.signUp,
       };
     });
   }
 
   async function sendCode() {
-    if (!isLoaded || !signIn || busy) return;
-    setBusy(true);
+    if (busy) return;
     setError("");
     try {
-      await signIn.create({ strategy: "email_code", identifier: email.trim() });
+      const { error } = await signIn.emailCode.sendCode({ emailAddress: email.trim() });
+      if (error) return failed(error);
       setCode("");
       setSeconds(RESEND_SECONDS);
       setStep("code");
     } catch (e) {
       failed(e);
-    } finally {
-      setBusy(false);
     }
   }
 
   async function verify(entered: string) {
-    if (!isLoaded || !signIn || busy) return;
-    setBusy(true);
+    if (busy) return;
     setError("");
     try {
-      const attempt = await signIn.attemptFirstFactor({ strategy: "email_code", code: entered });
-      if (attempt.status === "complete") {
-        await setActive({ session: attempt.createdSessionId });
-        return; // <SignedIn> takes over; this screen unmounts.
+      const { error } = await signIn.emailCode.verifyCode({ code: entered });
+      if (error) {
+        failed(error);
+        setCode("");
+        return;
       }
+      if (signIn.status === "complete") {
+        // finalize resolves { error } too — a failure here must not leave the
+        // person on step 2 with no message (#147 vet finding 3).
+        const { error: finalizeError } = await signIn.finalize();
+        if (finalizeError) failed(finalizeError);
+        return; // <Show when="signed-in"> takes over; this screen unmounts.
+      }
+      setErrorFrom("email");
       setError(GENERIC_ERROR);
     } catch (e) {
       failed(e);
       setCode("");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -294,6 +319,7 @@ export default function SignInScreen() {
             {error ? <Text style={styles.error}>{error}</Text> : null}
             <Pressable
               onPress={() => {
+                void signIn.reset();
                 setStep("email");
                 setCode("");
                 setError("");

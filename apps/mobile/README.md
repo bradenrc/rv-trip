@@ -48,6 +48,7 @@ to build without it (`rnmapbox-maps.podspec:39-42`). `app.json` already has
 ```bash
 pnpm dev                            # repo root: the web app + API on http://localhost:3000
 pnpm --filter @rv-trip/mobile ios   # expo run:ios — build (first time), install, boot, attach Metro
+pnpm --filter @rv-trip/mobile android # expo run:android — the same loop on the Android emulator
 ```
 
 The first `ios` in a tree is a real Xcode build: **~4–8 minutes**. It runs
@@ -104,8 +105,8 @@ EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_YOUR_KEY   # apps/mobile/.env.local
 ```
 
 **With the key** `app/_layout.tsx` mounts `<ClerkProvider>` and the navigator
-lives inside `<SignedIn>`, so nothing but `app/sign-in.tsx` renders until there
-is a session: email → a 6-digit code → in. The session token is cached in the
+lives inside `<Show when="signed-in">`, so nothing but `app/sign-in.tsx`
+renders until there is a session: email → a 6-digit code → in. The session token is cached in the
 Keychain (`expo-secure-store`), so that is once per device, not once per launch.
 Every API call then carries `Authorization: Bearer <session jwt>`, which is what
 the web app's proxy already verifies.

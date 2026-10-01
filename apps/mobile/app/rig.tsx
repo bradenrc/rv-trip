@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { RigProfile } from "@rv-trip/core";
-import { formatFeetInches, formatPounds } from "@rv-trip/core";
-import { useClerk, useUser } from "@clerk/clerk-expo";
+import type { RigProfile, UserPrefs } from "@rv-trip/core";
+import { formatFeetInches, formatPounds, homeBaseRowValue, householdHomeBasePatch } from "@rv-trip/core";
+import { useClerk, useUser } from "@clerk/expo";
 import { api } from "../src/api";
 import { clerkEnabled } from "../src/auth";
+import { Label, failed } from "../src/hops";
+import { PlaceSearchField, type Picked } from "../src/itinerary";
 import { C, F, R } from "../src/theme";
 import { Card, Centered, Kicker, Muted } from "../src/ui";
 
-/** Read-only in v1 — the rig is set up once, on the web. */
+/** Read-only in v1 — the rig is set up once, on the web. The household home
+ * base (#142 · Q5 A) is the one thing set here. */
 export default function RigScreen() {
   const [rig, setRig] = useState<RigProfile | null | undefined>(undefined);
   const [error, setError] = useState("");
@@ -24,11 +27,16 @@ export default function RigScreen() {
     return <Centered>{error ? <Muted>{error}</Muted> : <ActivityIndicator color={C.green} />}</Centered>;
   }
   if (rig === null) {
+    // #142 — a fly-only household still reaches the Home base row.
     return (
-      <Centered>
-        <Text style={{ color: C.ink, fontWeight: "700", fontSize: 17 }}>No rig yet</Text>
-        <Muted>Set up your rig on the web app. Until then every drive is a straight-line estimate.</Muted>
-      </Centered>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <AccountCard />
+        <HomeBaseRow />
+        <View style={{ marginTop: 28, alignItems: "center", gap: 6 }}>
+          <Text style={{ color: C.ink, fontWeight: "700", fontSize: 17 }}>No rig yet</Text>
+          <Muted>Set up your rig on the web app. Until then every drive is a straight-line estimate.</Muted>
+        </View>
+      </ScrollView>
     );
   }
 
@@ -42,8 +50,9 @@ export default function RigScreen() {
   ];
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <AccountCard />
+      <HomeBaseRow />
       <Kicker color={C.accent}>Routing input</Kicker>
       <Text style={styles.h1}>{rig.name}</Text>
       <Text style={{ color: C.inkMuted, fontSize: 14, lineHeight: 20 }}>
@@ -60,6 +69,60 @@ export default function RigScreen() {
       </Card>
       <Muted>Edit the rig on the web — this screen is read-only in v1.</Muted>
     </ScrollView>
+  );
+}
+
+/**
+ * #142 · Q5 A — "🏠 Home base": the HOUSEHOLD home base, one row card straight
+ * under AccountCard. Tapping it opens the shared place search (no anchor); a
+ * pick writes `PUT /api/prefs { homeBasePlace }`. A trip can still override it
+ * in its own settings.
+ */
+function HomeBaseRow() {
+  const [prefs, setPrefs] = useState<UserPrefs | null | undefined>(undefined);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    api.prefs
+      .get()
+      .then((p) => live && setPrefs(p))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const pick = async (p: Picked) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      setPrefs(await api.prefs.put(householdHomeBasePatch(p)));
+      setOpen(false);
+    } catch {
+      failed("That home base");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <Card style={{ gap: 0, padding: 0 }}>
+        <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" style={styles.row}>
+          <Text style={styles.k}>🏠 Home base</Text>
+          <Text style={styles.v}>{prefs === undefined ? "" : homeBaseRowValue(prefs)}</Text>
+        </Pressable>
+      </Card>
+      {open && (
+        <View style={{ gap: 6 }}>
+          <Label>Home base</Label>
+          <PlaceSearchField anchor={null} onPick={(p) => void pick(p)} />
+        </View>
+      )}
+      <Text style={styles.note}>Where your trips start and end. A trip can override it in Edit ▸ Starts from.</Text>
+    </>
   );
 }
 
@@ -156,6 +219,7 @@ const styles = StyleSheet.create({
   },
   stubName: { color: C.inkMuted, fontSize: 12, fontWeight: "700" },
   stubNote: { fontFamily: F.mono, fontSize: 10, color: C.inkFaded, lineHeight: 15 },
+  note: { fontFamily: F.mono, fontSize: 10.5, color: C.inkFaded, lineHeight: 15, marginTop: -3 },
   ghost: {
     borderWidth: 1,
     borderColor: C.borderHi,

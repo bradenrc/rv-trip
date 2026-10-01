@@ -5,7 +5,10 @@ import {
   isAlreadySaved,
   matchCandidateFromSaved,
   normalizePlaceName,
+  lodgingKindOfGoogle,
   reservationTypeOfGoogle,
+  stayKindChipLabel,
+  stayKindIsFromGoogle,
   suggestionToCreate,
   suggestionsFromTrips,
   type MatchCandidate,
@@ -436,5 +439,54 @@ describe("reservationTypeOfGoogle", () => {
     expect(reservationTypeOfGoogle(null)).toBe("other");
     expect(reservationTypeOfGoogle(undefined)).toBe("other");
     expect(reservationTypeOfGoogle("")).toBe("other");
+  });
+});
+
+describe("lodgingKindOfGoogle (#144 · Q9 B)", () => {
+  it("files every lodging family as a hotel, whatever the trip's default", () => {
+    expect(lodgingKindOfGoogle("hotel", "campground")).toBe("hotel");
+    expect(lodgingKindOfGoogle("lodging", "campground")).toBe("hotel");
+    expect(lodgingKindOfGoogle("motel", "campground")).toBe("hotel");
+    expect(lodgingKindOfGoogle("lodging", "hotel")).toBe("hotel");
+  });
+
+  it("files campgrounds and RV parks as a campground, even on a hotel-default trip", () => {
+    expect(lodgingKindOfGoogle("campground", "hotel")).toBe("campground");
+    expect(lodgingKindOfGoogle("rv_park", "hotel")).toBe("campground");
+    expect(lodgingKindOfGoogle("campground", "campground")).toBe("campground");
+  });
+
+  it("falls back to the trip's default for a non-lodging pick", () => {
+    expect(lodgingKindOfGoogle("park", "campground")).toBe("campground");
+    expect(lodgingKindOfGoogle("park", "airbnb")).toBe("airbnb");
+  });
+
+  it("falls back to the trip's default for an as-typed pick (no type)", () => {
+    expect(lodgingKindOfGoogle(null, "campground")).toBe("campground");
+    expect(lodgingKindOfGoogle(undefined, "friends")).toBe("friends");
+  });
+
+  it("is a hotel when there's no type and no default", () => {
+    expect(lodgingKindOfGoogle(null, null)).toBe("hotel");
+    expect(lodgingKindOfGoogle("park", null)).toBe("hotel");
+  });
+});
+
+describe("the Add-stay kind chip (#144 · Q9 B)", () => {
+  it("says the kind came from Google only for a lodging or campground type", () => {
+    expect(stayKindIsFromGoogle("hotel")).toBe(true);
+    expect(stayKindIsFromGoogle("lodging")).toBe(true);
+    expect(stayKindIsFromGoogle("campground")).toBe(true);
+    expect(stayKindIsFromGoogle("rv_park")).toBe(true);
+    expect(stayKindIsFromGoogle("park")).toBe(false);
+    expect(stayKindIsFromGoogle(null)).toBe(false);
+    expect(stayKindIsFromGoogle(undefined)).toBe(false);
+  });
+
+  it("reads the wireframe's two lines", () => {
+    expect(stayKindChipLabel("hotel", true)).toBe("Hotel · from Google · change");
+    expect(stayKindChipLabel("campground", true)).toBe("Campground · from Google · change");
+    expect(stayKindChipLabel("campground", false)).toBe("Campground · change");
+    expect(stayKindChipLabel("friends", false)).toBe("Friends · change");
   });
 });

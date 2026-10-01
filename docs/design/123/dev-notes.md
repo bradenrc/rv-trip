@@ -2,6 +2,49 @@
 
 Implements the vetted wireframe (`docs/design/123/index.html` on `mc/wireframe/issue-123-v0`), resolved q1–q6 = A.
 
+## Rework round 2: re-land on `origin/main` @ `16004e6` after #147 (Clerk core-3)
+
+The ship was blocked `[merge-conflict]`. I ran `git merge --no-commit --no-ff origin/main` in this tree and it reproduced the conflict exactly: three `UU` files, `sign-in.tsx`, `mobile-auth.test.ts` and `pnpm-lock.yaml`. The merge is resolved and staged, with `MERGE_HEAD` left for the engine's commit. No feature or design change was made. The real drift is semantic: #147 moved the app from `@clerk/clerk-expo` 2.x to `@clerk/expo` 4.7.2, which uses the core-3 signal API, `<Show>`, and `signIn.emailCode` / `finalize()`. This round ports #123's provider wiring onto that SDK.
+
+### What changed
+
+- **`apps/mobile/app/sign-in.tsx`**
+  - `:13-14` Imports: `useClerk, useSignIn, useSSO` come from `"@clerk/expo"`. `useSignInWithApple` now comes from the **`"@clerk/expo/apple"`** subpath, because 4.x no longer exports it from the root. That is not the `/legacy` shim #147's test forbids.
+  - `:58-65` main's `messageFor()` is kept. `:108` `failed(e, from)` is now `setErrorFrom(from); setError(messageFor(e))`. The email path's `setError(messageFor(x))` calls all became `failed(x)`, so an email error still lands in the email slot after an earlier provider error.
+  - `:83` `busy = fetchStatus === "fetching" || via !== null`. main derives the email busy state from `fetchStatus`, and `via`, the provider in flight, replaces my old `setBusy`. All three controls still share one flag.
+  - `:124-161` `runProvider`. In 4.x, `useSignInWithApple` and the root `useSSO` still run on Clerk's **classic** resources (`@clerk/react/legacy` `useSignIn` / `useSignUp`, mutated in place). The signal `signIn` the email step holds is a different object. So:
+    - The before-ids are read from `clerk.client?.signIn/signUp?.id` (`:136`).
+    - `attempted` compares those ids with the ids on the resources the hook returns, `res.signIn` / `res.signUp` (`:144`). I verified both hooks return them in the installed dist (`dist/hooks/useSignInWithApple.ios.js`, `dist/hooks/useSSO.js`).
+    - The session is activated with `clerk.setActive(...)` (`:149`), because the core-3 `useSignIn` has no `setActive`.
+    - The `isLoaded` guard is gone. Both hooks return `createdSessionId: null` with no resource change when Clerk isn't loaded, which classifies as `cancelled`, so nothing happens.
+  - The JSX and styles are unchanged from round 1. main's `void signIn.reset()` on "Use a different email" is kept.
+- **`packages/core/src/mobile-auth.test.ts:206-213`**: conflict resolved to main's signal-API assertions (`emailCode.sendCode` / `verifyCode` / `finalize`). The `useSSO` ban stays relaxed, because #123 deliberately adds `useSSO`. The `useOAuth` ban is kept. #147's "one SDK, no shim" suite passes as-is.
+- **`packages/core/src/mobile-sso.test.ts`**
+  - The email-step check moved from `strategy: "email_code"` to `signIn.emailCode.sendCode`.
+  - The Apple and Google import assertions now pin the 4.x entries.
+  - **Two new cases answer qa round 1's CN**, the untested screen-side wiring:
+    - `attempted` must be derived from `clerk.client` and `res.signIn` / `res.signUp`, and must never be a constant.
+    - The `incomplete` branch must set the provider slot plus `GENERIC_ERROR`, and the `session` branch must call `clerk.setActive`.
+  - I mutation-checked both. Forcing `attempted: false` REDs 1/19. Deleting the `incomplete` block REDs 1/19. Restoring the file greens it.
+- **`pnpm-lock.yaml`**: took main's lockfile, then ran `pnpm install`. The only delta is `expo-apple-authentication 57.0.2` + `expo-crypto 57.0.3` in the mobile importer, plus `@clerk/expo`'s optional peer hash changing because `expo-apple-authentication` is now present.
+- `apps/mobile/app.json` and `package.json` auto-merged cleanly. `usesAppleSignIn` and the `expo-apple-authentication` plugin now sit beside #147's `["@clerk/expo", { "appleSignIn": false }]`.
+
+### Flag for the walk / qa
+
+- **`@clerk/expo` plugin `appleSignIn: false` (#147) is left as-is.** That flag only stops Clerk's plugin from adding the `com.apple.developer.applesignin` entitlement. `ios.usesAppleSignIn: true` and the `expo-apple-authentication` plugin add the same entitlement, so the prebuild still gets it. I did not flip it, to keep #147's file untouched. Confirm on the dev-client rebuild that the entitlement is present.
+- Everything in round 1's walk flags still stands: the Clerk dashboard Apple / native-app registration, the redirect allow-list, and the dev-client rebuild. Note that the rebuild now also carries #147's iOS 17.0 floor.
+- The `attempted` heuristic now depends on Clerk's classic resources keeping a stable `id` until `create`. That is true in the installed 4.7.2 dist, but only the walk proves it end to end. Cancel on both providers must show no error.
+
+### Gate (ran this round)
+
+- `pnpm install --frozen-lockfile` → `Done in 748ms`.
+- `apps/mobile` `pnpm typecheck` (`tsc --noEmit`) → exit 0, no output.
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. That covers core at `Tests 1351 passed (1351)` across 65 files, web at `Tests 395 passed (395)`, and ui at `48 passed`.
+
+---
+
+## Round 1 notes (still accurate except where round 2 above supersedes them; line numbers are round-1's)
+
 ## What changed
 
 - `apps/mobile/app/sign-in.tsx`

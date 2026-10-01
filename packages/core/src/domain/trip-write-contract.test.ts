@@ -100,4 +100,14 @@ describe("tripPatchInput", () => {
     expect(tripPatchInput.safeParse({ rating: 9 }).success).toBe(false);
     expect(tripPatchInput.safeParse({ status: "traveling" }).success).toBe(false);
   });
+
+  /** #143 · Q8 A — phone Trip settings edits the destination. Without the key
+   * `.pick()` would drop it and the PATCH would silently change nothing. */
+  it("carries a destination, and null clears it", () => {
+    const destination = { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 };
+    expect(tripPatchInput.parse({ destination })).toEqual({ destination });
+    expect(tripPatchInput.parse({ destination: null })).toEqual({ destination: null });
+    expect(tripPatchInput.parse({})).not.toHaveProperty("destination");
+    expect(tripPatchInput.safeParse({ destination: { name: "", googlePlaceId: "x" } }).success).toBe(false);
+  });
 });

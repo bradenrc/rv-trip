@@ -67,7 +67,8 @@ describe("#123 · sign-in.tsx · q1·A stacked layout", () => {
     expect(emailStep).toContain("<Kicker>Email</Kicker>");
     expect(emailStep).toContain('placeholder="you@example.com"');
     expect(emailStep).toContain("We'll email you a 6-digit code.");
-    expect(signIn).toMatch(/strategy: "email_code"/);
+    // #147: the email path is core-3's signal API.
+    expect(signIn).toMatch(/signIn\.emailCode\.sendCode/);
   });
 
   it("adds no provider UI to the code step", () => {
@@ -78,7 +79,8 @@ describe("#123 · sign-in.tsx · q1·A stacked layout", () => {
 
 describe("#123 · sign-in.tsx · Apple (q2·A, q5·A)", () => {
   it("uses Clerk's built-in useSignInWithApple hook — no hand-rolled exchange", () => {
-    expect(signIn).toMatch(/useSignInWithApple/);
+    // @clerk/expo 4.x (#147) moved the hook to its own subpath entry.
+    expect(signIn).toMatch(/import \{ useSignInWithApple \} from "@clerk\/expo\/apple";/);
     expect(signIn).toMatch(/startAppleAuthenticationFlow\(/);
     expect(signIn).not.toMatch(/oauth_token_apple/);
   });
@@ -103,7 +105,7 @@ describe("#123 · sign-in.tsx · Apple (q2·A, q5·A)", () => {
 
 describe("#123 · sign-in.tsx · Google", () => {
   it("runs useSSO with oauth_google and the tripcaddie redirect", () => {
-    expect(signIn).toMatch(/useSSO/);
+    expect(signIn).toMatch(/import \{[^}]*\buseSSO\b[^}]*\} from "@clerk\/expo";/);
     expect(signIn).toMatch(/strategy: "oauth_google"/);
     expect(signIn).toMatch(/AuthSession\.makeRedirectUri\(\{ scheme: "tripcaddie" \}\)/);
     expect(signIn).toMatch(/WebBrowser\.maybeCompleteAuthSession\(\);/);
@@ -127,6 +129,28 @@ describe("#123 · sign-in.tsx · outcomes + errors", () => {
   it("routes both providers through core's providerOutcome", () => {
     expect(signIn).toMatch(/providerOutcome\(/);
     expect(signIn).toMatch(/from "@rv-trip\/core"/);
+  });
+
+  /**
+   * The provider hooks run on Clerk's classic resources, not the email step's
+   * signal `signIn` (#147), so "attempted" compares `clerk.client`'s ids taken
+   * before the flow against the resources the hook hands back (qa CN, round 1).
+   */
+  it("derives `attempted` from the hook's returned resources, not a constant", () => {
+    expect(signIn).toMatch(/signIn: clerk\.client\?\.signIn\?\.id \?\? null/);
+    expect(signIn).toMatch(/signUp: clerk\.client\?\.signUp\?\.id \?\? null/);
+    expect(signIn).toMatch(/\(res\.signIn\?\.id \?\? null\) !== before\.signIn/);
+    expect(signIn).toMatch(/\(res\.signUp\?\.id \?\? null\) !== before\.signUp/);
+    expect(signIn).not.toMatch(/attempted: (true|false)/);
+  });
+
+  it("shows GENERIC_ERROR in the provider slot on an incomplete outcome, and activates a session", () => {
+    expect(signIn).toMatch(
+      /if \(outcome === "incomplete"\) \{\s*setErrorFrom\("provider"\);\s*setError\(GENERIC_ERROR\);\s*\}/,
+    );
+    expect(signIn).toMatch(
+      /if \(outcome === "session"\) \{\s*await clerk\.setActive\(\{ session: res\.createdSessionId \}\);/,
+    );
   });
 
   it("shares one busy flag and one failed() across all three controls", () => {

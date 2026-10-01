@@ -133,6 +133,7 @@ describe("state 3 · results, the healthy path", () => {
       googlePlaceId: "ChIJvT2R2rSjkFQRRJgVJZ2Xk1Q",
       address: "156954 US-101, Forks, WA 98331",
       rating: 4.4,
+      primaryType: null,
     });
   });
 
@@ -152,6 +153,7 @@ describe("state 3 · results, the healthy path", () => {
       googlePlaceId: "ChIJvT2R2rSjkFQRRJgVJZ2Xk1Q",
       address: null,
       rating: null,
+      primaryType: null,
     });
   });
 
@@ -268,6 +270,7 @@ describe("the escape row — pinned to the bottom of EVERY list state", () => {
         googlePlaceId: null,
         address: null,
         rating: null,
+        primaryType: null,
       });
     }
   });
@@ -290,6 +293,7 @@ describe("the escape row — pinned to the bottom of EVERY list state", () => {
       googlePlaceId: null,
       address: null,
       rating: null,
+      primaryType: null,
     });
   });
 
@@ -301,7 +305,13 @@ describe("the escape row — pinned to the bottom of EVERY list state", () => {
       googlePlaceId: "ChIJC9xY0LWjkFQRk1cW6r0KJ7A",
       address: "157151 US-101, Forks, WA 98331",
       rating: 4.1,
+      primaryType: null,
     });
+  });
+
+  it("pickedFromSummary carries Google's primaryType (#144 · Q9 B)", () => {
+    expect(pickedFromSummary({ ...LODGE, primaryType: "lodging" }).primaryType).toBe("lodging");
+    expect(pickedFromSummary({ ...LODGE, primaryType: "rv_park" }).primaryType).toBe("rv_park");
   });
 });
 

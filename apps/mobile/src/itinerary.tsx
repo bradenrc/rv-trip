@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type {
   DateRangeValue,
   IdeaCategory,
+  LodgingKind,
   Place,
   ReservationDraft,
   ReservationType,
@@ -11,8 +12,11 @@ import type {
   Trip,
 } from "@rv-trip/core";
 import {
+  LODGING_KIND_LABEL,
   PICKER_DEBOUNCE_MS,
+  STAY_KINDS,
   isScheduled,
+  lodgingKindOfGoogle,
   nightsLabel,
   orderedStops,
   rangeNights,
@@ -20,15 +24,19 @@ import {
   searchAnchor,
   searchAnchorChip,
   stayDraft,
+  stayKindChipLabel,
+  stayKindIsFromGoogle,
+  stayKindType,
   stepNights,
+  withStayKind,
 } from "@rv-trip/core";
 import type { PlacesSearchEnvelope } from "@rv-trip/core/api-client";
 import { api } from "./api";
-import { Input, Label, Sheet } from "./hops";
+import { Input, Label, Sheet, failed } from "./hops";
 import { addStay, addStop, planIdeaToStop, planPinnedIdea, planStayIdea, updateTrip } from "./store";
 import { appendShelfIdea } from "@rv-trip/core";
 import { C, F, R } from "./theme";
-import { Button, CategoryTile, Chip, RangePicker } from "./ui";
+import { Button, CategoryTile, Chip, RangePicker, Segmented } from "./ui";
 
 /**
  * The phone's Itinerary · Ideas pieces (#131 · #128 · #126 — docs/design/130
@@ -40,7 +48,15 @@ import { Button, CategoryTile, Chip, RangePicker } from "./ui";
 
 const TILE: Record<IdeaCategory, ReservationType> = { do: "activity", eat: "dining", stay: "lodging" };
 
-type Picked = { name: string; lat: number | null; lng: number | null; googlePlaceId: string | null; address: string | null };
+export type Picked = {
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+  address: string | null;
+  /** Google's `primaryType` — #144 seeds a new stay's kind from it. */
+  primaryType: string | null;
+};
 
 /** The anchored search: a box, the "near …" chip, the rows, and — with
  * `lodging` — "Show all places, not just lodging". */
@@ -90,6 +106,7 @@ export function PlaceSearchField({
                   lng: r.location?.lng ?? null,
                   googlePlaceId: r.googlePlaceId,
                   address: r.address,
+                  primaryType: r.primaryType ?? null,
                 })
               }
               accessibilityRole="button"
@@ -110,7 +127,7 @@ export function PlaceSearchField({
           ))}
           {/* The escape row: a name with no place behind it is still legal. */}
           <Pressable
-            onPress={() => onPick({ name: q.trim(), lat: null, lng: null, googlePlaceId: null, address: null })}
+            onPress={() => onPick({ name: q.trim(), lat: null, lng: null, googlePlaceId: null, address: null, primaryType: null })}
             accessibilityRole="button"
             style={[styles.row, rows.length > 0 && styles.rule]}
           >
@@ -128,6 +145,8 @@ export function PlaceSearchField({
     </View>
   );
 }
+
+const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABEL[k] }));
 
 const placeOf = (p: Picked): Place => ({ name: p.name, lat: p.lat, lng: p.lng, googlePlaceId: p.googlePlaceId });
 
@@ -192,7 +211,7 @@ export function AddStopSheet({ trip, onClose }: { trip: Trip; onClose: () => voi
         anchor={anchor}
         onPick={(p) => {
           onClose();
-          void addStop(trip.id, placeOf(p)).catch(() => undefined);
+          void addStop(trip.id, placeOf(p)).catch(() => failed("That stop"));
         }}
       />
     </Sheet>
@@ -213,7 +232,7 @@ export function AddIdeaSheet({ trip, kind, onClose }: { trip: Trip; kind: IdeaCa
           void api.ideas
             .create({ tripId: trip.id, stopId: null, category: kind, title: p.name, status: "idea", place: placeOf(p) })
             .then((idea) => updateTrip(trip.id, (t) => appendShelfIdea(t, idea)))
-            .catch(() => undefined);
+            .catch(() => failed("That idea"));
         }}
       />
     </Sheet>
@@ -243,6 +262,18 @@ export function AddStaySheetPhone({
     null;
   const anchor = target ? searchAnchor(trip, { kind: "stop", stopId: target.id }) : searchAnchor(trip, { kind: "trip" });
   const [picked, setPicked] = useState<Picked | null>(null);
+  // #144 · Q9 B — the kind is Google's when its type says lodging/campground,
+  // else the trip's default; the chip says which, and opens the switch.
+  const [kind, setKind] = useState<LodgingKind>(() => lodgingKindOfGoogle(null, trip.lodgingDefault));
+  const [fromGoogle, setFromGoogle] = useState(false);
+  const [kindOpen, setKindOpen] = useState(false);
+  const pick = (p: Picked) => {
+    setPicked(p);
+    setKind(lodgingKindOfGoogle(p.primaryType, trip.lodgingDefault));
+    setFromGoogle(stayKindIsFromGoogle(p.primaryType));
+    setKindOpen(false);
+  };
+  const friends = kind === "friends";
   const span =
     target && isScheduled(target)
       ? { start: target.arriveDate, end: target.departDate }
@@ -254,11 +285,12 @@ export function AddStaySheetPhone({
   const draft: ReservationDraft | null =
     picked && complete
       ? {
-          ...stayDraft(trip.lodgingDefault ?? "hotel"),
+          ...withStayKind(stayDraft(kind), kind),
           name: picked.name,
           checkIn: complete.start,
           checkOut: complete.end,
-          confirmationNumber: conf,
+          // Friends has no paperwork (withStayKind) — the field hides below.
+          confirmationNumber: friends ? "" : conf,
         }
       : null;
   const body = draft ? reservationDraftInput(target?.id ?? "pending", draft) : null;
@@ -274,6 +306,7 @@ export function AddStaySheetPhone({
       onClose();
     } catch {
       setSaving(false);
+      failed("That stay");
     }
   };
 
@@ -285,7 +318,7 @@ export function AddStaySheetPhone({
       </View>
       {!picked ? (
         <>
-          <PlaceSearchField anchor={anchor} lodging onPick={setPicked} />
+          <PlaceSearchField anchor={anchor} lodging onPick={pick} />
           <Pressable onPress={onIdeaInstead} accessibilityRole="button">
             <Text style={[styles.rs, { textAlign: "center", textDecorationLine: "underline" }]}>
               Just considering? Save it as an idea instead
@@ -295,12 +328,27 @@ export function AddStaySheetPhone({
       ) : (
         <>
           <View style={styles.row}>
-            <CategoryTile type="lodging" size={24} />
+            <CategoryTile type={stayKindType(kind)} size={24} />
             <View style={{ flex: 1 }}>
               <Text style={styles.rn}>{picked.name}</Text>
               <Text style={styles.rs}>{picked.address ?? target?.place.name ?? ""}</Text>
             </View>
           </View>
+          <View style={{ alignSelf: "flex-start" }}>
+            <Chip on={fromGoogle} onPress={() => setKindOpen((o) => !o)}>
+              {stayKindChipLabel(kind, fromGoogle)}
+            </Chip>
+          </View>
+          {kindOpen && (
+            <Segmented
+              value={kind}
+              options={KIND_OPTIONS}
+              onChange={(k) => {
+                setKind(k);
+                setFromGoogle(false);
+              }}
+            />
+          )}
           <Label>Check-in → check-out</Label>
           <RangePicker value={range} tripSpan={{ start: trip.startDate, end: trip.endDate }} onChange={setRange} />
           {complete && (
@@ -316,8 +364,12 @@ export function AddStaySheetPhone({
               </View>
             </View>
           )}
-          <Label>Confirmation # · cost</Label>
-          <Input mono value={conf} onChangeText={setConf} placeholder="optional" />
+          {!friends && (
+            <>
+              <Label>Confirmation # · cost</Label>
+              <Input mono value={conf} onChangeText={setConf} placeholder="optional" />
+            </>
+          )}
           <Button onPress={() => void save()} disabled={!body || saving}>
             Save stay
           </Button>
@@ -364,7 +416,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
             Pinned to {stop.place.name} · {ideas.length}
           </Label>
           {ideas.map((i) => (
-            <View key={i.id}>{row(i.title, i.category, () => void planPinnedIdea(trip.id, stop.id, i.id).catch(() => undefined))}</View>
+            <View key={i.id}>{row(i.title, i.category, () => void planPinnedIdea(trip.id, stop.id, i.id).catch(() => failed("Plan it")))}</View>
           ))}
         </View>
       ))}
@@ -384,7 +436,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
               onPress={() => {
                 const id = pickFor;
                 setPickFor(null);
-                void planIdeaToStop(trip.id, id, s.id).catch(() => undefined);
+                void planIdeaToStop(trip.id, id, s.id).catch(() => failed("Plan it"));
               }}
               accessibilityRole="button"
               style={styles.mi}
@@ -404,7 +456,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
               const id = stayFor;
               setStayFor(null);
               if (range.start && range.end) {
-                void planStayIdea(trip.id, id, { start: range.start, end: range.end }).catch(() => undefined);
+                void planStayIdea(trip.id, id, { start: range.start, end: range.end }).catch(() => failed("Plan it"));
               }
             }}
           >
