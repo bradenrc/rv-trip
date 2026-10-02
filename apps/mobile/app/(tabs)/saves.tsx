@@ -14,7 +14,7 @@ import { Button, CategoryTile, Centered, Kicker, Muted, Stars, Toast } from "../
  * The Saves tab (#111 i2 · docs/design/111 "The Saves tab", Q4 B · Q5 A).
  *
  * Want to go / Been there, then the shelf as core's `savesShelves` groups it:
- * region headers by save count, destinations alphabetically under each, saves
+ * region headers by save count, areas alphabetically under each, saves
  * newest first, and the Unanchored group last. A save with a pending place
  * suggestion (Q3 A) gets the rv-info strip — tap it to upgrade, or Dismiss.
  *
@@ -122,10 +122,10 @@ function Shelf({ saves, status }: { saves: SavedPlace[]; status: SavedPlaceStatu
       {regions.map((r) => (
         <Fragment key={r.region ?? "—"}>
           {r.region !== null && <Text style={styles.grp}>{r.region}</Text>}
-          {r.destinations.map((d) => (
-            <Fragment key={d.destination.id}>
+          {r.areas.map((d) => (
+            <Fragment key={d.area.id}>
               <View style={styles.dest}>
-                <Text style={styles.destName}>{d.destination.name}</Text>
+                <Text style={styles.destName}>{d.area.name}</Text>
                 <Text style={styles.destCount}>{d.saves.length}</Text>
               </View>
               <Rows saves={d.saves} />

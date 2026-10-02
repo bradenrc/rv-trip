@@ -5,8 +5,8 @@ import { getOwner } from "@/lib/owner";
 
 /**
  * Add flight with Round trip on (#129 · Q10 A · vet HIGH) — BOTH boundary
- * hops' bookings in ONE transactional save: `outbound` on home → first stop,
- * `return` on last stop → home (created when the trip has none, since
+ * hops' bookings in ONE transactional save: `outbound` on home → first destination,
+ * `return` on last destination → home (created when the trip has none, since
  * `reconcileSegments` never invents one). Round trip off books the outbound
  * alone. Both hops go Fly and are re-timed from their bookings.
  *
@@ -14,7 +14,7 @@ import { getOwner } from "@/lib/owner";
  * grown a row); 400 on a body the schema refuses; 404 when the trip is not the
  * caller's; 409 `no_home_base` when there is no home → first hop to book (no
  * home base on the trip or the household); 409 `segment_date_mismatch` when a
- * flight's date disagrees with the stop it touches (stop dates win, Q3 A) —
+ * flight's date disagrees with the destination it touches (destination dates win, Q3 A) —
  * nothing is written.
  */
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {

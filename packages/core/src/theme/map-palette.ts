@@ -74,16 +74,16 @@ export interface OverlayPalette {
   category: Record<RvCategory, string>;
   /** The teardrop's inner dot on a "want" place. */
   dropDot: string;
-  /** Stop-disc stroke — planning and been alike. */
+  /** Destination-disc stroke — planning and been alike. */
   discStroke: string;
-  /** Stop-disc fill, planning only. */
+  /** Destination-disc fill, planning only. */
   discFill: string;
-  /** Stop-disc numeral, planning only. */
+  /** Destination-disc numeral, planning only. */
   discInk: string;
   /** The hollow ground behind a been disc, a floating disc, and a been
-   * teardrop's body (MapView.tsx StopDisc + PlaceDrop both). */
+   * teardrop's body (MapView.tsx DestinationDisc + PlaceDrop both). */
   hollowGround: string;
-  /** A floating stop's dashed stroke — and its ◇, which takes the same value. */
+  /** A floating destination's dashed stroke — and its ◇, which takes the same value. */
   floatingStroke: string;
   selFill: string;
   selStroke: string;

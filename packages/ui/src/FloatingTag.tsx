@@ -1,5 +1,5 @@
 /**
- * The amber "Floating" pill that marks a dateless stop — one that lives in the
+ * The amber "Floating" pill that marks a dateless destination — one that lives in the
  * route sequence but isn't yet placed on the calendar.
  */
 export function FloatingTag() {

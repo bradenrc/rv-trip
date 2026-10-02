@@ -29,7 +29,7 @@ describe("buildComputeRoutesBody", () => {
     expect(body).not.toHaveProperty("intermediates");
   });
 
-  it("marks every intermediate `via: true` — a pass-through, never a stop", () => {
+  it("marks every intermediate `via: true` — a pass-through, never a destination", () => {
     const body = buildComputeRoutesBody(ASTORIA, NEWPORT, [
       { lat: 46.0142, lng: -123.9231 },
       { lat: 45.7208, lng: -123.9377 },

@@ -136,8 +136,8 @@ export function TripCard({
         )}
         <div className="mt-auto flex flex-wrap items-center gap-4 pt-1.5">
           <Chip Icon={CalendarDays}>{trip.days} days</Chip>
-          <Chip Icon={MapPin}>{trip.stops} stops</Chip>
-          <Chip Icon={Flag}>{trip.legs} legs</Chip>
+          <Chip Icon={MapPin}>{trip.destinations} destinations</Chip>
+          <Chip Icon={Flag}>{trip.chapters} chapters</Chip>
           {/* The miles number is the route rail's own — so when a drive fell
               back to a straight line, the card says so beside it rather than
               presenting a chord as a road distance. */}

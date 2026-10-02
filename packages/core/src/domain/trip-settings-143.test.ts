@@ -3,7 +3,7 @@ import { phoneTripSettingsDraft, phoneTripSettingsPatch } from "./trip-form";
 import { tripPatchInput, type Trip } from "./types";
 
 /**
- * #143 · Q8 A — the phone's "Trip settings": Destination · Dates · Starts from
+ * #143 · Q8 A — the phone's "Trip settings": Area · Dates · Starts from
  * above the three defaults. Save sends only what changed; status, rating and
  * note are never part of it (they stay web-only).
  */
@@ -27,7 +27,7 @@ function trip(over: Partial<Trip> = {}): Trip {
     homeBase: "Boise, ID",
     homeBasePlace: { name: "Boise, ID", lat: 43.615, lng: -116.2023, googlePlaceId: "ChIJnbRH" },
     homeBaseFromHousehold: true,
-    destination: { id: "d1", name: "Oregon Coast & Cascades", googlePlaceId: "ChIJore", lat: 44, lng: -123 },
+    area: { id: "d1", name: "Oregon Coast & Cascades", googlePlaceId: "ChIJore", lat: 44, lng: -123 },
     startDate: "2026-08-01",
     endDate: "2026-08-28",
     status: "planning",
@@ -39,7 +39,7 @@ function trip(over: Partial<Trip> = {}): Trip {
     rigOn: true,
     surfaceRadiusMi: null,
     ideas: [],
-    legs: [],
+    chapters: [],
     segments: [],
     ...over,
   };
@@ -49,30 +49,30 @@ describe("phoneTripSettingsDraft / phoneTripSettingsPatch", () => {
   it("opens on the trip and saves nothing when nothing moved", () => {
     const t = trip();
     const d = phoneTripSettingsDraft(t);
-    expect(d.destination?.name).toBe("Oregon Coast & Cascades");
+    expect(d.area?.name).toBe("Oregon Coast & Cascades");
     expect(d.homeBasePlace?.name).toBe("Boise, ID");
     expect(d).toMatchObject({ startDate: "2026-08-01", endDate: "2026-08-28", mode: "road" });
     expect(phoneTripSettingsPatch(t, d)).toEqual({});
   });
 
-  it("sends a newly picked destination as the picked place", () => {
+  it("sends a newly picked area as the picked place", () => {
     const t = trip();
-    const patch = phoneTripSettingsPatch(t, { ...phoneTripSettingsDraft(t), destination: BLI });
+    const patch = phoneTripSettingsPatch(t, { ...phoneTripSettingsDraft(t), area: BLI });
     expect(patch).toEqual({
-      destination: { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 },
+      area: { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 },
     });
     expect(tripPatchInput.parse(patch)).toEqual(patch);
   });
 
-  it("clears the destination with null; a pick with no Google id is not a change", () => {
+  it("clears the area with null; a pick with no Google id is not a change", () => {
     const t = trip();
-    expect(phoneTripSettingsPatch(t, { ...phoneTripSettingsDraft(t), destination: null })).toEqual({
-      destination: null,
+    expect(phoneTripSettingsPatch(t, { ...phoneTripSettingsDraft(t), area: null })).toEqual({
+      area: null,
     });
     const freeText = { ...BLI, googlePlaceId: null, lat: null, lng: null };
-    expect(phoneTripSettingsPatch(t, { ...phoneTripSettingsDraft(t), destination: freeText })).toEqual({});
-    // A trip with no destination and nothing picked stays that way.
-    const bare = trip({ destination: null });
+    expect(phoneTripSettingsPatch(t, { ...phoneTripSettingsDraft(t), area: freeText })).toEqual({});
+    // A trip with no area and nothing picked stays that way.
+    const bare = trip({ area: null });
     expect(phoneTripSettingsPatch(bare, phoneTripSettingsDraft(bare))).toEqual({});
   });
 

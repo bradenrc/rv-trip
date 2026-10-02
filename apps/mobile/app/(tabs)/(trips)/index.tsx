@@ -106,8 +106,8 @@ function TripCard({ trip, onPress }: { trip: TripSummary; onPress: () => void })
           </Text>
           <View style={styles.stats}>
             <Stat n={trip.days} label="days" />
-            <Stat n={trip.stops} label="stops" />
-            <Stat n={trip.legs} label={trip.legs === 1 ? "leg" : "legs"} />
+            <Stat n={trip.destinations} label="destinations" />
+            <Stat n={trip.chapters} label={trip.chapters === 1 ? "chapter" : "chapters"} />
             <Stat n={trip.miles} label="mi" />
             {trip.open > 0 && <Stat n={trip.open} label="open" warn />}
           </View>

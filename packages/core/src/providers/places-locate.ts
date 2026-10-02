@@ -4,7 +4,7 @@ import type { PlaceSummary, PlacesProvider } from "./index";
 /**
  * Locate — the bounded coordinate backfill of docs/design/41 §6.
  *
- * A stop, a saved place or an IDEA can exist with no `lat/lng` (every one of
+ * A destination, a saved place or an IDEA can exist with no `lat/lng` (every one of
  * those columns is nullable). The map keeps those rows as `UnmappedRow`s — visible, listed, and
  * counted by the dashed "N unmapped" chip — rather than dropping them. Locate
  * is the user-pressed repair: one press, one bounded batch, at most
@@ -17,9 +17,9 @@ import type { PlaceSummary, PlacesProvider } from "./index";
  *
  * `UnmappedRow` (apps/web/src/components/map/pins.ts) carries the `kind`
  * EXPLICITLY as of #69. It used to be derived from the row's map layer, and
- * that derivation was only ever correct while the three trip layers held stops
- * alone: an idea on a planning trip derived "stop", and the batch would have
- * asked the stops table for an idea's id, loaded nothing, and counted the row
+ * that derivation was only ever correct while the three trip layers held destinations
+ * alone: an idea on a planning trip derived "destination", and the batch would have
+ * asked the destinations table for an idea's id, loaded nothing, and counted the row
  * still unmapped forever. The field is set at each `unmapped.push` site.
  *
  * Same split as places-search.ts: the whole decision tree is here, pure and
@@ -36,12 +36,12 @@ import type { PlaceSummary, PlacesProvider } from "./index";
 export const LOCATE_MAX_ROWS = 25;
 
 /**
- * Which table the id names. Three of them: the saved-place shelf, a trip stop,
- * and — since #69 — an idea hanging under a stop. The client NAMES it on the
+ * Which table the id names. Three of them: the saved-place shelf, a trip destination,
+ * and — since #69 — an idea hanging under a destination. The client NAMES it on the
  * row rather than deriving it from the map layer, because the layers stopped
  * being a proxy for the table the moment ideas joined the map.
  */
-export const locateRowKind = z.enum(["place", "stop", "idea"]);
+export const locateRowKind = z.enum(["place", "destination", "idea"]);
 export type LocateRowKind = z.infer<typeof locateRowKind>;
 
 export const locateRowSchema = z.object({
@@ -63,11 +63,11 @@ export type LocateRequest = z.infer<typeof locateRequestSchema>;
 
 /** A row as the DATABASE describes it — the only source of the search text. */
 export interface LocateTarget extends LocateRow {
-  /** A stop's place name, a saved place's name — and for an IDEA its `title`,
+  /** A destination's place name, a saved place's name — and for an IDEA its `title`,
    * which is all an un-located idea has. "Tumalo Falls trailhead" resolves;
    * "Deschutes River float" is an activity and never will. */
   name: string;
-  /** Saved places carry one; neither a stop nor an idea has a region column,
+  /** Saved places carry one; neither a destination nor an idea has a region column,
    * so both are null. */
   region: string | null;
 }

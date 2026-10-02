@@ -22,7 +22,7 @@ const PLACEHOLDER_URL = "postgres://rvtrip:rvtrip@127.0.0.1:1/rvtrip_test_placeh
 const url = inject("databaseUrl");
 process.env.DATABASE_URL = url || PLACEHOLDER_URL;
 
-// #113: the idea / stop / reservation handlers now hand the live destination
+// #113: the idea / destination / reservation handlers now hand the live area
 // resolver to the Been write-through, so a check-off on a located thing would
 // reach Google's geocoder on a laptop whose .env carries a key (globalSetup's
 // dotenv load puts it in every worker). The suite runs keyless — the stub,

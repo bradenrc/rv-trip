@@ -10,7 +10,7 @@
 - `[RENDER_THIN] Stars`: Stars renders star **icons** (SVG), no text, so the text-based thinness heuristic trips. Confirmed on the screenshot — it paints 4 star rows correctly. Benign.
 
 ## Known `check_design_system` warnings (Claude Design server-side; benign)
-- The uploaded `_ds_bundle.css` (our compiled `dist/styles.css`) contains **Tailwind v4 framework internals** — `--tw-*` (26: translate/shadow/ring/gradient/border-style/…) and `--default-*` (8: font-family/transition-*). The server check classifies them as unknown design tokens. **They are NOT brand tokens** and **cannot be removed** — utilities reference them at runtime (e.g. `StopBar` uses `hover:-translate-y-px` → `--tw-translate-y`, `hover:shadow-rv-lg` → `--tw-shadow`). Non-blocking: the 20 components import and render fine.
+- The uploaded `_ds_bundle.css` (our compiled `dist/styles.css`) contains **Tailwind v4 framework internals** — `--tw-*` (26: translate/shadow/ring/gradient/border-style/…) and `--default-*` (8: font-family/transition-*). The server check classifies them as unknown design tokens. **They are NOT brand tokens** and **cannot be removed** — utilities reference them at runtime (e.g. `DestinationBar` uses `hover:-translate-y-px` → `--tw-translate-y`, `hover:shadow-rv-lg` → `--tw-shadow`). Non-blocking: the 20 components import and render fine.
 - **Root fix is upstream in the design-sync tooling** — its token classifier (`lib/emit.mjs`) should skip `--tw-*`/`--default-*` (or emit `/* @kind other */` for them). That's skill-owned code the skill says not to fork.
 - Repo-side option (unverified — the server check must honor `@kind` for it to help): a post-`tailwindcss` build step annotating each `--tw-*`/`--default-*` declaration in `dist/styles.css` with `/* @kind other */`, then re-sync. Not applied yet — deferred pending confirmation the check reads the annotation. See Downloads `DESIGN_SYNC_NOTES.md`.
 
@@ -30,7 +30,7 @@
 ## Re-sync risks (watch-list for the next run)
 - **Token drift**: `rv-*` values live in two places (see above). A design that looks off-brand after a re-sync usually means `entry.css` fell behind `globals.css`.
 - **Preview data is inlined** in `.design-sync/previews/*.tsx` (realistic Pacific-NW-Loop trip content). It's static — it won't rot, but if a component's props change, its preview may need updating.
-- **Grid organisms** (`StopBar`, `OpenSpan`) position via `grid-column` and are previewed inside their parent (`SwimLane`/`OpenLane`); a component-API change to those parents can break the child previews.
+- **Grid organisms** (`DestinationBar`, `OpenSpan`) position via `grid-column` and are previewed inside their parent (`SwimLane`/`OpenLane`); a component-API change to those parents can break the child previews.
 - **`geist` devDep** must stay installed for the font woff2 to resolve at build time.
 - **`categoryMeta` is load-bearing across surfaces.** `CategoryChip`, `FilterChip`, and `PlaceCard` all resolve their icon/color through it, as do `CategoryTile`/`ReservationLineItem`. A change to the five-category mapping silently restyles every one of them — re-check those cards after any edit to `src/category.ts`.
 - **Places previews inline domain objects** (`SavedPlace` shape with `place`/`region`/`source`/`tripName`). If `@rv-trip/core`'s `savedPlace` schema gains a required field, those `.tsx` files fail to compile and the components drop to floor cards — the build log's `! preview build failed:` line is the tell.

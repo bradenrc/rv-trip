@@ -29,6 +29,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  areaSubtitle,
   LODGING_KIND_LABEL,
   LOCATE_MAX_ROWS,
   PICKED_COORDLESS_LABEL,
@@ -38,6 +39,7 @@ import {
   nearLabel,
   pickedFromPlace,
   searchAnchor,
+  type Logistics as LogisticsModel,
   type NearPlace,
   type PickedPlace,
   type TravelMode,
@@ -54,7 +56,7 @@ import {
   money,
 } from "@rv-trip/ui";
 import { navigationCaption, navigationOptions } from "@/lib/trip-logic";
-import type { RouteDrive, RouteLeg, RouteSummary } from "@/lib/trip-logic";
+import type { RouteDrive, RouteChapter, RouteSummary } from "@/lib/trip-logic";
 import { InlineText } from "@/components/ui/inline-text";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import {
@@ -75,78 +77,87 @@ import {
   MENU_SURFACE,
 } from "./row-menu";
 import { HopCard, HopModeSwitch, type HopCardActions } from "./HopCard";
+import { Logistics } from "./Logistics";
 
 /**
- * Every structural verb in the route lens lives on a row menu (⋯) — the leg
- * header's and the stop row's. Rename is the ONE exception: it is the same
+ * Every structural verb in the route lens lives on a row menu (⋯) — the chapter
+ * header's and the destination row's. Rename is the ONE exception: it is the same
  * inline edit the row already shows, and the menu item only focuses it, so a
  * name has one save path rather than two.
  */
 export interface RouteViewActions {
-  /** the leg or stop whose inline rename should be open (a menu Rename, or a
+  /** the chapter or destination whose inline rename should be open (a menu Rename, or a
    * row that was just created) — `null` when nothing is being renamed */
   renamingId: string | null;
   onStartRename: (id: string) => void;
   onRenameDone: () => void;
-  onRenameLeg: (legId: string, title: string) => void;
-  onAddStop: (legId: string) => void;
-  onAddLeg: () => void;
-  /** delta is -1 (up) / +1 (down); `canMoveLeg` disables the end of the list */
-  onMoveLeg: (legId: string, delta: -1 | 1) => void;
-  canMoveLeg: (legId: string, delta: -1 | 1) => boolean;
-  onDeleteLeg: (legId: string) => void;
-  onRenameStop: (stopId: string, name: string) => void;
-  onEditStopDates: (stopId: string) => void;
-  onUnscheduleStop: (stopId: string) => void;
-  onMoveStopToLeg: (stopId: string, legId: string) => void;
-  onDeleteStop: (stopId: string) => void;
+  onRenameChapter: (chapterId: string, title: string) => void;
+  onAddDestination: (chapterId: string) => void;
+  onAddChapter: () => void;
+  /** delta is -1 (up) / +1 (down); `canMoveChapter` disables the end of the list */
+  onMoveChapter: (chapterId: string, delta: -1 | 1) => void;
+  canMoveChapter: (chapterId: string, delta: -1 | 1) => boolean;
+  onDeleteChapter: (chapterId: string) => void;
+  onRenameDestination: (destinationId: string, name: string) => void;
+  onEditDestinationDates: (destinationId: string) => void;
+  onUnscheduleDestination: (destinationId: string) => void;
+  onMoveDestinationToChapter: (destinationId: string, chapterId: string) => void;
+  onDeleteDestination: (destinationId: string) => void;
 
   // ── #60 · the picker, mounted in the row ─────────────────────────────────
 
-  /** The leg whose "Add stop" draft row is open, or null. The draft row is NOT
-   * a stop: nothing is written until a place is chosen, so dismissing it
+  /** The chapter whose "Add destination" draft row is open, or null. The draft row is NOT
+   * a destination: nothing is written until a place is chosen, so dismissing it
    * persists nothing — which is the only way this screen stops manufacturing
    * the coordless rows it exists to repair. */
-  draftLegId: string | null;
-  onPickDraftStop: (legId: string, picked: PickedPlace) => void;
-  onCancelDraftStop: () => void;
-  /** The stop whose place editor is open. One editor, three entry points: the
-   * row menu's "Change place…", the coordless chip's "Set place", and the stop
+  draftChapterId: string | null;
+  onPickDraftDestination: (chapterId: string, picked: PickedPlace) => void;
+  onCancelDraftDestination: () => void;
+  /** The destination whose place editor is open. One editor, three entry points: the
+   * row menu's "Change place…", the coordless chip's "Set place", and the destination
    * sheet's mini-map button. */
-  placingStopId: string | null;
-  onStartChangePlace: (stopId: string) => void;
-  onChangeStopPlace: (stopId: string, picked: PickedPlace) => void;
+  placingDestinationId: string | null;
+  onStartChangePlace: (destinationId: string) => void;
+  onChangeDestinationPlace: (destinationId: string, picked: PickedPlace) => void;
   onCancelChangePlace: () => void;
-  /** The rail's Locate — one bounded batch over `summary.unmappedStops`. */
+  /** The rail's Locate — one bounded batch over `summary.unmappedDestinations`. */
   locating: boolean;
   onLocate: () => void;
 
   // ── #104 · hops ──────────────────────────────────────────────────────────
 
-  /** The hop whose Add flight / Add ferry form is open — set by its button
-   * and by a fly/ferry day clicked on the Timeline (Q5 A). */
+  /** The hop whose Add flight / Add ferry form is open in its Logistics group
+   * (#155) — set by the group's button and by a fly/ferry day clicked on the
+   * Timeline (Q5 A). */
   openHopId: string | null;
   hops: HopCardActions;
 
-  /** #128 · Q8 A door 2 — the stop card's "+ Add stay", dates from the stop. */
-  onAddStay: (stopId: string) => void;
+  /** #128 · Q8 A door 2 — the destination card's "+ Add stay", dates from the destination. */
+  onAddStay: (destinationId: string) => void;
 }
 
 export function RouteView({
-  legs,
+  chapters,
+  countKicker,
+  logistics,
   trip,
   summary,
   costs,
   hasRig,
   units,
-  onOpenStop,
+  onOpenDestination,
   routeDrag,
   onRowDragStart,
   onRowDragEnd,
   onRowDrop,
   actions,
 }: {
-  legs: RouteLeg[];
+  chapters: RouteChapter[];
+  /** #155 · Q1 A — "3 destinations" when no chapter is named (core's
+   * `routeCountKicker`), drawn where the first chapter header would be. */
+  countKicker: string | null;
+  /** #155 · Q3 B — the Logistics section's groups; null renders no section. */
+  logistics: LogisticsModel | null;
   /** The trip the model was built from (#104): its default mode decides the
    * intro and where a hop's mode switch lives (Q7 B), `rigOn` gates the rig
    * nudge, and the Add flight form judges its date clash against it. */
@@ -161,25 +172,18 @@ export function RouteView({
   /** No rig yet = no routing input: every drive falls to a straight-line
    * estimate and the rail carries one dashed nudge. Never a blocking wizard. */
   hasRig: boolean;
-  onOpenStop: (id: string) => void;
-  routeDrag: { legId: string; stopId: string } | null;
-  onRowDragStart: (legId: string, stopId: string) => void;
+  onOpenDestination: (id: string) => void;
+  routeDrag: { chapterId: string; destinationId: string } | null;
+  onRowDragStart: (chapterId: string, destinationId: string) => void;
   onRowDragEnd: () => void;
-  onRowDrop: (legId: string, targetId: string) => void;
+  onRowDrop: (chapterId: string, targetId: string) => void;
   actions: RouteViewActions;
 }) {
   // Q7 B: on a drive trip the mode switch hides in a drive row's ⋯ menu; on a
   // fly trip it is visible on every hop. Klunk row 2: the intro follows too.
   const driveTrip = trip.defaultMode === "drive";
-  const hopCard = (hop: NonNullable<RouteLeg["leadingHop"]>, flush: boolean) => (
-    <HopCard
-      key={hop.segmentId}
-      hop={hop}
-      trip={trip}
-      flush={flush}
-      formOpen={actions.openHopId === hop.segmentId}
-      actions={actions.hops}
-    />
+  const hopCard = (hop: NonNullable<RouteChapter["leadingHop"]>, flush: boolean) => (
+    <HopCard key={hop.segmentId} hop={hop} flush={flush} actions={actions.hops} />
   );
   const driveRow = (drive: RouteDrive) => (
     <Drive
@@ -204,38 +208,56 @@ export function RouteView({
             : "Drag to reorder; how you get between places is shown in order."}
         </p>
 
-        {legs.map((leg) => (
-          <div key={leg.id} id={`route-${leg.id}`} className="mb-8 scroll-mt-6">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="mb-[3px] font-mono text-[9px] uppercase tracking-[0.12em] text-rv-ink-faded">
-                  {leg.kicker}
+        {chapters.map((chapter, ci) => {
+          // #155 · Q1 A — a NAMED chapter renders "CHAPTER N" and its name; an
+          // unnamed one renders no header (its rename still opens the editor
+          // in place). A trip with no named chapter carries the count kicker
+          // where the first header would be. The pill and ⋯ stay either way.
+          const renaming = actions.renamingId === chapter.id;
+          const titled = chapter.name !== null || renaming;
+          const count = ci === 0 ? countKicker : null;
+          return (
+          <div key={chapter.id} id={`route-${chapter.id}`} className="mb-8 scroll-mt-6">
+            <div
+              className={`mb-4 flex items-center gap-3 ${titled || count ? "justify-between" : "justify-end"}`}
+            >
+              {titled ? (
+                <div className="min-w-0">
+                  {chapter.kicker && (
+                    <div className="mb-[3px] font-mono text-[9px] uppercase tracking-[0.12em] text-rv-ink-faded">
+                      {chapter.kicker}
+                    </div>
+                  )}
+                  <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">
+                    <InlineText
+                      key={renaming ? "editing" : "idle"}
+                      autoEdit={renaming}
+                      onEditEnd={actions.onRenameDone}
+                      value={chapter.name ?? ""}
+                      onSave={(title) => actions.onRenameChapter(chapter.id, title)}
+                      label="Rename chapter"
+                      className="text-[22px] font-extrabold text-rv-ink"
+                    />
+                  </h2>
                 </div>
-                <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">
-                  <InlineText
-                    key={actions.renamingId === leg.id ? "editing" : "idle"}
-                    autoEdit={actions.renamingId === leg.id}
-                    onEditEnd={actions.onRenameDone}
-                    value={leg.name}
-                    onSave={(title) => actions.onRenameLeg(leg.id, title)}
-                    label="Rename leg"
-                    className="text-[22px] font-extrabold text-rv-ink"
-                  />
-                </h2>
-              </div>
+              ) : (
+                count && (
+                  <div className="font-mono text-[9px] uppercase tracking-[0.12em] text-rv-ink-faded">{count}</div>
+                )
+              )}
               <div className="flex flex-none items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => actions.onAddStop(leg.id)}
+                  onClick={() => actions.onAddDestination(chapter.id)}
                   className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-pill border border-rv-green bg-rv-green-soft px-[13px] py-1.5 text-[13px] font-semibold text-rv-green"
                 >
                   <Plus className="size-3.5" />
-                  Add stop
+                  Add destination
                 </button>
-                <RowMenu label={`Actions for ${leg.name}`}>
+                <RowMenu label={`Actions for ${chapter.name ?? "this chapter"}`}>
                   <DropdownMenuItem
                     className={MENU_ITEM}
-                    onSelect={() => actions.onStartRename(leg.id)}
+                    onSelect={() => actions.onStartRename(chapter.id)}
                   >
                     <Pencil />
                     Rename
@@ -243,62 +265,63 @@ export function RouteView({
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className={MENU_ITEM}
-                    disabled={!actions.canMoveLeg(leg.id, -1)}
-                    onSelect={() => actions.onMoveLeg(leg.id, -1)}
+                    disabled={!actions.canMoveChapter(chapter.id, -1)}
+                    onSelect={() => actions.onMoveChapter(chapter.id, -1)}
                   >
                     <ArrowUp />
-                    Move leg up
+                    Move chapter up
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className={MENU_ITEM}
-                    disabled={!actions.canMoveLeg(leg.id, 1)}
-                    onSelect={() => actions.onMoveLeg(leg.id, 1)}
+                    disabled={!actions.canMoveChapter(chapter.id, 1)}
+                    onSelect={() => actions.onMoveChapter(chapter.id, 1)}
                   >
                     <ArrowDown />
-                    Move leg down
+                    Move chapter down
                   </DropdownMenuItem>
                   <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border" />
                   <DropdownMenuItem
                     className={MENU_ITEM_WARN}
-                    onSelect={() => actions.onDeleteLeg(leg.id)}
+                    onSelect={() => actions.onDeleteChapter(chapter.id)}
                   >
                     <Trash2 />
-                    Delete leg…
+                    Delete chapter…
                     <MenuHint>confirm</MenuHint>
                   </DropdownMenuItem>
                 </RowMenu>
               </div>
             </div>
 
-            {leg.leadingHop && hopCard(leg.leadingHop, true)}
+            {chapter.leadingHop && hopCard(chapter.leadingHop, true)}
 
-            {leg.rows.map((row, i) => {
-              // The picker's bias (#126 anchor order): the stop ABOVE this one
-              // in the leg, then the trip's destination — never the home base.
-              const near = searchAnchor(trip, { kind: "after", stopId: leg.rows[i - 1]?.stop.id ?? null });
+            {chapter.rows.map((row, i) => {
+              // The picker's bias (#126 anchor order): the destination ABOVE this one
+              // in the chapter, then the trip's area — never the home base.
+              const near = searchAnchor(trip, { kind: "after", destinationId: chapter.rows[i - 1]?.destination.id ?? null });
               const hasStay = row.reservations.some((r) => r.type === "lodging" || r.type === "campground");
               const wholeTrip =
-                row.stop.arriveDate === trip.startDate && row.stop.departDate === trip.endDate;
-              const placing = actions.placingStopId === row.stop.id;
-              const mapped = hasCoords(row.stop.place);
+                row.destination.arriveDate === trip.startDate && row.destination.departDate === trip.endDate;
+              const placing = actions.placingDestinationId === row.destination.id;
+              const mapped = hasCoords(row.destination.place);
+              const subtitle = areaSubtitle(trip, row.destination.place.name);
               return (
-              <div key={row.stop.id}>
+              <div key={row.destination.id}>
                 <div
                   // Dragging and the picker cannot share a row: a draggable
                   // ancestor swallows the text selection an input needs.
                   draggable={row.floating && !placing}
                   onDragStart={
                     row.floating && !placing
-                      ? () => onRowDragStart(leg.id, row.stop.id)
+                      ? () => onRowDragStart(chapter.id, row.destination.id)
                       : undefined
                   }
                   onDragEnd={row.floating && !placing ? onRowDragEnd : undefined}
                   onDragOver={row.floating && !placing ? (e) => e.preventDefault() : undefined}
                   onDrop={
-                    row.floating && !placing ? () => onRowDrop(leg.id, row.stop.id) : undefined
+                    row.floating && !placing ? () => onRowDrop(chapter.id, row.destination.id) : undefined
                   }
                   className={`relative flex items-start gap-3 rounded-rv-card border bg-rv-surface p-4 shadow-rv-sm ${
-                    routeDrag?.stopId === row.stop.id ? "border-rv-green" : "border-rv-border"
+                    routeDrag?.destinationId === row.destination.id ? "border-rv-green" : "border-rv-border"
                   }`}
                 >
                   {row.floating ? (
@@ -313,7 +336,7 @@ export function RouteView({
                     />
                   )}
 
-                  {/* The row still opens the stop sheet, but the title line
+                  {/* The row still opens the destination sheet, but the title line
                       now carries its own controls — so the click target is a
                       stretched overlay UNDER the content rather than a <button>
                       wrapped around it (a button inside a button is invalid,
@@ -327,8 +350,8 @@ export function RouteView({
                   {!placing && (
                     <button
                       type="button"
-                      onClick={() => onOpenStop(row.stop.id)}
-                      aria-label={`Open ${row.stop.place.name}`}
+                      onClick={() => onOpenDestination(row.destination.id)}
+                      aria-label={`Open ${row.destination.place.name}`}
                       className="absolute inset-0 cursor-pointer rounded-rv-card border-0 bg-transparent p-0"
                     />
                   )}
@@ -344,11 +367,11 @@ export function RouteView({
                       {placing ? (
                         <span className="min-w-0 flex-[1_1_260px]">
                           <PlaceEditor
-                            initial={pickedFromPlace(row.stop.place)}
+                            initial={pickedFromPlace(row.destination.place)}
                             near={near}
-                            onPick={(p) => actions.onChangeStopPlace(row.stop.id, p)}
+                            onPick={(p) => actions.onChangeDestinationPlace(row.destination.id, p)}
                             onCancel={actions.onCancelChangePlace}
-                            cancelLabel={`Stop changing the place for ${row.stop.place.name}`}
+                            cancelLabel={`Stop changing the place for ${row.destination.place.name}`}
                           />
                         </span>
                       ) : (
@@ -357,16 +380,18 @@ export function RouteView({
                            a flex-wrap title line does not. */
                         <span className="pointer-events-auto inline-block max-w-full">
                           <InlineText
-                            key={actions.renamingId === row.stop.id ? "editing" : "idle"}
-                            autoEdit={actions.renamingId === row.stop.id}
+                            key={actions.renamingId === row.destination.id ? "editing" : "idle"}
+                            autoEdit={actions.renamingId === row.destination.id}
                             onEditEnd={actions.onRenameDone}
-                            value={row.stop.place.name}
-                            onSave={(name) => actions.onRenameStop(row.stop.id, name)}
-                            label="Rename stop"
+                            value={row.destination.place.name}
+                            onSave={(name) => actions.onRenameDestination(row.destination.id, name)}
+                            label="Rename destination"
                             className="text-[17px] font-bold text-rv-ink"
                           />
                         </span>
                       )}
+                      {/* #155 · Q2 A — the trip's area, unless the name says it. */}
+                      {!placing && subtitle && <span className="text-[13px] text-rv-ink-faded">{subtitle}</span>}
                       {row.floating && <FloatingTag />}
                       {row.dates && (
                         <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-rv-ink-faded">
@@ -381,10 +406,10 @@ export function RouteView({
                         </span>
                       )}
                       <span className={`pointer-events-auto ${wholeTrip ? "" : "ml-auto"}`}>
-                        <RowMenu label={`Actions for ${row.stop.place.name}`}>
+                        <RowMenu label={`Actions for ${row.destination.place.name}`}>
                           <DropdownMenuItem
                             className={MENU_ITEM}
-                            onSelect={() => actions.onStartRename(row.stop.id)}
+                            onSelect={() => actions.onStartRename(row.destination.id)}
                           >
                             <Pencil />
                             Rename
@@ -394,7 +419,7 @@ export function RouteView({
                               thing: it opens an editor IN the row, not a dialog. */}
                           <DropdownMenuItem
                             className={MENU_ITEM}
-                            onSelect={() => actions.onStartChangePlace(row.stop.id)}
+                            onSelect={() => actions.onStartChangePlace(row.destination.id)}
                           >
                             <CircleDot />
                             Change place…
@@ -402,7 +427,7 @@ export function RouteView({
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             className={MENU_ITEM}
-                            onSelect={() => actions.onEditStopDates(row.stop.id)}
+                            onSelect={() => actions.onEditDestinationDates(row.destination.id)}
                           >
                             <CalendarDays />
                             Edit dates…
@@ -411,7 +436,7 @@ export function RouteView({
                           <DropdownMenuItem
                             className={MENU_ITEM}
                             disabled={row.floating}
-                            onSelect={() => actions.onUnscheduleStop(row.stop.id)}
+                            onSelect={() => actions.onUnscheduleDestination(row.destination.id)}
                           >
                             <Undo2 />
                             Unschedule
@@ -420,18 +445,18 @@ export function RouteView({
                           <DropdownMenuSub>
                             <DropdownMenuSubTrigger className={MENU_ITEM}>
                               <ArrowLeftRight />
-                              Move to leg
+                              Move to chapter
                             </DropdownMenuSubTrigger>
                             <DropdownMenuSubContent className={MENU_SURFACE}>
-                              {legs.map((target) => (
+                              {chapters.map((target) => (
                                 <DropdownMenuItem
                                   key={target.id}
                                   className={MENU_ITEM}
-                                  disabled={target.id === leg.id}
-                                  onSelect={() => actions.onMoveStopToLeg(row.stop.id, target.id)}
+                                  disabled={target.id === chapter.id}
+                                  onSelect={() => actions.onMoveDestinationToChapter(row.destination.id, target.id)}
                                 >
-                                  {target.name}
-                                  <MenuHint>{target.kicker}</MenuHint>
+                                  {target.name ?? "Unnamed chapter"}
+                                  {target.kicker && <MenuHint>{target.kicker}</MenuHint>}
                                 </DropdownMenuItem>
                               ))}
                             </DropdownMenuSubContent>
@@ -439,17 +464,17 @@ export function RouteView({
                           <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border" />
                           <DropdownMenuItem
                             className={MENU_ITEM_WARN}
-                            onSelect={() => actions.onDeleteStop(row.stop.id)}
+                            onSelect={() => actions.onDeleteDestination(row.destination.id)}
                           >
                             <Trash2 />
-                            Delete stop…
+                            Delete destination…
                             <MenuHint>confirm</MenuHint>
                           </DropdownMenuItem>
                         </RowMenu>
                       </span>
                     </div>
 
-                    {/* A coordless stop is a LEGAL row — the escape hatch is the
+                    {/* A coordless destination is a LEGAL row — the escape hatch is the
                         point. What it must not be is silent: no pin, no
                         connector, no HERE route. The sentence is the picker's
                         own `PICKED_COORDLESS_LABEL`, so the row and the picker
@@ -461,7 +486,7 @@ export function RouteView({
                           {PICKED_COORDLESS_LABEL}
                           <button
                             type="button"
-                            onClick={() => actions.onStartChangePlace(row.stop.id)}
+                            onClick={() => actions.onStartChangePlace(row.destination.id)}
                             className="cursor-pointer border-none bg-transparent p-0 font-bold text-rv-warning underline"
                           >
                             Set place
@@ -490,18 +515,18 @@ export function RouteView({
                       </div>
                     )}
 
-                    {/* #128 · Q8 A door 2 — a stop with no stay yet offers one,
-                        its dates arriving from the stop. */}
+                    {/* #128 · Q8 A door 2 — a destination with no stay yet offers one,
+                        its dates arriving from the destination. */}
                     {!hasStay && !placing && (
                       <div className="pointer-events-auto pl-10">
                         <button
                           type="button"
-                          onClick={() => actions.onAddStay(row.stop.id)}
+                          onClick={() => actions.onAddStay(row.destination.id)}
                           className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-dashed border-rv-green bg-transparent px-2.5 py-1.5 text-[12.5px] font-bold text-rv-green-ink"
                         >
                           + Add stay
                           <span className="font-mono text-[11px] font-normal text-rv-ink-faded">
-                            · dates from this stop
+                            · dates from this destination
                           </span>
                         </button>
                       </div>
@@ -537,10 +562,10 @@ export function RouteView({
               );
             })}
 
-            {/* "Add stop" appends this row and opens the picker inside it. It is
-                a DRAFT, not a stop: the pick is the create, so dismissing it
+            {/* "Add destination" appends this row and opens the picker inside it. It is
+                a DRAFT, not a destination: the pick is the create, so dismissing it
                 writes nothing at all. */}
-            {actions.draftLegId === leg.id && (
+            {actions.draftChapterId === chapter.id && (
               <div className="flex items-start gap-3 rounded-rv-card border border-dashed border-rv-border-hi bg-rv-surface p-4 shadow-rv-sm">
                 <GripVertical
                   className="mt-[3px] size-[18px] shrink-0 text-rv-ink-subtle"
@@ -549,42 +574,38 @@ export function RouteView({
                 <div className="min-w-0 flex-1">
                   <PlaceEditor
                     initial={null}
-                    near={searchAnchor(trip, { kind: "after", stopId: leg.rows.at(-1)?.stop.id ?? null })}
-                    onPick={(p) => actions.onPickDraftStop(leg.id, p)}
-                    onCancel={actions.onCancelDraftStop}
-                    cancelLabel="Discard this stop"
+                    near={searchAnchor(trip, { kind: "after", destinationId: chapter.rows.at(-1)?.destination.id ?? null })}
+                    onPick={(p) => actions.onPickDraftDestination(chapter.id, p)}
+                    onCancel={actions.onCancelDraftDestination}
+                    cancelLabel="Discard this destination"
                   />
                 </div>
               </div>
             )}
 
-            {(leg.outboundDrive || leg.outboundHop) && (
-              <>
-                <div className="my-0.5 ml-8 flex items-center gap-[9px]">
-                  <span className="font-mono text-[9px] uppercase tracking-[0.11em] text-rv-ink-faded">
-                    {leg.outboundSeam}
-                  </span>
-                  <span className="h-px flex-1 bg-rv-border-soft" />
-                </div>
-                {leg.outboundDrive && driveRow(leg.outboundDrive)}
-                {/* A hop that crosses legs sits under the same seam a crossing
-                    drive does (Greece: Athens → Mykonos, Naxos → Athens). */}
-                {leg.outboundHop && hopCard(leg.outboundHop, false)}
-              </>
-            )}
+            {/* #155 — the "LEG 1 → LEG 2" seam is gone: the drive or hop that
+                crosses into the next chapter stands on its own row. */}
+            {chapter.outboundDrive && driveRow(chapter.outboundDrive)}
+            {chapter.outboundHop && hopCard(chapter.outboundHop, false)}
 
-            {leg.returnHop && hopCard(leg.returnHop, true)}
+            {chapter.returnHop && hopCard(chapter.returnHop, true)}
           </div>
-        ))}
+          );
+        })}
 
         <button
           type="button"
-          onClick={actions.onAddLeg}
+          onClick={actions.onAddChapter}
           className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-dashed border-rv-border-hi bg-transparent px-[18px] py-2.5 text-[14px] font-semibold text-rv-ink"
         >
           <CirclePlus className="size-4" />
-          Add leg
+          Add chapter
         </button>
+
+        {/* #155 · Q3 B — flights, ferries and shuttles, after the destinations. */}
+        {logistics && (
+          <Logistics model={logistics} trip={trip} openHopId={actions.openHopId} actions={actions.hops} />
+        )}
       </div>
 
       <RouteRail
@@ -608,14 +629,14 @@ export function RouteView({
  *
  *  1. The bias line. `near` (PlacePicker.tsx:48) has always existed and has
  *     never been visible; on a row it is the difference between "search the
- *     planet" and "search near the stop above", so the row says which.
+ *     planet" and "search near the destination above", so the row says which.
  *  2. A way out. The picker itself has no dismiss — its ✕ clears the CHOSEN
  *     place and drops back to the search box (design state 6 → 1). Abandoning
  *     the editor entirely is this button, and on a draft row it is also how you
- *     abandon the stop: nothing has been written yet.
+ *     abandon the destination: nothing has been written yet.
  *
  * The value is held here rather than by the caller so that clearing the chip
- * really does drop back to the search box — a value read straight off the stop
+ * really does drop back to the search box — a value read straight off the destination
  * would snap back on the next render.
  */
 function PlaceEditor({
@@ -893,7 +914,7 @@ function RouteRail({
           <div className="mt-1 text-[12px] text-rv-ink-faded">
             {summary.driveMiles > 0
               ? `${summary.driveTime} behind the wheel`
-              : "add stops with places to estimate driving"}
+              : "add destinations with places to estimate driving"}
           </div>
 
           {/* Only when there is something to say — a permanent "0 restrictions"
@@ -947,8 +968,8 @@ function RouteRail({
           />
           <Stat
             Icon={MapPin}
-            label="Stops"
-            value={`${summary.stops} · ${summary.scheduled} set / ${summary.floating} floating`}
+            label="Destinations"
+            value={`${summary.destinations} · ${summary.scheduled} set / ${summary.floating} floating`}
           />
 
           {/* Only when there is something to say — the same rule
@@ -962,7 +983,7 @@ function RouteRail({
               <div className="flex items-start gap-2 text-[12.5px] text-rv-warning">
                 <TriangleAlert className="mt-px size-[15px] flex-none" />
                 <span>
-                  {summary.unmapped} stop{summary.unmapped === 1 ? "" : "s"} without a place
+                  {summary.unmapped} destination{summary.unmapped === 1 ? "" : "s"} without a place
                 </span>
               </div>
               <button
@@ -984,13 +1005,14 @@ function RouteRail({
           )}
         </div>
 
-        <div className="h-px bg-rv-border-soft" />
-
-        {/* Legs jump-links */}
+        {/* Chapters jump-links — issue 155 · Q1 A: named chapters only, and the
+            block renders only when at least one is named. */}
+        {summary.chapters.length > 0 && <div className="h-px bg-rv-border-soft" />}
+        {summary.chapters.length > 0 && (
         <div>
-          <div className={`${kicker} mb-2`}>Legs</div>
+          <div className={`${kicker} mb-2`}>Chapters</div>
           <div className="flex flex-col gap-0.5">
-            {summary.legs.map((l) => (
+            {summary.chapters.map((l) => (
               <a
                 key={l.id}
                 href={`#route-${l.id}`}
@@ -998,13 +1020,14 @@ function RouteRail({
               >
                 <span className="text-[13px] font-semibold text-rv-ink">{l.name}</span>
                 <span className="font-mono text-[11px] text-rv-ink-faded">
-                  {l.stops} stop{l.stops === 1 ? "" : "s"}
+                  {l.destinations} destination{l.destinations === 1 ? "" : "s"}
                   {costs ? ` · ${money(l.cost)}` : ""}
                 </span>
               </a>
             ))}
           </div>
         </div>
+        )}
       </div>
     </aside>
   );

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { segmentDateConflicts, reconcileSegments } from "../domain/segments";
 import { savedPlace, trip as tripSchema } from "../domain/types";
 import { savesShelves, shelfCounts } from "../capture/shelves";
-import { DESTINATION_MAX_MILES, haversineMeters } from "../providers/index";
+import { AREA_MAX_MILES, haversineMeters } from "../providers/index";
 import { timelineModel, tripJournal } from "../planner/index";
 import {
   SEED_OWNER,
@@ -10,7 +10,7 @@ import {
   costaRicaTrip,
   greeceTrip,
   pnwTrip,
-  seedDestinations,
+  seedAreas,
   seedSaves,
   seedTrips,
   yellowstoneTrip,
@@ -26,7 +26,7 @@ describe("the seed trips", () => {
     for (const t of seedTrips()) expect(() => tripSchema.parse(t)).not.toThrow();
   });
 
-  it("carry ZERO segment/date conflicts (Q3 A: stop dates win)", () => {
+  it("carry ZERO segment/date conflicts (Q3 A: destination dates win)", () => {
     for (const t of seedTrips()) expect({ [t.title]: segmentDateConflicts(t) }).toEqual({ [t.title]: [] });
   });
 
@@ -38,7 +38,7 @@ describe("the seed trips", () => {
 
   it("PNW: 4 drive segments, untimed — home→Astoria · Astoria→Newport · Newport→Bend · Bend→Crater", () => {
     const t = pnwTrip();
-    expect(t.segments.map((s) => [s.fromStopId, s.toStopId, s.mode, s.departAt])).toEqual([
+    expect(t.segments.map((s) => [s.fromDestinationId, s.toDestinationId, s.mode, s.departAt])).toEqual([
       [null, "stp_astoria", "drive", null],
       ["stp_astoria", "stp_newport", "drive", null],
       ["stp_newport", "stp_bend", "drive", null],
@@ -51,14 +51,24 @@ describe("the seed trips", () => {
     });
   });
 
-  it("Costa Rica: the two AA flights hang on seg_out, the stop keeps only the Westin", () => {
+  it("Costa Rica: the two AA flights and a shuttle hang on seg_out, the destination keeps only the Westin", () => {
     const t = costaRicaTrip();
     const out = t.segments.find((s) => s.id === "seg_out")!;
-    expect(out.reservations.map((r) => [r.name, r.stopId, r.segmentId])).toEqual([
-      ["AA 2451 BOI→LAX", null, "seg_out"],
-      ["AA 2208 LAX→LIR", null, "seg_out"],
+    expect(out.reservations.map((r) => [r.name, r.destinationId, r.segmentId, r.transportKind])).toEqual([
+      ["AA 2451 BOI→LAX", null, "seg_out", null],
+      ["AA 2208 LAX→LIR", null, "seg_out", null],
+      // #155 · Q4 A — the done-when's shuttles, one each side of the trip.
+      ["Airport shuttle · LIR → hotel", null, "seg_out", "shuttle"],
     ]);
-    const conchal = t.legs[0]!.stops[0]!;
+    const home = t.segments.find((s) => s.id === "seg_home")!;
+    expect(home.reservations.map((r) => [r.name, r.transportKind])).toEqual([
+      ["Airport shuttle · hotel → LIR", "shuttle"],
+    ]);
+    // #155 · Q1 A / Q2 A — one unnamed chapter; the trip's area is Guanacaste.
+    expect(t.chapters.map((c) => c.title)).toEqual([null]);
+    expect(t.area?.name).toBe("Guanacaste");
+    expect(seedAreas().some((a) => a.googlePlaceId === t.area?.googlePlaceId)).toBe(true);
+    const conchal = t.chapters[0]!.destinations[0]!;
     expect(conchal.reservations.map((r) => r.name)).toEqual(["Westin Reserva Conchal"]);
     expect(conchal.ideas.map((i) => i.title)).toEqual(["Playa Conchal snorkel", "Tamarindo surf lesson"]);
     expect(t.segments.map((s) => s.id)).toEqual(["seg_out", "seg_home"]);
@@ -69,13 +79,13 @@ describe("the seed trips", () => {
     });
   });
 
-  it("Greece: no home base — a fly, a ferry and a fly, one hotel per stop", () => {
+  it("Greece: no home base — a fly, a ferry and a fly, one hotel per destination", () => {
     const t = greeceTrip();
     expect(t.homeBase).toBeNull();
-    expect(t.legs.map((l) => l.title)).toEqual(["Athens", "Cyclades", "Back to Athens"]);
+    expect(t.chapters.map((l) => l.title)).toEqual(["Athens", "Cyclades", "Back to Athens"]);
     expect(t.segments.map((s) => s.mode)).toEqual(["fly", "ferry", "fly"]);
-    for (const l of t.legs) {
-      for (const s of l.stops) expect(s.reservations.map((r) => r.type)).toEqual(["lodging"]);
+    for (const l of t.chapters) {
+      for (const s of l.destinations) expect(s.reservations.map((r) => r.type)).toEqual(["lodging"]);
     }
   });
 });
@@ -83,7 +93,7 @@ describe("the seed trips", () => {
 describe("the seeds on the gantt (wireframe §1)", () => {
   it("PNW is today's timeline: Astoria cols 2–4, Newport 5–9, Bend 12–16, all arriving by drive", () => {
     const m = timelineModel(pnwTrip());
-    const bars = m.legs.flatMap((l) => l.bars);
+    const bars = m.chapters.flatMap((l) => l.bars);
     expect(bars.map((b) => [b.name, b.startCol, b.span, b.arriveMode, b.resCount, b.ideaCount])).toEqual([
       ["Astoria, OR", 2, 3, "drive", 2, 0],
       ["Newport, OR", 5, 5, "drive", 1, 2],
@@ -99,7 +109,7 @@ describe("the seeds on the gantt (wireframe §1)", () => {
 
   it("Costa Rica: Conchal's bar ends Jan 23 but reads its own dates, and arrives by air", () => {
     const m = timelineModel(costaRicaTrip());
-    const [bar] = m.legs[0]!.bars;
+    const [bar] = m.chapters[0]!.bars;
     expect(bar).toMatchObject({
       name: "Westin Reserva Conchal",
       range: "Jan 16–24",
@@ -116,7 +126,7 @@ describe("the seeds on the gantt (wireframe §1)", () => {
 
   it("Greece: the first Athens has no inbound segment, so no arrival edge", () => {
     const m = timelineModel(greeceTrip());
-    const bars = m.legs.flatMap((l) => l.bars);
+    const bars = m.chapters.flatMap((l) => l.bars);
     expect(bars.map((b) => [b.name, b.range, b.startCol, b.span, b.arriveMode])).toEqual([
       ["Athens", "May 10–12", 1, 2, null],
       ["Mykonos", "May 12–16", 3, 4, "fly"],
@@ -130,7 +140,7 @@ describe("the seeds on the gantt (wireframe §1)", () => {
 // ── #111 i2 · the walk's Saves tab ─────────────────────────────────────────
 
 describe("the seed saves (#111 i2)", () => {
-  const dests = seedDestinations();
+  const dests = seedAreas();
   const byKey = new Map(dests.map((d) => [d.key, d]));
   /** The seed as the read shape, the way GET /api/places will answer it. */
   const library = seedSaves().map((s, i) =>
@@ -147,7 +157,7 @@ describe("the seed saves (#111 i2)", () => {
       again: null,
       anchor: s.anchor,
       areaLabel: s.areaLabel,
-      destination: s.destination ? { ...byKey.get(s.destination)!, id: s.destination } : null,
+      area: s.area ? { ...byKey.get(s.area)!, id: s.area } : null,
       suggestedPlace: s.suggestedPlace,
       createdAt: s.createdAt,
     }),
@@ -159,7 +169,7 @@ describe("the seed saves (#111 i2)", () => {
       ["Oregon", 8],
       ["Costa Rica", 1],
     ]);
-    expect(want.regions[0]!.destinations.map((d) => [d.destination.name, d.saves.map((s) => s.place.name)])).toEqual([
+    expect(want.regions[0]!.areas.map((d) => [d.area.name, d.saves.map((s) => s.place.name)])).toEqual([
       ["Bandon, OR", ["great BLM camp spot", "chandel"]],
       ["Bend, OR", ["taco truck Dana said", "Sunny's Smokehouse"]],
       ["Nehalem, OR", ["Nehalem Bay State Park"]],
@@ -167,7 +177,7 @@ describe("the seed saves (#111 i2)", () => {
       ["Tillamook, OR", ["Cape Lookout State Park"]],
       ["Warrenton, OR", ["Fort Stevens State Park"]],
     ]);
-    expect(want.regions[1]!.destinations[0]!.saves.map((s) => [s.place.name, s.source])).toEqual([
+    expect(want.regions[1]!.areas[0]!.saves.map((s) => [s.place.name, s.source])).toEqual([
       ["El Chandelier", "Marcy"],
     ]);
     expect(want.unanchored.map((s) => s.place.name)).toEqual(["pin in the Alvord Desert", "Kalaloch Campground"]);
@@ -184,11 +194,11 @@ describe("the seed saves (#111 i2)", () => {
 
   it("has South Beach on the Been there shelf, ★5, under Newport, OR · Oregon, visited on the coast trip", () => {
     const south = seedSaves().find((s) => s.name === "South Beach State Park")!;
-    expect(south).toMatchObject({ status: "been", rating: 5, trip: "trip_coast", destination: "newport" });
+    expect(south).toMatchObject({ status: "been", rating: 5, trip: "trip_coast", area: "newport" });
     expect(byKey.get("newport")).toMatchObject({ name: "Newport, OR", region: "Oregon" });
     const been = savesShelves(library, "been");
     expect(been.regions[0]!.region).toBe("Oregon");
-    expect(been.regions[0]!.destinations[0]!.saves.map((s) => s.place.name)).toContain("South Beach State Park");
+    expect(been.regions[0]!.areas[0]!.saves.map((s) => s.place.name)).toContain("South Beach State Park");
   });
 
   it("hangs the one Q3 A suggestion on the offline 'chandel' note", () => {
@@ -198,19 +208,19 @@ describe("the seed saves (#111 i2)", () => {
     ]);
   });
 
-  it("files every anchored save within 25 mi of its destination, and names only real trips", () => {
+  it("files every anchored save within 25 mi of its area, and names only real trips", () => {
     const tripIds = new Set(seedTrips().map((t) => t.id));
     for (const s of seedSaves()) {
       if (s.trip) expect(tripIds.has(s.trip)).toBe(true);
-      if (!s.destination) continue;
-      const d = byKey.get(s.destination);
+      if (!s.area) continue;
+      const d = byKey.get(s.area);
       expect(d, s.name).toBeDefined();
       const mi = haversineMeters({ lat: s.lat!, lng: s.lng! }, d!) / 1609.344;
-      expect(mi, s.name).toBeLessThanOrEqual(DESTINATION_MAX_MILES);
+      expect(mi, s.name).toBeLessThanOrEqual(AREA_MAX_MILES);
     }
   });
 
-  it("keeps destination place ids unique — the (owner, google_place_id) unique", () => {
+  it("keeps area place ids unique — the (owner, google_place_id) unique", () => {
     expect(new Set(dests.map((d) => d.googlePlaceId)).size).toBe(dests.length);
   });
 });
@@ -219,10 +229,10 @@ describe("the complete trips' journals (#146)", () => {
   it("Oregon Coast Weekend journals the design's 4 · 3 · 1 · 1", () => {
     const j = tripJournal(coastWeekendTrip());
     expect(j.tally).toEqual({ logged: 4, again: 3, once: 1, skipped: 1 });
-    expect(j.stops.map((g) => [g.stop.place.name, g.rating, g.again])).toEqual([
+    expect(j.destinations.map((g) => [g.destination.place.name, g.rating, g.again])).toEqual([
       ["Newport, OR", 5, true],
     ]);
-    expect(j.stops[0]!.entries.map((e) => e.name)).toEqual([
+    expect(j.destinations[0]!.entries.map((e) => e.name)).toEqual([
       "Local Ocean Seafoods",
       "South Beach State Park",
       "Oregon Coast Aquarium",
@@ -234,8 +244,8 @@ describe("the complete trips' journals (#146)", () => {
   it("Yellowstone & Tetons journals its two Been saves, 2 · 0 · 0 · 0", () => {
     const j = tripJournal(yellowstoneTrip());
     expect(j.tally).toEqual({ logged: 2, again: 0, once: 0, skipped: 0 });
-    expect(j.stops.map((g) => g.stop.place.name)).toEqual(["Fishing Bridge, WY"]);
-    expect(j.stops[0]!.entries.map((e) => e.name)).toEqual([
+    expect(j.destinations.map((g) => g.destination.place.name)).toEqual(["Fishing Bridge, WY"]);
+    expect(j.destinations[0]!.entries.map((e) => e.name)).toEqual([
       "Fishing Bridge RV Park",
       "Old Faithful Loop",
     ]);

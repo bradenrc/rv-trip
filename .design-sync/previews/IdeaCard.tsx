@@ -7,7 +7,7 @@ export const AnIdea = () => (
     <IdeaCard
       idea={{
         id: "i1",
-        stopId: "s1",
+        destinationId: "s1",
         title: "Deschutes River float",
         status: "idea",
         place: null,
@@ -31,7 +31,7 @@ export const Done = () => (
     <IdeaCard
       idea={{
         id: "i2",
-        stopId: "s1",
+        destinationId: "s1",
         title: "Oregon Coast Aquarium",
         status: "done",
         place: null,

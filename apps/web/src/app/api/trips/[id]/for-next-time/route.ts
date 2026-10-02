@@ -5,7 +5,7 @@ import { nextTimeFor } from "@/lib/next-time";
 
 /**
  * "For next time" (#113 · #107, Q7 B · Q8 B): one "Last time here" card per
- * past trip × destination this trip goes back near — core's pure
+ * past trip × area this trip goes back near — core's pure
  * `forNextTime` over three owner-scoped reads. The phone's Route lens draws it
  * above the nearby banner; the web computes the same function in its page.
  */

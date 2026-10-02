@@ -14,7 +14,7 @@ import type {
 import { SURFACE_RADII } from "../domain/types";
 import { haversineMeters } from "../providers/index";
 import { categoryOf } from "../theme/tokens";
-import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedStops, shelfMiles, type StopAnchor } from "./shelf";
+import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedDestinations, shelfMiles, type DestinationAnchor } from "./shelf";
 
 /**
  * Trip surfacing (#111 i3 · docs/design/111 "#102 · trip surfacing", Q6 A ·
@@ -27,29 +27,29 @@ import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedStops, shelfMiles, type StopAnc
  * this.
  */
 
-/** One save, measured: the save, its nearest located stop, and the raw miles. */
+/** One save, measured: the save, its nearest located destination, and the raw miles. */
 interface Measured {
   save: SavedPlace;
-  stop: StopAnchor;
+  destination: DestinationAnchor;
   mi: number;
 }
 
 /**
  * The point a save is measured FROM: its own lat/lng, or — for an area save
- * that has none (a web note, "in the Bandon area") — its destination's. A save
- * with neither measures nothing and is skipped. The destination's point is used
+ * that has none (a web note, "in the Bandon area") — its area's. A save
+ * with neither measures nothing and is skipped. The area's point is used
  * for distance ONLY; the match against the trip's ideas (`isAlreadySaved`)
  * sees the save's own coordinates (rule 4 in domain/places.ts: borrowed
  * coordinates never enter a comparison).
  */
 function pointOf(s: SavedPlace): { lat: number; lng: number } | null {
   if (hasCoords(s.place)) return { lat: s.place.lat, lng: s.place.lng };
-  const d = s.destination;
+  const d = s.area;
   if (d && d.lat !== null && d.lng !== null) return { lat: d.lat, lng: d.lng };
   return null;
 }
 
-function nearest(point: { lat: number; lng: number }, anchors: StopAnchor[]): { stop: StopAnchor; mi: number } {
+function nearest(point: { lat: number; lng: number }, anchors: DestinationAnchor[]): { destination: DestinationAnchor; mi: number } {
   let best = anchors[0]!;
   let bestM = haversineMeters(point, best);
   for (const a of anchors.slice(1)) {
@@ -59,14 +59,14 @@ function nearest(point: { lat: number; lng: number }, anchors: StopAnchor[]): { 
       bestM = m;
     }
   }
-  return { stop: best, mi: bestM / METERS_PER_MILE };
+  return { destination: best, mi: bestM / METERS_PER_MILE };
 }
 
 /** Every idea already on the trip — the shelf's AND the ones attached to a
- * stop, since an added save dragged onto a stop is still on this trip. Only an
+ * destination, since an added save dragged onto a destination is still on this trip. Only an
  * idea with a place can match a save. */
 function ideaPlaces(trip: Trip): MatchCandidate[] {
-  const all: Idea[] = [...trip.ideas, ...trip.legs.flatMap((l) => l.stops.flatMap((s) => s.ideas))];
+  const all: Idea[] = [...trip.ideas, ...trip.chapters.flatMap((l) => l.destinations.flatMap((s) => s.ideas))];
   return all.flatMap((i) => (i.place ? [i.place] : []));
 }
 
@@ -78,7 +78,7 @@ export function nextSurfaceRing(radiusMi: number): SurfaceRadiusMi | null {
 const oneDecimal = (mi: number) => Math.round(mi * 10) / 10;
 
 /**
- * The saves within `radiusMi` of a located stop (floating stops count),
+ * The saves within `radiusMi` of a located destination (floating destinations count),
  * nearest first, and the `beyond` hint for the next ring out.
  *
  * - `radiusMi` null → `NEAR_RADIUS_MI` (the trip has never picked a chip).
@@ -101,7 +101,7 @@ export function nearbySaves(
   excludedSaveIds: Iterable<string> = [],
 ): NearbySaves {
   const radius = radiusMi ?? NEAR_RADIUS_MI;
-  const anchors = locatedStops(trip);
+  const anchors = locatedDestinations(trip);
   if (anchors.length === 0) return { radiusMi: radius, items: [], beyond: null };
 
   const dismissed = new Set([...dismissedSaveIds, ...excludedSaveIds]);
@@ -113,8 +113,8 @@ export function nearbySaves(
     const point = pointOf(save);
     if (!point) continue;
     if (isAlreadySaved(save.place, onTrip)) continue;
-    const { stop, mi } = nearest(point, anchors);
-    measured.push({ save, stop, mi });
+    const { destination, mi } = nearest(point, anchors);
+    measured.push({ save, destination, mi });
   }
   measured.sort((a, b) => a.mi - b.mi || a.save.place.name.localeCompare(b.save.place.name));
 
@@ -136,7 +136,7 @@ export function nearbySaves(
   return { radiusMi: radius, items, beyond };
 }
 
-function toItem({ save, stop, mi }: Measured): NearbySave {
+function toItem({ save, destination, mi }: Measured): NearbySave {
   return {
     saveId: save.id,
     name: save.place.name,
@@ -145,7 +145,7 @@ function toItem({ save, stop, mi }: Measured): NearbySave {
     rating: save.rating,
     source: save.source,
     place: save.place,
-    nearestStop: { id: stop.id, name: stop.name },
+    nearestDestination: { id: destination.id, name: destination.name },
     distanceMi: shelfMiles(mi),
   };
 }
@@ -163,7 +163,7 @@ export function nearbyBanner(
 ): { title: string; sub: string; dismiss: string } {
   return {
     title: n === 1 ? "1 of your saves is near this trip" : `${n} of your saves are near this trip`,
-    sub: `within ${radiusMi} mi of a stop · ${verb}`,
+    sub: `within ${radiusMi} mi of a destination · ${verb}`,
     dismiss: "Dismiss",
   };
 }
@@ -178,11 +178,11 @@ export function nearbyCountLabel(n: number): string {
   return `${n} save${n === 1 ? "" : "s"}`;
 }
 
-/** A row's second line: distance · nearest stop · who. A been save reads
+/** A row's second line: distance · nearest destination · who. A been save reads
  * "Been" there — the Stars are drawn after it. */
 export function nearbyRowLine(item: NearbySave): string {
   const who = item.status === "been" ? "Been" : item.source;
-  return [`${item.distanceMi} mi`, item.nearestStop.name, who].filter(Boolean).join(" · ");
+  return [`${item.distanceMi} mi`, item.nearestDestination.name, who].filter(Boolean).join(" · ");
 }
 
 /** The dashed line under the rows: "**1 more just past 50 mi**, the nearest at
@@ -223,7 +223,7 @@ export function ideaCategoryOfSaveType(type: NearbySave["type"]): IdeaCategory {
 }
 
 /**
- * Add → the shipped `POST /api/ideas` body: a shelf idea (`stopId` null) that
+ * Add → the shipped `POST /api/ideas` body: a shelf idea (`destinationId` null) that
  * COPIES the save — name, place, type as category, source as the note — the
  * same one-way copy as the web's "Add from Places" (TripPlanner
  * `addIdeaFromPlace`). No link back to the save.
@@ -231,7 +231,7 @@ export function ideaCategoryOfSaveType(type: NearbySave["type"]): IdeaCategory {
 export function nearbyIdeaBody(tripId: string, item: NearbySave): IdeaCreateInput {
   return {
     tripId,
-    stopId: null,
+    destinationId: null,
     category: ideaCategoryOfSaveType(item.type),
     title: item.name,
     status: "idea",

@@ -58,7 +58,7 @@ const TILE_TYPE: Record<IdeaCategory, ReservationType> = {
   do: "activity",
 };
 
-/** "Ideas · N" — the trip's shelf ideas (`stopId` null), compact. */
+/** "Ideas · N" — the trip's shelf ideas (`destinationId` null), compact. */
 export function IdeasSection({ trip }: { trip: Trip }) {
   const rows = useMemo(() => shelfIdeas(trip), [trip]);
   return (
@@ -77,7 +77,7 @@ export function IdeasSection({ trip }: { trip: Trip }) {
                 </Text>
                 {r.distanceMi !== null && (
                   <Text style={styles.rowLine} numberOfLines={1}>
-                    {r.distanceMi} mi · {r.nearestStopName}
+                    {r.distanceMi} mi · {r.nearestDestinationName}
                   </Text>
                 )}
               </View>

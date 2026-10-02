@@ -12,7 +12,7 @@ import type { CachedNavCheck, CachedRoute } from "@rv-trip/db";
  * The three-layer read path (docs/design/43 §1): in-process Map → `routes`
  * table → vendor. This is the only apps/web test with NO database: both seams
  * it exercises — the table and HERE — are the two things the issue exists to
- * stop calling, so they are the two things this file fakes. The real db suite
+ * destination calling, so they are the two things this file fakes. The real db suite
  * covers `getCachedRoutes`/`putCachedRoutes` (packages/db) against Postgres.
  *
  * Every case re-imports ./routing through `vi.resetModules()`, because the
@@ -339,16 +339,16 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
     surfaceRadiusMi: null,
     ideas: [],
     segments: [],
-    legs: [
+    chapters: [
       {
         id: "l1",
         tripId: "t1",
         title: "Coast",
         sortOrder: 0,
-        stops: [
+        destinations: [
           {
             id: "s1",
-            legId: "l1",
+            chapterId: "l1",
             sortOrder: 0,
             place: { name: "Astoria", lat: astoria.lat, lng: astoria.lng, googlePlaceId: null },
             arriveDate: "2026-08-02",
@@ -362,7 +362,7 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
           },
           {
             id: "s2",
-            legId: "l1",
+            chapterId: "l1",
             sortOrder: 1,
             place: { name: "Newport", lat: newport.lat, lng: newport.lng, googlePlaceId: null },
             arriveDate: "2026-08-04",
@@ -398,8 +398,8 @@ describe("routeTrip: the nav resolution is opt-in per caller", () => {
         {
           id: "seg1",
           tripId: "t1",
-          fromStopId: "s1",
-          toStopId: "s2",
+          fromDestinationId: "s1",
+          toDestinationId: "s2",
           mode: "fly" as const,
           departAt: null,
           arriveAt: null,

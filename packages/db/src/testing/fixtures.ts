@@ -2,16 +2,16 @@ import { asc, count, eq, sql } from "drizzle-orm";
 import type { SuggestedPlace } from "@rv-trip/core";
 import { db } from "../index";
 import {
-  destinations,
+  areas,
   ideas,
-  legs,
+  chapters,
   reservations,
   rigs,
   routes,
   saves,
   tripDismissedSaves,
   travelSegments,
-  stops,
+  destinations,
   trips,
   userPrefs,
 } from "../schema";
@@ -46,8 +46,8 @@ export const DEV_OWNER = "dev-household";
 export const OTHER_OWNER = "other-user";
 
 export type TripRow = typeof trips.$inferSelect;
-export type LegRow = typeof legs.$inferSelect;
-export type StopRow = typeof stops.$inferSelect;
+export type ChapterRow = typeof chapters.$inferSelect;
+export type DestinationRow = typeof destinations.$inferSelect;
 export type IdeaRow = typeof ideas.$inferSelect;
 export type ReservationRow = typeof reservations.$inferSelect;
 export type SavedPlaceRow = typeof saves.$inferSelect;
@@ -56,9 +56,9 @@ export type SegmentRow = typeof travelSegments.$inferSelect;
 export type RouteRow = typeof routes.$inferSelect;
 export type UserPrefsRow = typeof userPrefs.$inferSelect;
 
-/** A stop the route helpers accept: `routeCacheKey`/`estimateRoute` want
- * non-nullable lat/lng, and `stops.lat`/`lng` are nullable columns. */
-export type PlacedStopRow = StopRow & { lat: number; lng: number };
+/** A destination the route helpers accept: `routeCacheKey`/`estimateRoute` want
+ * non-nullable lat/lng, and `destinations.lat`/`lng` are nullable columns. */
+export type PlacedDestinationRow = DestinationRow & { lat: number; lng: number };
 
 export interface TripSeed {
   owner: string;
@@ -82,12 +82,12 @@ export interface TripSeed {
   rigOn: boolean;
 }
 
-export interface LegSeed {
-  title: string;
+export interface ChapterSeed {
+  title: string | null;
   sortOrder: number;
 }
 
-export interface StopSeed {
+export interface DestinationSeed {
   placeName: string;
   lat: number | null;
   lng: number | null;
@@ -101,9 +101,9 @@ export interface StopSeed {
 
 export interface IdeaSeed {
   title: string;
-  /** #80: an idea belongs to the TRIP; the stop is optional. Passing
-   * `stopId: null` seeds a SHELF idea. */
-  stopId: string | null;
+  /** #80: an idea belongs to the TRIP; the destination is optional. Passing
+   * `destinationId: null` seeds a SHELF idea. */
+  destinationId: string | null;
   category: "do" | "eat" | "stay";
   status: "idea" | "planned" | "done";
   placeName: string | null;
@@ -155,11 +155,11 @@ export interface PlaceSeed {
   tripId: string | null;
   /** #111: the phone's capture id. */
   clientId: string | null;
-  /** #111 i2: override the derived anchor / label, attach a destination row,
+  /** #111 i2: override the derived anchor / label, attach an area row,
    * or hang a pending Q3 A suggestion on the save. */
   anchor: "place" | "area" | "pin";
   areaLabel: string | null;
-  destinationId: string | null;
+  areaId: string | null;
   suggestedPlace: SuggestedPlace | null;
 }
 
@@ -174,16 +174,16 @@ export interface RigSeed {
   propaneOnBoard: boolean;
 }
 
-/** The worked trip, whole — 2 legs, exactly 3 coordinate-bearing scheduled
- * stops (so `orderedPairs` yields exactly two route keys), 1 reservation,
+/** The worked trip, whole — 2 chapters, exactly 3 coordinate-bearing scheduled
+ * destinations (so `orderedPairs` yields exactly two route keys), 1 reservation,
  * 1 idea. The bundle fixture (§6.5). */
 export interface LoopFixture {
   trip: TripRow;
-  legCoast: LegRow;
-  legMountains: LegRow;
-  astoria: PlacedStopRow;
-  newport: PlacedStopRow;
-  bend: PlacedStopRow;
+  chapterCoast: ChapterRow;
+  chapterMountains: ChapterRow;
+  astoria: PlacedDestinationRow;
+  newport: PlacedDestinationRow;
+  bend: PlacedDestinationRow;
   reservation: ReservationRow;
   idea: IdeaRow;
 }
@@ -209,23 +209,24 @@ async function insertTrip(p: Partial<TripSeed> = {}): Promise<TripRow> {
   return row!;
 }
 
-async function insertLeg(p: { tripId: string } & Partial<LegSeed>): Promise<LegRow> {
+async function insertChapter(p: { tripId: string } & Partial<ChapterSeed>): Promise<ChapterRow> {
   const [row] = await db
-    .insert(legs)
+    .insert(chapters)
     .values({
       tripId: p.tripId,
-      title: p.title ?? "Oregon Coast",
+      // `undefined` → the default name; an explicit null is an unnamed chapter (#155).
+      title: p.title === undefined ? "Oregon Coast" : p.title,
       sortOrder: p.sortOrder ?? 0,
     })
     .returning();
   return row!;
 }
 
-async function insertStop(p: { legId: string } & Partial<StopSeed>): Promise<StopRow> {
+async function insertDestination(p: { chapterId: string } & Partial<DestinationSeed>): Promise<DestinationRow> {
   const [row] = await db
-    .insert(stops)
+    .insert(destinations)
     .values({
-      legId: p.legId,
+      chapterId: p.chapterId,
       placeName: p.placeName ?? "Astoria, OR",
       lat: p.lat === undefined ? 46.1879 : p.lat,
       lng: p.lng === undefined ? -123.8313 : p.lng,
@@ -245,7 +246,7 @@ async function insertIdea(p: { tripId: string } & Partial<IdeaSeed>): Promise<Id
     .insert(ideas)
     .values({
       tripId: p.tripId,
-      stopId: p.stopId === undefined ? null : p.stopId,
+      destinationId: p.destinationId === undefined ? null : p.destinationId,
       title: p.title ?? "Fort Stevens bike loop",
       category: p.category ?? "do",
       status: p.status ?? "idea",
@@ -262,12 +263,12 @@ async function insertIdea(p: { tripId: string } & Partial<IdeaSeed>): Promise<Id
 }
 
 async function insertReservation(
-  p: { stopId: string } & Partial<ResSeed>,
+  p: { destinationId: string } & Partial<ResSeed>,
 ): Promise<ReservationRow> {
   const [row] = await db
     .insert(reservations)
     .values({
-      stopId: p.stopId,
+      destinationId: p.destinationId,
       type: p.type ?? "campground",
       name: p.name ?? "Astoria/Warrenton KOA",
       checkIn: p.checkIn === undefined ? "2026-08-02" : p.checkIn,
@@ -302,7 +303,7 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
             : p.region === undefined
               ? "Tillamook, OR"
               : p.region,
-      destinationId: p.destinationId ?? null,
+      areaId: p.areaId ?? null,
       suggestedPlace: p.suggestedPlace ?? null,
       type: p.type ?? "campground",
       status: p.status ?? "want",
@@ -317,12 +318,12 @@ async function insertSavedPlace(p: Partial<PlaceSeed> = {}): Promise<SavedPlaceR
   return row!;
 }
 
-/** A destinations row (#111), Bandon unless told otherwise. */
-async function insertDestination(
+/** A areas row (#111), Bandon unless told otherwise. */
+async function insertArea(
   p: Partial<{ owner: string; googlePlaceId: string; name: string; region: string | null; lat: number | null; lng: number | null }> = {},
 ) {
   const [row] = await db
-    .insert(destinations)
+    .insert(areas)
     .values({
       ownerId: p.owner ?? DEV_OWNER,
       googlePlaceId: p.googlePlaceId ?? "ChIJbandon",
@@ -352,25 +353,25 @@ async function insertRig(p: Partial<RigSeed> = {}): Promise<RigRow> {
   return row!;
 }
 
-/** `stops.lat`/`lng` are nullable columns; the route helpers are not. */
-function placed(row: StopRow): PlacedStopRow {
+/** `destinations.lat`/`lng` are nullable columns; the route helpers are not. */
+function placed(row: DestinationRow): PlacedDestinationRow {
   if (row.lat == null || row.lng == null) {
-    throw new Error(`fixture stop "${row.placeName}" has no coordinates`);
+    throw new Error(`fixture destination "${row.placeName}" has no coordinates`);
   }
-  return row as PlacedStopRow;
+  return row as PlacedDestinationRow;
 }
 
 async function pacificNorthwestLoop(owner: string = DEV_OWNER): Promise<LoopFixture> {
   const trip = await insertTrip({ owner });
-  const legCoast = await insertLeg({ tripId: trip.id, title: "Oregon Coast", sortOrder: 0 });
-  const legMountains = await insertLeg({
+  const chapterCoast = await insertChapter({ tripId: trip.id, title: "Oregon Coast", sortOrder: 0 });
+  const chapterMountains = await insertChapter({
     tripId: trip.id,
     title: "Cascades & Home",
     sortOrder: 1,
   });
   const astoria = placed(
-    await insertStop({
-      legId: legCoast.id,
+    await insertDestination({
+      chapterId: chapterCoast.id,
       placeName: "Astoria, OR",
       lat: 46.1879,
       lng: -123.8313,
@@ -382,8 +383,8 @@ async function pacificNorthwestLoop(owner: string = DEV_OWNER): Promise<LoopFixt
     }),
   );
   const newport = placed(
-    await insertStop({
-      legId: legCoast.id,
+    await insertDestination({
+      chapterId: chapterCoast.id,
       placeName: "Newport, OR",
       lat: 44.6365,
       lng: -124.053,
@@ -394,8 +395,8 @@ async function pacificNorthwestLoop(owner: string = DEV_OWNER): Promise<LoopFixt
     }),
   );
   const bend = placed(
-    await insertStop({
-      legId: legMountains.id,
+    await insertDestination({
+      chapterId: chapterMountains.id,
       placeName: "Bend, OR",
       lat: 44.0582,
       lng: -121.3153,
@@ -405,12 +406,12 @@ async function pacificNorthwestLoop(owner: string = DEV_OWNER): Promise<LoopFixt
     }),
   );
   const reservation = await insertReservation({
-    stopId: astoria.id,
+    destinationId: astoria.id,
     rating: 5,
     notes: "Full hookups, site A12 backs to the trees.",
   });
-  const idea = await insertIdea({ tripId: trip.id, stopId: astoria.id });
-  return { trip, legCoast, legMountains, astoria, newport, bend, reservation, idea };
+  const idea = await insertIdea({ tripId: trip.id, destinationId: astoria.id });
+  return { trip, chapterCoast, chapterMountains, astoria, newport, bend, reservation, idea };
 }
 
 /**
@@ -425,13 +426,13 @@ async function ageCachedRoute(key: string, days: number): Promise<void> {
     .where(eq(routes.key, key));
 }
 
-/** A travel segment (#110). Fixtures write stops directly, so a trip built
+/** A travel segment (#110). Fixtures write destinations directly, so a trip built
  * here has NO hops until a mutation reconciles it — this is how a test plants
  * a timed one (a flight) to reconcile or conflict against. */
 async function insertSegment(p: {
   tripId: string;
-  fromStopId: string | null;
-  toStopId: string | null;
+  fromDestinationId: string | null;
+  toDestinationId: string | null;
   mode?: "drive" | "fly" | "ferry";
   departAt?: string | null;
   arriveAt?: string | null;
@@ -443,8 +444,8 @@ async function insertSegment(p: {
     .insert(travelSegments)
     .values({
       tripId: p.tripId,
-      fromStopId: p.fromStopId,
-      toStopId: p.toStopId,
+      fromDestinationId: p.fromDestinationId,
+      toDestinationId: p.toDestinationId,
       mode: p.mode ?? "drive",
       departAt: p.departAt ? new Date(p.departAt) : null,
       arriveAt: p.arriveAt ? new Date(p.arriveAt) : null,
@@ -518,12 +519,12 @@ export const fx = {
   prefs: insertPrefs,
   /** Backdate a cached route, so the 30-day TTL can be read from both sides. */
   ageCachedRoute,
-  leg: insertLeg,
-  stop: insertStop,
+  chapter: insertChapter,
+  destination: insertDestination,
   idea: insertIdea,
   reservation: insertReservation,
   savedPlace: insertSavedPlace,
-  destination: insertDestination,
+  area: insertArea,
   segment: insertSegment,
   rig: insertRig,
   pacificNorthwestLoop,
@@ -539,12 +540,12 @@ export const read = {
     const [row] = await db.select().from(trips).where(eq(trips.id, id));
     return row ?? null;
   },
-  async leg(id: string): Promise<LegRow | null> {
-    const [row] = await db.select().from(legs).where(eq(legs.id, id));
+  async chapter(id: string): Promise<ChapterRow | null> {
+    const [row] = await db.select().from(chapters).where(eq(chapters.id, id));
     return row ?? null;
   },
-  async stop(id: string): Promise<StopRow | null> {
-    const [row] = await db.select().from(stops).where(eq(stops.id, id));
+  async destination(id: string): Promise<DestinationRow | null> {
+    const [row] = await db.select().from(destinations).where(eq(destinations.id, id));
     return row ?? null;
   },
   async idea(id: string): Promise<IdeaRow | null> {
@@ -579,13 +580,13 @@ export const read = {
       .where(eq(tripDismissedSaves.tripId, tripId));
     return rows.map((r) => r.saveId).sort();
   },
-  /** An owner's destinations rows (#111), oldest first. */
-  async destinations(owner: string): Promise<(typeof destinations.$inferSelect)[]> {
+  /** An owner's areas rows (#111), oldest first. */
+  async areas(owner: string): Promise<(typeof areas.$inferSelect)[]> {
     return db
       .select()
-      .from(destinations)
-      .where(eq(destinations.ownerId, owner))
-      .orderBy(asc(destinations.createdAt));
+      .from(areas)
+      .where(eq(areas.ownerId, owner))
+      .orderBy(asc(areas.createdAt));
   },
   /** The ROW, not the payload: `RigProfile` carries no timestamp (C3), so the
    * upsert's touch can only be asserted here. */
@@ -601,39 +602,39 @@ export const read = {
     const [row] = await db.select().from(rigs).where(eq(rigs.ownerId, owner));
     return row ?? null;
   },
-  /** Leg ids, by sortOrder. */
-  async legOrder(tripId: string): Promise<string[]> {
+  /** Chapter ids, by sortOrder. */
+  async chapterOrder(tripId: string): Promise<string[]> {
     const rows = await db
-      .select({ id: legs.id })
-      .from(legs)
-      .where(eq(legs.tripId, tripId))
-      .orderBy(asc(legs.sortOrder));
+      .select({ id: chapters.id })
+      .from(chapters)
+      .where(eq(chapters.tripId, tripId))
+      .orderBy(asc(chapters.sortOrder));
     return rows.map((r) => r.id);
   },
-  async legRows(tripId: string): Promise<{ id: string; sortOrder: number }[]> {
+  async chapterRows(tripId: string): Promise<{ id: string; sortOrder: number }[]> {
     return db
-      .select({ id: legs.id, sortOrder: legs.sortOrder })
-      .from(legs)
-      .where(eq(legs.tripId, tripId))
-      .orderBy(asc(legs.sortOrder));
+      .select({ id: chapters.id, sortOrder: chapters.sortOrder })
+      .from(chapters)
+      .where(eq(chapters.tripId, tripId))
+      .orderBy(asc(chapters.sortOrder));
   },
-  async stopRows(legId: string): Promise<{ id: string; sortOrder: number }[]> {
+  async destinationRows(chapterId: string): Promise<{ id: string; sortOrder: number }[]> {
     return db
-      .select({ id: stops.id, sortOrder: stops.sortOrder })
-      .from(stops)
-      .where(eq(stops.legId, legId))
-      .orderBy(asc(stops.sortOrder));
+      .select({ id: destinations.id, sortOrder: destinations.sortOrder })
+      .from(destinations)
+      .where(eq(destinations.chapterId, chapterId))
+      .orderBy(asc(destinations.sortOrder));
   },
-  async countLegs(tripId: string): Promise<number> {
-    const [row] = await db.select({ n: count() }).from(legs).where(eq(legs.tripId, tripId));
+  async countChapters(tripId: string): Promise<number> {
+    const [row] = await db.select({ n: count() }).from(chapters).where(eq(chapters.tripId, tripId));
     return Number(row!.n);
   },
-  async countStops(legId: string): Promise<number> {
-    const [row] = await db.select({ n: count() }).from(stops).where(eq(stops.legId, legId));
+  async countDestinations(chapterId: string): Promise<number> {
+    const [row] = await db.select({ n: count() }).from(destinations).where(eq(destinations.chapterId, chapterId));
     return Number(row!.n);
   },
-  async countIdeas(stopId: string): Promise<number> {
-    const [row] = await db.select({ n: count() }).from(ideas).where(eq(ideas.stopId, stopId));
+  async countIdeas(destinationId: string): Promise<number> {
+    const [row] = await db.select({ n: count() }).from(ideas).where(eq(ideas.destinationId, destinationId));
     return Number(row!.n);
   },
   /** Every idea on a trip, attached or on the shelf (#80). */
@@ -641,11 +642,11 @@ export const read = {
     const [row] = await db.select({ n: count() }).from(ideas).where(eq(ideas.tripId, tripId));
     return Number(row!.n);
   },
-  async countReservations(stopId: string): Promise<number> {
+  async countReservations(destinationId: string): Promise<number> {
     const [row] = await db
       .select({ n: count() })
       .from(reservations)
-      .where(eq(reservations.stopId, stopId));
+      .where(eq(reservations.destinationId, destinationId));
     return Number(row!.n);
   },
   async countSavedPlaces(owner: string): Promise<number> {

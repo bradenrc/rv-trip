@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
@@ -20,9 +20,12 @@ import type {
   TravelMode,
 } from "@rv-trip/core";
 import {
+  areaSubtitle,
   dayKindColor,
+  logisticsModel,
+  routeCountKicker,
   setIdeaFields,
-  setStopReservationFields,
+  setDestinationReservationFields,
   fullRange,
   nightsLabel,
   rangeNights,
@@ -32,7 +35,7 @@ import {
   routeSummary,
   timelineModel,
   tripArcs,
-  tripStopPins,
+  tripDestinationPins,
 } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
 import { NearbyBanner, NearbySheet } from "../../../../../src/nearby";
@@ -40,15 +43,18 @@ import {
   HopActionSheet,
   HopBookingSheet,
   HopRow,
+  LogisticsSection,
   MODE_OPTIONS,
+  ShuttleSheet,
   switchHop,
+  type HopRef,
 } from "../../../../../src/hops";
 import { RoundTripSheet } from "../../../../../src/round-trip";
 import {
   AddIdeaSheet,
   AddSheet,
   AddStaySheetPhone,
-  AddStopSheet,
+  AddDestinationSheet,
   IdeasTab,
 } from "../../../../../src/itinerary";
 import { queuePatch } from "../../../../../src/capture";
@@ -105,8 +111,8 @@ export default function TripScreen() {
   // #131 · the trip's + Add and the sheets it opens.
   const [addOpen, setAddOpen] = useState(false);
   const [flightOpen, setFlightOpen] = useState(false);
-  const [stayFor, setStayFor] = useState<{ stopId: string | null } | null>(null);
-  const [stopOpen, setStopOpen] = useState(false);
+  const [stayFor, setStayFor] = useState<{ destinationId: string | null } | null>(null);
+  const [destinationOpen, setDestinationOpen] = useState(false);
   const [ideaKind, setIdeaKind] = useState<IdeaCategory | null>(null);
   const [mode, setMode] = useStyleMode();
   const router = useRouter();
@@ -119,13 +125,20 @@ export default function TripScreen() {
   const [reviewing, setReviewing] = useState(false);
   // #104 · the hop sheets: a drive row's ⋯ (a drive trip) and Add flight/ferry.
   const [menuSegment, setMenuSegment] = useState<string | null>(null);
-  const [bookingHop, setBookingHop] = useState<RouteHop | null>(null);
+  const [bookingHop, setBookingHop] = useState<HopRef | null>(null);
+  // #155 · Q4 A — "+ Add shuttle" (and a shuttle/train/car row's Edit).
+  const [shuttleHop, setShuttleHop] = useState<HopRef | null>(null);
+  // #155 · Q3 B — the hop chip scrolls the Route to its Logistics group: the
+  // ScrollView, the section's y in it, and each group's y in the section.
+  const scrollRef = useRef<ScrollView>(null);
+  const logisticsY = useRef(0);
+  const groupY = useRef(new Map<string, number>());
   // #143 · the booking line tapped — its hop's sheet opens as Edit flight/ferry.
   const [editingBookingId, setEditingBookingId] = useState<string | null>(null);
 
   // The same two models the web planner renders — from @rv-trip/core/planner.
   const timeline = useMemo(() => (bundle ? timelineModel(bundle.trip) : null), [bundle]);
-  const legs = useMemo(
+  const chapters = useMemo(
     () => (bundle ? routeModel(bundle.trip, bundle.routes, bundle.rigHash) : []),
     [bundle],
   );
@@ -133,6 +146,7 @@ export default function TripScreen() {
     () => (bundle ? routeSummary(bundle.trip, bundle.routes, bundle.rigHash) : null),
     [bundle],
   );
+  const logistics = useMemo(() => (bundle ? logisticsModel(bundle.trip) : null), [bundle]);
 
   // The map's whole input, from the bundle the screen already holds — two pure
   // calls, no new endpoint and no second derivation. `rigHash` is the routing
@@ -142,7 +156,7 @@ export default function TripScreen() {
     () => (bundle ? tripArcs(bundle.trip, bundle.routes, bundle.rigHash) : []),
     [bundle],
   );
-  const pins = useMemo(() => (bundle ? tripStopPins(bundle.trip) : []), [bundle]);
+  const pins = useMemo(() => (bundle ? tripDestinationPins(bundle.trip) : []), [bundle]);
 
   if (!bundle) {
     return (
@@ -168,12 +182,12 @@ export default function TripScreen() {
     TRIP_MODE_CHOICES.find((c) => c.value === tripModeChoice(trip.defaultMode))?.label ?? "";
   const ideaCount =
     trip.ideas.filter((i) => i.status === "idea").length +
-    trip.legs.flatMap((l) => l.stops).flatMap((s) => s.ideas).filter((i) => i.status === "idea").length;
+    trip.chapters.flatMap((l) => l.destinations).flatMap((s) => s.ideas).filter((i) => i.status === "idea").length;
   // Q7 B: on a drive trip the mode lives in the drive row's ⋯; on a fly trip
   // every hop shows its Segmented.
   const driveTrip = trip.defaultMode === "drive";
-  const stopName = (sid: string | null) =>
-    sid === null ? "home" : (trip.legs.flatMap((l) => l.stops).find((s) => s.id === sid)?.place.name ?? "");
+  const destinationName = (sid: string | null) =>
+    sid === null ? "home" : (trip.chapters.flatMap((l) => l.destinations).find((s) => s.id === sid)?.place.name ?? "");
   const menuSeg = menuSegment ? trip.segments.find((s) => s.id === menuSegment) : undefined;
   const hopRow = (hop: RouteHop, flush: boolean) => (
     <HopRow
@@ -182,16 +196,13 @@ export default function TripScreen() {
       flush={flush}
       showSwitch
       onMode={(m) => switchHop(trip, hop.segmentId, m)}
-      onAdd={() => {
-        setEditingBookingId(null);
-        setBookingHop(hop);
-      }}
-      onEdit={(bookingId) => {
-        setEditingBookingId(bookingId);
-        setBookingHop(hop);
+      onChip={() => {
+        const y = groupY.current.get(hop.segmentId);
+        if (y !== undefined) scrollRef.current?.scrollTo({ y: logisticsY.current + y, animated: true });
       }}
     />
   );
+  const countKicker = routeCountKicker(trip);
   const driveRow = (drive: RouteDrive) => (
     <Drive
       drive={drive}
@@ -229,14 +240,14 @@ export default function TripScreen() {
     updateTrip(trip.id, (t) => ({ ...t, note }));
     api.trips.patch(trip.id, { note }).catch(() => void reload());
   };
-  /** A Journal row's sheet → the same queued PATCH the stop screen sends. */
+  /** A Journal row's sheet → the same queued PATCH the destination screen sends. */
   const logEntry = (e: JournalEntry, v: HowWasIt) => {
     setJournalEntry(null);
     const before = { rating: e.rating, again: e.again, notes: e.notes };
     const entity = e.kind;
     const apply = (f: HowWasIt) =>
       updateTrip(trip.id, (t) =>
-        entity === "idea" ? setIdeaFields(t, e.id, f) : setStopReservationFields(t, e.id, f),
+        entity === "idea" ? setIdeaFields(t, e.id, f) : setDestinationReservationFields(t, e.id, f),
       );
     apply(v);
     void queuePatch(entity, e.id, v, {
@@ -254,7 +265,7 @@ export default function TripScreen() {
       <Stack.Screen
         options={{
           title: trip.title,
-          // #103 · #143 · Edit opens Trip settings — Destination · Dates ·
+          // #103 · #143 · Edit opens Trip settings — Area · Dates ·
           // Starts from, then the setup's three blocks.
           headerRight: () => (
             <Pressable onPress={() => router.push(`/trips/new?edit=${trip.id}`)} hitSlop={8} accessibilityRole="button">
@@ -269,7 +280,7 @@ export default function TripScreen() {
             counts: there is no scroll below it to carry the rest. */}
         <View style={styles.masthead}>
           <Kicker color={C.accent}>
-            {[modeLabel, trip.destination?.name].filter(Boolean).join(" · ") || "Trip planner"}
+            {[modeLabel, trip.area?.name].filter(Boolean).join(" · ") || "Trip planner"}
           </Kicker>
           <Text style={styles.h1}>{trip.title}</Text>
           {lens !== "map" ? (
@@ -285,7 +296,7 @@ export default function TripScreen() {
             </>
           ) : (
             <Text style={styles.mono}>
-              {fullRange(trip.startDate, trip.endDate)} · {summary!.stops} stops · {arcs.length}{" "}
+              {fullRange(trip.startDate, trip.endDate)} · {summary!.destinations} destinations · {arcs.length}{" "}
               drive{arcs.length === 1 ? "" : "s"}
             </Text>
           )}
@@ -329,6 +340,7 @@ export default function TripScreen() {
           </View>
         ) : (
           <ScrollView
+            ref={scrollRef}
             contentContainerStyle={styles.content}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
           >
@@ -418,39 +430,72 @@ export default function TripScreen() {
               </>
             ) : (
             <>
-            {/* Route — legs → stops, drives between */}
-            {legs.map((leg) => (
-              <View key={leg.id} style={{ gap: 8, marginTop: 6 }}>
-                <Kicker>{leg.kicker}</Kicker>
-                <Text style={styles.h2}>{leg.name}</Text>
-                {leg.leadingHop && hopRow(leg.leadingHop, true)}
-                {leg.rows.map((row) => (
-                  <View key={row.stop.id} style={{ gap: 8 }}>
-                    <StopRow
+            {/* Route — chapters → destinations, drives between */}
+            {chapters.map((chapter, ci) => (
+              <View key={chapter.id} style={{ gap: 8, marginTop: 6 }}>
+                {/* #155 · Q1 A — a named chapter: "CHAPTER N" and its name; an
+                    unnamed one: no header. With no named chapter at all, the
+                    first carries the count kicker instead. */}
+                {chapter.name !== null ? (
+                  <View>
+                    {chapter.kicker && <Kicker>{chapter.kicker}</Kicker>}
+                    <Text style={styles.h2}>{chapter.name}</Text>
+                  </View>
+                ) : (
+                  ci === 0 && countKicker && <Kicker>{countKicker}</Kicker>
+                )}
+                {chapter.leadingHop && hopRow(chapter.leadingHop, true)}
+                {chapter.rows.map((row) => (
+                  <View key={row.destination.id} style={{ gap: 8 }}>
+                    <DestinationRow
                       row={row}
-                      wholeTrip={row.stop.arriveDate === trip.startDate && row.stop.departDate === trip.endDate}
-                      onPress={() => router.push(`/trips/${trip.id}/stops/${row.stop.id}`)}
-                      onAddStay={() => setStayFor({ stopId: row.stop.id })}
+                      subtitle={areaSubtitle(trip, row.destination.place.name)}
+                      wholeTrip={row.destination.arriveDate === trip.startDate && row.destination.departDate === trip.endDate}
+                      onPress={() => router.push(`/trips/${trip.id}/destinations/${row.destination.id}`)}
+                      onAddStay={() => setStayFor({ destinationId: row.destination.id })}
                     />
                     {row.drive && driveRow(row.drive)}
                     {row.hop && hopRow(row.hop, false)}
                   </View>
                 ))}
-                {(leg.outboundDrive || leg.outboundHop) && (
-                  <View style={{ gap: 6 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginLeft: 12 }}>
-                      <Kicker>{leg.outboundSeam}</Kicker>
-                      <View style={{ flex: 1, height: 1, backgroundColor: C.borderSoft }} />
-                    </View>
-                    {leg.outboundDrive && driveRow(leg.outboundDrive)}
-                    {leg.outboundHop && hopRow(leg.outboundHop, false)}
-                  </View>
-                )}
-                {leg.returnHop && hopRow(leg.returnHop, true)}
+                {/* #155 — no "LEG 1 → LEG 2" seam: the crossing stands on its own. */}
+                {chapter.outboundDrive && driveRow(chapter.outboundDrive)}
+                {chapter.outboundHop && hopRow(chapter.outboundHop, false)}
+                {chapter.returnHop && hopRow(chapter.returnHop, true)}
               </View>
             ))}
 
-            {/* Floating stops that have no leg row yet are already in the route list; the rail: */}
+            {/* #155 — "+ Add destination" at the foot of the list. */}
+            <Pressable onPress={() => setDestinationOpen(true)} accessibilityRole="button" style={styles.addDest}>
+              <Text style={styles.addDestText}>+ Add destination</Text>
+            </Pressable>
+
+            {/* #155 · Q3 B — flights, ferries and shuttles, after the destinations. */}
+            {logistics && (
+              <View onLayout={(e) => (logisticsY.current = e.nativeEvent.layout.y)}>
+                <LogisticsSection
+                  model={logistics}
+                  onGroupLayout={(segmentId, y) => groupY.current.set(segmentId, y)}
+                  onAdd={(g) => {
+                    setEditingBookingId(null);
+                    setBookingHop(g);
+                  }}
+                  onAddShuttle={(g) => {
+                    setEditingBookingId(null);
+                    setShuttleHop(g);
+                  }}
+                  onEdit={(g, bookingId) => {
+                    const r = trip.segments.flatMap((x) => x.reservations).find((x) => x.id === bookingId);
+                    const aside = r?.transportKind === "shuttle" || r?.transportKind === "train" || r?.transportKind === "car";
+                    setEditingBookingId(bookingId);
+                    if (aside) setShuttleHop(g);
+                    else setBookingHop(g);
+                  }}
+                />
+              </View>
+            )}
+
+            {/* Floating destinations that have no chapter row yet are already in the route list; the rail: */}
             <Card style={{ gap: 10, marginTop: 8 }}>
               <Kicker>On the road</Kicker>
               <View style={{ flexDirection: "row", alignItems: "baseline", gap: 6 }}>
@@ -458,7 +503,7 @@ export default function TripScreen() {
                 {summary!.driveMiles > 0 && <Text style={[styles.mono, { fontSize: 14 }]}>mi</Text>}
               </View>
               <Text style={styles.mono}>
-                {summary!.driveMiles > 0 ? `${summary!.driveTime} behind the wheel` : "add stops with places to estimate driving"}
+                {summary!.driveMiles > 0 ? `${summary!.driveTime} behind the wheel` : "add destinations with places to estimate driving"}
               </Text>
               {summary!.restrictionCount > 0 && (
                 <Text style={[styles.mono, { color: C.warning }]}>
@@ -473,7 +518,7 @@ export default function TripScreen() {
               )}
               <View style={{ height: 1, backgroundColor: C.borderSoft }} />
               <Text style={styles.mono}>
-                {summary!.stops} stops · {summary!.scheduled} set / {summary!.floating} floating · {summary!.openCount} open
+                {summary!.destinations} destinations · {summary!.scheduled} set / {summary!.floating} floating · {summary!.openCount} open
                 day{summary!.openCount === 1 ? "" : "s"} in {summary!.gapCount} gap{summary!.gapCount === 1 ? "" : "s"}
               </Text>
             </Card>
@@ -485,11 +530,24 @@ export default function TripScreen() {
       </View>
       <HopActionSheet
         visible={menuSeg !== undefined}
-        title={menuSeg ? `${stopName(menuSeg.fromStopId)} → ${stopName(menuSeg.toStopId)}` : ""}
+        title={menuSeg ? `${destinationName(menuSeg.fromDestinationId)} → ${destinationName(menuSeg.toDestinationId)}` : ""}
         onClose={() => setMenuSegment(null)}
         onPick={(m) => {
           if (menuSegment) switchHop(trip, menuSegment, m);
           setMenuSegment(null);
+        }}
+      />
+      <ShuttleSheet
+        trip={trip}
+        hop={shuttleHop}
+        editing={
+          editingBookingId
+            ? (trip.segments.flatMap((s) => s.reservations).find((r) => r.id === editingBookingId) ?? null)
+            : null
+        }
+        onClose={() => {
+          setShuttleHop(null);
+          setEditingBookingId(null);
         }}
       />
       <HopBookingSheet
@@ -515,11 +573,11 @@ export default function TripScreen() {
           }}
           onStay={() => {
             setAddOpen(false);
-            setStayFor({ stopId: null });
+            setStayFor({ destinationId: null });
           }}
-          onStop={() => {
+          onDestination={() => {
             setAddOpen(false);
-            setStopOpen(true);
+            setDestinationOpen(true);
           }}
           onIdea={(k) => {
             setAddOpen(false);
@@ -535,7 +593,7 @@ export default function TripScreen() {
       {stayFor && (
         <AddStaySheetPhone
           trip={trip}
-          stopId={stayFor.stopId}
+          destinationId={stayFor.destinationId}
           onClose={() => setStayFor(null)}
           onIdeaInstead={() => {
             setStayFor(null);
@@ -544,7 +602,7 @@ export default function TripScreen() {
           }}
         />
       )}
-      {stopOpen && <AddStopSheet trip={trip} onClose={() => setStopOpen(false)} />}
+      {destinationOpen && <AddDestinationSheet trip={trip} onClose={() => setDestinationOpen(false)} />}
       {ideaKind && <AddIdeaSheet trip={trip} kind={ideaKind} onClose={() => setIdeaKind(null)} />}
       <HowWasItSheet
         visible={journalEntry !== null}
@@ -572,16 +630,19 @@ export default function TripScreen() {
   );
 }
 
-function StopRow({
+function DestinationRow({
   row,
+  subtitle,
   wholeTrip,
   onPress,
   onAddStay,
 }: {
   row: RouteRowModel;
+  /** #155 · Q2 A — the trip's area, unless the name already says it. */
+  subtitle: string | null;
   wholeTrip: boolean;
   onPress: () => void;
-  /** #128 · Q8 A door 2 — a stop with no stay offers one, dates from the stop. */
+  /** #128 · Q8 A door 2 — a destination with no stay offers one, dates from the destination. */
   onAddStay: () => void;
 }) {
   const hasStay = row.reservations.some((r) => r.type === "lodging" || r.type === "campground");
@@ -590,7 +651,8 @@ function StopRow({
       {({ pressed }) => (
         <Card style={{ opacity: pressed ? 0.85 : 1, gap: 6 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <Text style={styles.stopName}>{row.stop.place.name}</Text>
+            <Text style={styles.destinationName}>{row.destination.place.name}</Text>
+            {subtitle && <Text style={styles.loc}>{subtitle}</Text>}
             {row.floating && <FloatingTag />}
             {wholeTrip && (
               <View style={styles.wholeTrip}>
@@ -620,7 +682,7 @@ function StopRow({
           {!hasStay && (
             <Pressable onPress={onAddStay} accessibilityRole="button" style={styles.addStay}>
               <Text style={styles.addStayText}>
-                + Add stay <Text style={styles.addStayHint}>· dates from this stop</Text>
+                + Add stay <Text style={styles.addStayHint}>· dates from this destination</Text>
               </Text>
             </Pressable>
           )}
@@ -756,7 +818,19 @@ const styles = StyleSheet.create({
   h2: { color: C.ink, fontSize: 19, fontWeight: "800", marginTop: -4 },
   hero: { fontFamily: F.mono, color: C.ink, fontSize: 30, fontWeight: "700" },
   mono: { fontFamily: F.mono, color: C.inkFaded, fontSize: 12 },
-  stopName: { color: C.ink, fontSize: 17, fontWeight: "700" },
+  destinationName: { color: C.ink, fontSize: 17, fontWeight: "700" },
+  loc: { color: C.inkFaded, fontSize: 13 },
+  // #155 — the foot-of-list "+ Add destination" pill.
+  addDest: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: C.green,
+    backgroundColor: C.greenSoft,
+    borderRadius: R.pill,
+    paddingVertical: 3,
+    paddingHorizontal: 11,
+  },
+  addDestText: { fontSize: 11.5, fontWeight: "600", color: C.green },
   drive: { marginLeft: 12, paddingVertical: 6, paddingHorizontal: 10, borderRadius: R.md, gap: 8 },
   rowmenu: {
     width: 26,

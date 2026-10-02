@@ -47,7 +47,7 @@ Reservation/idea types collapse to five categories with fixed icons + colors:
 (tour/activity/event, blue), **Travel** (transport, slate), **Other**. Use
 `<CategoryTile type="campground" />` and `<StatusPill status="planned" />` rather
 than hand-building these — they encode the language. Ratings use `<Stars>`;
-dateless stops get `<FloatingTag>`.
+dateless destinations get `<FloatingTag>`.
 
 ## Where the truth lives
 
@@ -59,7 +59,7 @@ Read `styles.css` (tokens + `@font-face`) and each component's `.prompt.md`
 ```tsx
 import { Stars, ReservationLineItem, FloatingTag } from "@rv-trip/ui";
 
-// A stop's row in a plan — DS components inside your own token-styled layout
+// A destination's row in a plan — DS components inside your own token-styled layout
 <div className="rounded-rv-card border border-rv-border bg-rv-surface p-4 shadow-rv-sm">
   <div className="flex items-center gap-2.5">
     <span className="text-[17px] font-bold text-rv-navy">Astoria, OR</span>

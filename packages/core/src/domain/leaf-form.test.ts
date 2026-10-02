@@ -26,7 +26,7 @@ import {
   type Reservation,
 } from "./types";
 
-const STOP = "6f1c5b4e-0000-4000-8000-000000000001";
+const DESTINATION = "6f1c5b4e-0000-4000-8000-000000000001";
 const TRIP = "6f1c5b4e-0000-4000-8000-0000000000aa";
 
 /** The reservation the design's undo toast is holding: "Rogue Ales brewery
@@ -34,7 +34,7 @@ const TRIP = "6f1c5b4e-0000-4000-8000-0000000000aa";
 function res(over: Partial<Reservation> = {}): Reservation {
   return {
     id: "r1",
-    stopId: STOP,
+    destinationId: DESTINATION,
     ideaId: null,
     type: "dining",
     name: "Rogue Ales brewery lunch",
@@ -50,6 +50,7 @@ function res(over: Partial<Reservation> = {}): Reservation {
     startsTz: null,
     endsTz: null,
     lodgingKind: null,
+    transportKind: null,
     lastChange: null,
     again: null,
     ...over,
@@ -60,7 +61,7 @@ function ideaFixture(over: Partial<Idea> = {}): Idea {
   return {
     id: "i1",
     tripId: TRIP,
-    stopId: STOP,
+    destinationId: DESTINATION,
     title: "Rogue Ales brewery lunch",
     category: "eat",
     status: "planned",
@@ -104,8 +105,8 @@ describe("reservationDraftInput — the add form's POST body", () => {
       cost: "204",
       lodgingKind: null,
     };
-    expect(reservationDraftInput(STOP, draft)).toEqual({
-      stopId: STOP,
+    expect(reservationDraftInput(DESTINATION, draft)).toEqual({
+      destinationId: DESTINATION,
       type: "campground",
       name: "Astoria/Warrenton KOA",
       checkIn: "2026-08-02",
@@ -119,11 +120,12 @@ describe("reservationDraftInput — the add form's POST body", () => {
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
     });
   });
 
   it("is a body the API's own schema accepts", () => {
-    const body = reservationDraftInput(STOP, {
+    const body = reservationDraftInput(DESTINATION, {
       ...BLANK_RESERVATION_DRAFT,
       name: "Columbia River Maritime Museum",
       type: "activity",
@@ -133,9 +135,9 @@ describe("reservationDraftInput — the add form's POST body", () => {
 
   it("leaves the optional fields null when the form is bare", () => {
     expect(
-      reservationDraftInput(STOP, { ...BLANK_RESERVATION_DRAFT, name: "Fort Stevens" }),
+      reservationDraftInput(DESTINATION, { ...BLANK_RESERVATION_DRAFT, name: "Fort Stevens" }),
     ).toEqual({
-      stopId: STOP,
+      destinationId: DESTINATION,
       type: "campground",
       name: "Fort Stevens",
       checkIn: null,
@@ -149,25 +151,26 @@ describe("reservationDraftInput — the add form's POST body", () => {
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
     });
   });
 
   it("is null — the same null that disables Save — when it is not submittable", () => {
     const ok = { ...BLANK_RESERVATION_DRAFT, name: "Fort Stevens" };
-    expect(reservationDraftInput(STOP, BLANK_RESERVATION_DRAFT)).toBeNull();
-    expect(reservationDraftInput(STOP, { ...ok, name: "   " })).toBeNull();
-    expect(reservationDraftInput(STOP, { ...ok, cost: "free" })).toBeNull();
+    expect(reservationDraftInput(DESTINATION, BLANK_RESERVATION_DRAFT)).toBeNull();
+    expect(reservationDraftInput(DESTINATION, { ...ok, name: "   " })).toBeNull();
+    expect(reservationDraftInput(DESTINATION, { ...ok, cost: "free" })).toBeNull();
     // check-out before check-in
     expect(
-      reservationDraftInput(STOP, { ...ok, checkIn: "2026-08-05", checkOut: "2026-08-02" }),
+      reservationDraftInput(DESTINATION, { ...ok, checkIn: "2026-08-05", checkOut: "2026-08-02" }),
     ).toBeNull();
     // a check-out with no check-in is not a stay
-    expect(reservationDraftInput(STOP, { ...ok, checkOut: "2026-08-02" })).toBeNull();
+    expect(reservationDraftInput(DESTINATION, { ...ok, checkOut: "2026-08-02" })).toBeNull();
   });
 
   it("accepts a check-in with no check-out — a dinner is one date", () => {
     expect(
-      reservationDraftInput(STOP, {
+      reservationDraftInput(DESTINATION, {
         ...BLANK_RESERVATION_DRAFT,
         type: "dining",
         name: "Rogue Ales",
@@ -220,13 +223,14 @@ describe("reservationRestoreInput — what Undo re-POSTs", () => {
   it("carries every field of the deleted row, rating and notes included", () => {
     const r = res();
     expect(reservationRestoreInput(r)).toEqual({
-      stopId: STOP,
+      destinationId: DESTINATION,
       segmentId: null,
       startsAt: null,
       endsAt: null,
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
       type: "dining",
       name: "Rogue Ales brewery lunch",
       checkIn: "2026-08-18",
@@ -243,10 +247,10 @@ describe("reservationRestoreInput — what Undo re-POSTs", () => {
 describe("ideaDraftInput / ideaRestoreInput", () => {
   it("creates an idea from just a title", () => {
     expect(
-      ideaDraftInput({ tripId: TRIP, stopId: STOP }, "  Cape Perpetua overlook  "),
+      ideaDraftInput({ tripId: TRIP, destinationId: DESTINATION }, "  Cape Perpetua overlook  "),
     ).toEqual({
       tripId: TRIP,
-      stopId: STOP,
+      destinationId: DESTINATION,
       category: "do",
       title: "Cape Perpetua overlook",
       status: "idea",
@@ -258,14 +262,14 @@ describe("ideaDraftInput / ideaRestoreInput", () => {
   });
 
   it("is null on an empty title", () => {
-    expect(ideaDraftInput({ tripId: TRIP, stopId: STOP }, "   ")).toBeNull();
+    expect(ideaDraftInput({ tripId: TRIP, destinationId: DESTINATION }, "   ")).toBeNull();
   });
 
   it("restores a deleted idea with its status, rating and note intact", () => {
     const body = ideaRestoreInput(ideaFixture());
     expect(body).toEqual({
       tripId: TRIP,
-      stopId: STOP,
+      destinationId: DESTINATION,
       category: "eat",
       title: "Rogue Ales brewery lunch",
       status: "planned",
@@ -287,8 +291,8 @@ describe("UNDO_WINDOW_MS", () => {
 /**
  * The idea PATCH's flattening (#69). `ideas` has no `place` column and
  * `updateIdeaFields` spreads its patch straight into drizzle's `.set()`, so the
- * route calls this between the two — the same seam `stopPatchColumns` is for
- * the stop write.
+ * route calls this between the two — the same seam `destinationPatchColumns` is for
+ * the destination write.
  *
  * The rule the whole thing turns on: ABSENT is not NULL. Every shipped idea
  * write is a single-field patch ({status} / {rating} / {notes}), so mapping the
@@ -365,31 +369,31 @@ describe("ideaPatchColumns", () => {
       .not.toHaveProperty("place");
   });
 
-  /** #80 — `stop_id` IS a column, so it is the one key that must NOT be
+  /** #80 — `destination_id` IS a column, so it is the one key that must NOT be
    * flattened. All three drop gestures write it, and the middle one writes an
    * explicit null. */
-  it("passes stopId straight through as a real column", () => {
-    expect(ideaPatchColumns({ stopId: STOP })).toEqual({ stopId: STOP });
-    expect(ideaPatchColumns({ stopId: null })).toEqual({ stopId: null });
+  it("passes destinationId straight through as a real column", () => {
+    expect(ideaPatchColumns({ destinationId: DESTINATION })).toEqual({ destinationId: DESTINATION });
+    expect(ideaPatchColumns({ destinationId: null })).toEqual({ destinationId: null });
     expect(ideaPatchColumns({ category: "stay" })).toEqual({ category: "stay" });
   });
 
   it("still distinguishes absent from explicit null for `place` while it does", () => {
-    // The drag back to the shelf sends { stopId: null } and NOTHING about the
+    // The drag back to the shelf sends { destinationId: null } and NOTHING about the
     // place: a phantom place: null here would wipe a located idea's pin.
-    const back = ideaPatchColumns({ stopId: null });
-    expect(back).toEqual({ stopId: null });
+    const back = ideaPatchColumns({ destinationId: null });
+    expect(back).toEqual({ destinationId: null });
     expect("placeName" in back).toBe(false);
     expect("lat" in back).toBe(false);
 
     // And the reverse: clearing the place says nothing about the attachment.
     const cleared = ideaPatchColumns({ place: null });
-    expect("stopId" in cleared).toBe(false);
+    expect("destinationId" in cleared).toBe(false);
   });
 
   it("carries the drop and the clear together when a body sends both", () => {
-    expect(ideaPatchColumns({ stopId: STOP, status: "planned" })).toEqual({
-      stopId: STOP,
+    expect(ideaPatchColumns({ destinationId: DESTINATION, status: "planned" })).toEqual({
+      destinationId: DESTINATION,
       status: "planned",
     });
   });
@@ -437,8 +441,8 @@ describe("ideaIsLocated — place-state 3, the row menu's condition", () => {
   });
 
   it("does not care where the idea lives — a shelf row is state 3 too", () => {
-    expect(ideaIsLocated(ideaFixture({ stopId: null, place: LOCATED }))).toBe(true);
-    expect(ideaIsLocated(ideaFixture({ stopId: null, place: null }))).toBe(false);
+    expect(ideaIsLocated(ideaFixture({ destinationId: null, place: LOCATED }))).toBe(true);
+    expect(ideaIsLocated(ideaFixture({ destinationId: null, place: null }))).toBe(false);
   });
 });
 
@@ -457,7 +461,7 @@ describe("#105 · a stay by kind", () => {
       "friends",
     );
     expect(d.cost).toBe("");
-    const body = reservationDraftInput(STOP, {
+    const body = reservationDraftInput(DESTINATION, {
       ...d,
       cost: "90",
       confirmationNumber: "X1",
@@ -489,7 +493,7 @@ describe("#105 · a stay by kind", () => {
 
   it("an undone delete of a flight goes back on its HOP, clock and all", () => {
     const flight = res({
-      stopId: null,
+      destinationId: null,
       segmentId: "6f1c5b4e-0000-4000-8000-0000000000b1",
       type: "transport",
       name: "AA 2451 BOI→LAX",
@@ -501,7 +505,7 @@ describe("#105 · a stay by kind", () => {
       endsTz: "America/Los_Angeles",
     });
     const body = reservationRestoreInput(flight);
-    expect(body).toMatchObject({ stopId: null, segmentId: flight.segmentId, startsTz: "America/Boise" });
+    expect(body).toMatchObject({ destinationId: null, segmentId: flight.segmentId, startsTz: "America/Boise" });
     expect(reservationCreateInput.safeParse(body).success).toBe(true);
   });
 });

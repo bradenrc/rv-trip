@@ -13,7 +13,7 @@ import { AgainBadge } from "./JournalLens";
 
 /**
  * "Last time here" (#113 · #107, Q7 B · Q8 B · docs/design/113 Screen 4):
- * one card per past trip × destination this trip goes back near, drawn above
+ * one card per past trip × area this trip goes back near, drawn above
  * the lenses next to W1's nearby banner. The numbers are core's `forNextTime`,
  * computed on the server (trips/[id]/page.tsx); the card's saves are already
  * left out of the banner's count.
@@ -31,7 +31,7 @@ export function LastTimeHere({
   return (
     <div className="mb-4 flex flex-col gap-3">
       {nextTime.cards.map((card) => (
-        <Card key={`${card.pastTrip.id}:${card.destination.id ?? card.stop.id}`} card={card} onAdd={onAdd} />
+        <Card key={`${card.pastTrip.id}:${card.area.id ?? card.destination.id}`} card={card} onAdd={onAdd} />
       ))}
     </div>
   );

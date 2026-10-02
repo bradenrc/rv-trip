@@ -60,7 +60,7 @@ export interface MapMountProps {
   /** How many points were dropped for having no coordinates — the honest count
    * behind the "nothing to map yet" frame. */
   unmappedCount?: number;
-  /** The over-canvas style pill. Off for the stop sheet's mini-map, which
+  /** The over-canvas style pill. Off for the destination sheet's mini-map, which
    * follows the preference but is too small to carry a control. */
   showStyleControl?: boolean;
 }

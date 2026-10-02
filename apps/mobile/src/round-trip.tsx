@@ -45,7 +45,7 @@ export function RoundTripSheet({ trip, onClose }: { trip: Trip; onClose: () => v
   const [saving, setSaving] = useState(false);
   const [settingHome, setSettingHome] = useState(false);
   const [savingHome, setSavingHome] = useState(false);
-  const dest = trip.destination?.name ?? trip.legs.flatMap((l) => l.stops)[0]?.place.name ?? "";
+  const dest = trip.area?.name ?? trip.chapters.flatMap((l) => l.destinations)[0]?.place.name ?? "";
 
   const setOutbound = (patch: Partial<HopBookingDraft>) => {
     const next = { ...out, ...patch };
@@ -106,7 +106,7 @@ export function RoundTripSheet({ trip, onClose }: { trip: Trip; onClose: () => v
           </View>
         </View>
         {(zones.from.zone === null && zones.from.code !== "") || (zones.to.zone === null && zones.to.code !== "") ? (
-          <Text style={[styles.pm, { color: C.warning }]}>An airport we don’t know — add this leg on its hop to pick a zone.</Text>
+          <Text style={[styles.pm, { color: C.warning }]}>An airport we don’t know — add this flight on its hop to pick a zone.</Text>
         ) : null}
       </View>
     );

@@ -135,10 +135,10 @@ describe("packages/db/src/schema.ts — userPrefs", () => {
     // The six the base sha already had: reservation_type, idea_status,
     // trip_status, save_status (was saved_place_status), rig_type, route_source
     // — plus idea_category (#80), change_entity + change_field (#78) and
-    // travel_mode + lodging_kind + save_anchor (#110), which ARE vocabularies
-    // the product speaks. A preference is not, and that is what this guard is
-    // about.
-    expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(12);
+    // travel_mode + lodging_kind + save_anchor (#110) and transport_kind
+    // (#155), which ARE vocabularies the product speaks. A preference is not,
+    // and that is what this guard is about.
+    expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(13);
     for (const name of ["theme", "units", "map_style", "track_costs"])
       expect(code(schema)).not.toContain(`pgEnum("${name}"`);
   });
@@ -173,7 +173,7 @@ describe("packages/db — getPrefsByOwner / upsertPrefs", () => {
 
   it("writes ONLY the keys the patch actually carried", () => {
     const body = flat(code(mutations)).split("export async function upsertPrefs")[1] ?? "";
-    // The guard is what stops a one-field PUT nulling the other three.
+    // The guard is what destinations a one-field PUT nulling the other three.
     expect(body.slice(0, body.indexOf(".returning()"))).toContain("!== undefined");
   });
 });

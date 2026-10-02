@@ -5,20 +5,22 @@ import {
   zoneNearPoint,
 } from "./airports";
 import { newSegmentDateConflicts, type SegmentDateConflict } from "./segments";
+import { movesClock } from "./transport-kind";
 import type {
   IsoDate,
   Place,
   Reservation,
   ReservationCreateInput,
   Segment,
-  Stop,
+  Destination,
+  TransportKind,
   TravelMode,
   Trip,
 } from "./types";
 
 /**
  * A hop's bookings (#104) — flights and ferries entered on the hop between two
- * stops, in local time. Pure, and run on BOTH sides: the server's
+ * destinations, in local time. Pure, and run on BOTH sides: the server's
  * `createReservation` re-times the segment and judges the date clash with
  * these functions, and the web and the phone run the very same ones on the
  * draft trip so the amber message appears before the POST (Q8 A).
@@ -32,6 +34,9 @@ export interface TimedBooking {
   endsAt: string | null;
   startsTz: string | null;
   endsTz: string | null;
+  /** #155 · Q4 A — a shuttle/train/car never moves the clock. Absent or null
+   * reads as the hop's own mode, which always does. */
+  transportKind?: TransportKind | null;
 }
 
 type SegmentClock = Pick<Segment, "departAt" | "arriveAt" | "departTz" | "arriveTz">;
@@ -44,8 +49,11 @@ type SegmentClock = Pick<Segment, "departAt" | "arriveAt" | "departTz" | "arrive
  * `seg_home` is timed with no flights on it).
  */
 export function retimedSegment<S extends SegmentClock>(seg: S, bookings: TimedBooking[]): S {
-  const leaves = bookings.filter((b) => b.startsAt !== null && b.startsTz !== null);
-  const lands = bookings.filter((b) => b.endsAt !== null && b.endsTz !== null);
+  // #155 · Q4 A (vet MED): only a flight or a ferry times the hop — a timed
+  // airport shuttle after LIR must never stretch it, here or on the server.
+  const clock = bookings.filter(movesClock);
+  const leaves = clock.filter((b) => b.startsAt !== null && b.startsTz !== null);
+  const lands = clock.filter((b) => b.endsAt !== null && b.endsTz !== null);
   if (leaves.length === 0 || lands.length === 0) return seg;
   const first = leaves.reduce((a, b) => (Date.parse(b.startsAt!) < Date.parse(a.startsAt!) ? b : a));
   const last = lands.reduce((a, b) => (Date.parse(b.endsAt!) > Date.parse(a.endsAt!) ? b : a));
@@ -58,14 +66,14 @@ export function retimedSegment<S extends SegmentClock>(seg: S, bookings: TimedBo
   };
 }
 
-// ── the clash, and the "move the stop" fix ─────────────────────────────────
+// ── the clash, and the "move the destination" fix ─────────────────────────────────
 
 /** A trip shaped enough for the clash check — the domain `Trip` qualifies. */
-type ClashTrip = Pick<Trip, "id" | "homeBase" | "defaultMode" | "legs" | "segments">;
+type ClashTrip = Pick<Trip, "id" | "homeBase" | "defaultMode" | "chapters" | "segments">;
 
 /**
- * Which side of a stop a hop's clash is on. A hop going HOME is judged against
- * the stop it leaves (its check-out); every other hop against the stop it
+ * Which side of a destination a hop's clash is on. A hop going HOME is judged against
+ * the destination it leaves (its check-out); every other hop against the destination it
  * lands at (its check-in) — `segmentDateConflicts`' own two rules.
  */
 export type ClashSide = "checkout" | "checkin";
@@ -73,8 +81,8 @@ export type ClashSide = "checkout" | "checkin";
 export interface HopClash {
   conflict: SegmentDateConflict;
   side: ClashSide;
-  stopId: string;
-  stopName: string;
+  destinationId: string;
+  destinationName: string;
 }
 
 /** The trip with one more booking on a hop, and that hop re-timed from it. */
@@ -89,7 +97,7 @@ export function withSegmentBooking<T extends ClashTrip>(trip: T, segmentId: stri
 
 /**
  * The clash a new booking on a hop would INTRODUCE, or null. Same rule the
- * server enforces with 409 `segment_date_mismatch`: stop dates win, and a
+ * server enforces with 409 `segment_date_mismatch`: destination dates win, and a
  * conflict that predates the booking is not this booking's fault.
  */
 export function hopBookingClash(trip: ClashTrip, segmentId: string, body: TimedBooking): HopClash | null {
@@ -103,25 +111,25 @@ export function hopBookingClash(trip: ClashTrip, segmentId: string, body: TimedB
   return conflict ? clashOf(trip, seg, conflict) : null;
 }
 
-/** Name the stop a conflict is about, and which of its dates. */
+/** Name the destination a conflict is about, and which of its dates. */
 export function clashOf(
-  trip: { legs: { stops: { id: string; place?: { name: string } }[] }[] },
-  seg: Pick<Segment, "fromStopId" | "toStopId">,
+  trip: { chapters: { destinations: { id: string; place?: { name: string } }[] }[] },
+  seg: Pick<Segment, "fromDestinationId" | "toDestinationId">,
   conflict: SegmentDateConflict,
 ): HopClash | null {
-  const side: ClashSide = seg.toStopId === null ? "checkout" : "checkin";
-  const stopId = side === "checkout" ? seg.fromStopId : seg.toStopId;
-  const stop = trip.legs.flatMap((l) => l.stops).find((s) => s.id === stopId);
-  if (!stop) return null;
+  const side: ClashSide = seg.toDestinationId === null ? "checkout" : "checkin";
+  const destinationId = side === "checkout" ? seg.fromDestinationId : seg.toDestinationId;
+  const destination = trip.chapters.flatMap((l) => l.destinations).find((s) => s.id === destinationId);
+  if (!destination) return null;
   // The server judges a bare hop set with no names; the name is copy only.
-  return { conflict, side, stopId: stop.id, stopName: stop.place?.name ?? "" };
+  return { conflict, side, destinationId: destination.id, destinationName: destination.place?.name ?? "" };
 }
 
 /**
- * Q8 A's first fix — the stop's date the booking moves: a check-out for a hop
+ * Q8 A's first fix — the destination's date the booking moves: a check-out for a hop
  * home, a check-in otherwise, set to the booking's own local date.
  */
-export function clashStopPatch(
+export function clashDestinationPatch(
   clash: Pick<HopClash, "side" | "conflict">,
 ): { arriveDate: IsoDate } | { departDate: IsoDate } {
   return clash.side === "checkout"
@@ -130,37 +138,37 @@ export function clashStopPatch(
 }
 
 /**
- * The stop re-dated by the fix — and its own stay moved WITH it, so the stay
- * card and the stop never disagree (vet MED c): a campground/lodging row whose
- * check-out was the stop's old check-out follows it (and the check-in, for a
+ * The destination re-dated by the fix — and its own stay moved WITH it, so the stay
+ * card and the destination never disagree (vet MED c): a campground/lodging row whose
+ * check-out was the destination's old check-out follows it (and the check-in, for a
  * check-in move).
  */
-export function movedStop(stop: Stop, clash: Pick<HopClash, "side" | "conflict">): Stop {
+export function movedDestination(destination: Destination, clash: Pick<HopClash, "side" | "conflict">): Destination {
   const { expected, actual } = clash.conflict;
-  const stay = (r: Reservation) => r.stopId === stop.id && (r.type === "campground" || r.type === "lodging");
+  const stay = (r: Reservation) => r.destinationId === destination.id && (r.type === "campground" || r.type === "lodging");
   if (clash.side === "checkout") {
     return {
-      ...stop,
+      ...destination,
       departDate: actual,
-      reservations: stop.reservations.map((r) =>
+      reservations: destination.reservations.map((r) =>
         stay(r) && r.checkOut === expected ? { ...r, checkOut: actual } : r,
       ),
     };
   }
   return {
-    ...stop,
+    ...destination,
     arriveDate: actual,
-    reservations: stop.reservations.map((r) =>
+    reservations: destination.reservations.map((r) =>
       stay(r) && r.checkIn === expected ? { ...r, checkIn: actual } : r,
     ),
   };
 }
 
-/** A clash's move is legal only while the stop stays a forward range. */
-export function clashMoveIsValid(stop: Pick<Stop, "arriveDate" | "departDate">, clash: HopClash): boolean {
-  const patch = clashStopPatch(clash);
-  const arrive = "arriveDate" in patch ? patch.arriveDate : stop.arriveDate;
-  const depart = "departDate" in patch ? patch.departDate : stop.departDate;
+/** A clash's move is legal only while the destination stays a forward range. */
+export function clashMoveIsValid(destination: Pick<Destination, "arriveDate" | "departDate">, clash: HopClash): boolean {
+  const patch = clashDestinationPatch(clash);
+  const arrive = "arriveDate" in patch ? patch.arriveDate : destination.arriveDate;
+  const depart = "departDate" in patch ? patch.departDate : destination.departDate;
   return arrive === null || depart === null || arrive <= depart;
 }
 
@@ -180,25 +188,25 @@ export interface ClashCopy {
 export function hopClashCopy(clash: HopClash, kind: HopBookingKind): ClashCopy {
   const noun = kind === "ferry" ? "ferry" : "flight";
   const { expected, actual } = clash.conflict;
-  const stop = clash.stopName;
+  const destination = clash.destinationName;
   return clash.side === "checkout"
     ? {
-        headline: `This ${noun} leaves ${monthSlashDay(actual)}, but ${stop} runs to ${monthSlashDay(expected)}.`,
-        sub: "Stop dates win, so nothing is saved until they agree.",
-        move: `Check out of ${stop} on ${monthSlashDay(actual)} instead`,
-        keep: `Keep the stop, and fix the ${noun} date`,
+        headline: `This ${noun} leaves ${monthSlashDay(actual)}, but ${destination} runs to ${monthSlashDay(expected)}.`,
+        sub: "Destination dates win, so nothing is saved until they agree.",
+        move: `Check out of ${destination} on ${monthSlashDay(actual)} instead`,
+        keep: `Keep the destination, and fix the ${noun} date`,
       }
     : {
-        headline: `This ${noun} lands ${monthSlashDay(actual)}, but ${stop} starts ${monthSlashDay(expected)}.`,
-        sub: "Stop dates win, so nothing is saved until they agree.",
-        move: `Check in to ${stop} on ${monthSlashDay(actual)} instead`,
-        keep: `Keep the stop, and fix the ${noun} date`,
+        headline: `This ${noun} lands ${monthSlashDay(actual)}, but ${destination} starts ${monthSlashDay(expected)}.`,
+        sub: "Destination dates win, so nothing is saved until they agree.",
+        move: `Check in to ${destination} on ${monthSlashDay(actual)} instead`,
+        keep: `Keep the destination, and fix the ${noun} date`,
       };
 }
 
 /**
  * The trip after a booking landed — what the web and the phone splice in on
- * the 201. With `move` it is the one-request fix: the stop's date and its own
+ * the 201. With `move` it is the one-request fix: the destination's date and its own
  * stay moved in the same breath, exactly as the server wrote them.
  */
 export function applyHopBooking<T extends ClashTrip>(trip: T, r: Reservation, move: boolean): T {
@@ -208,9 +216,9 @@ export function applyHopBooking<T extends ClashTrip>(trip: T, r: Reservation, mo
   if (!clash) return next;
   return {
     ...next,
-    legs: next.legs.map((l) => ({
+    chapters: next.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => (s.id === clash.stopId ? movedStop(s, clash) : s)),
+      destinations: l.destinations.map((s) => (s.id === clash.destinationId ? movedDestination(s, clash) : s)),
     })),
   };
 }
@@ -232,7 +240,7 @@ export function removeSegmentBooking<T extends Pick<Trip, "segments">>(trip: T, 
  * The mode switch, applied optimistically (`PATCH /api/segments/:id`) — the
  * server's `updateSegmentMode` does the same three things (#129 · Q11 A):
  *
- *  - to Drive: the clock goes (an untimed drive borrows its day from the stop);
+ *  - to Drive: the clock goes (an untimed drive borrows its day from the destination);
  *    its bookings are KEPT, parked on the hop, unless `bookings` is `remove`.
  *  - to Fly/Ferry: the hop is re-timed from whatever bookings it kept, so a
  *    flight parked and brought back paints its ✈ day again.
@@ -310,7 +318,7 @@ export interface HopBookingDraft {
   toZone: string | null;
 }
 
-/** The form's opening state. A ferry's ports are the hop's two stops. */
+/** The form's opening state. A ferry's ports are the hop's two destinations. */
 export function blankHopDraft(kind: HopBookingKind, ports: { from: string; to: string } | null = null): HopBookingDraft {
   return {
     kind,
@@ -334,7 +342,7 @@ export interface ZoneChip {
 }
 
 /** The two chips. A flight reads each airport code; a ferry reads its port
- * stops' coordinates (the nearest listed airport's zone). */
+ * destinations' coordinates (the nearest listed airport's zone). */
 export function hopDraftZones(
   d: HopBookingDraft,
   ports: { from: Place | null; to: Place | null } = { from: null, to: null },
@@ -399,12 +407,89 @@ export function hopBookingInput(
     startsTz: fromZone,
     endsTz: toZone,
     lodgingKind: null,
+    // #155 · Q4 A — the form says what it books.
+    transportKind: d.kind,
+  };
+}
+
+/** What the "+ Add shuttle" form holds (#155 · Q4 A): a name, and two
+ * OPTIONAL local times ("YYYY-MM-DD HH:MM"). */
+export interface ShuttleDraft {
+  name: string;
+  departs: string;
+  arrives: string;
+}
+
+/**
+ * The zone a shuttle's typed times are read in (#155): the hop's local zone on
+ * the shuttle's side — where it ARRIVES for an outbound hop (the shuttle runs
+ * after the landing), where it LEAVES for a hop going home (before the
+ * departure). The segment's own zone when it is timed; otherwise the zone
+ * nearest that destination's point. Null when neither is known.
+ */
+export function shuttleZone(trip: Pick<Trip, "segments" | "chapters">, segmentId: string): string | null {
+  const seg = trip.segments.find((s) => s.id === segmentId);
+  if (!seg) return null;
+  const home = seg.toDestinationId === null;
+  const tz = home ? seg.departTz : seg.arriveTz;
+  if (tz) return tz;
+  const id = home ? seg.fromDestinationId : seg.toDestinationId;
+  const p = trip.chapters.flatMap((c) => c.destinations).find((d) => d.id === id)?.place;
+  return p && p.lat != null && p.lng != null ? zoneNearPoint(p.lat, p.lng) : null;
+}
+
+/** A shuttle as its form would hold it — the edit's opening state. */
+export function shuttleDraftFromBooking(r: Reservation): ShuttleDraft {
+  return { name: r.name, ...bookingLocalTimes(r) };
+}
+
+/**
+ * The `POST /api/reservations` body for "+ Add shuttle", or null while it is
+ * not submittable. The name is required; the times are optional, and a typed
+ * one is read in `zone` — the hop's local zone on the shuttle's side (the
+ * arrival's for an outbound hop, the departure's going home). A typed time with
+ * no zone to read it in, or one that is not a wall clock, is not submittable.
+ * A shuttle never re-times its hop (`retimedSegment`), so it has no clash.
+ */
+export function shuttleBookingInput(
+  segmentId: string,
+  d: ShuttleDraft,
+  zone: string | null,
+): ReservationCreateInput | null {
+  const name = d.name.trim();
+  if (name === "") return null;
+  const read = (local: string): { at: string | null; ok: boolean } => {
+    if (local.trim() === "") return { at: null, ok: true };
+    if (!zone) return { at: null, ok: false };
+    const at = localToInstant(local, zone);
+    return { at, ok: at !== null };
+  };
+  const starts = read(d.departs);
+  const ends = read(d.arrives);
+  if (!starts.ok || !ends.ok) return null;
+  if (starts.at && ends.at && Date.parse(ends.at) < Date.parse(starts.at)) return null;
+  return {
+    segmentId,
+    type: "transport",
+    name,
+    checkIn: null,
+    checkOut: null,
+    confirmationNumber: null,
+    cost: null,
+    rating: null,
+    notes: null,
+    startsAt: starts.at,
+    endsAt: ends.at,
+    startsTz: starts.at ? zone : null,
+    endsTz: ends.at ? zone : null,
+    lodgingKind: null,
+    transportKind: "shuttle",
   };
 }
 
 /**
- * Q8 A's second fix — "Keep the stop, and fix the flight date": both of the
- * form's dates move by the clash's gap, so the booking lands on the stop's
+ * Q8 A's second fix — "Keep the destination, and fix the flight date": both of the
+ * form's dates move by the clash's gap, so the booking lands on the destination's
  * date. Nothing is saved; the human still presses Save.
  */
 export function fixHopDraftDates(d: HopBookingDraft, clash: HopClash): HopBookingDraft {

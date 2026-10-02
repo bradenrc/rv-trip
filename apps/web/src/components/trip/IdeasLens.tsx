@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { Library } from "lucide-react";
 import {
   isScheduled,
-  orderedStops,
+  orderedDestinations,
   type DateRangeValue,
   type DateSpan,
   type Idea,
@@ -28,13 +28,13 @@ import { MENU_ITEM, MENU_SURFACE, MenuHint } from "./row-menu";
  * onto the plan.
  *
  * The Timeline rail's shelf, "Last time here" and the nearby-saves banner live
- * here now (they sat above the lenses). Stop-pinned maybes group under their
- * stop; the trip's unattached ones sit under "For the trip". **Plan it** is the
+ * here now (they sat above the lenses). Destination-pinned maybes group under their
+ * destination; the trip's unattached ones sit under "For the trip". **Plan it** is the
  * promotion bridge that replaces the drag-to-gantt:
  *
- *   - a stay idea opens the RangePicker and becomes a stop (`onPlanStay`);
- *   - a do/eat idea picks its stop (`onPlanToStop` — attach + planned);
- *   - an idea already pinned to a stop is simply marked planned.
+ *   - a stay idea opens the RangePicker and becomes a destination (`onPlanStay`);
+ *   - a do/eat idea picks its destination (`onPlanToDestination` — attach + planned);
+ *   - an idea already pinned to a destination is simply marked planned.
  */
 export interface IdeasLensProps {
   trip: Trip;
@@ -53,19 +53,19 @@ export interface IdeasLensProps {
   ideaPicker?: (idea: Idea) => ReactNode;
   ideaActions?: (idea: Idea) => ReactNode;
   // the pinned rows' pill
-  onCyclePinned: (stopId: string, ideaId: string) => void;
+  onCyclePinned: (destinationId: string, ideaId: string) => void;
   // Plan it
   onPlanStay: (ideaId: string, span: DateSpan) => void;
-  onPlanToStop: (ideaId: string, stopId: string) => void;
-  onPlanPinned: (stopId: string, ideaId: string) => void;
+  onPlanToDestination: (ideaId: string, destinationId: string) => void;
+  onPlanPinned: (destinationId: string, ideaId: string) => void;
 }
 
-/** How many maybes the tab badge counts: the shelf plus every stop-pinned idea
+/** How many maybes the tab badge counts: the shelf plus every destination-pinned idea
  * still at status `idea`. */
 export function maybeCount(trip: Trip): number {
   return (
     trip.ideas.filter((i) => i.status === "idea").length +
-    trip.legs.flatMap((l) => l.stops).flatMap((s) => s.ideas).filter((i) => i.status === "idea").length
+    trip.chapters.flatMap((l) => l.destinations).flatMap((s) => s.ideas).filter((i) => i.status === "idea").length
   );
 }
 
@@ -76,9 +76,9 @@ export function IdeasLens(p: IdeasLensProps) {
   const [planningStay, setPlanningStay] = useState<Idea | null>(null);
   /** The shelf row whose research pad (#82) is open — one at a time. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const stops = orderedStops(p.trip);
-  const pinned = stops
-    .map((s) => ({ stop: s, ideas: s.ideas.filter((i) => i.status === "idea") }))
+  const destinations = orderedDestinations(p.trip);
+  const pinned = destinations
+    .map((s) => ({ destination: s, ideas: s.ideas.filter((i) => i.status === "idea") }))
     .filter((g) => g.ideas.length > 0);
   const forTrip = p.shelf.groups.flatMap((g) => g.ideas);
   const total = p.shelf.total + pinned.reduce((n, g) => n + g.ideas.length, 0);
@@ -90,14 +90,14 @@ export function IdeasLens(p: IdeasLensProps) {
       </button>
     ) : (
       <DropdownMenu>
-        <DropdownMenuTrigger className={PLAN_IT} disabled={stops.length === 0}>
+        <DropdownMenuTrigger className={PLAN_IT} disabled={destinations.length === 0}>
           Plan it
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className={MENU_SURFACE}>
-          {stops.map((s) => (
-            <DropdownMenuItem key={s.id} className={MENU_ITEM} onSelect={() => p.onPlanToStop(idea.id, s.id)}>
+          {destinations.map((s) => (
+            <DropdownMenuItem key={s.id} className={MENU_ITEM} onSelect={() => p.onPlanToDestination(idea.id, s.id)}>
               {s.place.name}
-              <MenuHint>stop</MenuHint>
+              <MenuHint>destination</MenuHint>
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
@@ -147,22 +147,22 @@ export function IdeasLens(p: IdeasLensProps) {
             </div>
           )}
 
-          {pinned.map(({ stop, ideas }) => (
-            <div key={stop.id}>
+          {pinned.map(({ destination, ideas }) => (
+            <div key={destination.id}>
               <GroupHead>
-                Pinned to {stop.place.name} · {ideas.length}
+                Pinned to {destination.place.name} · {ideas.length}
               </GroupHead>
               {ideas.map((idea) => (
                 <ShelfIdeaCard
                   key={idea.id}
                   idea={idea}
-                  nearestStopName={stop.place.name}
+                  nearestDestinationName={destination.place.name}
                   actions={
-                    <button type="button" className={PLAN_IT} onClick={() => p.onPlanPinned(stop.id, idea.id)}>
+                    <button type="button" className={PLAN_IT} onClick={() => p.onPlanPinned(destination.id, idea.id)}>
                       Plan it
                     </button>
                   }
-                  onCycle={() => p.onCyclePinned(stop.id, idea.id)}
+                  onCycle={() => p.onCyclePinned(destination.id, idea.id)}
                 />
               ))}
             </div>
@@ -177,7 +177,7 @@ export function IdeasLens(p: IdeasLensProps) {
             <ShelfIdeaCard
               key={row.idea.id}
               idea={row.idea}
-              nearestStopName={row.nearestStopName}
+              nearestDestinationName={row.nearestDestinationName}
               distanceMi={row.distanceMi}
               expanded={expandedId === row.idea.id}
               onClick={() => setExpandedId((id) => (id === row.idea.id ? null : row.idea.id))}
@@ -231,7 +231,7 @@ function GroupHead({ children }: { children: ReactNode }) {
   );
 }
 
-/** Plan it on a stay idea: pick its nights, and it becomes a stop. Defaults to
+/** Plan it on a stay idea: pick its nights, and it becomes a destination. Defaults to
  * the trip's first open run — or the whole trip when nothing is scheduled. */
 function PlanStayDialog({
   trip,
@@ -244,7 +244,7 @@ function PlanStayDialog({
   onClose: () => void;
   onPlan: (span: DateSpan) => void;
 }) {
-  const scheduled = trip.legs.flatMap((l) => l.stops).some(isScheduled);
+  const scheduled = trip.chapters.flatMap((l) => l.destinations).some(isScheduled);
   const [range, setRange] = useState<DateRangeValue>(
     scheduled ? { start: null, end: null } : { start: trip.startDate, end: trip.endDate },
   );
@@ -255,7 +255,7 @@ function PlanStayDialog({
         <DialogHeader className="gap-1.5">
           <DialogTitle className="text-[17px] font-extrabold text-rv-ink">Plan {idea.title}</DialogTitle>
           <DialogDescription className="text-[11.5px] text-rv-ink-faded">
-            Pick its nights — it becomes a stop on the Itinerary.
+            Pick its nights — it becomes a destination on the Itinerary.
           </DialogDescription>
         </DialogHeader>
         <div className="mt-3 flex flex-col gap-2.5">
@@ -276,5 +276,5 @@ function PlanStayDialog({
 
 function sameFilter(a: ShelfFilter, b: ShelfFilter): boolean {
   if (a.kind !== b.kind) return false;
-  return a.kind !== "near" || a.stopId === (b as { kind: "near"; stopId: string }).stopId;
+  return a.kind !== "near" || a.destinationId === (b as { kind: "near"; destinationId: string }).destinationId;
 }

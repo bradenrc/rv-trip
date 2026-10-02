@@ -51,12 +51,12 @@ const target = (row: LocateRow, name: string, region: string | null = null): Loc
 });
 
 const koaRow: LocateRow = { kind: "place", id: KOA_ID };
-const pulloutRow: LocateRow = { kind: "stop", id: PULLOUT_ID };
+const pulloutRow: LocateRow = { kind: "destination", id: PULLOUT_ID };
 
 /** Answers per query, and records everything it was asked. */
 class FakeProvider implements PlacesProvider {
-  // #111 widened the interface; nothing here resolves a destination.
-  async resolveDestination(): Promise<null> {
+  // #111 widened the interface; nothing here resolves an area.
+  async resolveArea(): Promise<null> {
     return null;
   }
   readonly searches: string[] = [];
@@ -72,8 +72,8 @@ class FakeProvider implements PlacesProvider {
 }
 
 class BrokenProvider implements PlacesProvider {
-  // #111 widened the interface; nothing here resolves a destination.
-  async resolveDestination(): Promise<null> {
+  // #111 widened the interface; nothing here resolves an area.
+  async resolveArea(): Promise<null> {
     return null;
   }
   async search(): Promise<PlaceSummary[]> {
@@ -136,7 +136,7 @@ describe("locateRequestSchema", () => {
     expect(
       locateRequestSchema.safeParse({ rows: [{ kind: "reservation", id: KOA_ID }] }).success,
     ).toBe(false);
-    expect(locateRequestSchema.safeParse({ rows: [{ kind: "stop", id: "nope" }] }).success).toBe(
+    expect(locateRequestSchema.safeParse({ rows: [{ kind: "destination", id: "nope" }] }).success).toBe(
       false,
     );
   });
@@ -158,7 +158,7 @@ describe("locateQuery", () => {
     );
   });
 
-  it("is the bare name when the row has no region — a stop has no region column", () => {
+  it("is the bare name when the row has no region — a destination has no region column", () => {
     expect(locateQuery({ name: "Forest Road 25 pullout", region: null })).toBe(
       "Forest Road 25 pullout",
     );
@@ -171,14 +171,14 @@ describe("dedupeLocateRows", () => {
   });
 
   it("treats the same id on two kinds as two rows", () => {
-    const asStop: LocateRow = { kind: "stop", id: KOA_ID };
-    expect(dedupeLocateRows([koaRow, asStop])).toEqual([koaRow, asStop]);
+    const asDestination: LocateRow = { kind: "destination", id: KOA_ID };
+    expect(dedupeLocateRows([koaRow, asDestination])).toEqual([koaRow, asDestination]);
   });
 
   it("spans all THREE kinds — `rowKey` is `${kind}:${id}`, so nothing collapses", () => {
     const asIdea: LocateRow = { kind: "idea", id: KOA_ID };
-    const asStop: LocateRow = { kind: "stop", id: KOA_ID };
-    expect(dedupeLocateRows([koaRow, asStop, asIdea, asIdea])).toEqual([koaRow, asStop, asIdea]);
+    const asDestination: LocateRow = { kind: "destination", id: KOA_ID };
+    expect(dedupeLocateRows([koaRow, asDestination, asIdea, asIdea])).toEqual([koaRow, asDestination, asIdea]);
   });
 });
 
@@ -329,7 +329,7 @@ describe("locateToastMessage", () => {
     );
   });
 
-  it("stops listing past three and counts the rest", () => {
+  it("destinations listing past three and counts the rest", () => {
     expect(locateToastMessage(0, ["A", "B", "C", "D"])).toBe(
       "Located 0 of 4. A, B and 2 more still have no coordinates.",
     );

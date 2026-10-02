@@ -47,7 +47,7 @@ const CAT_CHIPS: { cat: CategoryLabel; type: ReservationType }[] = [
  * The Saves library (#111 i4 renamed it from Places; the URL is still
  * /places). Two shelves off one status field, a category filter scoped to the
  * active shelf, and a grid/map lens over the same filtered list — the grid
- * grouped by destination under region headers (`SavesGroups`).
+ * grouped by area under region headers (`SavesGroups`).
  */
 export function PlacesLibrary({
   places,
@@ -114,7 +114,7 @@ export function PlacesLibrary({
 
   // The wrapper is the grid item, so the card still stretches to the row's
   // height (`grid` on a single child stretches it) and the menu can anchor to
-  // the card's own box. `onAddToTrip` stays unpassed: the add-a-stop path it
+  // the card's own box. `onAddToTrip` stays unpassed: the add-a-destination path it
   // needs is issue #22, in epic #40 — until then the DS button is inert by
   // design, not by omission.
   const renderCard = (p: SavedPlace) => (
@@ -215,7 +215,7 @@ export function PlacesLibrary({
               </div>
             </div>
           )}
-          {/* #111 i4 · Q4 B: the grid is grouped by destination under region
+          {/* #111 i4 · Q4 B: the grid is grouped by area under region
               headers — core's savesShelves, the phone's Saves tab order. */}
           <SavesGroups places={list} status={status} renderCard={renderCard} />
         </>

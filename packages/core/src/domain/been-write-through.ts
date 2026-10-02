@@ -18,11 +18,11 @@ import type { IdeaCategory, IdeaStatus, Place, ReservationType } from "./types";
  *    deleted: an un-check leaves the Been save where it is.
  * 2. A reservation in the Travel category (a flight, a ferry) is skipped —
  *    you don't go back to a flight.
- * 3. The candidate is the thing's OWN place. An idea or stop with neither a
+ * 3. The candidate is the thing's OWN place. An idea or destination with neither a
  *    Google id nor coordinates has nothing to anchor, so it is skipped. A
  *    reservation is NAME-ONLY (rule 4 of domain/places.ts: a reservation never
- *    borrows its stop's pin for matching); the stop's point only feeds the
- *    destination resolver, in packages/db.
+ *    borrows its destination's pin for matching); the destination's point only feeds the
+ *    area resolver, in packages/db.
  * 4. A library row the shipped `isAlreadySaved` rule matches is UPDATED
  *    (graduated to been) — the same rule the "Been there?" shelf and nearby
  *    surfacing use, so every surface agrees on what "the same place" is.
@@ -41,7 +41,7 @@ export type BeenThing =
       again: boolean | null;
     }
   | {
-      kind: "stop";
+      kind: "destination";
       place: Place;
       rating: number | null;
       again: boolean | null;
@@ -102,10 +102,10 @@ function candidateOf(thing: BeenThing): MatchCandidate | null {
       if (!hasPlace(thing.place)) return null;
       // An idea's title is what the traveller called it; its place is where.
       return { ...thing.place, name: thing.place.name || thing.title };
-    case "stop":
+    case "destination":
       return hasPlace(thing.place) ? { ...thing.place } : null;
     case "reservation":
-      // Rule 4: name only. Never the stop's coordinates.
+      // Rule 4: name only. Never the destination's coordinates.
       return { name: thing.name, lat: null, lng: null, googlePlaceId: null };
   }
 }
@@ -114,8 +114,8 @@ function typeOf(thing: BeenThing): ReservationType {
   switch (thing.kind) {
     case "idea":
       return saveTypeOfIdeaCategory(thing.category);
-    case "stop":
-      // `stops` carry no category — a town is not a campground (places.ts).
+    case "destination":
+      // `destinations` carry no category — a town is not a campground (places.ts).
       return "other";
     case "reservation":
       return thing.type;

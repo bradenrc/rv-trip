@@ -9,10 +9,10 @@ export async function GET() {
 }
 
 /**
- * Create a trip. The create seeds one "Leg 1" in the same transaction, so the
- * planner it redirects to has a leg header to hang "Add stop" on. #126 · Q4 A:
- * a `destination` is upserted as the household's destinations row, the trip
- * points at it, and Leg 1 opens with one stop spanning the trip. Returns
+ * Create a trip. The create seeds one unnamed chapter in the same transaction, so the
+ * planner it redirects to has a chapter header to hang "Add destination" on. #126 · Q4 A:
+ * a `area` is upserted as the household's areas row, the trip
+ * points at it, and Chapter 1 opens with one destination spanning the trip. Returns
  * the full tree (201) — the same shape `GET /api/trips/:id` returns under
  * `trip`, with `status` already derived from the dates.
  */
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   }
   const owner = await getOwner();
   // `homeBasePlace` is one object on the wire and three nullable columns
-  // underneath — flattened here for the same reason the stop write is (#60).
+  // underneath — flattened here for the same reason the destination write is (#60).
   const { homeBasePlace, ...fields } = parsed.data;
   const row = await createTrip(owner, {
     ...fields,

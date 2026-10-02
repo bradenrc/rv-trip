@@ -7,7 +7,7 @@ import type { TravelMode } from "@rv-trip/core";
  * derived from the data length so a trip of any duration lays out correctly.
  */
 
-/** The leg column. It is `sticky left-0` inside the timeline's own
+/** The chapter column. It is `sticky left-0` inside the timeline's own
  * `overflow-x-auto`, so the month scrolls and the label you are reading stays
  * put. The opaque `bg-rv-surface` (the gantt card's own surface) is
  * load-bearing — without it the bars slide visibly beneath the labels — and so
@@ -118,8 +118,10 @@ export function Ruler({ cells }: { cells: { letter: string; label: string; weekS
   );
 }
 
-/** A leg row: its label gutter plus a grid the caller fills with <StopBar>s.
- * `rowHeight` drives the timeline's density (Comfortable 112 / Compact 78 / Dense 58). */
+/** A chapter row: its label gutter plus a grid the caller fills with <DestinationBar>s.
+ * `rowHeight` drives the timeline's density (Comfortable 112 / Compact 78 / Dense 58).
+ * #155 · Q1 A — an UNNAMED chapter passes `null` for both and the gutter stays
+ * empty (it keeps its width, so every lane's grid still lines up). */
 export function SwimLane({
   kicker: k,
   name,
@@ -127,8 +129,8 @@ export function SwimLane({
   rowHeight = 112,
   children,
 }: {
-  kicker: string;
-  name: string;
+  kicker: string | null;
+  name: string | null;
   columns: number;
   rowHeight?: number;
   children: React.ReactNode;
@@ -136,8 +138,8 @@ export function SwimLane({
   return (
     <div className="mb-2.5 flex items-center">
       <div className={gutter}>
-        <div className={kicker}>{k}</div>
-        <div className="text-[13px] font-bold leading-tight text-rv-ink">{name}</div>
+        {k && <div className={kicker}>{k}</div>}
+        {name && <div className="text-[13px] font-bold leading-tight text-rv-ink">{name}</div>}
       </div>
       <div
         className="grid flex-1 rounded-rv-sm"
@@ -155,7 +157,7 @@ export function SwimLane({
 }
 
 /**
- * A scheduled stop as a gantt bar, positioned by grid-column. Navy left edge
+ * A scheduled destination as a gantt bar, positioned by grid-column. Navy left edge
  * = the arrival day. Meta chips show rating, reservation and idea counts.
  *
  * `arriveMode` (#110 §2) is optional: `undefined` keeps the navy edge every
@@ -164,12 +166,12 @@ export function SwimLane({
  * range, in the range's own `text-rv-green`.
  *
  * It is ALSO a drop target (#80): a do/eat idea dragged off the shelf lands on
- * a stop rather than on open days — an open span is not a stop, so there is
+ * a destination rather than on open days — an open span is not a destination, so there is
  * nothing there for it to attach to. `active` is the same highlight contract
  * `OpenSpan` already holds: the caller lights only the targets the thing in
  * hand can actually land on, so the wrong target simply never invites the drop.
  */
-export function StopBar({
+export function DestinationBar({
   name,
   range,
   rating,
@@ -191,7 +193,7 @@ export function StopBar({
   ideaCount: number;
   startCol: number;
   span: number;
-  /** How the stop was arrived at; `null` = nothing arrived (no edge). */
+  /** How the destination was arrived at; `null` = nothing arrived (no edge). */
   arriveMode?: TravelMode | null;
   /** tighter padding/gap for the Compact & Dense timeline densities */
   compact?: boolean;
@@ -247,7 +249,7 @@ export function StopBar({
   );
 }
 
-/** A run of unplanned days in the timeline; a drop target while a floating stop
+/** A run of unplanned days in the timeline; a drop target while a floating destination
  * is being dragged. */
 export function OpenSpan({
   count,

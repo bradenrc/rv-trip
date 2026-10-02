@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { encodeFlexiblePolyline } from "../providers/polyline";
 import { orderedPairs, routeCacheKey } from "../domain/route-order";
-import type { Stop, Trip } from "../domain/types";
+import type { Destination, Trip } from "../domain/types";
 import type { RouteResult } from "../providers/index";
 import type { RouteMap } from "./index";
 import { arcLabel, tripArcs } from "./map-arcs";
@@ -13,7 +13,7 @@ import { arcLabel, tripArcs } from "./map-arcs";
  *
  * What this guards is the seam a second renderer needs: one arc per
  * `orderedPairs()` pair — the SAME pair set the Route rail and the dashboard
- * card key on, floating stops included — each carrying the `source` a Mapbox
+ * card key on, floating destinations included — each carrying the `source` a Mapbox
  * layer paints by, the miles the rail prints, and its decoded geometry. No
  * layer scoping and no label copy: those stay the web's (`pins.ts`), because
  * the phone's masthead words them differently.
@@ -24,10 +24,10 @@ const HASH = "test-routing-hash";
 /** HERE's published flexible-polyline test vector — four vertices. */
 const HERE_CORRIDOR = "BFoz5xJ67i1B1B7PzIhaxL7Y";
 
-function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
+function mkDestination(partial: Partial<Destination> & { id: string; chapterId: string }): Destination {
   return {
     id: partial.id,
-    legId: partial.legId,
+    chapterId: partial.chapterId,
     place: partial.place ?? { name: partial.id, lat: 45, lng: -122, googlePlaceId: null },
     arriveDate: partial.arriveDate ?? null,
     departDate: partial.departDate ?? null,
@@ -41,7 +41,7 @@ function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
   };
 }
 
-/** The seed fixture's shape: two legs, three dated stops, one floating. */
+/** The seed fixture's shape: two chapters, three dated destinations, one floating. */
 function seedTrip(): Trip {
   return {
     id: "t1",
@@ -56,24 +56,24 @@ function seedTrip(): Trip {
     rating: null,
     note: null,
     ideas: [],
-    legs: [
+    chapters: [
       {
         id: "coast",
         tripId: "t1",
         title: "Oregon Coast",
         sortOrder: 0,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "astoria",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
             arriveDate: "2026-08-02",
             departDate: "2026-08-05",
             sortOrder: 0,
           }),
-          mkStop({
+          mkDestination({
             id: "newport",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
             arriveDate: "2026-08-05",
             departDate: "2026-08-09",
@@ -86,20 +86,20 @@ function seedTrip(): Trip {
         tripId: "t1",
         title: "Cascades & Home",
         sortOrder: 1,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "bend",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Bend, OR", lat: 44.0582, lng: -121.3153, googlePlaceId: null },
             arriveDate: "2026-08-12",
             departDate: "2026-08-16",
             sortOrder: 0,
           }),
-          // Floating — no dates. It sits at the end of ITS leg, so the pair
+          // Floating — no dates. It sits at the end of ITS chapter, so the pair
           // Bend → Crater Lake is the trip's last drive.
-          mkStop({
+          mkDestination({
             id: "crater",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Crater Lake NP", lat: 42.9446, lng: -122.109, googlePlaceId: null },
             sortOrder: 1,
           }),
@@ -115,9 +115,9 @@ function seedTrip(): Trip {
 }
 
 /** A routed answer for one pair, with a four-vertex corridor. */
-function routedPair(trip: Trip, fromStopId: string, primaryRoad: string | null): RouteMap {
-  const pair = orderedPairs(trip).find((p) => p.fromStopId === fromStopId);
-  expect(pair, `pair leaving ${fromStopId}`).toBeDefined();
+function routedPair(trip: Trip, fromDestinationId: string, primaryRoad: string | null): RouteMap {
+  const pair = orderedPairs(trip).find((p) => p.fromDestinationId === fromDestinationId);
+  expect(pair, `pair leaving ${fromDestinationId}`).toBeDefined();
   const result: RouteResult = {
     durationSeconds: 3 * 3600,
     distanceMeters: 218_874, // 136 mi
@@ -195,13 +195,13 @@ describe("tripArcs — one arc per ordered pair, two renderers", () => {
 
   it("skips a pair whose coordinates are missing rather than inventing one", () => {
     const trip = seedTrip();
-    trip.legs[0]!.stops[1]!.place = {
+    trip.chapters[0]!.destinations[1]!.place = {
       name: "Newport, OR",
       lat: null,
       lng: null,
       googlePlaceId: null,
     };
-    // orderedPairs yields no pair on either side of a coordless stop.
+    // orderedPairs yields no pair on either side of a coordless destination.
     expect(tripArcs(trip, {}, HASH).map((a) => a.id)).toEqual(["bend->crater"]);
   });
 

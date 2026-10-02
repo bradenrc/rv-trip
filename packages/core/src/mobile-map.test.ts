@@ -8,7 +8,7 @@ import { ARC_CASING_WIDTH, DEFAULT_STYLE_MODE, MAP_PALETTE, isStyleMode } from "
  * The phone's map contract (issue #44, item 4).
  *
  * The pure half of this item executes for real in `planner/map-pins.test.ts`
- * (`tripArcs` / `tripStopPins` / `arcFeatureCollection` / `mapBounds`). What is
+ * (`tripArcs` / `tripDestinationPins` / `arcFeatureCollection` / `mapBounds`). What is
  * left is a native renderer: `@rnmapbox/maps` is a native module behind an Expo
  * config plugin, `apps/mobile` has no test runner, and nothing in `src/map.tsx`
  * can be mounted here. So — exactly as `mobile-dev-loop.test.ts` (item 1) and
@@ -30,7 +30,7 @@ import { ARC_CASING_WIDTH, DEFAULT_STYLE_MODE, MAP_PALETTE, isStyleMode } from "
  *      unavailable" copy is verbatim from `packages/ui/src/MapFrame.tsx`, and no
  *      screen offers a Google Maps fallback in its place.
  *   5. The Route lens is untouched and the Map lens renders OUTSIDE its
- *      ScrollView; the stop screen's mini-map has no arcs, no labels, no pill.
+ *      ScrollView; the destination screen's mini-map has no arcs, no labels, no pill.
  *   6. `Segmented`'s metrics really are `@rv-trip/ui` `SegmentedControl`'s —
  *      asserted against the DS file, so a DS change reds here.
  *
@@ -53,7 +53,7 @@ const appConfig = JSON.parse(appJson) as {
 const map = read("apps/mobile/src/map.tsx");
 const ui = read("apps/mobile/src/ui.tsx");
 const tripScreen = read("apps/mobile/app/(tabs)/(trips)/trips/[id]/index.tsx");
-const stopScreen = read("apps/mobile/app/(tabs)/(trips)/trips/[id]/stops/[stopId].tsx");
+const destinationScreen = read("apps/mobile/app/(tabs)/(trips)/trips/[id]/destinations/[destinationId].tsx");
 const readme = read("apps/mobile/README.md");
 // The two files the phone mirrors, read so a change there reds here.
 const dsMapFrame = read("packages/ui/src/MapFrame.tsx");
@@ -71,7 +71,7 @@ function code(src: string): string {
 const mapCode = code(map);
 const uiCode = code(ui);
 const tripCode = code(tripScreen);
-const stopCode = code(stopScreen);
+const destinationCode = code(destinationScreen);
 
 /** Collapse whitespace so a JSX attribute that hard-wraps still matches. */
 const flat = (s: string) => s.replace(/\s+/g, " ");
@@ -99,7 +99,7 @@ describe("the native map's dependencies and plugin", () => {
     expect(mapCode).toContain("process.env.EXPO_PUBLIC_MAPBOX_TOKEN");
     // One reader, so there is one answer to "is there a token".
     expect(mapCode.match(/EXPO_PUBLIC_MAPBOX_TOKEN/g)).toHaveLength(1);
-    for (const src of [tripScreen, stopScreen, ui]) {
+    for (const src of [tripScreen, destinationScreen, ui]) {
       expect(src).not.toContain("EXPO_PUBLIC_MAPBOX_TOKEN");
     }
     expect(readme).toContain("EXPO_PUBLIC_MAPBOX_TOKEN");
@@ -232,7 +232,7 @@ describe("the basemap and the style preference", () => {
   it("the mode is null until the store answers, and the loading frame covers it", () => {
     expect(flat(mapCode)).toContain("useState<StyleMode | null>(null)");
     expect(flat(tripScreen)).toContain('mode === null ? ( <View style={styles.mapFrameBox}> <MapFrame state="loading" />');
-    expect(flat(stopScreen)).toContain('mode === null ? ( <MapFrame state="loading"');
+    expect(flat(destinationScreen)).toContain('mode === null ? ( <MapFrame state="loading"');
   });
 });
 
@@ -264,7 +264,7 @@ describe("mapAvailable() degrades, and nothing routes to Google Maps instead", (
 
   it("offers no Google Maps fallback on any map surface", () => {
     // Code, not prose: the docstrings explain the rule and so name Google.
-    for (const src of [mapCode, stopCode, tripCode]) {
+    for (const src of [mapCode, destinationCode, tripCode]) {
       expect(src).not.toMatch(/google/i);
     }
     // The phone's ONE hand-off to Google is a drive's Navigate button, which
@@ -306,7 +306,7 @@ describe("the three frames reproduce packages/ui's copy", () => {
       'export type MapFrameState = "loading" | "unavailable" | "empty"',
     );
     expect(tripCode).toContain('<MapFrame state="loading"');
-    expect(stopCode).toContain('<MapFrame state="loading"');
+    expect(destinationCode).toContain('<MapFrame state="loading"');
   });
 
   it("uses glyphs, because this kit ships no icon set", () => {
@@ -320,7 +320,7 @@ describe("the three frames reproduce packages/ui's copy", () => {
 describe("the trip screen's Route ⇄ Map lens", () => {
   it("derives both halves of the map from core, from the bundle it already holds", () => {
     expect(flat(tripScreen)).toContain("tripArcs(bundle.trip, bundle.routes, bundle.rigHash)");
-    expect(flat(tripScreen)).toContain("tripStopPins(bundle.trip)");
+    expect(flat(tripScreen)).toContain("tripDestinationPins(bundle.trip)");
   });
 
   it("puts the lens control in the masthead, above both lenses", () => {
@@ -363,7 +363,7 @@ describe("the trip screen's Route ⇄ Map lens", () => {
   });
 
   it("shortens the masthead's date line on the map, where no scroll carries the rest", () => {
-    expect(flat(tripScreen)).toContain("{summary!.stops} stops · {arcs.length}{\" \"} drive");
+    expect(flat(tripScreen)).toContain("{summary!.destinations} destinations · {arcs.length}{\" \"} drive");
   });
 
   it("passes the map the style handler, so the over-canvas pill renders", () => {
@@ -373,18 +373,18 @@ describe("the trip screen's Route ⇄ Map lens", () => {
   });
 });
 
-describe("the stop screen's mini-map", () => {
+describe("the destination screen's mini-map", () => {
   it("is mounted with no arcs, no labels and no style pill", () => {
-    expect(flat(stopScreen)).toContain(
+    expect(flat(destinationScreen)).toContain(
       "<TripMap pins={miniPins} mode={mode} showLabels={false} height={MINI_MAP_HEIGHT} />",
     );
     // Structural, not a boolean: no handler ⇒ nothing to change ⇒ no pill.
-    expect(stopCode).not.toContain("onModeChange");
-    expect(stopCode).not.toMatch(/<TripMap[^>]*arcs=/);
+    expect(destinationCode).not.toContain("onModeChange");
+    expect(destinationCode).not.toMatch(/<TripMap[^>]*arcs=/);
   });
 
   it("diverges from the web's mini-map on labels, on purpose and explicitly", () => {
-    // The web's StopMiniMap passes no `showLabels`, and MapView defaults it to
+    // The web's DestinationMiniMap passes no `showLabels`, and MapView defaults it to
     // true, so the web DOES label its one pin. The phone's prop is required so
     // neither call site can inherit a default.
     expect(webMapView).toContain("showLabels = true");
@@ -393,20 +393,20 @@ describe("the stop screen's mini-map", () => {
   });
 
   it("keeps the web's 150pt frame height", () => {
-    expect(stopScreen).toContain("const MINI_MAP_HEIGHT = 150");
-    expect(read("apps/web/src/components/map/StopMiniMap.tsx")).toContain(
-      'STOP_MINI_MAP_HEIGHT = "150px"',
+    expect(destinationScreen).toContain("const MINI_MAP_HEIGHT = 150");
+    expect(read("apps/web/src/components/map/DestinationMiniMap.tsx")).toContain(
+      'DESTINATION_MINI_MAP_HEIGHT = "150px"',
     );
   });
 
   it("prints the ordinal from core's scheduledOrder, not from anything local", () => {
-    expect(stopScreen).toContain("scheduledOrder(bundle.trip)");
-    expect(flat(stopScreen)).toContain(
-      "`${legName} · stop ${ordinal} of ${order!.total}` : legName",
+    expect(destinationScreen).toContain("scheduledOrder(bundle.trip)");
+    expect(flat(destinationScreen)).toContain(
+      "`${chapterName} · destination ${ordinal} of ${order!.total}` : chapterName",
     );
-    // A floating stop has no place in the sequence, so it keeps the bare leg
-    // name rather than printing "stop null of 3".
-    expect(flat(stopScreen)).toContain("ordinal !== null && legName ?");
+    // A floating destination has no place in the sequence, so it keeps the bare chapter
+    // name rather than printing "destination null of 3".
+    expect(flat(destinationScreen)).toContain("ordinal !== null && chapterName ?");
   });
 });
 

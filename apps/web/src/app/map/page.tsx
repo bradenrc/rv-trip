@@ -3,7 +3,7 @@ import {
   getPrefsByOwner,
   getRigByOwner,
   listSavedPlacesForOwner,
-  listTripsWithStopsForOwner,
+  listTripsWithDestinationsForOwner,
 } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 import { routeTrip } from "@/lib/routing";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export default async function MapPage() {
   const owner = await getOwner();
   const [trips, places, rig, prefs] = await Promise.all([
-    listTripsWithStopsForOwner(owner),
+    listTripsWithDestinationsForOwner(owner),
     listSavedPlacesForOwner(owner),
     getRigByOwner(owner),
     getPrefsByOwner(owner),
@@ -53,7 +53,7 @@ export default async function MapPage() {
         Map
       </h1>
       <p className="m-0 mb-4 mt-3 max-w-[58ch] text-[15px] leading-relaxed text-rv-ink-muted">
-        Everywhere you&rsquo;ve been and everywhere you&rsquo;ve saved, on one map — visited stops,
+        Everywhere you&rsquo;ve been and everywhere you&rsquo;ve saved, on one map — visited destinations,
         favorites, and routes across all your trips.
       </p>
 

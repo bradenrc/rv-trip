@@ -19,8 +19,8 @@ import type {
   ReservationDraft,
   ReservationType,
   TravelMode,
-  Stop,
-  StopDatesDraft,
+  Destination,
+  DestinationDatesDraft,
   Trip,
   TripDateRange,
   TripSettingsDraft,
@@ -49,30 +49,29 @@ import {
   resolveHomeBase,
   editSegmentBooking,
   locateToastMessage,
-  legCascadeCounts,
-  nextLegTitle,
+  chapterCascadeCounts,
   drivePairs,
   withReconciledSegments,
-  orphanedStopsMessage,
+  orphanedDestinationsMessage,
   reservationDraft,
   reservationDraftInput,
   reservationDraftPatch,
   reservationRestoreInput,
   routeCacheKey,
-  stopCascadeCounts,
-  stopDatesDraft,
-  stopDatesOutsideTrip,
-  stopDatesHelp,
-  stopDatesPatch,
-  stopOutsideTripMessage,
-  stopPlaceCreate,
-  stopPlacePatch,
-  stopsOutsideRange,
+  destinationCascadeCounts,
+  destinationDatesDraft,
+  destinationDatesOutsideTrip,
+  destinationDatesHelp,
+  destinationDatesPatch,
+  destinationOutsideTripMessage,
+  destinationPlaceCreate,
+  destinationPlacePatch,
+  destinationsOutsideRange,
   tripCascadeCounts,
   tripDayCount,
   tripSettingsDraft,
   tripSettingsPatch,
-  unscheduleStopPatch,
+  unscheduleDestinationPatch,
 } from "@rv-trip/core";
 import {
   CategoryTile,
@@ -107,37 +106,39 @@ import {
   X,
 } from "lucide-react";
 import {
-  allStops,
+  allDestinations,
   appendIdea,
   appendShelfIdea,
-  appendLeg,
+  appendChapter,
   appendReservation,
-  appendStop,
+  appendDestination,
   applyPromotion,
-  canMoveLeg,
-  legOrder,
-  moveLeg,
-  moveStopToLeg,
-  attachIdeaToStop,
+  canMoveChapter,
+  chapterOrder,
+  moveChapter,
+  moveDestinationToChapter,
+  attachIdeaToDestination,
   detachIdeaToShelf,
   ideaShelf,
   removeIdea,
   removeShelfIdea,
   setShelfIdeaFields,
-  removeLeg,
+  removeChapter,
   removeReservation,
-  removeStop,
-  renameLeg,
-  renameStop,
-  setStopDates,
-  setStopPlace,
-  stopAbove,
+  removeDestination,
+  renameChapter,
+  renameDestination,
+  setDestinationDates,
+  setDestinationPlace,
+  destinationAbove,
   timelineModel,
   routeModel,
   routeSummary,
-  stopMap,
-  setStopRating,
-  setStopNote,
+  routeCountKicker,
+  logisticsModel,
+  destinationMap,
+  setDestinationRating,
+  setDestinationNote,
   setReservationRating,
   setReservationNote,
   setReservationFields,
@@ -147,7 +148,7 @@ import {
   setIdeaNote,
   scheduleFloating,
   reorderFloating,
-  updateStop,
+  updateDestination,
   type NavMap,
   type RouteMap,
   type ShelfFilter,
@@ -196,7 +197,7 @@ import { MENU_ITEM, MENU_ITEM_WARN, MENU_SURFACE, MenuHint, RowMenu } from "./ro
 import { Timeline } from "./Timeline";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { RouteView } from "./RouteView";
-import { StopDetailSheet } from "./StopDetailSheet";
+import { DestinationDetailSheet } from "./DestinationDetailSheet";
 import { NearbySavesBanner, NearbySavesSheet, sheetRows } from "./NearbySaves";
 import { JournalLens } from "./JournalLens";
 import { LastTimeHere } from "./LastTimeHere";
@@ -294,8 +295,8 @@ export function TripPlanner({
     setTab("itinerary");
     setSub("route");
   };
-  /** #128 · the Add stay sheet — `stopId` null is Itinerary ▸ Add ▸ Stay. */
-  const [staySheet, setStaySheet] = useState<{ stopId: string | null } | null>(null);
+  /** #128 · the Add stay sheet — `destinationId` null is Itinerary ▸ Add ▸ Stay. */
+  const [staySheet, setStaySheet] = useState<{ destinationId: string | null } | null>(null);
   /** #129 · the Add flight (round trip) sheet. */
   const [flightSheetOpen, setFlightSheetOpen] = useState(false);
   /** #129 · Q11 A — the keep-or-remove prompt for Fly → Drive. */
@@ -313,22 +314,22 @@ export function TripPlanner({
   /** The reservation form: `"new"` is the add form, an id is that row's full
    * edit, `null` is closed. One form, two jobs. */
   const [formTarget, setFormTarget] = useState<string | "new" | null>(null);
-  /** The leg or stop whose inline rename is open — set by the row menu's
+  /** The chapter or destination whose inline rename is open — set by the row menu's
    * "Rename" and by a create, so a new row lands ready to be named. */
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [datesStopId, setDatesStopId] = useState<string | null>(null);
-  /** The leg whose "Add stop" DRAFT row is open. The draft is not a stop — the
+  const [datesDestinationId, setDatesDestinationId] = useState<string | null>(null);
+  /** The chapter whose "Add destination" DRAFT row is open. The draft is not a destination — the
    * pick is the create — so dismissing it writes nothing, which is how this
    * screen stops manufacturing the coordless rows #60 exists to repair. */
-  const [draftLegId, setDraftLegId] = useState<string | null>(null);
-  /** The stop whose place editor is open. One editor, three entry points: the
-   * row menu, the row's amber coordless chip, and the stop sheet's mini-map. */
-  const [placingStopId, setPlacingStopId] = useState<string | null>(null);
+  const [draftChapterId, setDraftChapterId] = useState<string | null>(null);
+  /** The destination whose place editor is open. One editor, three entry points: the
+   * row menu, the row's amber coordless chip, and the destination sheet's mini-map. */
+  const [placingDestinationId, setPlacingDestinationId] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
-  /** The optional place on the stop sheet's "Add idea" form. */
+  /** The optional place on the destination sheet's "Add idea" form. */
   const [ideaPicked, setIdeaPicked] = useState<PickedPlace | null>(null);
-  const [deleteLegId, setDeleteLegId] = useState<string | null>(null);
-  const [deleteStopId, setDeleteStopId] = useState<string | null>(null);
+  const [deleteChapterId, setDeleteChapterId] = useState<string | null>(null);
+  const [deleteDestinationId, setDeleteDestinationId] = useState<string | null>(null);
   const [form, setForm] = useState<AddForm>(() => stayDraft(initialTrip.lodgingDefault));
   const [ideaAddOpen, setIdeaAddOpen] = useState(false);
   const [ideaDraft, setIdeaDraft] = useState("");
@@ -340,7 +341,7 @@ export function TripPlanner({
   /** The shelf's pressed proximity chip (#80). `all` is the reset. */
   const [shelfFilter, setShelfFilter] = useState<ShelfFilter>({ kind: "all" });
   /** The "+ Add" branch that is open, as the kind of maybe it creates. `null`
-   * is closed; the fourth branch ("A stop") is the shipped draft-stop row. */
+   * is closed; the fourth branch ("A destination") is the shipped draft-destination row. */
   const [addIdeaCategory, setAddIdeaCategory] = useState<IdeaCategory | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [shelfDraft, setShelfDraft] = useState("");
@@ -354,12 +355,12 @@ export function TripPlanner({
   /** The rows added from the OPEN review sheet — kept as "✓ Idea" even after a
    * refetch drops them (they are on the trip now). Cleared on each open. */
   const [nearbyAdded, setNearbyAdded] = useState<NearbySave[]>([]);
-  /** The shelf row whose place picker is open — the same #69 entrance the stop
+  /** The shelf row whose place picker is open — the same #69 entrance the destination
    * sheet's idea card has, on the rail's card. */
   const [locatingShelfIdeaId, setLocatingShelfIdeaId] = useState<string | null>(null);
   const [routeDrag, setRouteDrag] = useState<{
-    legId: string;
-    stopId: string;
+    chapterId: string;
+    destinationId: string;
   } | null>(null);
   // Cost tracking is opt-in — planning without money in your face is the default.
   const [costTracking, changeCostTracking] = useBooleanPref("rv-track-costs");
@@ -406,7 +407,7 @@ export function TripPlanner({
 
   const timeline = useMemo(() => timelineModel(trip), [trip]);
   // The rail's first section. Pure, memoized on the trip and the pressed chip
-  // — the proximity pairs are ideas × located stops, so this stays bounded.
+  // — the proximity pairs are ideas × located destinations, so this stays bounded.
   const shelf = useMemo(() => ideaShelf(trip, shelfFilter), [trip, shelfFilter]);
   const route = useMemo(
     () => routeModel(trip, routes, routingHash, nav, units),
@@ -416,31 +417,33 @@ export function TripPlanner({
     () => routeSummary(trip, routes, routingHash),
     [trip, routes, routingHash],
   );
-  const byId = useMemo(() => stopMap(trip), [trip]);
+  // #155 · Q3 B — the Logistics section, from the same trip.
+  const logistics = useMemo(() => logisticsModel(trip), [trip]);
+  const byId = useMemo(() => destinationMap(trip), [trip]);
   // Trip-wide scheduled sequence — the same ordering routeSummary() and /map use.
   const scheduledOrdinal = useMemo(
     () =>
       new Map(
-        trip.legs
-          .flatMap((l) => l.stops)
+        trip.chapters
+          .flatMap((l) => l.destinations)
           .filter(isScheduled)
           .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!))
           .map((s, i) => [s.id, i + 1] as const),
       ),
     [trip],
   );
-  const selectedStop = selectedId ? (byId.get(selectedId) ?? null) : null;
-  const selectedLegName = selectedStop
-    ? (trip.legs.find((l) => l.id === selectedStop.legId)?.title ?? "")
+  const selectedDestination = selectedId ? (byId.get(selectedId) ?? null) : null;
+  const selectedChapterName = selectedDestination
+    ? (trip.chapters.find((l) => l.id === selectedDestination.chapterId)?.title ?? "")
     : "";
   // The three row-menu surfaces read their subject off the tree rather than
   // snapshotting it, so a rollback under an open dialog corrects what it shows.
-  const deleteLeg = deleteLegId ? (trip.legs.find((l) => l.id === deleteLegId) ?? null) : null;
-  const deleteStop = deleteStopId ? (byId.get(deleteStopId) ?? null) : null;
-  const datesStop = datesStopId ? (byId.get(datesStopId) ?? null) : null;
+  const deleteChapter = deleteChapterId ? (trip.chapters.find((l) => l.id === deleteChapterId) ?? null) : null;
+  const deleteDestination = deleteDestinationId ? (byId.get(deleteDestinationId) ?? null) : null;
+  const datesDestination = datesDestinationId ? (byId.get(datesDestinationId) ?? null) : null;
 
-  /** Every leaf surface is per-stop, so opening or closing the sheet closes all
-   * of them — a form left open over another stop would write to the wrong row. */
+  /** Every leaf surface is per-destination, so opening or closing the sheet closes all
+   * of them — a form left open over another destination would write to the wrong row. */
   const resetLeafForms = () => {
     setFormTarget(null);
     setIdeaAddOpen(false);
@@ -448,15 +451,15 @@ export function TripPlanner({
     setIdeaPicked(null);
     setPromotingId(null);
   };
-  const openStop = (id: string) => {
+  const openDestination = (id: string) => {
     setSelectedId(id);
     resetLeafForms();
   };
-  const closeStop = () => {
+  const closeDestination = () => {
     setSelectedId(null);
     // Mount B's editor cannot outlive the sheet it was opened from — it would
     // reappear, still open, on the row behind it.
-    setPlacingStopId(null);
+    setPlacingDestinationId(null);
     resetLeafForms();
   };
   const toggleIdeaNote = (ideaId: string) =>
@@ -470,17 +473,17 @@ export function TripPlanner({
   // ── mutations: optimistic local update + persist ─────────────────────────
 
   /**
-   * The gantt drop — and the stop sheet's "Schedule" button, which has no drop
+   * The gantt drop — and the destination sheet's "Schedule" button, which has no drop
    * target and passes no gap.
    *
-   * `gap` is the open span the card was dropped ON: the stop takes that gap's
+   * `gap` is the open span the card was dropped ON: the destination takes that gap's
    * first date and `min(3, gap.span)` days of it, so dropping on Aug 10–11
    * lands on Aug 10–11 rather than on the trip's longest empty run. `null`
    * keeps the longest-run fallback the sheet's button has always used.
    *
-   * Two fields, one PATCH — no `sortOrder` write. `orderedLegStops()` sorts
-   * scheduled stops by `arriveDate`, so the dates alone reorder the leg
-   * everywhere the stop appears.
+   * Two fields, one PATCH — no `sortOrder` write. `orderedChapterDestinations()` sorts
+   * scheduled destinations by `arriveDate`, so the dates alone reorder the chapter
+   * everywhere the destination appears.
    */
   const doSchedule = (id: string, gap: TimelineGap | null = null) => {
     const undo = trip;
@@ -488,17 +491,17 @@ export function TripPlanner({
     if (next === undo) return; // no open day to land on — nothing happened
     setTrip(next);
     upgradeRoutes(next);
-    const s = stopMap(next).get(id);
+    const s = destinationMap(next).get(id);
     if (!s?.arriveDate || !s.departDate) return;
     const arriveDate = s.arriveDate;
     const departDate = s.departDate;
     persist(
-      tripApi.updateStop(id, { arriveDate, departDate }),
+      tripApi.updateDestination(id, { arriveDate, departDate }),
       undo,
       `Couldn't schedule ${s.place.name} — put back to floating.`,
     );
     // The drop is the one gesture with no dialog in front of it, so the toast
-    // is where it becomes reversible: Undo puts the stop back to floating and
+    // is where it becomes reversible: Undo puts the destination back to floating and
     // writes that back too.
     toast.success(`Scheduled ${s.place.name} · ${monthDay(arriveDate)} – ${monthDay(departDate)}`, {
       action: {
@@ -506,7 +509,7 @@ export function TripPlanner({
         onClick: () => {
           setTrip(undo);
           persist(
-            tripApi.updateStop(id, { arriveDate: null, departDate: null }),
+            tripApi.updateDestination(id, { arriveDate: null, departDate: null }),
             next,
             `Couldn't undo — ${s.place.name} still has dates.`,
           );
@@ -526,7 +529,7 @@ export function TripPlanner({
    * surfaces a maybe can be created from. */
   const openAddIdea = (category: IdeaCategory) => {
     setTab("ideas");
-    setDraftLegId(null);
+    setDraftChapterId(null);
     setPlacesPanelOpen(false);
     setShelfDraft("");
     setShelfPicked(null);
@@ -534,11 +537,11 @@ export function TripPlanner({
   };
 
   /** The shelf's "+ Add" — one field plus an optional place, exactly like the
-   * sheet's, but with no stop in hand. */
+   * sheet's, but with no destination in hand. */
   const submitShelfIdea = async () => {
     if (!addIdeaCategory) return;
     const body = ideaDraftInput(
-      { tripId: trip.id, stopId: null, category: addIdeaCategory },
+      { tripId: trip.id, destinationId: null, category: addIdeaCategory },
       shelfDraft,
       shelfPicked,
     );
@@ -565,7 +568,7 @@ export function TripPlanner({
     try {
       const created = await tripApi.createIdea({
         tripId: trip.id,
-        stopId: null,
+        destinationId: null,
         category: ideaCategoryOfType(p.type),
         title: p.place.name,
         status: "idea",
@@ -681,11 +684,11 @@ export function TripPlanner({
   /**
    * Gesture 1 · a STAY-idea dropped on open days.
    *
-   * It creates the stop immediately (Q3 → A) and links the idea to it: two
+   * It creates the destination immediately (Q3 → A) and links the idea to it: two
    * writes, one gesture. The dates are `planIdeaOnGap` — the SAME rule
    * `scheduleFloating` uses, so a drop on the Oct 18–24 span lands Oct 18–20 for
-   * an idea exactly as it does for a floating stop. The leg is the one owning
-   * the last stop, falling back to the last leg: the "goes on the end" rule
+   * an idea exactly as it does for a floating destination. The chapter is the one owning
+   * the last destination, falling back to the last chapter: the "goes on the end" rule
    * every create here already follows.
    */
   /**
@@ -700,23 +703,23 @@ export function TripPlanner({
   ) => {
     const it = trip.ideas.find((i) => i.id === ideaId);
     if (!it) return;
-    const legId = legOrder(trip).at(-1);
-    if (!legId) return;
+    const chapterId = chapterOrder(trip).at(-1);
+    if (!chapterId) return;
     const undo = trip;
     try {
-      const created = await tripApi.createStop({
-        legId,
+      const created = await tripApi.createDestination({
+        chapterId,
         place: it.place ?? { name: it.title, lat: null, lng: null, googlePlaceId: null },
         arriveDate: dates.arriveDate,
         departDate: dates.departDate,
       });
-      const next = attachIdeaToStop(appendStop(trip, created), ideaId, created.id);
+      const next = attachIdeaToDestination(appendDestination(trip, created), ideaId, created.id);
       setTrip(next);
       upgradeRoutes(next);
       // Held, not just fired: Undo chains off it so the detach below can never
       // overtake the attach on the wire.
       const attached = persist(
-        tripApi.updateIdea(ideaId, { stopId: created.id, status: "planned" }),
+        tripApi.updateIdea(ideaId, { destinationId: created.id, status: "planned" }),
         undo,
         `Couldn't plan ${it.title} — it's back on the shelf.`,
       );
@@ -727,16 +730,16 @@ export function TripPlanner({
             label: "Undo",
             onClick: () => {
               setTrip(undo);
-              // DETACH FIRST, then delete. `ideas.stop_id` is ON DELETE CASCADE
-              // (packages/db/src/schema.ts:133), so deleting the stop this
+              // DETACH FIRST, then delete. `ideas.destination_id` is ON DELETE CASCADE
+              // (packages/db/src/schema.ts:133), so deleting the destination this
               // gesture created while the idea is still attached DESTROYS the
               // idea — the rail would show it back for one session and it
               // would be gone on the next load. The PATCH puts the row (and the
               // status the plan moved to "planned") back where the undone tree
-              // already shows it; only then is the stop safe to remove.
+              // already shows it; only then is the destination safe to remove.
               void attached
-                .then(() => tripApi.updateIdea(ideaId, { stopId: null, status: it.status }))
-                .then(() => tripApi.deleteStop(created.id))
+                .then(() => tripApi.updateIdea(ideaId, { destinationId: null, status: it.status }))
+                .then(() => tripApi.deleteDestination(created.id))
                 .catch(() => {
                   toast.error(`Couldn't undo — ${it.title} still has dates.`);
                 });
@@ -749,33 +752,33 @@ export function TripPlanner({
     }
   };
 
-  /** #131 · Plan it on a do/eat idea: it goes to the stop you pick AND is
+  /** #131 · Plan it on a do/eat idea: it goes to the destination you pick AND is
    * planned — so it lands on the Itinerary, which lists knowns only. */
-  const planIdeaToStop = (ideaId: string, stopId: string) => {
+  const planIdeaToDestination = (ideaId: string, destinationId: string) => {
     const it = trip.ideas.find((i) => i.id === ideaId);
-    const stop = byId.get(stopId);
-    if (!it || !stop) return;
+    const destination = byId.get(destinationId);
+    if (!it || !destination) return;
     const undo = trip;
-    const attached = attachIdeaToStop(trip, ideaId, stopId);
+    const attached = attachIdeaToDestination(trip, ideaId, destinationId);
     setTrip(
-      updateStopIdeas(attached, stopId, (x) => (x.id === ideaId ? { ...x, status: "planned" } : x)),
+      updateDestinationIdeas(attached, destinationId, (x) => (x.id === ideaId ? { ...x, status: "planned" } : x)),
     );
     persist(
-      tripApi.updateIdea(ideaId, { stopId, status: "planned" }),
+      tripApi.updateIdea(ideaId, { destinationId, status: "planned" }),
       undo,
       `Couldn't plan ${it.title} — it's back on Ideas.`,
     );
-    toast.success(`Planned ${it.title} · ${stop.place.name}`);
+    toast.success(`Planned ${it.title} · ${destination.place.name}`);
   };
 
-  /** #131 · Plan it on an idea already pinned to a stop — and the pinned row's
-   * pill. Both are the stop idea's status write. */
-  const setPinnedIdeaStatus = (stopId: string, ideaId: string, next: (s: Idea["status"]) => Idea["status"]) => {
-    const it = byId.get(stopId)?.ideas.find((x) => x.id === ideaId);
+  /** #131 · Plan it on an idea already pinned to a destination — and the pinned row's
+   * pill. Both are the destination idea's status write. */
+  const setPinnedIdeaStatus = (destinationId: string, ideaId: string, next: (s: Idea["status"]) => Idea["status"]) => {
+    const it = byId.get(destinationId)?.ideas.find((x) => x.id === ideaId);
     if (!it) return;
     const status = next(it.status);
     const undo = trip;
-    setTrip(updateStopIdeas(trip, stopId, (x) => (x.id === ideaId ? { ...x, status } : x)));
+    setTrip(updateDestinationIdeas(trip, destinationId, (x) => (x.id === ideaId ? { ...x, status } : x)));
     persist(
       tripApi.updateIdea(ideaId, { status }),
       undo,
@@ -784,25 +787,25 @@ export function TripPlanner({
   };
 
   /** Gesture 3 · an ATTACHED idea goes back to the shelf. Legal only now that
-   * `stop_id` is nullable, and it is an EXPLICIT null on the wire — absent
+   * `destination_id` is nullable, and it is an EXPLICIT null on the wire — absent
    * would mean "leave the attachment alone". */
   const doDetachIdea = (ideaId: string) => {
-    const it = allStops(trip)
+    const it = allDestinations(trip)
       .flatMap((st) => st.ideas)
       .find((x) => x.id === ideaId);
     if (!it) return;
     const undo = trip;
     setTrip(detachIdeaToShelf(trip, ideaId));
     persist(
-      tripApi.updateIdea(ideaId, { stopId: null }),
+      tripApi.updateIdea(ideaId, { destinationId: null }),
       undo,
-      `Couldn't move ${it.title} — it's back under its stop.`,
+      `Couldn't move ${it.title} — it's back under its destination.`,
     );
   };
 
   /** The shelf card's own leaf writes: the status pill and the delete. They go
    * through the SAME endpoints the sheet's card uses — #80's whole ownership
-   * move is what makes them reach a row with a null stop_id at all. */
+   * move is what makes them reach a row with a null destination_id at all. */
   const cycleShelfIdeaStatus = (ideaId: string) => {
     const it = trip.ideas.find((i) => i.id === ideaId);
     if (!it) return;
@@ -820,10 +823,10 @@ export function TripPlanner({
   /**
    * The shelf row's RESEARCH PAD (#82) — its stars and its note.
    *
-   * TWO NEW handlers, not a re-thread of the stop sheet's three. Those are
-   * stop-scoped by construction: `setIdeaRating(trip, selectedStop.id, …)` and
-   * `setIdeaNote(…)` both walk into a stop's `ideas`, and an unattached idea is
-   * not in any stop's — it lives in `trip.ideas`. So the shelf's pad writes
+   * TWO NEW handlers, not a re-thread of the destination sheet's three. Those are
+   * destination-scoped by construction: `setIdeaRating(trip, selectedDestination.id, …)` and
+   * `setIdeaNote(…)` both walk into a destination's `ideas`, and an unattached idea is
+   * not in any destination's — it lives in `trip.ideas`. So the shelf's pad writes
    * through `setShelfIdeaFields`, the same pure mutation the pill and Locate
    * already use. The PATCH is unchanged: `ideaPatchInput` has carried `rating`
    * and `notes` all along.
@@ -917,92 +920,94 @@ export function TripPlanner({
     });
   };
 
-  // ── legs ─────────────────────────────────────────────────────────────────
+  // ── chapters ─────────────────────────────────────────────────────────────────
   //
   // A CREATE is the one write with nothing to be optimistic about — only the
   // server can mint the id — so it awaits the 201 and splices the row it hands
   // back. Everything else applies to the tree first and hands persist() the
   // trip it was applied to, which is what a failure puts back.
 
-  const addLeg = async () => {
+  const addChapter = async () => {
     try {
-      const leg = await tripApi.createLeg({ tripId: trip.id, title: nextLegTitle(trip) });
-      setTrip((t) => appendLeg(t, leg));
+      // #155 · Q1 A — an UNNAMED chapter (as a new trip's first one is); its
+      // inline rename opens straight away to name it.
+      const chapter = await tripApi.createChapter({ tripId: trip.id, title: null });
+      setTrip((t) => appendChapter(t, chapter));
       showRoute();
-      setRenamingId(leg.id);
+      setRenamingId(chapter.id);
     } catch {
-      toast.error("Couldn't add a leg — nothing was created.");
+      toast.error("Couldn't add a chapter — nothing was created.");
     }
   };
 
-  const doRenameLeg = (legId: string, title: string) => {
+  const doRenameChapter = (chapterId: string, title: string) => {
     const undo = trip;
-    const was = trip.legs.find((l) => l.id === legId)?.title ?? "that leg";
-    setTrip(renameLeg(trip, legId, title));
+    const was = trip.chapters.find((l) => l.id === chapterId)?.title ?? "that chapter";
+    setTrip(renameChapter(trip, chapterId, title));
     persist(
-      tripApi.updateLeg(legId, { title }),
+      tripApi.updateChapter(chapterId, { title }),
       undo,
       `Couldn't rename ${was} — the old name is back.`,
     );
   };
 
-  /** "Move leg up/down" — the whole new order travels, never a swap. */
-  const doMoveLeg = (legId: string, delta: -1 | 1) => {
+  /** "Move chapter up/down" — the whole new order travels, never a swap. */
+  const doMoveChapter = (chapterId: string, delta: -1 | 1) => {
     const undo = trip;
-    const next = moveLeg(trip, legId, delta);
+    const next = moveChapter(trip, chapterId, delta);
     if (next === undo) return;
     setTrip(next);
     upgradeRoutes(next);
     persist(
-      tripApi.reorderLegs(trip.id, legOrder(next)),
+      tripApi.reorderChapters(trip.id, chapterOrder(next)),
       undo,
       "Couldn't save that order — put back the way it was.",
     );
   };
 
-  const doDeleteLeg = (legId: string) => {
-    setDeleteLegId(null);
-    const leg = trip.legs.find((l) => l.id === legId);
-    if (!leg) return;
+  const doDeleteChapter = (chapterId: string) => {
+    setDeleteChapterId(null);
+    const chapter = trip.chapters.find((l) => l.id === chapterId);
+    if (!chapter) return;
     const undo = trip;
-    // The sheet cannot outlive the stop it is showing.
-    if (leg.stops.some((s) => s.id === selectedId)) closeStop();
-    setTrip(removeLeg(trip, legId));
+    // The sheet cannot outlive the destination it is showing.
+    if (chapter.destinations.some((s) => s.id === selectedId)) closeDestination();
+    setTrip(removeChapter(trip, chapterId));
     persist(
-      tripApi.deleteLeg(legId),
+      tripApi.deleteChapter(chapterId),
       undo,
-      `Couldn't delete ${leg.title} — the leg and its stops are back.`,
+      `Couldn't delete ${chapter.title ?? "that chapter"} — the chapter and its destinations are back.`,
     );
   };
 
-  // ── stops ────────────────────────────────────────────────────────────────
+  // ── destinations ────────────────────────────────────────────────────────────────
 
   /**
-   * "Add stop" no longer creates anything: it appends a DRAFT row to the leg
-   * and opens the picker inside it, biased to the stop above. Nothing is
+   * "Add destination" no longer creates anything: it appends a DRAFT row to the chapter
+   * and opens the picker inside it, biased to the destination above. Nothing is
    * written until a place is chosen — which is the whole of #60's headline fix,
-   * because the old path posted a literal "New stop" with three null columns
+   * because the old path posted a literal "New destination" with three null columns
    * that no patch could ever repair.
    */
-  const openDraftStop = (legId: string) => {
+  const openDraftDestination = (chapterId: string) => {
     showRoute();
-    setPlacingStopId(null);
-    setDraftLegId(legId);
+    setPlacingDestinationId(null);
+    setDraftChapterId(chapterId);
   };
 
   /** The pick IS the create: name, coordinates and place id in one write, so
-   * the stop is born mapped and its connector resolves immediately. */
-  const createStopFromPick = async (legId: string, picked: PickedPlace) => {
-    const body = stopPlaceCreate(legId, picked);
+   * the destination is born mapped and its connector resolves immediately. */
+  const createDestinationFromPick = async (chapterId: string, picked: PickedPlace) => {
+    const body = destinationPlaceCreate(chapterId, picked);
     if (!body) return;
-    setDraftLegId(null);
+    setDraftChapterId(null);
     try {
-      const created = await tripApi.createStop(body);
-      const next = appendStop(trip, created);
+      const created = await tripApi.createDestination(body);
+      const next = appendDestination(trip, created);
       setTrip(next);
       upgradeRoutes(next);
     } catch {
-      toast.error("Couldn't add a stop — nothing was created.");
+      toast.error("Couldn't add a destination — nothing was created.");
     }
   };
 
@@ -1012,17 +1017,17 @@ export function TripPlanner({
    * re-picked free-text name honestly clears the coordinates rather than
    * leaving a pin at the last spot under a new label.
    */
-  const doChangeStopPlace = (stopId: string, picked: PickedPlace) => {
-    const patch = stopPlacePatch(picked);
+  const doChangeDestinationPlace = (destinationId: string, picked: PickedPlace) => {
+    const patch = destinationPlacePatch(picked);
     if (!patch?.place) return;
-    setPlacingStopId(null);
+    setPlacingDestinationId(null);
     const undo = trip;
-    const was = byId.get(stopId)?.place.name ?? "that stop";
-    const next = setStopPlace(trip, stopId, patch.place);
+    const was = byId.get(destinationId)?.place.name ?? "that destination";
+    const next = setDestinationPlace(trip, destinationId, patch.place);
     setTrip(next);
     upgradeRoutes(next);
     persist(
-      tripApi.updateStop(stopId, patch),
+      tripApi.updateDestination(destinationId, patch),
       undo,
       `Couldn't change the place for ${was} — the old one is back.`,
     );
@@ -1030,8 +1035,8 @@ export function TripPlanner({
 
   /**
    * The rail's Locate — the same bounded batch /map already ships, pointed at
-   * the planner's coordless STOPS (`locateRowKind` has always been
-   * `["place","stop"]`).
+   * the planner's coordless DESTINATIONS (`locateRowKind` has always been
+   * `["place","destination"]`).
    *
    * It refreshes rather than echoing: `LocateResponse` returns only id/lat/lng,
    * not the `googlePlaceId` the server also wrote, so a local echo would leave
@@ -1039,11 +1044,11 @@ export function TripPlanner({
    * re-resolved server-side anyway.
    */
   const locateUnmapped = () => {
-    const batch = summary.unmappedStops.slice(0, LOCATE_MAX_ROWS);
+    const batch = summary.unmappedDestinations.slice(0, LOCATE_MAX_ROWS);
     if (batch.length === 0) return;
     setLocating(true);
     tripApi
-      .locatePlaces(batch.map((row) => ({ kind: "stop" as const, id: row.id })))
+      .locatePlaces(batch.map((row) => ({ kind: "destination" as const, id: row.id })))
       .then(({ located, results }) => {
         const found = new Set(results.map((r) => r.id));
         const stuck = batch.filter((row) => !found.has(row.id)).map((row) => row.name);
@@ -1054,83 +1059,83 @@ export function TripPlanner({
       .finally(() => setLocating(false));
   };
 
-  const doRenameStop = (stopId: string, name: string) => {
+  const doRenameDestination = (destinationId: string, name: string) => {
     const undo = trip;
-    const was = byId.get(stopId)?.place.name ?? "that stop";
-    setTrip(renameStop(trip, stopId, name));
+    const was = byId.get(destinationId)?.place.name ?? "that destination";
+    setTrip(renameDestination(trip, destinationId, name));
     persist(
-      tripApi.updateStop(stopId, { placeName: name }),
+      tripApi.updateDestination(destinationId, { placeName: name }),
       undo,
       `Couldn't rename ${was} — the old name is back.`,
     );
   };
 
-  /** The stop-dates dialog's Save. Both dates travel together. #127 · Q7 B:
+  /** The destination-dates dialog's Save. Both dates travel together. #127 · Q7 B:
    * with "Extend trip" pressed, the trip's dates move first, in the same save. */
-  const saveStopDates = (stopId: string, draft: StopDatesDraft, extend: DateSpan | null = null) => {
-    setDatesStopId(null);
-    const stop = byId.get(stopId);
-    if (!stop) return;
-    const patch = stopDatesPatch(stop, draft);
+  const saveDestinationDates = (destinationId: string, draft: DestinationDatesDraft, extend: DateSpan | null = null) => {
+    setDatesDestinationId(null);
+    const destination = byId.get(destinationId);
+    if (!destination) return;
+    const patch = destinationDatesPatch(destination, draft);
     if (patch === null || Object.keys(patch).length === 0) return;
     const undo = trip;
     const widened = extend ? { ...trip, startDate: extend.start, endDate: extend.end } : trip;
-    const next = setStopDates(widened, stopId, patch.arriveDate ?? null, patch.departDate ?? null);
+    const next = setDestinationDates(widened, destinationId, patch.arriveDate ?? null, patch.departDate ?? null);
     setTrip(next);
     upgradeRoutes(next);
     const write = extend
       ? tripApi
           .updateTrip(trip.id, { startDate: extend.start, endDate: extend.end })
-          .then(() => tripApi.updateStop(stopId, patch))
-      : tripApi.updateStop(stopId, patch);
-    persist(write, undo, `Couldn't save those dates — ${stop.place.name} is back where it was.`);
+          .then(() => tripApi.updateDestination(destinationId, patch))
+      : tripApi.updateDestination(destinationId, patch);
+    persist(write, undo, `Couldn't save those dates — ${destination.place.name} is back where it was.`);
   };
 
-  /** One PATCH setting BOTH dates to null: the stop drops back to floating. */
-  const doUnschedule = (stopId: string) => {
-    setDatesStopId(null);
-    const stop = byId.get(stopId);
-    if (!stop || !isScheduled(stop)) return;
+  /** One PATCH setting BOTH dates to null: the destination drops back to floating. */
+  const doUnschedule = (destinationId: string) => {
+    setDatesDestinationId(null);
+    const destination = byId.get(destinationId);
+    if (!destination || !isScheduled(destination)) return;
     const undo = trip;
-    const next = setStopDates(trip, stopId, null, null);
+    const next = setDestinationDates(trip, destinationId, null, null);
     setTrip(next);
     upgradeRoutes(next);
     persist(
-      tripApi.updateStop(stopId, unscheduleStopPatch()),
+      tripApi.updateDestination(destinationId, unscheduleDestinationPatch()),
       undo,
-      `Couldn't unschedule ${stop.place.name} — the dates are back.`,
+      `Couldn't unschedule ${destination.place.name} — the dates are back.`,
     );
   };
 
-  const doMoveStopToLeg = (stopId: string, legId: string) => {
+  const doMoveDestinationToChapter = (destinationId: string, chapterId: string) => {
     const undo = trip;
-    const next = moveStopToLeg(trip, stopId, legId);
+    const next = moveDestinationToChapter(trip, destinationId, chapterId);
     if (next === undo) return;
-    const moved = stopMap(next).get(stopId);
+    const moved = destinationMap(next).get(destinationId);
     if (!moved) return;
     setTrip(next);
     upgradeRoutes(next);
     persist(
-      // The destination leg AND the position it was appended at — the server
+      // The target chapter AND the position it was appended at — the server
       // appends too, but only the client knows the row is going to the end of
-      // a leg it is already holding.
-      tripApi.updateStop(stopId, { legId, sortOrder: moved.sortOrder }),
+      // a chapter it is already holding.
+      tripApi.updateDestination(destinationId, { chapterId, sortOrder: moved.sortOrder }),
       undo,
-      `Couldn't move ${moved.place.name} — it's back in the leg it came from.`,
+      `Couldn't move ${moved.place.name} — it's back in the chapter it came from.`,
     );
   };
 
-  const doDeleteStop = (stopId: string) => {
-    setDeleteStopId(null);
-    const stop = byId.get(stopId);
-    if (!stop) return;
+  const doDeleteDestination = (destinationId: string) => {
+    setDeleteDestinationId(null);
+    const destination = byId.get(destinationId);
+    if (!destination) return;
     const undo = trip;
-    if (selectedId === stopId) closeStop();
-    setTrip(removeStop(trip, stopId));
+    if (selectedId === destinationId) closeDestination();
+    setTrip(removeDestination(trip, destinationId));
     persist(
-      tripApi.deleteStop(stopId),
+      tripApi.deleteDestination(destinationId),
       undo,
-      `Couldn't delete ${stop.place.name} — the stop is back.`,
+      `Couldn't delete ${destination.place.name} — the destination is back.`,
     );
   };
 
@@ -1213,7 +1218,7 @@ export function TripPlanner({
 
   /** The full edit: the same form, seeded from the row it is editing. */
   const openEditReservation = (resId: string) => {
-    const r = selectedStop?.reservations.find((x) => x.id === resId);
+    const r = selectedDestination?.reservations.find((x) => x.id === resId);
     if (!r) return;
     setForm(reservationDraft(r));
     setFormTarget(resId);
@@ -1224,12 +1229,12 @@ export function TripPlanner({
     if (formTarget === "new") {
       const body = reservationDraftInput(selectedId, form);
       if (!body) return;
-      const stopId = selectedId;
+      const destinationId = selectedId;
       try {
         // A create is the one write with nothing to be optimistic about: only
         // the server can mint the id, so it awaits the 201 and splices the row.
         const row = await tripApi.createReservation(body);
-        setTrip((t) => appendReservation(t, stopId, row));
+        setTrip((t) => appendReservation(t, destinationId, row));
         setForm(stayDraft(trip.lodgingDefault));
         setFormTarget(null);
       } catch {
@@ -1237,16 +1242,16 @@ export function TripPlanner({
       }
       return;
     }
-    const r = selectedStop?.reservations.find((x) => x.id === formTarget);
-    if (!r || !selectedStop) return;
+    const r = selectedDestination?.reservations.find((x) => x.id === formTarget);
+    if (!r || !selectedDestination) return;
     const patch = reservationDraftPatch(r, form);
     if (patch === null) return;
     setFormTarget(null);
     if (Object.keys(patch).length === 0) return;
     const undo = trip;
-    // The sheet lists only its stop's reservations (#110 Q2 A), so the row's
-    // parent IS the open stop.
-    setTrip(setReservationFields(trip, selectedStop.id, r.id, patch));
+    // The sheet lists only its destination's reservations (#110 Q2 A), so the row's
+    // parent IS the open destination.
+    setTrip(setReservationFields(trip, selectedDestination.id, r.id, patch));
     persist(
       tripApi.updateReservation(r.id, patch),
       undo,
@@ -1255,11 +1260,11 @@ export function TripPlanner({
   };
 
   const doDeleteReservation = (resId: string) => {
-    const r = selectedStop?.reservations.find((x) => x.id === resId);
-    if (!r || !selectedStop) return;
+    const r = selectedDestination?.reservations.find((x) => x.id === resId);
+    if (!r || !selectedDestination) return;
     if (formTarget === resId) setFormTarget(null);
     const undo = trip;
-    const next = removeReservation(trip, selectedStop.id, resId);
+    const next = removeReservation(trip, selectedDestination.id, resId);
     setTrip(next);
     persist(
       tripApi.deleteReservation(resId),
@@ -1279,8 +1284,8 @@ export function TripPlanner({
   const restoreReservation = async (r: Reservation) => {
     try {
       const row = await tripApi.createReservation(reservationRestoreInput(r));
-      // The re-POSTed row is stop-attached by construction.
-      setTrip((t) => (row.stopId ? appendReservation(t, row.stopId, row) : t));
+      // The re-POSTed row is destination-attached by construction.
+      setTrip((t) => (row.destinationId ? appendReservation(t, row.destinationId, row) : t));
     } catch {
       toast.error(`Couldn't put ${r.name} back.`);
     }
@@ -1290,18 +1295,18 @@ export function TripPlanner({
     if (!selectedId) return;
     // The place is optional and the title is not: a place without a title is
     // not an idea, which is exactly what `ideaDraftInput` refuses.
-    // The sheet's form always has a stop in hand; the shelf's "+ Add" is the
+    // The sheet's form always has a destination in hand; the shelf's "+ Add" is the
     // one with none (#80).
     const body = ideaDraftInput(
-      { tripId: trip.id, stopId: selectedId },
+      { tripId: trip.id, destinationId: selectedId },
       ideaDraft,
       ideaPicked,
     );
     if (!body) return;
-    const stopId = selectedId;
+    const destinationId = selectedId;
     try {
       const created = await tripApi.createIdea(body);
-      setTrip((t) => appendIdea(t, stopId, created));
+      setTrip((t) => appendIdea(t, destinationId, created));
       setIdeaDraft("");
       setIdeaPicked(null);
       setIdeaAddOpen(false);
@@ -1311,11 +1316,11 @@ export function TripPlanner({
   };
 
   const doDeleteIdea = (ideaId: string) => {
-    const it = selectedStop?.ideas.find((x) => x.id === ideaId);
-    if (!it || it.stopId === null) return;
+    const it = selectedDestination?.ideas.find((x) => x.id === ideaId);
+    if (!it || it.destinationId === null) return;
     if (promotingId === ideaId) setPromotingId(null);
     const undo = trip;
-    setTrip(removeIdea(trip, it.stopId, ideaId));
+    setTrip(removeIdea(trip, it.destinationId, ideaId));
     persist(tripApi.deleteIdea(ideaId), undo, `Couldn't delete ${it.title} — the idea is back.`);
     toast.success(`Deleted ${it.title}`, {
       duration: UNDO_WINDOW_MS,
@@ -1329,11 +1334,11 @@ export function TripPlanner({
     try {
       const created = await tripApi.createIdea(ideaRestoreInput(it));
       // An undone delete puts the row back where it WAS — a shelf idea comes
-      // back as a shelf idea, not as a fresh maybe under a stop.
+      // back as a shelf idea, not as a fresh maybe under a destination.
       setTrip((t) =>
-        created.stopId === null
+        created.destinationId === null
           ? appendShelfIdea(t, created)
-          : appendIdea(t, created.stopId, created),
+          : appendIdea(t, created.destinationId, created),
       );
     } catch {
       toast.error(`Couldn't put ${it.title} back.`);
@@ -1346,12 +1351,12 @@ export function TripPlanner({
    */
   const confirmPromote = async () => {
     const ideaId = promotingId;
-    if (!ideaId || !selectedStop) return;
-    const stopId = selectedStop.id;
+    if (!ideaId || !selectedDestination) return;
+    const destinationId = selectedDestination.id;
     setPromotingId(null);
     try {
       const row = await tripApi.promoteIdea(ideaId, promoteType);
-      setTrip((t) => applyPromotion(t, stopId, ideaId, row));
+      setTrip((t) => applyPromotion(t, destinationId, ideaId, row));
     } catch {
       toast.error("Couldn't book that idea.");
     }
@@ -1384,7 +1389,7 @@ export function TripPlanner({
   };
 
   /** #124 · a hop booking's Edit — `PATCH` with its clock; the hop re-times.
-   * Awaited, not optimistic: a 409 (the new date misses the stop) keeps the
+   * Awaited, not optimistic: a 409 (the new date misses the destination) keeps the
    * form open with the old flight still on the card. */
   const editHopBooking = async (resId: string, patch: ReservationPatchInput): Promise<boolean> => {
     if (Object.keys(patch).length === 0) return true;
@@ -1399,7 +1404,7 @@ export function TripPlanner({
       );
       return true;
     } catch {
-      toast.error("Couldn't save that flight — its date may disagree with the stop.");
+      toast.error("Couldn't save that flight — its date may disagree with the destination.");
       return false;
     }
   };
@@ -1416,39 +1421,39 @@ export function TripPlanner({
     } catch {
       toast.error(
         trip.homeBase
-          ? "Couldn't save those flights — check their dates against the stop."
+          ? "Couldn't save those flights — check their dates against the destination."
           : "Set a home base first — flights go from home.",
       );
       return false;
     }
   };
 
-  /** #128 · Save stay. With no stop yet, the place and its nights BECOME the
-   * stop first (the trip's last leg), then the stay hangs on it. */
+  /** #128 · Save stay. With no destination yet, the place and its nights BECOME the
+   * destination first (the trip's last chapter), then the stay hangs on it. */
   const saveStay = async (input: {
-    stopId: string | null;
+    destinationId: string | null;
     place: PickedPlace;
     draft: ReservationDraft;
   }): Promise<boolean> => {
     try {
-      let stopId = input.stopId;
+      let destinationId = input.destinationId;
       let working = trip;
-      if (!stopId) {
-        const legId = legOrder(trip).at(-1);
-        const body = legId ? stopPlaceCreate(legId, input.place) : null;
+      if (!destinationId) {
+        const chapterId = chapterOrder(trip).at(-1);
+        const body = chapterId ? destinationPlaceCreate(chapterId, input.place) : null;
         if (!body) return false;
-        const created = await tripApi.createStop({
+        const created = await tripApi.createDestination({
           ...body,
           arriveDate: input.draft.checkIn,
           departDate: input.draft.checkOut,
         });
-        working = appendStop(trip, created);
-        stopId = created.id;
+        working = appendDestination(trip, created);
+        destinationId = created.id;
       }
-      const body = reservationDraftInput(stopId, input.draft);
+      const body = reservationDraftInput(destinationId, input.draft);
       if (!body) return false;
       const row = await tripApi.createReservation(body);
-      const next = appendReservation(working, stopId, row);
+      const next = appendReservation(working, destinationId, row);
       setTrip(next);
       upgradeRoutes(next);
       setStaySheet(null);
@@ -1471,7 +1476,7 @@ export function TripPlanner({
     try {
       const created = await tripApi.createIdea({
         tripId: trip.id,
-        stopId: null,
+        destinationId: null,
         category: "stay",
         title: picked.name,
         status: "idea",
@@ -1484,13 +1489,13 @@ export function TripPlanner({
     }
   };
 
-  /** Save flight / Save ferry — and, with `moveStop`, Q8 A's "Check out of …
-   * instead": the booking and the stop's new date in ONE request. A create is
+  /** Save flight / Save ferry — and, with `moveDestination`, Q8 A's "Check out of …
+   * instead": the booking and the destination's new date in ONE request. A create is
    * not optimistic (only the server mints the id), so it awaits the 201. */
-  const saveHopBooking = async (body: ReservationCreateInput, moveStop: boolean) => {
+  const saveHopBooking = async (body: ReservationCreateInput, moveDestination: boolean) => {
     try {
-      const row = await tripApi.createReservation(moveStop ? { ...body, moveStop: true } : body);
-      setTrip((t) => withReconciledSegments(applyHopBooking(t, row, moveStop)));
+      const row = await tripApi.createReservation(moveDestination ? { ...body, moveDestination: true } : body);
+      setTrip((t) => withReconciledSegments(applyHopBooking(t, row, moveDestination)));
       setOpenHopId(null);
       return true;
     } catch {
@@ -1581,11 +1586,11 @@ export function TripPlanner({
             </h1>
             <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1.5 text-[15px] text-rv-ink-muted">
               {/* #126 · Q4 A — where the trip is going leads the meta line. */}
-              {trip.destination && (
+              {trip.area && (
                 <>
                   <span className="inline-flex items-center gap-1.5">
                     <MapPin className="size-4 text-rv-green" />
-                    {trip.destination.name}
+                    {trip.area.name}
                   </span>
                   <Dot />
                 </>
@@ -1640,14 +1645,14 @@ export function TripPlanner({
             <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
             {/* #131 · the Add verb keeps its shipped trigger and offers only
                 what fits the tab: Itinerary adds KNOWNS (a flight, a stay, a
-                stop), Ideas adds MAYBES (the three idea kinds, or a copy from
+                destination), Ideas adds MAYBES (the three idea kinds, or a copy from
                 your Places). On Journal it is hidden — the Journal lens (#113)
-                keeps its own per-row "How was it?". A stop still has no leg in
-                hand, so it appends to the LAST one; createTrip seeds "Leg 1". */}
+                keeps its own per-row "How was it?". A destination still has no chapter in
+                hand, so it appends to the LAST one; createTrip seeds one unnamed chapter. */}
             {tab !== "journal" && (
               <DropdownMenu open={addMenuOpen} onOpenChange={setAddMenuOpen}>
                 <DropdownMenuTrigger
-                  disabled={trip.legs.length === 0}
+                  disabled={trip.chapters.length === 0}
                   className="ml-auto inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border-none bg-rv-accent-deep px-4 py-[9px] text-[14px] font-semibold text-rv-accent-ink disabled:cursor-default disabled:opacity-45 md:ml-0"
                 >
                   <Plus className="size-4" />
@@ -1662,7 +1667,7 @@ export function TripPlanner({
                       Flight
                       <MenuHint>round trip on</MenuHint>
                     </DropdownMenuItem>
-                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => setStaySheet({ stopId: null })}>
+                    <DropdownMenuItem className={MENU_ITEM} onSelect={() => setStaySheet({ destinationId: null })}>
                       <Bed />
                       Stay
                       <MenuHint>hotel · campground · friends</MenuHint>
@@ -1670,12 +1675,12 @@ export function TripPlanner({
                     <DropdownMenuItem
                       className={MENU_ITEM}
                       onSelect={() => {
-                        const legId = legOrder(trip).at(-1);
-                        if (legId) openDraftStop(legId);
+                        const chapterId = chapterOrder(trip).at(-1);
+                        if (chapterId) openDraftDestination(chapterId);
                       }}
                     >
                       <MapPin />
-                      A stop
+                      A destination
                       <MenuHint>on the plan</MenuHint>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator className="mx-0.5 my-1 bg-rv-border-soft" />
@@ -1822,16 +1827,16 @@ export function TripPlanner({
                 </DropdownMenuItem>
               </RowMenu>
             )}
-            onCyclePinned={(stopId, ideaId) =>
-              setPinnedIdeaStatus(stopId, ideaId, (st) =>
+            onCyclePinned={(destinationId, ideaId) =>
+              setPinnedIdeaStatus(destinationId, ideaId, (st) =>
                 st === "idea" ? "planned" : st === "planned" ? "done" : "idea",
               )
             }
             onPlanStay={(ideaId, span) =>
               void planIdeaOnDates(ideaId, { arriveDate: span.start, departDate: span.end })
             }
-            onPlanToStop={planIdeaToStop}
-            onPlanPinned={(stopId, ideaId) => setPinnedIdeaStatus(stopId, ideaId, () => "planned")}
+            onPlanToDestination={planIdeaToDestination}
+            onPlanPinned={(destinationId, ideaId) => setPinnedIdeaStatus(destinationId, ideaId, () => "planned")}
           />
         ) : (
           <>
@@ -1851,51 +1856,53 @@ export function TripPlanner({
             {sub === "timeline" ? (
               <Timeline
                 model={timeline}
-                onOpenStop={openStop}
+                onOpenDestination={openDestination}
                 onSchedule={doSchedule}
                 onOpenHop={openHopFromTimeline}
               />
             ) : (
               <RouteView
-                legs={route}
+                chapters={route}
+                countKicker={routeCountKicker(trip)}
+                logistics={logistics}
                 trip={trip}
                 summary={summary}
                 costs={costTracking}
                 hasRig={hasRig}
                 units={units}
-                onOpenStop={openStop}
+                onOpenDestination={openDestination}
                 routeDrag={routeDrag}
                 actions={{
                   renamingId,
                   // Renaming and changing the place are two editors for one row;
                   // opening either closes the other.
                   onStartRename: (id) => {
-                    setPlacingStopId(null);
+                    setPlacingDestinationId(null);
                     setRenamingId(id);
                   },
                   onRenameDone: () => setRenamingId(null),
-                  onRenameLeg: doRenameLeg,
-                  onAddStop: openDraftStop,
-                  onAddLeg: () => void addLeg(),
-                  onMoveLeg: doMoveLeg,
-                  canMoveLeg: (legId, delta) => canMoveLeg(trip, legId, delta),
-                  onDeleteLeg: setDeleteLegId,
-                  onRenameStop: doRenameStop,
-                  onEditStopDates: setDatesStopId,
-                  onUnscheduleStop: doUnschedule,
-                  onMoveStopToLeg: doMoveStopToLeg,
-                  onDeleteStop: setDeleteStopId,
-                  draftLegId,
-                  onPickDraftStop: (legId, picked) => void createStopFromPick(legId, picked),
-                  onCancelDraftStop: () => setDraftLegId(null),
-                  placingStopId,
-                  onStartChangePlace: (stopId) => {
-                    setDraftLegId(null);
+                  onRenameChapter: doRenameChapter,
+                  onAddDestination: openDraftDestination,
+                  onAddChapter: () => void addChapter(),
+                  onMoveChapter: doMoveChapter,
+                  canMoveChapter: (chapterId, delta) => canMoveChapter(trip, chapterId, delta),
+                  onDeleteChapter: setDeleteChapterId,
+                  onRenameDestination: doRenameDestination,
+                  onEditDestinationDates: setDatesDestinationId,
+                  onUnscheduleDestination: doUnschedule,
+                  onMoveDestinationToChapter: doMoveDestinationToChapter,
+                  onDeleteDestination: setDeleteDestinationId,
+                  draftChapterId,
+                  onPickDraftDestination: (chapterId, picked) => void createDestinationFromPick(chapterId, picked),
+                  onCancelDraftDestination: () => setDraftChapterId(null),
+                  placingDestinationId,
+                  onStartChangePlace: (destinationId) => {
+                    setDraftChapterId(null);
                     setRenamingId(null);
-                    setPlacingStopId(stopId);
+                    setPlacingDestinationId(destinationId);
                   },
-                  onChangeStopPlace: doChangeStopPlace,
-                  onCancelChangePlace: () => setPlacingStopId(null),
+                  onChangeDestinationPlace: doChangeDestinationPlace,
+                  onCancelChangePlace: () => setPlacingDestinationId(null),
                   locating,
                   onLocate: locateUnmapped,
                   openHopId,
@@ -1906,23 +1913,23 @@ export function TripPlanner({
                     onDelete: doDeleteHopBooking,
                     onEdit: editHopBooking,
                   },
-                  onAddStay: (stopId) => setStaySheet({ stopId }),
+                  onAddStay: (destinationId) => setStaySheet({ destinationId }),
                 }}
-                onRowDragStart={(legId, stopId) => setRouteDrag({ legId, stopId })}
+                onRowDragStart={(chapterId, destinationId) => setRouteDrag({ chapterId, destinationId })}
                 onRowDragEnd={() => setRouteDrag(null)}
-                onRowDrop={(legId, targetId) => {
-                  if (routeDrag && routeDrag.legId === legId) {
+                onRowDrop={(chapterId, targetId) => {
+                  if (routeDrag && routeDrag.chapterId === chapterId) {
                     const undo = trip;
-                    const next = reorderFloating(trip, legId, routeDrag.stopId, targetId);
+                    const next = reorderFloating(trip, chapterId, routeDrag.destinationId, targetId);
                     setTrip(next);
                     upgradeRoutes(next);
-                    const leg = next.legs.find((l) => l.id === legId);
-                    if (leg) {
-                      const order = [...leg.stops]
+                    const chapter = next.chapters.find((l) => l.id === chapterId);
+                    if (chapter) {
+                      const order = [...chapter.destinations]
                         .sort((a, b) => a.sortOrder - b.sortOrder)
                         .map((s) => s.id);
                       persist(
-                        tripApi.reorderLeg(legId, order),
+                        tripApi.reorderChapter(chapterId, order),
                         undo,
                         "Couldn't save that order — put back the way it was.",
                       );
@@ -1936,11 +1943,11 @@ export function TripPlanner({
         )}
       </div>
 
-      {selectedStop && (
-        <StopDetailSheet
-          stop={selectedStop}
-          legName={selectedLegName}
-          stopOrdinal={scheduledOrdinal.get(selectedStop.id) ?? null}
+      {selectedDestination && (
+        <DestinationDetailSheet
+          destination={selectedDestination}
+          chapterName={selectedChapterName}
+          destinationOrdinal={scheduledOrdinal.get(selectedDestination.id) ?? null}
           costs={costTracking}
           lodgingDefault={trip.lodgingDefault}
           leaves={{
@@ -1971,7 +1978,7 @@ export function TripPlanner({
               // form uses, so the two entrances write identical rows.
               const undo = trip;
               const place = ideaPlace(picked);
-              setTrip(setIdeaPlace(trip, selectedStop.id, ideaId, place));
+              setTrip(setIdeaPlace(trip, selectedDestination.id, ideaId, place));
               persist(
                 tripApi.updateIdea(ideaId, { place }),
                 undo,
@@ -1982,9 +1989,9 @@ export function TripPlanner({
               // #74 · the ATTACHED idea's clear. Same explicit null, same
               // endpoint and same optimistic-then-persist shape as the shelf's
               // (`doClearShelfIdeaPlace`); only the tree write differs, because
-              // this row lives under a stop.
+              // this row lives under a destination.
               const undo = trip;
-              setTrip(setIdeaPlace(trip, selectedStop.id, ideaId, null));
+              setTrip(setIdeaPlace(trip, selectedDestination.id, ideaId, null));
               persist(
                 tripApi.updateIdea(ideaId, { place: null }),
                 undo,
@@ -2002,25 +2009,25 @@ export function TripPlanner({
             onConfirmPromote: () => void confirmPromote(),
           }}
           ideaNoteOpen={ideaNoteOpen}
-          placing={placingStopId === selectedStop.id}
+          placing={placingDestinationId === selectedDestination.id}
           placeNear={searchAnchor(trip, {
             kind: "after",
-            stopId: stopAbove(trip, selectedStop.id)?.id ?? null,
+            destinationId: destinationAbove(trip, selectedDestination.id)?.id ?? null,
           })}
-          stopNear={searchAnchor(trip, { kind: "stop", stopId: selectedStop.id })}
+          destinationNear={searchAnchor(trip, { kind: "destination", destinationId: selectedDestination.id })}
           tripSpan={{ start: trip.startDate, end: trip.endDate }}
-          onStartChangePlace={() => setPlacingStopId(selectedStop.id)}
-          onChangePlace={(picked) => doChangeStopPlace(selectedStop.id, picked)}
-          onCancelChangePlace={() => setPlacingStopId(null)}
-          onClose={closeStop}
-          onSchedule={() => doSchedule(selectedStop.id)}
+          onStartChangePlace={() => setPlacingDestinationId(selectedDestination.id)}
+          onChangePlace={(picked) => doChangeDestinationPlace(selectedDestination.id, picked)}
+          onCancelChangePlace={() => setPlacingDestinationId(null)}
+          onClose={closeDestination}
+          onSchedule={() => doSchedule(selectedDestination.id)}
           onSetRating={(n) => {
             const undo = trip;
-            const next = setStopRating(trip, selectedStop.id, n);
+            const next = setDestinationRating(trip, selectedDestination.id, n);
             setTrip(next);
             persist(
-              tripApi.updateStop(selectedStop.id, {
-                rating: stopMap(next).get(selectedStop.id)?.rating ?? null,
+              tripApi.updateDestination(selectedDestination.id, {
+                rating: destinationMap(next).get(selectedDestination.id)?.rating ?? null,
               }),
               undo,
               "Couldn't save that rating — the old rating is back.",
@@ -2028,12 +2035,12 @@ export function TripPlanner({
           }}
           onSetNote={(v) => {
             beginNoteEdit();
-            setTrip((t) => setStopNote(t, selectedStop.id, v));
+            setTrip((t) => setDestinationNote(t, selectedDestination.id, v));
           }}
           onCommitNote={() =>
             persist(
-              tripApi.updateStop(selectedStop.id, {
-                notes: byId.get(selectedStop.id)?.notes ?? "",
+              tripApi.updateDestination(selectedDestination.id, {
+                notes: byId.get(selectedDestination.id)?.notes ?? "",
               }),
               takeNoteUndo(),
               "Couldn't save that note — the old note is back.",
@@ -2041,10 +2048,10 @@ export function TripPlanner({
           }
           onResRating={(resId, n) => {
             const undo = trip;
-            const next = setReservationRating(trip, selectedStop.id, resId, n);
+            const next = setReservationRating(trip, selectedDestination.id, resId, n);
             setTrip(next);
-            const r = stopMap(next)
-              .get(selectedStop.id)
+            const r = destinationMap(next)
+              .get(selectedDestination.id)
               ?.reservations.find((x) => x.id === resId);
             persist(
               tripApi.updateReservation(resId, { rating: r?.rating ?? null }),
@@ -2054,10 +2061,10 @@ export function TripPlanner({
           }}
           onResNote={(resId, v) => {
             beginNoteEdit();
-            setTrip((t) => setReservationNote(t, selectedStop.id, resId, v));
+            setTrip((t) => setReservationNote(t, selectedDestination.id, resId, v));
           }}
           onCommitResNote={(resId) => {
-            const r = byId.get(selectedStop.id)?.reservations.find((x) => x.id === resId);
+            const r = byId.get(selectedDestination.id)?.reservations.find((x) => x.id === resId);
             persist(
               tripApi.updateReservation(resId, { notes: r?.notes ?? "" }),
               takeNoteUndo(),
@@ -2066,10 +2073,10 @@ export function TripPlanner({
           }}
           onIdeaCycle={(ideaId) => {
             const undo = trip;
-            const next = cycleIdeaStatus(trip, selectedStop.id, ideaId);
+            const next = cycleIdeaStatus(trip, selectedDestination.id, ideaId);
             setTrip(next);
-            const it = stopMap(next)
-              .get(selectedStop.id)
+            const it = destinationMap(next)
+              .get(selectedDestination.id)
               ?.ideas.find((x) => x.id === ideaId);
             if (it) {
               persist(
@@ -2081,10 +2088,10 @@ export function TripPlanner({
           }}
           onIdeaRating={(ideaId, n) => {
             const undo = trip;
-            const next = setIdeaRating(trip, selectedStop.id, ideaId, n);
+            const next = setIdeaRating(trip, selectedDestination.id, ideaId, n);
             setTrip(next);
-            const it = stopMap(next)
-              .get(selectedStop.id)
+            const it = destinationMap(next)
+              .get(selectedDestination.id)
               ?.ideas.find((x) => x.id === ideaId);
             persist(
               tripApi.updateIdea(ideaId, { rating: it?.rating ?? null }),
@@ -2094,10 +2101,10 @@ export function TripPlanner({
           }}
           onIdeaNote={(ideaId, v) => {
             beginNoteEdit();
-            setTrip((t) => setIdeaNote(t, selectedStop.id, ideaId, v));
+            setTrip((t) => setIdeaNote(t, selectedDestination.id, ideaId, v));
           }}
           onCommitIdeaNote={(ideaId) => {
-            const it = byId.get(selectedStop.id)?.ideas.find((x) => x.id === ideaId);
+            const it = byId.get(selectedDestination.id)?.ideas.find((x) => x.id === ideaId);
             persist(
               tripApi.updateIdea(ideaId, { notes: it?.notes ?? "" }),
               takeNoteUndo(),
@@ -2132,41 +2139,41 @@ export function TripPlanner({
           the client is already holding, so the sentence is real before the
           dialog opens. A reservation or an idea is a LEAF and gets no dialog
           at all — that is the undo toast in i6. */}
-      {deleteLeg && (
+      {deleteChapter && (
         <CascadeDeleteConfirm
           open
-          onOpenChange={(open) => !open && setDeleteLegId(null)}
-          title={`Delete “${deleteLeg.title}”?`}
-          counts={legCascadeCounts(deleteLeg)}
-          action="Delete leg"
-          onConfirm={() => doDeleteLeg(deleteLeg.id)}
+          onOpenChange={(open) => !open && setDeleteChapterId(null)}
+          title={deleteChapter.title ? `Delete “${deleteChapter.title}”?` : "Delete this chapter?"}
+          counts={chapterCascadeCounts(deleteChapter)}
+          action="Delete chapter"
+          onConfirm={() => doDeleteChapter(deleteChapter.id)}
         />
       )}
 
-      {deleteStop && (
+      {deleteDestination && (
         <CascadeDeleteConfirm
           open
-          onOpenChange={(open) => !open && setDeleteStopId(null)}
-          title={`Delete “${deleteStop.place.name}”?`}
-          counts={stopCascadeCounts(deleteStop)}
-          action="Delete stop"
-          onConfirm={() => doDeleteStop(deleteStop.id)}
+          onOpenChange={(open) => !open && setDeleteDestinationId(null)}
+          title={`Delete “${deleteDestination.place.name}”?`}
+          counts={destinationCascadeCounts(deleteDestination)}
+          action="Delete destination"
+          onConfirm={() => doDeleteDestination(deleteDestination.id)}
         />
       )}
 
-      <StopDatesDialog
-        stop={datesStop}
-        legName={datesStop ? (trip.legs.find((l) => l.id === datesStop.legId)?.title ?? "") : ""}
+      <DestinationDatesDialog
+        destination={datesDestination}
+        chapterName={datesDestination ? (trip.chapters.find((l) => l.id === datesDestination.chapterId)?.title ?? "") : ""}
         range={{ startDate: trip.startDate, endDate: trip.endDate }}
-        onOpenChange={(open) => !open && setDatesStopId(null)}
-        onSave={saveStopDates}
+        onOpenChange={(open) => !open && setDatesDestinationId(null)}
+        onSave={saveDestinationDates}
         onUnschedule={doUnschedule}
       />
 
       {staySheet && (
         <AddStaySheet
           trip={trip}
-          stopId={staySheet.stopId}
+          destinationId={staySheet.destinationId}
           onClose={() => setStaySheet(null)}
           onSave={saveStay}
           onSaveIdea={(p) => void saveStayAsIdea(p)}
@@ -2197,9 +2204,9 @@ export function TripPlanner({
   );
 }
 
-/** A stop's ideas, rewritten one by one — the Plan it / pinned-pill writes. */
-function updateStopIdeas(trip: Trip, stopId: string, f: (i: Idea) => Idea): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, ideas: s.ideas.map(f) }));
+/** A destination's ideas, rewritten one by one — the Plan it / pinned-pill writes. */
+function updateDestinationIdeas(trip: Trip, destinationId: string, f: (i: Idea) => Idea): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, ideas: s.ideas.map(f) }));
 }
 
 /** A menu's small mono section head ("Add to Itinerary · the knowns"). */
@@ -2269,11 +2276,11 @@ function TripSettingsFields({
   const usesHousehold =
     !!trip.homeBaseFromHousehold && draft.homeBasePlace?.name === trip.homeBase;
   // Refused, not clamped: deriveDays drops days outside the trip window, so a
-  // range that leaves a scheduled stop outside it would make the stop invisible
+  // range that leaves a scheduled destination outside it would make the destination invisible
   // rather than wrong. The client holds the whole tree, so it says so here —
   // with the same sentence the server's 409 carries.
   const orphans = rangeOk
-    ? stopsOutsideRange({ startDate: draft.startDate, endDate: draft.endDate }, allStops(trip))
+    ? destinationsOutsideRange({ startDate: draft.startDate, endDate: draft.endDate }, allDestinations(trip))
     : [];
   const canSave = rangeOk && orphans.length === 0;
 
@@ -2399,7 +2406,7 @@ function TripSettingsFields({
         )}
         {orphans.length > 0 && (
           <p className="m-0 rounded-rv-md bg-rv-warning-soft px-[11px] py-[9px] text-[12.5px] text-rv-warning">
-            {orphanedStopsMessage(orphans)}
+            {orphanedDestinationsMessage(orphans)}
           </p>
         )}
       </div>
@@ -2433,7 +2440,7 @@ function TripSettingsFields({
 }
 
 /**
- * A cascading delete's confirm — trip, leg and stop all use THIS one, because
+ * A cascading delete's confirm — trip, chapter and destination all use THIS one, because
  * they are the same sentence with a different subject. It names the loss with
  * real counts (the client holds the whole tree) and never asks "are you
  * sure?". No destructive variant: the action is the CTA colour (ember) because
@@ -2453,7 +2460,7 @@ function CascadeDeleteConfirm({
   /** “Delete “Oregon Coast”?” — the question, already quoted */
   title: string;
   counts: CascadeCounts;
-  /** the confirm button's verb: "Delete trip" · "Delete leg" · "Delete stop" */
+  /** the confirm button's verb: "Delete trip" · "Delete chapter" · "Delete destination" */
   action: string;
   onConfirm: () => void;
 }) {
@@ -2485,36 +2492,36 @@ function CascadeDeleteConfirm({
 }
 
 /**
- * The stop-dates dialog — the second of the epic's two dialogs, and the medium
- * weight for a stop. Native `<input type="date">`: the app ships no date
+ * The destination-dates dialog — the second of the epic's two dialogs, and the medium
+ * weight for a destination. Native `<input type="date">`: the app ships no date
  * picker. Unschedule sits in the footer as well as in the row menu, because
  * "these dates are wrong" and "this has no dates" are the same thought here.
  *
- * Mounted only while a stop is open so the draft is re-seeded on every open —
+ * Mounted only while a destination is open so the draft is re-seeded on every open —
  * that is what makes Cancel really discard (Radix keeps the component mounted
  * and only portals its content).
  */
-function StopDatesDialog({
-  stop,
-  legName,
+function DestinationDatesDialog({
+  destination,
+  chapterName,
   range,
   onOpenChange,
   onSave,
   onUnschedule,
 }: {
-  stop: Stop | null;
-  legName: string;
+  destination: Destination | null;
+  chapterName: string;
   range: TripDateRange;
   onOpenChange: (open: boolean) => void;
-  onSave: (stopId: string, draft: StopDatesDraft, extend: DateSpan | null) => void;
-  onUnschedule: (stopId: string) => void;
+  onSave: (destinationId: string, draft: DestinationDatesDraft, extend: DateSpan | null) => void;
+  onUnschedule: (destinationId: string) => void;
 }) {
   return (
-    <Dialog open={stop !== null} onOpenChange={onOpenChange}>
-      {stop && (
-        <StopDatesFields
-          stop={stop}
-          legName={legName}
+    <Dialog open={destination !== null} onOpenChange={onOpenChange}>
+      {destination && (
+        <DestinationDatesFields
+          destination={destination}
+          chapterName={chapterName}
           range={range}
           onCancel={() => onOpenChange(false)}
           onSave={onSave}
@@ -2525,35 +2532,35 @@ function StopDatesDialog({
   );
 }
 
-function StopDatesFields({
-  stop,
-  legName,
+function DestinationDatesFields({
+  destination,
+  chapterName,
   range,
   onCancel,
   onSave,
   onUnschedule,
 }: {
-  stop: Stop;
-  legName: string;
+  destination: Destination;
+  chapterName: string;
   range: TripDateRange;
   onCancel: () => void;
-  onSave: (stopId: string, draft: StopDatesDraft, extend: DateSpan | null) => void;
-  onUnschedule: (stopId: string) => void;
+  onSave: (destinationId: string, draft: DestinationDatesDraft, extend: DateSpan | null) => void;
+  onUnschedule: (destinationId: string) => void;
 }) {
-  const [draft, setDraft] = useState<StopDatesDraft>(() => stopDatesDraft(stop));
-  const set = (patch: Partial<StopDatesDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const [draft, setDraft] = useState<DestinationDatesDraft>(() => destinationDatesDraft(destination));
+  const set = (patch: Partial<DestinationDatesDraft>) => setDraft((d) => ({ ...d, ...patch }));
   /** #127 · Q7 B — "Extend trip" pressed: the trip's dates move in the same save. */
   const [extend, setExtend] = useState<DateSpan | null>(null);
-  const help = stopDatesHelp(draft);
-  const patch = stopDatesPatch(stop, draft);
-  // A stop dated outside the trip still needs the trip moved with it: the
-  // handler's 409 stands (deriveDays clamps to the window, so the stop would
+  const help = destinationDatesHelp(draft);
+  const patch = destinationDatesPatch(destination, draft);
+  // A destination dated outside the trip still needs the trip moved with it: the
+  // handler's 409 stands (deriveDays clamps to the window, so the destination would
   // sit nowhere on the calendar). The picker's amber "Extend trip" is the way
   // through; without it the server's own sentence says why Save is off.
   const tripWindow = extend ? { startDate: extend.start, endDate: extend.end } : range;
   const outside =
     patch !== null &&
-    stopDatesOutsideTrip(tripWindow, {
+    destinationDatesOutsideTrip(tripWindow, {
       arriveDate: draft.arriveDate,
       departDate: draft.departDate,
     });
@@ -2562,9 +2569,9 @@ function StopDatesFields({
     <DialogContent className="gap-0 rounded-rv-card border border-rv-border-hi bg-rv-surface p-[18px] px-5 text-rv-ink shadow-rv-xl sm:max-w-[470px]">
       <DialogHeader className="gap-1.5">
         <DialogTitle className="text-[17px] font-extrabold text-rv-ink">
-          Dates for {stop.place.name}
+          Dates for {destination.place.name}
         </DialogTitle>
-        <DialogDescription className="text-[11.5px] text-rv-ink-faded">{legName}</DialogDescription>
+        <DialogDescription className="text-[11.5px] text-rv-ink-faded">{chapterName}</DialogDescription>
       </DialogHeader>
 
       <div className="mt-3 flex flex-col gap-2.5">
@@ -2588,7 +2595,7 @@ function StopDatesFields({
         )}
         {outside && (
           <p className="m-0 rounded-rv-md bg-rv-warning-soft px-[11px] py-[9px] text-[12.5px] text-rv-warning">
-            {stopOutsideTripMessage(range, draft.arriveDate, draft.departDate)}
+            {destinationOutsideTripMessage(range, draft.arriveDate, draft.departDate)}
           </p>
         )}
       </div>
@@ -2596,7 +2603,7 @@ function StopDatesFields({
       <div className="mt-[15px] flex items-center gap-[9px]">
         <button
           type="button"
-          onClick={() => onSave(stop.id, draft, extend)}
+          onClick={() => onSave(destination.id, draft, extend)}
           disabled={patch === null || outside}
           className="cursor-pointer rounded-rv-md border-none bg-rv-accent-deep px-3.5 py-[7px] text-[12.5px] font-bold text-rv-accent-ink disabled:cursor-default disabled:opacity-45"
         >
@@ -2611,8 +2618,8 @@ function StopDatesFields({
         </button>
         <button
           type="button"
-          onClick={() => onUnschedule(stop.id)}
-          disabled={!isScheduled(stop)}
+          onClick={() => onUnschedule(destination.id)}
+          disabled={!isScheduled(destination)}
           className="ml-auto cursor-pointer rounded-rv-md border border-rv-border-hi bg-transparent px-[11px] py-[5px] text-[11.5px] font-semibold text-rv-ink disabled:cursor-default disabled:opacity-45"
         >
           Unschedule
@@ -2650,10 +2657,10 @@ function ToggleTab({
 
 /**
  * The shelf's "+ Add" draft — one field plus the OPTIONAL place picker, the
- * same two-part form the stop sheet's "Add idea" already is.
+ * same two-part form the destination sheet's "Add idea" already is.
  *
  * It is a draft, not an idea: dismissing it writes nothing, exactly the way the
- * draft-stop row works (#60). The heading says which of the three branches you
+ * draft-destination row works (#60). The heading says which of the three branches you
  * pressed, so a menu choice is still legible once the menu is gone.
  */
 function ShelfIdeaDraft({

@@ -4,11 +4,11 @@ import {
   isoDate,
   tripCreateInput,
   type IsoDate,
-  type Leg,
+  type Chapter,
   type LodgingKind,
   type Place,
-  type Stop,
-  type StopPatchInput,
+  type Destination,
+  type DestinationPatchInput,
   type Trip,
   type TripCreateInput,
   type TripPatchInput,
@@ -49,8 +49,8 @@ export type TripModeChoice = "road" | "air" | "mixed";
 /** The three cards, with the design's copy — shared by the web page and the
  * phone screen so the two never drift. */
 export const TRIP_MODE_CHOICES: readonly { value: TripModeChoice; label: string; sub: string }[] = [
-  { value: "road", label: "Road trip", sub: "Driving between stops. Camping, RV, or car." },
-  { value: "air", label: "Fly & stay", sub: "Fly there, stay put or fly between stops." },
+  { value: "road", label: "Road trip", sub: "Driving between destinations. Camping, RV, or car." },
+  { value: "air", label: "Fly & stay", sub: "Fly there, stay put or fly between destinations." },
   { value: "mixed", label: "A mix", sub: "Flights, ferries, and drives. You set each hop." },
 ];
 
@@ -103,8 +103,8 @@ export interface TripDraft {
   startDate: string;
   endDate: string;
   /** #126 · Q4 A — "Where to?", the question the page now opens on. A place
-   * with a Google id becomes the trip's destination and its spanning stop. */
-  destination?: PickedPlace | null;
+   * with a Google id becomes the trip's area and its spanning destination. */
+  area?: PickedPlace | null;
   /** The trip's OWN home base — an override. Null reads the household
    * default (#126 · Q5 A), which the page shows as a quiet chip. */
   homeBasePlace: PickedPlace | null;
@@ -117,7 +117,7 @@ export const BLANK_TRIP_DRAFT: TripDraft = {
   title: "",
   startDate: "",
   endDate: "",
-  destination: null,
+  area: null,
   homeBasePlace: null,
   mode: null,
   lodgingDefault: null,
@@ -146,14 +146,14 @@ export function withTripMode(draft: TripDraft, mode: TripModeChoice): TripDraft 
 export function tripDraftInput(draft: TripDraft): TripCreateInput | null {
   if (draft.mode === null) return null;
   if (tripDayCount(draft.startDate, draft.endDate) === null) return null;
-  const dest = draft.destination ?? null;
+  const dest = draft.area ?? null;
   const parsed = tripCreateInput.safeParse({
     // An untitled trip to a picked place is named for it ("Bellingham, WA").
     title: draft.title.trim() || dest?.name.trim() || "",
-    // Only a real Google place can be a destinations row (the unique is owner
+    // Only a real Google place can be a areas row (the unique is owner
     // + place id); a free-text escape pick names the trip, nothing more.
     ...(dest?.googlePlaceId && {
-      destination: { googlePlaceId: dest.googlePlaceId, name: dest.name, lat: dest.lat, lng: dest.lng },
+      area: { googlePlaceId: dest.googlePlaceId, name: dest.name, lat: dest.lat, lng: dest.lng },
     }),
     startDate: draft.startDate,
     endDate: draft.endDate,
@@ -273,9 +273,9 @@ export function tripSettingsPatch(t: Trip, d: TripSettingsDraft): TripSettingsPa
   return patch;
 }
 
-/** The web dialog's patch — it never edits the destination (#143 added that
+/** The web dialog's patch — it never edits the area (#143 added that
  * to the phone's Trip settings only), so the key is not in its type. */
-export type TripSettingsPatch = Omit<TripPatchInput, "destination">;
+export type TripSettingsPatch = Omit<TripPatchInput, "area">;
 
 /** The dates + "Starts from" half of a settings patch — shared by the web
  * dialog and the phone's Trip settings (#143) so the two rules cannot drift. */
@@ -310,7 +310,7 @@ function rangeAndHomePatch(
 // ── #143 · Q8 A — the phone's Trip settings ────────────────────────────────
 
 /**
- * What the phone's "Trip settings" screen holds: Destination · Dates · Starts
+ * What the phone's "Trip settings" screen holds: Area · Dates · Starts
  * from above the three defaults. Status, rating and note stay web-only, so
  * they are not in it and can never ride along on its Save.
  */
@@ -320,13 +320,13 @@ export interface PhoneTripSettingsDraft
     "startDate" | "endDate" | "homeBasePlace" | "mode" | "lodgingDefault" | "rigOn"
   > {
   /** "Where to?" — a place picked from the search, or null for none. */
-  destination: PickedPlace | null;
+  area: PickedPlace | null;
 }
 
 /** The trip, as the phone screen's opening state. */
 export function phoneTripSettingsDraft(t: Trip): PhoneTripSettingsDraft {
   const { startDate, endDate, homeBasePlace, mode, lodgingDefault, rigOn } = tripSettingsDraft(t);
-  const dest = t.destination ?? null;
+  const dest = t.area ?? null;
   return {
     startDate,
     endDate,
@@ -334,7 +334,7 @@ export function phoneTripSettingsDraft(t: Trip): PhoneTripSettingsDraft {
     mode,
     lodgingDefault,
     rigOn,
-    destination: dest
+    area: dest
       ? {
           name: dest.name,
           lat: dest.lat,
@@ -349,20 +349,20 @@ export function phoneTripSettingsDraft(t: Trip): PhoneTripSettingsDraft {
 }
 
 /**
- * The phone's Save — only what changed. A new destination is sent as the
+ * The phone's Save — only what changed. A new area is sent as the
  * picked place (the server upserts the household's row and repoints the trip;
- * no stop is written); null clears it. A pick with no Google id cannot be a
- * destinations row, so it is not a change. "Use household default" is a null
+ * no destination is written); null clears it. A pick with no Google id cannot be a
+ * areas row, so it is not a change. "Use household default" is a null
  * home base, exactly as on the web.
  */
 export function phoneTripSettingsPatch(t: Trip, d: PhoneTripSettingsDraft): TripPatchInput {
   const patch: TripPatchInput = rangeAndHomePatch(t, d);
-  const current = t.destination ?? null;
-  if (d.destination === null) {
-    if (current !== null) patch.destination = null;
-  } else if (d.destination.googlePlaceId && d.destination.googlePlaceId !== current?.googlePlaceId) {
-    const { name, googlePlaceId, lat, lng } = d.destination;
-    patch.destination = { name, googlePlaceId, lat, lng };
+  const current = t.area ?? null;
+  if (d.area === null) {
+    if (current !== null) patch.area = null;
+  } else if (d.area.googlePlaceId && d.area.googlePlaceId !== current?.googlePlaceId) {
+    const { name, googlePlaceId, lat, lng } = d.area;
+    patch.area = { name, googlePlaceId, lat, lng };
   }
   Object.assign(patch, tripDefaultsPatch(t, d));
   return patch;
@@ -374,20 +374,20 @@ export function phoneTripSettingsPatch(t: Trip, d: PhoneTripSettingsDraft): Trip
  * the confirm counts before it opens — never "are you sure?", always the
  * number that is about to go. */
 export interface CascadeCounts {
-  legs: number;
-  stops: number;
+  chapters: number;
+  destinations: number;
   reservations: number;
   ideas: number;
 }
 
 /** Everything a `DELETE /api/trips/:id` cascades away (schema.ts FKs). */
 export function tripCascadeCounts(t: Trip): CascadeCounts {
-  const stops = t.legs.flatMap((l) => l.stops);
+  const destinations = t.chapters.flatMap((l) => l.destinations);
   return {
-    legs: t.legs.length,
-    stops: stops.length,
-    reservations: stops.reduce((n, s) => n + s.reservations.length, 0),
-    ideas: stops.reduce((n, s) => n + s.ideas.length, 0),
+    chapters: t.chapters.length,
+    destinations: destinations.length,
+    reservations: destinations.reduce((n, s) => n + s.reservations.length, 0),
+    ideas: destinations.reduce((n, s) => n + s.ideas.length, 0),
   };
 }
 
@@ -395,12 +395,12 @@ function countPhrase(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-/** "Its 2 legs, 2 stops, 3 reservations and 2 ideas are deleted with it. This
+/** "Its 2 chapters, 2 destinations, 3 reservations and 2 ideas are deleted with it. This
  * can't be undone." — zero counts are left out rather than read as "0 ideas". */
 export function cascadeLossSentence(c: CascadeCounts): string {
   const parts = [
-    c.legs > 0 ? countPhrase(c.legs, "leg") : null,
-    c.stops > 0 ? countPhrase(c.stops, "stop") : null,
+    c.chapters > 0 ? countPhrase(c.chapters, "chapter") : null,
+    c.destinations > 0 ? countPhrase(c.destinations, "destination") : null,
     c.reservations > 0 ? countPhrase(c.reservations, "reservation") : null,
     c.ideas > 0 ? countPhrase(c.ideas, "idea") : null,
   ].filter((p): p is string => p !== null);
@@ -410,41 +410,32 @@ export function cascadeLossSentence(c: CascadeCounts): string {
   return `Its ${listed} ${parts.length === 1 ? "is" : "are"} deleted with it. This can't be undone.`;
 }
 
-/** Everything a `DELETE /api/legs/:id` cascades away. The leg is what you are
+/** Everything a `DELETE /api/chapters/:id` cascades away. The chapter is what you are
  * deleting, not what goes WITH it, so it never counts itself. */
-export function legCascadeCounts(l: Leg): CascadeCounts {
+export function chapterCascadeCounts(l: Chapter): CascadeCounts {
   return {
-    legs: 0,
-    stops: l.stops.length,
-    reservations: l.stops.reduce((n, s) => n + s.reservations.length, 0),
-    ideas: l.stops.reduce((n, s) => n + s.ideas.length, 0),
+    chapters: 0,
+    destinations: l.destinations.length,
+    reservations: l.destinations.reduce((n, s) => n + s.reservations.length, 0),
+    ideas: l.destinations.reduce((n, s) => n + s.ideas.length, 0),
   };
 }
 
-/** Everything a `DELETE /api/stops/:id` cascades away — its two leaf tables. */
-export function stopCascadeCounts(s: Stop): CascadeCounts {
-  return { legs: 0, stops: 0, reservations: s.reservations.length, ideas: s.ideas.length };
+/** Everything a `DELETE /api/destinations/:id` cascades away — its two leaf tables. */
+export function destinationCascadeCounts(s: Destination): CascadeCounts {
+  return { chapters: 0, destinations: 0, reservations: s.reservations.length, ideas: s.ideas.length };
 }
 
-/**
- * The title "Add leg" sends. It counts the legs there are rather than reading
- * the highest sortOrder, so the name matches the "Leg N" kicker the route lens
- * renders — and the first one is "Leg 1", exactly what `createTrip` seeds.
- */
-export function nextLegTitle(t: Trip): string {
-  return `Leg ${t.legs.length + 1}`;
-}
-
-// ── the stop-dates dialog ──────────────────────────────────────────────────
+// ── the destination-dates dialog ──────────────────────────────────────────────────
 
 /** What the dialog holds. Both are "" for null, the way a date input holds it. */
-export interface StopDatesDraft {
+export interface DestinationDatesDraft {
   arriveDate: string;
   departDate: string;
 }
 
-/** The stop, as the dialog's opening state. A floating stop opens blank. */
-export function stopDatesDraft(s: Stop): StopDatesDraft {
+/** The destination, as the dialog's opening state. A floating destination opens blank. */
+export function destinationDatesDraft(s: Destination): DestinationDatesDraft {
   return { arriveDate: s.arriveDate ?? "", departDate: s.departDate ?? "" };
 }
 
@@ -454,7 +445,7 @@ export function stopDatesDraft(s: Stop): StopDatesDraft {
  * day of the span that is not a stay. `null` while the range is unusable, which
  * is the same condition that disables Save.
  */
-export function stopDatesHelp(d: StopDatesDraft): string | null {
+export function destinationDatesHelp(d: DestinationDatesDraft): string | null {
   const days = tripDayCount(d.arriveDate, d.departDate);
   if (days === null) return null;
   const arrive = d.arriveDate as IsoDate;
@@ -462,18 +453,18 @@ export function stopDatesHelp(d: StopDatesDraft): string | null {
 }
 
 /**
- * The `PATCH /api/stops/:id` body for the dialog's Save: both dates, or `{}`
+ * The `PATCH /api/destinations/:id` body for the dialog's Save: both dates, or `{}`
  * when neither moved. `null` means the range is not submittable — and it is the
  * same `null` the Save button is disabled on, so there is one rule, not two.
  */
-export function stopDatesPatch(s: Stop, d: StopDatesDraft): StopPatchInput | null {
+export function destinationDatesPatch(s: Destination, d: DestinationDatesDraft): DestinationPatchInput | null {
   if (tripDayCount(d.arriveDate, d.departDate) === null) return null;
   if (d.arriveDate === s.arriveDate && d.departDate === s.departDate) return {};
   return { arriveDate: d.arriveDate as IsoDate, departDate: d.departDate as IsoDate };
 }
 
-/** "Unschedule" — one PATCH setting BOTH dates to null, so the stop drops back
+/** "Unschedule" — one PATCH setting BOTH dates to null, so the destination drops back
  * to the floating rail rather than half-landing on the calendar. */
-export function unscheduleStopPatch(): StopPatchInput {
+export function unscheduleDestinationPatch(): DestinationPatchInput {
   return { arriveDate: null, departDate: null };
 }

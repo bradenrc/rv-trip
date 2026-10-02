@@ -18,7 +18,7 @@ import { StatusPill } from "./StatusPill";
 import { money } from "./format";
 import { ResearchPad } from "./ResearchPad";
 
-/** Styled placeholder for a stop's map (real map is a follow-up). */
+/** Styled placeholder for a destination's map (real map is a follow-up). */
 export function MapPlaceholder({ label }: { label: string }) {
   return (
     <div className="flex h-[150px] flex-col items-center justify-center gap-1.5 rounded-rv-card border border-rv-border bg-rv-navy-soft text-rv-ink-faded">
@@ -29,7 +29,7 @@ export function MapPlaceholder({ label }: { label: string }) {
 }
 
 /**
- * A reservation in the stop-detail sheet: category tile, name, cost, a mono meta
+ * A reservation in the destination-detail sheet: category tile, name, cost, a mono meta
  * line (category · type · dates · #conf), an editable rating, and an
  * always-available note.
  *
@@ -110,7 +110,7 @@ export function ReservationCard({
 }
 
 /**
- * An idea in the stop-detail sheet: category icon, title, a cycling status pill,
+ * An idea in the destination-detail sheet: category icon, title, a cycling status pill,
  * a "Book" action (promote → reservation) until done, an editable rating once
  * done, and a toggleable note.
  *
@@ -152,7 +152,7 @@ export function IdeaCard({
   picker?: ReactNode;
   /** the doors out, mounted inside the pad (#82). The app fills it with
    * `<DrillRow>` because only the app knows this idea's locality — the parent
-   * stop's `placeName`, which the card never receives. */
+   * destination's `placeName`, which the card never receives. */
   drill?: ReactNode;
   /** the quiet Google line, LAST in the pad (#82). App-filled, because a DS
    * component never fetches. */
@@ -166,7 +166,7 @@ export function IdeaCard({
   onCommitNote: () => void;
   onToggleNote: () => void;
   /**
-   * "Book" — promote to a reservation. OPTIONAL (#80): `reservations.stop_id`
+   * "Book" — promote to a reservation. OPTIONAL (#80): `reservations.destination_id`
    * is NOT NULL, so an UNATTACHED idea cannot become a reservation at all, and
    * without this handler the action does not render — the same way `onLocate`'s
    * absence already makes the place line read-only.
@@ -295,9 +295,9 @@ function IdeaPlaceLine({ idea, onLocate }: { idea: Idea; onLocate?: () => void }
  *
  * The sheet's card is a detail surface: stars, a note pen, a status pill and a
  * Book action. The shelf row is a HANDLE — something you pick up and drop on a
- * day or on a stop — so it carries a grip, the title, where it is relative to
+ * day or on a destination — so it carries a grip, the title, where it is relative to
  * the trip, and nothing else. (Book is absent for a harder reason than density:
- * `reservations.stop_id` is NOT NULL, so an unattached idea is not bookable at
+ * `reservations.destination_id` is NOT NULL, so an unattached idea is not bookable at
  * all.) The two are separate components rather than one with five flags,
  * because they are two different objects that happen to read the same row.
  *
@@ -306,7 +306,7 @@ function IdeaPlaceLine({ idea, onLocate }: { idea: Idea; onLocate?: () => void }
  */
 export function ShelfIdeaCard({
   idea,
-  nearestStopName,
+  nearestDestinationName,
   distanceMi,
   expanded = false,
   actions,
@@ -324,10 +324,10 @@ export function ShelfIdeaCard({
   onDragEnd,
 }: {
   idea: Idea;
-  /** The nearest stop the trip has actually placed, and how far — the row's
+  /** The nearest destination the trip has actually placed, and how far — the row's
    * second line. There is no city column on an idea, so the anchor named is a
-   * stop you already own (`ideaShelf` in @rv-trip/core decides both). */
-  nearestStopName?: string | null;
+   * destination you already own (`ideaShelf` in @rv-trip/core decides both). */
+  nearestDestinationName?: string | null;
   distanceMi?: number | null;
   /**
    * The research pad, open in place (#82 Q2 → B). A shelf row still has no
@@ -339,7 +339,7 @@ export function ShelfIdeaCard({
   actions?: ReactNode;
   /** the open place picker, mounted under the place line */
   picker?: ReactNode;
-  /** the doors out, inside the pad (#82). A shelf idea has no parent stop and
+  /** the doors out, inside the pad (#82). A shelf idea has no parent destination and
    * so no locality: every query is the bare title. */
   drill?: ReactNode;
   /** the quiet Google line, last in the pad (#82). An unlocated row has no
@@ -361,7 +361,7 @@ export function ShelfIdeaCard({
   onLocate?: () => void;
   /**
    * The pad's writes (#82). Shelf-side and NEW: an unattached idea is not in any
-   * stop's `ideas`, so the sheet's stop-scoped handlers cannot serve this row.
+   * destination's `ideas`, so the sheet's destination-scoped handlers cannot serve this row.
    * Absent → the pad renders read-only.
    */
   onRating?: (n: number) => void;
@@ -410,8 +410,8 @@ export function ShelfIdeaCard({
         {located ? (
           <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-rv-ink-faded">
             <MapPin className="size-3 flex-none" />
-            {nearestStopName && distanceMi !== null && distanceMi !== undefined
-              ? `${nearestStopName} · ${distanceMi} mi`
+            {nearestDestinationName && distanceMi !== null && distanceMi !== undefined
+              ? `${nearestDestinationName} · ${distanceMi} mi`
               : idea.place!.name}
           </span>
         ) : (

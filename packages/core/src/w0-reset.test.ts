@@ -43,19 +43,19 @@ describe("packages/db/src/schema.ts — v2 (§5)", () => {
     expect(schema).toContain('pgEnum("lodging_kind", ["hotel", "friends", "airbnb", "campground"])');
     expect(schema).toContain('pgEnum("save_anchor", ["place", "area", "pin"])');
     expect(schema).toContain('pgEnum("save_status", ["want", "been"])');
-    expect(schema).toContain('pgEnum("change_entity", ["stop", "idea", "reservation", "save"])');
+    expect(schema).toContain('pgEnum("change_entity", ["destination", "idea", "reservation", "save"])');
     expect(schema).not.toContain("saved_place");
   });
 
-  it("declares travel_segments, destinations (unique per household + place) and saves", () => {
+  it("declares travel_segments, areas (unique per household + place) and saves", () => {
     expect(schema).toContain('pgTable( "travel_segments"');
-    expect(schema).toContain('pgTable( "destinations"');
-    expect(schema).toContain('unique("destinations_owner_place_uq").on(t.ownerId, t.googlePlaceId)');
+    expect(schema).toContain('pgTable( "areas"');
+    expect(schema).toContain('unique("areas_owner_place_uq").on(t.ownerId, t.googlePlaceId)');
     expect(schema).toContain('pgTable( "saves"');
   });
 
   it("hangs every reservation on exactly one parent", () => {
-    expect(schema).toContain("num_nonnulls(${t.stopId}, ${t.segmentId}) = 1");
+    expect(schema).toContain("num_nonnulls(${t.destinationId}, ${t.segmentId}) = 1");
   });
 
   it("gives trips their three plain defaults", () => {

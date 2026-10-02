@@ -73,11 +73,11 @@ describe("the Add flight form (#104)", () => {
     expect(hopBookingInput(SEG_UUID, picked, hopDraftZones(picked))).not.toBeNull();
   });
 
-  it("a ferry's zone comes from its port stops", () => {
+  it("a ferry's zone comes from its port destinations", () => {
     const gr = greeceTrip();
-    const stops = gr.legs.flatMap((l) => l.stops);
-    const myk = stops.find((s) => s.id === "stp_mykonos")!;
-    const nax = stops.find((s) => s.id === "stp_naxos")!;
+    const destinations = gr.chapters.flatMap((l) => l.destinations);
+    const myk = destinations.find((s) => s.id === "stp_mykonos")!;
+    const nax = destinations.find((s) => s.id === "stp_naxos")!;
     const d = {
       ...blankHopDraft("ferry", { from: "Mykonos", to: "Naxos" }),
       label: "SeaJets",
@@ -98,22 +98,22 @@ describe("the date clash (Q8 A)", () => {
     endsTz: "America/Chicago",
   };
 
-  it("names the stop and both dates, before any POST", () => {
+  it("names the destination and both dates, before any POST", () => {
     const clash = hopBookingClash(costaRicaTrip(), "seg_home", redeye23)!;
     expect(clash).toMatchObject({
       side: "checkout",
-      stopId: "stp_conchal",
+      destinationId: "stp_conchal",
       conflict: { segmentId: "seg_home", expected: "2027-01-24", actual: "2027-01-23" },
     });
     expect(hopClashCopy(clash, "flight")).toEqual({
       headline: "This flight leaves 01/23, but Westin Reserva Conchal runs to 01/24.",
-      sub: "Stop dates win, so nothing is saved until they agree.",
+      sub: "Destination dates win, so nothing is saved until they agree.",
       move: "Check out of Westin Reserva Conchal on 01/23 instead",
-      keep: "Keep the stop, and fix the flight date",
+      keep: "Keep the destination, and fix the flight date",
     });
   });
 
-  it("is quiet when the flight agrees with the stop", () => {
+  it("is quiet when the flight agrees with the destination", () => {
     expect(
       hopBookingClash(costaRicaTrip(), "seg_home", {
         ...redeye23,
@@ -123,7 +123,7 @@ describe("the date clash (Q8 A)", () => {
     ).toBeNull();
   });
 
-  it("has check-in copy for a hop INTO a stop (vet MED a)", () => {
+  it("has check-in copy for a hop INTO a destination (vet MED a)", () => {
     // seg_out with its seeded flights taken off, so the new one alone times it.
     const cr = costaRicaTrip();
     const bare = { ...cr, segments: cr.segments.map((s) => ({ ...s, reservations: [] })) };
@@ -137,16 +137,16 @@ describe("the date clash (Q8 A)", () => {
     expect(hopClashCopy(clash, "flight").move).toBe("Check in to Westin Reserva Conchal on 01/15 instead");
   });
 
-  it("'Keep the stop' rewrites the form's dates and nothing else", () => {
+  it("'Keep the destination' rewrites the form's dates and nothing else", () => {
     const clash = hopBookingClash(costaRicaTrip(), "seg_home", redeye23)!;
     const d = { ...blankHopDraft("flight"), departs: "2027-01-23 19:30", arrives: "2027-01-23 23:55" };
     expect(fixHopDraftDates(d, clash)).toMatchObject({ departs: "2027-01-24 19:30", arrives: "2027-01-24 23:55" });
   });
 
-  it("'Check out … instead' moves the stop AND its own stay (vet MED c)", () => {
+  it("'Check out … instead' moves the destination AND its own stay (vet MED c)", () => {
     const r: Reservation = {
       id: "r_new",
-      stopId: null,
+      destinationId: null,
       segmentId: "seg_home",
       ideaId: null,
       type: "transport",
@@ -158,25 +158,27 @@ describe("the date clash (Q8 A)", () => {
       rating: null,
       notes: null,
       lodgingKind: null,
+      transportKind: null,
       lastChange: null,
       again: null,
       ...redeye23,
     };
     const next = applyHopBooking(costaRicaTrip(), r, true);
-    const conchal = next.legs[0]!.stops[0]!;
+    const conchal = next.chapters[0]!.destinations[0]!;
     expect(conchal.departDate).toBe("2027-01-23");
     expect(conchal.reservations.find((x) => x.id === "res_westin")?.checkOut).toBe("2027-01-23");
-    expect(next.segments.find((s) => s.id === "seg_home")?.reservations).toHaveLength(1);
+    // The seeded shuttle (#155) plus the new flight.
+    expect(next.segments.find((s) => s.id === "seg_home")?.reservations).toHaveLength(2);
   });
 });
 
 describe("setSegmentMode — the switch", () => {
   it("drops the pair out of drivePairs when a drive hop flies", () => {
     const pnw = pnwTrip();
-    const hop = pnw.segments.find((s) => s.fromStopId === "stp_astoria")!;
-    expect(drivePairs(pnw).some((p) => p.fromStopId === "stp_astoria")).toBe(true);
+    const hop = pnw.segments.find((s) => s.fromDestinationId === "stp_astoria")!;
+    expect(drivePairs(pnw).some((p) => p.fromDestinationId === "stp_astoria")).toBe(true);
     const flown = setSegmentMode(pnw, hop.id, "fly");
-    expect(drivePairs(flown).some((p) => p.fromStopId === "stp_astoria")).toBe(false);
+    expect(drivePairs(flown).some((p) => p.fromDestinationId === "stp_astoria")).toBe(false);
   });
 
   it("a hop switched back to Drive drops its clock", () => {

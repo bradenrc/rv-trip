@@ -18,7 +18,7 @@ import { ctx, describeDb, req } from "@/test/db";
  */
 
 /** Costa Rica Fly & Stay, as the seed has it (core/seeds costaRicaTrip): one
- * stop, the hop out (optionally without its flights) and the timed redeye home. */
+ * destination, the hop out (optionally without its flights) and the timed redeye home. */
 async function costaRica(owner = DEV_OWNER) {
   const trip = await fx.trip({
     owner,
@@ -30,9 +30,9 @@ async function costaRica(owner = DEV_OWNER) {
     lodgingDefault: "hotel",
     rigOn: false,
   });
-  const leg = await fx.leg({ tripId: trip.id, title: "Guanacaste" });
-  const conchal = await fx.stop({
-    legId: leg.id,
+  const chapter = await fx.chapter({ tripId: trip.id, title: "Guanacaste" });
+  const conchal = await fx.destination({
+    chapterId: chapter.id,
     placeName: "Westin Reserva Conchal",
     lat: 10.4047,
     lng: -85.8127,
@@ -40,7 +40,7 @@ async function costaRica(owner = DEV_OWNER) {
     departDate: "2027-01-24",
   });
   const westin = await fx.reservation({
-    stopId: conchal.id,
+    destinationId: conchal.id,
     type: "lodging",
     name: "Westin Reserva Conchal",
     checkIn: "2027-01-16",
@@ -50,15 +50,15 @@ async function costaRica(owner = DEV_OWNER) {
   });
   const out = await fx.segment({
     tripId: trip.id,
-    fromStopId: null,
-    toStopId: conchal.id,
+    fromDestinationId: null,
+    toDestinationId: conchal.id,
     mode: "fly",
     sortOrder: 0,
   });
   const home = await fx.segment({
     tripId: trip.id,
-    fromStopId: conchal.id,
-    toStopId: null,
+    fromDestinationId: conchal.id,
+    toDestinationId: null,
     mode: "fly",
     departAt: "2027-01-25T01:30:00Z",
     departTz: "America/Costa_Rica",
@@ -66,7 +66,7 @@ async function costaRica(owner = DEV_OWNER) {
     arriveTz: "America/Boise",
     sortOrder: 1,
   });
-  return { trip, leg, conchal, westin, out, home };
+  return { trip, chapter, conchal, westin, out, home };
 }
 
 const flight = (segmentId: string, name: string, startsAt: string, startsTz: string, endsAt: string, endsTz: string) => ({
@@ -136,7 +136,7 @@ describeDb("#104 · a flight on a hop", () => {
       req(flight(out.id, "AA 2451 BOI→LAX", "2027-01-16T13:05:00.000Z", "America/Boise", "2027-01-16T15:10:00.000Z", "America/Los_Angeles")),
     );
     expect(b.status).toBe(201);
-    expect(await b.json()).toMatchObject({ segmentId: out.id, stopId: null, startsTz: "America/Boise" });
+    expect(await b.json()).toMatchObject({ segmentId: out.id, destinationId: null, startsTz: "America/Boise" });
 
     const [seg] = (await read.segments(out.tripId)).filter((s) => s.id === out.id);
     expect(seg!.departAt?.toISOString()).toBe("2027-01-16T13:05:00.000Z");
@@ -161,16 +161,16 @@ describeDb("#104 · a flight on a hop", () => {
     expect(await segmentRes(home.id)).toHaveLength(0);
     const [seg] = (await read.segments(home.tripId)).filter((s) => s.id === home.id);
     expect(seg!.departAt?.toISOString()).toBe("2027-01-25T01:30:00.000Z");
-    expect((await read.stop(conchal.id))!.departDate).toBe("2027-01-24");
+    expect((await read.destination(conchal.id))!.departDate).toBe("2027-01-24");
   });
 
-  it("the same body with moveStop: true is 201 — the stop and its own stay move to Jan 23", async () => {
+  it("the same body with moveDestination: true is 201 — the destination and its own stay move to Jan 23", async () => {
     const { home, conchal, westin } = await costaRica();
 
-    const res = await POST_RES(req({ ...redeye23(home.id), moveStop: true }));
+    const res = await POST_RES(req({ ...redeye23(home.id), moveDestination: true }));
 
     expect(res.status).toBe(201);
-    expect((await read.stop(conchal.id))!.departDate).toBe("2027-01-23");
+    expect((await read.destination(conchal.id))!.departDate).toBe("2027-01-23");
     expect((await read.reservation(westin.id))!.checkOut).toBe("2027-01-23");
     const [seg] = (await read.segments(home.tripId)).filter((s) => s.id === home.id);
     expect(seg!.departAt?.toISOString()).toBe("2027-01-24T01:30:00.000Z");
@@ -179,7 +179,7 @@ describeDb("#104 · a flight on a hop", () => {
 
   it("400s a body naming both parents, or neither", async () => {
     const { home, conchal } = await costaRica();
-    expect((await POST_RES(req({ ...redeye23(home.id), stopId: conchal.id }))).status).toBe(400);
+    expect((await POST_RES(req({ ...redeye23(home.id), destinationId: conchal.id }))).status).toBe(400);
     // JSON drops an undefined key: this body names no parent at all.
     expect((await POST_RES(req({ ...redeye23(home.id), segmentId: undefined }))).status).toBe(400);
   });
@@ -209,14 +209,14 @@ describeDb("#104 · a flight on a hop", () => {
 describeDb("#104 · PATCH /api/segments/:id — the mode switch", () => {
   it("changes the mode, and drivePairs then excludes the pair", async () => {
     const { trip, astoria, newport } = await fx.pacificNorthwestLoop();
-    const hop = await fx.segment({ tripId: trip.id, fromStopId: astoria.id, toStopId: newport.id, sortOrder: 1 });
+    const hop = await fx.segment({ tripId: trip.id, fromDestinationId: astoria.id, toDestinationId: newport.id, sortOrder: 1 });
 
     const res = await PATCH_SEGMENT(req({ mode: "fly" }, "PATCH"), ctx(hop.id));
 
     expect(res.status).toBe(204);
     const bundle = tripBundleSchema.parse(await (await GET_TRIP(req(undefined, "GET"), ctx(trip.id))).json());
     expect(bundle.trip.segments.find((s) => s.id === hop.id)?.mode).toBe("fly");
-    expect(drivePairs(bundle.trip).some((p) => p.fromStopId === astoria.id)).toBe(false);
+    expect(drivePairs(bundle.trip).some((p) => p.fromDestinationId === astoria.id)).toBe(false);
   });
 
   it("#129 · Drive with flights on the hop is no longer refused — no choice reads as keep; and 404s another owner's hop", async () => {
@@ -247,7 +247,7 @@ describeDb("#105 · a stay by kind", () => {
     const { trip, bend } = await fx.pacificNorthwestLoop();
     const res = await POST_RES(
       req({
-        stopId: bend.id,
+        destinationId: bend.id,
         type: "lodging",
         lodgingKind: "friends",
         name: "Jane & Rick",
@@ -261,8 +261,8 @@ describeDb("#105 · a stay by kind", () => {
     const created = (await res.json()) as { id: string };
 
     const bundle = tripBundleSchema.parse(await (await GET_TRIP(req(undefined, "GET"), ctx(trip.id))).json());
-    const stay = bundle.trip.legs
-      .flatMap((l) => l.stops)
+    const stay = bundle.trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === bend.id)!
       .reservations.find((r) => r.id === created.id);
     expect(stay).toMatchObject({ lodgingKind: "friends", cost: null, type: "lodging", name: "Jane & Rick" });

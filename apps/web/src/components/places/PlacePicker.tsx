@@ -20,8 +20,8 @@ import { tripApi } from "@/lib/trip-api";
 /**
  * The place picker — docs/design/41 §4, Variant C.
  *
- * Controlled: one value in, one value out. It takes no trip, no leg and no
- * stop, which is the whole point — #21 (home base), #22 (add a stop) and #24
+ * Controlled: one value in, one value out. It takes no trip, no chapter and no
+ * destination, which is the whole point — #21 (home base), #22 (add a destination) and #24
  * (add an idea) mount it unchanged without #41 building any of their sheets.
  *
  * The free-text escape row is pinned to the bottom of EVERY state that shows a
@@ -35,7 +35,7 @@ import { tripApi } from "@/lib/trip-api";
  * by document order. On the trip page the picker opens inside the add-idea card
  * and the Gantt's row labels come later at the SAME level
  * (`sticky left-0 z-10`, packages/ui/src/Gantt.tsx:18), so every row that fell
- * past the card's bottom edge was painted over by an opaque RHYTHM / LEG 1 /
+ * past the card's bottom edge was painted over by an opaque RHYTHM / CHAPTER 1 /
  * UNPLANNED label. A body portal has no ancestor left to trap it.
  *
  * Inside a Radix layer the list stays INLINE, one z-level higher than before.

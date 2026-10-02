@@ -65,10 +65,10 @@ describe("isAlreadySaved — rule 1, id match wins", () => {
 
 describe("isAlreadySaved — rule 2, names must match", () => {
   it("keeps Fishing Bridge, WY separate from Fishing Bridge RV Park at 0 m", () => {
-    // seed.ts — the stop and the saved row carry identical coordinates and
+    // seed.ts — the destination and the saved row carry identical coordinates and
     // neither has a googlePlaceId. A campground is not its town.
-    const stop = saved("Fishing Bridge, WY", 44.5647, -110.3735);
-    expect(isAlreadySaved(stop, LIBRARY)).toBe(false);
+    const destination = saved("Fishing Bridge, WY", 44.5647, -110.3735);
+    expect(isAlreadySaved(destination, LIBRARY)).toBe(false);
   });
 
   it("ignores a shared region word — Newport, OR is not Local Ocean Seafoods", () => {
@@ -93,7 +93,7 @@ describe("isAlreadySaved — rule 3, coordinates are a tiebreaker", () => {
 
   it("matches on the name alone when the candidate has no coordinates (Gap 3)", () => {
     // The South Beach State Park reservation (seed.ts) has no lat/lng of its
-    // own; its parent stop's pin is ~3.1 km away and is never borrowed.
+    // own; its parent destination's pin is ~3.1 km away and is never borrowed.
     const c = saved("South Beach State Park", null, null);
     expect(isAlreadySaved(c, LIBRARY)).toBe(true);
   });
@@ -109,7 +109,7 @@ describe("isAlreadySaved — rule 4, borrowed coordinates never enter", () => {
     const own = saved("South Beach State Park", null, null);
     const borrowed = { ...own, lat: 44.6365, lng: -124.053 };
     expect(isAlreadySaved(own, LIBRARY)).toBe(true);
-    // Same row with its parent stop's pin pasted in would have been suggested —
+    // Same row with its parent destination's pin pasted in would have been suggested —
     // which is exactly why the caller must never paste it.
     expect(isAlreadySaved(borrowed, LIBRARY)).toBe(false);
   });
@@ -138,16 +138,16 @@ function pnwLoop(status: Trip["status"]): Trip {
     rating: null,
     note: null,
     ideas: [],
-    legs: [
+    chapters: [
       {
-        id: "leg-coast",
+        id: "chapter-coast",
         tripId: "9f1c2f4a-1d3b-4a2e-8c55-0b7e6a9d1234",
         title: "Oregon Coast",
         sortOrder: 0,
-        stops: [
+        destinations: [
           {
-            id: "stop-astoria",
-            legId: "leg-coast",
+            id: "destination-astoria",
+            chapterId: "chapter-coast",
             place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
             arriveDate: "2026-08-02",
             departDate: "2026-08-05",
@@ -157,7 +157,7 @@ function pnwLoop(status: Trip["status"]): Trip {
             reservations: [
               {
                 id: "res-koa",
-                stopId: "stop-astoria",
+                destinationId: "destination-astoria",
                 ideaId: null,
                 type: "campground",
                 name: "Astoria/Warrenton KOA",
@@ -175,10 +175,11 @@ function pnwLoop(status: Trip["status"]): Trip {
                 startsTz: null,
                 endsTz: null,
               lodgingKind: null,
+              transportKind: null,
               },
               {
                 id: "res-museum",
-                stopId: "stop-astoria",
+                destinationId: "destination-astoria",
                 ideaId: null,
                 type: "tour",
                 name: "Columbia River Maritime Museum",
@@ -196,6 +197,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 startsTz: null,
                 endsTz: null,
               lodgingKind: null,
+              transportKind: null,
               },
             ],
             ideas: [],
@@ -203,8 +205,8 @@ function pnwLoop(status: Trip["status"]): Trip {
             again: null,
           },
           {
-            id: "stop-newport",
-            legId: "leg-coast",
+            id: "destination-newport",
+            chapterId: "chapter-coast",
             place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
             arriveDate: "2026-08-05",
             departDate: "2026-08-09",
@@ -214,7 +216,7 @@ function pnwLoop(status: Trip["status"]): Trip {
             reservations: [
               {
                 id: "res-south-beach",
-                stopId: "stop-newport",
+                destinationId: "destination-newport",
                 ideaId: null,
                 type: "campground",
                 name: "South Beach State Park",
@@ -232,6 +234,7 @@ function pnwLoop(status: Trip["status"]): Trip {
                 startsTz: null,
                 endsTz: null,
               lodgingKind: null,
+              transportKind: null,
               },
             ],
             ideas: [],
@@ -239,8 +242,8 @@ function pnwLoop(status: Trip["status"]): Trip {
             again: null,
           },
           {
-            id: "stop-bend",
-            legId: "leg-coast",
+            id: "destination-bend",
+            chapterId: "chapter-coast",
             place: { name: "Bend, OR", lat: 44.0582, lng: -121.3153, googlePlaceId: null },
             arriveDate: "2026-08-12",
             departDate: "2026-08-16",
@@ -268,7 +271,7 @@ describe("suggestionsFromTrips", () => {
     expect(suggestionsFromTrips([pnwLoop("planning")])).toEqual([]);
   });
 
-  it("collects stops AND reservations rated >= 4 once the trip is complete (Q4=B)", () => {
+  it("collects destinations AND reservations rated >= 4 once the trip is complete (Q4=B)", () => {
     const got = suggestionsFromTrips([pnwLoop("complete")]);
     expect(got.map((s) => s.name)).toEqual([
       "Astoria, OR",
@@ -282,7 +285,7 @@ describe("suggestionsFromTrips", () => {
     expect(got.every((s) => s.rating >= SUGGESTION_MIN_RATING)).toBe(true);
   });
 
-  it("gives a reservation its parent stop's name as the region and NO coordinates", () => {
+  it("gives a reservation its parent destination's name as the region and NO coordinates", () => {
     const koa = suggestionsFromTrips([pnwLoop("complete")]).find(
       (s) => s.name === "Astoria/Warrenton KOA",
     )!;
@@ -295,11 +298,11 @@ describe("suggestionsFromTrips", () => {
     expect(koa.tripTitle).toBe("Pacific Northwest Loop");
   });
 
-  it("carries a stop's own coordinates and files it under Other", () => {
+  it("carries a destination's own coordinates and files it under Other", () => {
     const astoria = suggestionsFromTrips([pnwLoop("complete")]).find(
       (s) => s.name === "Astoria, OR",
     )!;
-    expect(astoria.kind).toBe("stop");
+    expect(astoria.kind).toBe("destination");
     expect(astoria.lat).toBe(46.1879);
     expect(astoria.type).toBe("other");
     expect(astoria.region).toBeNull();
@@ -330,7 +333,7 @@ const libraryRow = (name: string, lat: number | null, lng: number | null): Saved
   again: null,
   anchor: "pin",
   areaLabel: null,
-  destination: null,
+  area: null,
   suggestedPlace: null,
   createdAt: null,
 });
@@ -369,8 +372,8 @@ describe("buildSuggestionShelf", () => {
 
   it("drops dismissed keys, and goes back to null when all are dismissed", () => {
     const all = candidates();
-    const shelf = buildSuggestionShelf(all, library, ["stop:stop-astoria"])!;
-    expect(shelf.suggestions.map((s) => s.key)).not.toContain("stop:stop-astoria");
+    const shelf = buildSuggestionShelf(all, library, ["destination:destination-astoria"])!;
+    expect(shelf.suggestions.map((s) => s.key)).not.toContain("destination:destination-astoria");
     const keys = all.map((s) => s.key);
     expect(buildSuggestionShelf(all, library, keys)).toBeNull();
   });
@@ -378,7 +381,7 @@ describe("buildSuggestionShelf", () => {
   it("names the most recently ended trip in the headline", () => {
     const older: PlaceSuggestion = {
       ...candidates()[0]!,
-      key: "stop:old",
+      key: "destination:old",
       id: "old",
       name: "Jackson, WY",
       tripId: "3a2b1c0d-9e8f-4a7b-8c6d-5e4f3a2b1c0d",

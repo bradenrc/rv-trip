@@ -84,6 +84,32 @@ describe("capture queue", () => {
     expect(parseCaptureQueue(JSON.stringify({ a: 1 }))).toEqual([]);
     expect(parseCaptureQueue(JSON.stringify([{ nope: true }, PIN]))).toEqual([PIN]);
   });
+
+  it("#155 · reads items queued before the rename ('stop' / stopId) as destinations", () => {
+    const legacyPatch = {
+      kind: "patch",
+      clientId: "cap_old",
+      queuedAt: "2026-09-30T10:00:00Z",
+      attempts: 0,
+      entity: "stop",
+      id: "s1",
+      body: { rating: 4 },
+    };
+    const legacyIdea = {
+      kind: "idea",
+      clientId: "cap_old_idea",
+      queuedAt: "2026-09-30T10:01:00Z",
+      attempts: 0,
+      body: { clientId: "cap_old_idea", tripId: "t1", stopId: "s1", title: "Sunset", status: "done" },
+    };
+    expect(parseCaptureQueue(JSON.stringify([legacyPatch, legacyIdea]))).toEqual([
+      { ...legacyPatch, entity: "destination" },
+      {
+        ...legacyIdea,
+        body: { clientId: "cap_old_idea", tripId: "t1", destinationId: "s1", title: "Sunset", status: "done" },
+      },
+    ]);
+  });
 });
 
 describe("flushCaptureQueue", () => {
@@ -156,7 +182,7 @@ const DID_IT: QueuedIdea = {
   body: {
     clientId: "cap_didit",
     tripId: "5d3c9d7e-9b8e-4a8e-8f55-5a1f7b6d2c11",
-    stopId: "0b6c3b2a-1d4e-4f5a-9b8c-7d6e5f4a3b21",
+    destinationId: "0b6c3b2a-1d4e-4f5a-9b8c-7d6e5f4a3b21",
     title: "Sunset at Playa Flamingo",
     status: "done",
     rating: 5,

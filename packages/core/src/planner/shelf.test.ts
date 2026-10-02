@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import type { Idea, Stop, Trip } from "../domain/types";
+import type { Idea, Destination, Trip } from "../domain/types";
 import { trip as tripSchema } from "../domain/types";
 import { ideaShelf, shelfIdeas, NEAR_RADIUS_MI } from "./shelf";
 import { planIdeaOnGap, scheduleFloating, timelineModel } from "./index";
@@ -30,9 +30,9 @@ const ZEPHYR = { lat: 38.9946, lng: -119.9482 };
 // Bridgeport, CA — ~70 mi south, outside it.
 const BRIDGEPORT = { lat: 38.2574, lng: -119.2313 };
 
-function stop(over: Partial<Stop> & { id: string }): Stop {
+function destination(over: Partial<Destination> & { id: string }): Destination {
   return {
-    legId: "L1",
+    chapterId: "L1",
     place: { name: "Village Camp Truckee", ...TRUCKEE, googlePlaceId: null },
     arriveDate: "2026-10-10",
     departDate: "2026-10-17",
@@ -50,7 +50,7 @@ function stop(over: Partial<Stop> & { id: string }): Stop {
 function idea(over: Partial<Idea> & { id: string }): Idea {
   return {
     tripId: "T1",
-    stopId: null,
+    destinationId: null,
     title: "A maybe",
     category: "do",
     status: "idea",
@@ -70,7 +70,7 @@ const placed = (name: string, at: { lat: number; lng: number }) => ({
   googlePlaceId: null,
 });
 
-function fixture(ideas: Idea[], stops: Stop[] = [stop({ id: "S1" })]): Trip {
+function fixture(ideas: Idea[], destinations: Destination[] = [destination({ id: "S1" })]): Trip {
   return {
     id: "T1",
     ownerId: "dev-user",
@@ -84,7 +84,7 @@ function fixture(ideas: Idea[], stops: Stop[] = [stop({ id: "S1" })]): Trip {
     rating: null,
     note: null,
     ideas,
-    legs: [{ id: "L1", tripId: "T1", title: "Tahoe North", sortOrder: 0, stops }],
+    chapters: [{ id: "L1", tripId: "T1", title: "Tahoe North", sortOrder: 0, destinations }],
     defaultMode: "drive",
     lodgingDefault: null,
     rigOn: true,
@@ -133,13 +133,13 @@ function shelfTrip(): Trip {
       place: placed("Bodie", BRIDGEPORT),
       sortOrder: 5,
     }),
-    // ATTACHED — it has a stop, so it is NOT on the shelf.
-    idea({ id: "i7", category: "do", title: "Donner Memorial", stopId: "S1", sortOrder: 6 }),
+    // ATTACHED — it has a destination, so it is NOT on the shelf.
+    idea({ id: "i7", category: "do", title: "Donner Memorial", destinationId: "S1", sortOrder: 6 }),
   ]);
 }
 
 describe("shelfIdeas — only the unattached rows", () => {
-  it("returns stopId === null rows and nothing else", () => {
+  it("returns destinationId === null rows and nothing else", () => {
     expect(shelfIdeas(shelfTrip()).map((r) => r.idea.id)).toEqual([
       "i1",
       "i2",
@@ -150,11 +150,11 @@ describe("shelfIdeas — only the unattached rows", () => {
     ]);
   });
 
-  it("names the nearest LOCATED stop and how far, for the row's second line", () => {
+  it("names the nearest LOCATED destination and how far, for the row's second line", () => {
     const rows = shelfIdeas(shelfTrip());
     const coachland = rows.find((r) => r.idea.id === "i1")!;
-    expect(coachland.nearestStopId).toBe("S1");
-    expect(coachland.nearestStopName).toBe("Village Camp Truckee");
+    expect(coachland.nearestDestinationId).toBe("S1");
+    expect(coachland.nearestDestinationName).toBe("Village Camp Truckee");
     expect(coachland.distanceMi).toBeGreaterThan(0);
     expect(coachland.distanceMi).toBeLessThan(5);
   });
@@ -164,14 +164,14 @@ describe("shelfIdeas — only the unattached rows", () => {
     for (const id of ["i4", "i5"]) {
       const row = rows.find((r) => r.idea.id === id)!;
       expect(row.distanceMi).toBeNull();
-      expect(row.nearestStopName).toBeNull();
+      expect(row.nearestDestinationName).toBeNull();
     }
   });
 
-  it("measures nothing when the trip has no located stop to measure FROM", () => {
+  it("measures nothing when the trip has no located destination to measure FROM", () => {
     const noAnchor = fixture(
       [idea({ id: "i1", place: placed("Coachland", TRUCKEE) })],
-      [stop({ id: "S1", place: { name: "Somewhere", lat: null, lng: null, googlePlaceId: null } })],
+      [destination({ id: "S1", place: { name: "Somewhere", lat: null, lng: null, googlePlaceId: null } })],
     );
     expect(shelfIdeas(noAnchor)[0]!.distanceMi).toBeNull();
   });
@@ -191,10 +191,10 @@ describe("ideaShelf — the groups, the chips and the counts", () => {
     expect(shelf.countLabel).toBe("6 · 2 not on the map");
   });
 
-  it("produces one proximity chip per located stop, plus Anywhere and the amber one", () => {
+  it("produces one proximity chip per located destination, plus Anywhere and the amber one", () => {
     const shelf = ideaShelf(shelfTrip());
     expect(shelf.chips.map((c) => [c.label, c.count])).toEqual([
-      // Coachland, Zephyr Cove and Full Belly are inside 50 mi of the stop;
+      // Coachland, Zephyr Cove and Full Belly are inside 50 mi of the destination;
       // Bodie (~70 mi) is not, and the two coordless rows are in no radius.
       ["Near Village Camp Truckee", 3],
       ["Anywhere", 6],
@@ -211,8 +211,8 @@ describe("ideaShelf — the groups, the chips and the counts", () => {
     expect(shelf.countLabel).toBe("1");
   });
 
-  it("the near chip filters to what is within NEAR_RADIUS_MI of that stop", () => {
-    const shelf = ideaShelf(shelfTrip(), { kind: "near", stopId: "S1" });
+  it("the near chip filters to what is within NEAR_RADIUS_MI of that destination", () => {
+    const shelf = ideaShelf(shelfTrip(), { kind: "near", destinationId: "S1" });
     const ids = shelf.groups.flatMap((g) => g.ideas.map((r) => r.idea.id));
     expect(ids).toEqual(["i1", "i2", "i3"]);
     expect(NEAR_RADIUS_MI).toBe(50);
@@ -233,15 +233,15 @@ describe("ideaShelf — the groups, the chips and the counts", () => {
 });
 
 describe("planIdeaOnGap — the drop's dates are scheduleFloating's dates", () => {
-  /** Oct 10 – Nov 10 with one stop scheduled Oct 10–17: the open run starts
+  /** Oct 10 – Nov 10 with one destination scheduled Oct 10–17: the open run starts
    * Oct 18, exactly as the design's frame draws it. */
   function dropTrip(): Trip {
     return fixture(
       [idea({ id: "i1", category: "stay", place: placed("Coachland", TRUCKEE) })],
       [
-        stop({ id: "S1", arriveDate: "2026-10-10", departDate: "2026-10-17" }),
+        destination({ id: "S1", arriveDate: "2026-10-10", departDate: "2026-10-17" }),
         {
-          ...stop({ id: "S2" }),
+          ...destination({ id: "S2" }),
           place: { name: "Floater", ...TRUCKEE, googlePlaceId: null },
           arriveDate: null,
           departDate: null,
@@ -260,10 +260,10 @@ describe("planIdeaOnGap — the drop's dates are scheduleFloating's dates", () =
     });
   });
 
-  it("is the same rule the floating-stop drop uses — identical means identical", () => {
+  it("is the same rule the floating-destination drop uses — identical means identical", () => {
     const t = dropTrip();
     const gap = timelineModel(t).gaps[0]!;
-    const scheduled = scheduleFloating(t, "S2", gap).legs[0]!.stops.find((s) => s.id === "S2")!;
+    const scheduled = scheduleFloating(t, "S2", gap).chapters[0]!.destinations.find((s) => s.id === "S2")!;
     expect(planIdeaOnGap(t, gap)).toEqual({
       arriveDate: scheduled.arriveDate,
       departDate: scheduled.departDate,
@@ -286,10 +286,10 @@ describe("planIdeaOnGap — the drop's dates are scheduleFloating's dates", () =
 });
 
 describe("the trip tree carries the shelf", () => {
-  it("parses a tree with ideas[] beside legs[]", () => {
+  it("parses a tree with ideas[] beside chapters[]", () => {
     const parsed = tripSchema.parse(shelfTrip());
     expect(parsed.ideas.map((i) => i.id)).toHaveLength(7);
-    expect(parsed.ideas.filter((i) => i.stopId === null)).toHaveLength(6);
+    expect(parsed.ideas.filter((i) => i.destinationId === null)).toHaveLength(6);
   });
 
   it("defaults ideas[] to empty — every shipped caller predates the shelf", () => {
@@ -328,14 +328,14 @@ describe("the do/eat/stay vocabulary has ONE door into the five-category languag
   });
 
   /** Q7's binding comment: every path that learns a place persists Google's id.
-   * The two the shelf adds are the Add-from-Places copy and the drop's stop
+   * The two the shelf adds are the Add-from-Places copy and the drop's destination
    * create — both send the whole nested `place`, which carries all four
    * columns together rather than a name and a pair of coordinates. */
   it("the shelf's two new place paths carry googlePlaceId", () => {
     const planner = code(read("apps/web/src/components/trip/TripPlanner.tsx"));
     // The copy hands the saved place's whole `place` across.
     expect(planner).toMatch(/addIdeaFromPlace[\s\S]*?place: p\.place,/);
-    // The drop's stop create hands the idea's whole `place` across.
-    expect(planner).toMatch(/tripApi\.createStop\(\{[\s\S]*?place: it\.place \?\?/);
+    // The drop's destination create hands the idea's whole `place` across.
+    expect(planner).toMatch(/tripApi\.createDestination\(\{[\s\S]*?place: it\.place \?\?/);
   });
 });

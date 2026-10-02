@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
  * #80 · the picker's open list must ESCAPE its ancestors — asserted as source.
  *
  * The walk found the dropdown painted over by everything drawn after the
- * add-idea card: the rhythm strip, the legs, the Gantt's `sticky left-0 z-10`
+ * add-idea card: the rhythm strip, the chapters, the Gantt's `sticky left-0 z-10`
  * row labels (packages/ui/src/Gantt.tsx:18). Inline, the list was an
  * `absolute inset-x-0 top-full z-10` child of the field's `relative` wrapper,
  * and a z-index only ever wins inside the stacking context it lives in — so the

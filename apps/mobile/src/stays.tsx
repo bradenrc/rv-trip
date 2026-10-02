@@ -19,7 +19,7 @@ import { Button, RangePicker, Segmented } from "./ui";
 const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABEL[k] }));
 
 /**
- * The stop screen's stay form (#105 · Q9 A), kind first. Friends asks only who
+ * The destination screen's stay form (#105 · Q9 A), kind first. Friends asks only who
  * you're staying with and the nights — no cost, no confirmation number.
  *
  * #143 · Q6 B — given `editing`, the same sheet is **Edit stay**: seeded by
@@ -30,7 +30,7 @@ const KIND_OPTIONS = STAY_KINDS.map((k) => ({ value: k, label: LODGING_KIND_LABE
  */
 export function StaySheet({
   tripId,
-  stopId,
+  destinationId,
   title,
   kind,
   span,
@@ -39,12 +39,12 @@ export function StaySheet({
   onClose,
 }: {
   tripId: string;
-  stopId: string;
-  /** "Bend, OR · Aug 12–16" — the stop the stay belongs to. */
+  destinationId: string;
+  /** "Bend, OR · Aug 12–16" — the destination the stay belongs to. */
   title: string;
   /** Add's opening kind: the trip's lodging default (#105 · Q3 A). */
   kind: LodgingKind | null;
-  /** #128 · the stop's own dates — a new stay's default. */
+  /** #128 · the destination's own dates — a new stay's default. */
   span: { start: string; end: string } | null;
   tripSpan: { start: string; end: string };
   /** #143 — the stay row being edited; absent/null is Add stay. */
@@ -60,7 +60,7 @@ export function StaySheet({
   const set = (patch: Partial<ReservationDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const current = draft.lodgingKind ?? "campground";
   const friends = current === "friends";
-  const body = reservationDraftInput(stopId, draft);
+  const body = reservationDraftInput(destinationId, draft);
   const patch = editing ? reservationDraftPatch(editing, draft) : null;
   const savable = editing ? patch !== null : body !== null;
 
@@ -68,7 +68,7 @@ export function StaySheet({
     if (!savable || saving) return;
     setSaving(true);
     try {
-      if (editing) await editStay(tripId, stopId, editing.id, patch!);
+      if (editing) await editStay(tripId, destinationId, editing.id, patch!);
       else await addStay(tripId, body!);
       onClose();
     } catch {
@@ -86,7 +86,7 @@ export function StaySheet({
         style: "destructive",
         onPress: () => {
           onClose();
-          deleteStay(tripId, stopId, editing.id).catch(() => failed("That stay"));
+          deleteStay(tripId, destinationId, editing.id).catch(() => failed("That stay"));
         },
       },
     ]);

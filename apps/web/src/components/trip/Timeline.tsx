@@ -7,12 +7,12 @@ import {
   RhythmStrip,
   Ruler,
   SwimLane,
-  StopBar,
+  DestinationBar,
   OpenSpan,
   OpenLane,
   GanttLegend,
   FilterChip,
-  FloatingStopCard,
+  FloatingDestinationCard,
   AllScheduledCard,
   ShelfIdeaCard,
   DrillRow,
@@ -29,22 +29,22 @@ const ROW_HEIGHT = 78;
 
 /**
  * What is in hand during a drag. Two payload kinds, one drop layer (#80):
- * a floating STOP (which lands on open days, as it always has) and a shelf
- * IDEA (which lands on open days when it is a stay, and on a stop bar when it
+ * a floating DESTINATION (which lands on open days, as it always has) and a shelf
+ * IDEA (which lands on open days when it is a stay, and on a destination bar when it
  * is a do or an eat).
  */
 export type TimelineDrag =
-  | { kind: "stop"; id: string }
+  | { kind: "destination"; id: string }
   | { kind: "idea"; id: string; category: Idea["category"] };
 
-/** An open span is not a stop, so there is nothing there for a do/eat idea to
- * attach to; a stay-idea and a floating stop both become one. */
+/** An open span is not a destination, so there is nothing there for a do/eat idea to
+ * attach to; a stay-idea and a floating destination both become one. */
 function landsOnOpenDays(d: TimelineDrag | null): boolean {
-  return d !== null && (d.kind === "stop" || d.category === "stay");
+  return d !== null && (d.kind === "destination" || d.category === "stay");
 }
-/** …and the mirror: only an idea that is NOT a stay attaches to a stop bar.
- * (A floating stop dropped on another stop means nothing.) */
-function landsOnAStop(d: TimelineDrag | null): boolean {
+/** …and the mirror: only an idea that is NOT a stay attaches to a destination bar.
+ * (A floating destination dropped on another destination means nothing.) */
+function landsOnADestination(d: TimelineDrag | null): boolean {
   return d !== null && d.kind === "idea" && d.category !== "stay";
 }
 
@@ -53,7 +53,7 @@ export function Timeline({
   shelf,
   shelfFilter,
   onShelfFilter,
-  onOpenStop,
+  onOpenDestination,
   onSchedule,
   onPlanIdea,
   onAttachIdea,
@@ -75,24 +75,24 @@ export function Timeline({
   shelf?: IdeaShelf;
   shelfFilter?: ShelfFilter;
   onShelfFilter?: (f: ShelfFilter) => void;
-  onOpenStop: (id: string) => void;
-  /** `gap` is the open span the card was DROPPED on — the stop takes its first
+  onOpenDestination: (id: string) => void;
+  /** `gap` is the open span the card was DROPPED on — the destination takes its first
    * date, not the trip's longest empty run (#40). */
-  onSchedule: (stopId: string, gap: TimelineGap | null) => void;
-  /** A stay-idea dropped on open days: it becomes a stop with those dates. */
+  onSchedule: (destinationId: string, gap: TimelineGap | null) => void;
+  /** A stay-idea dropped on open days: it becomes a destination with those dates. */
   onPlanIdea?: (ideaId: string, gap: TimelineGap) => void;
-  /** A do/eat idea dropped on a stop bar: it leaves the shelf and lives there. */
-  onAttachIdea?: (ideaId: string, stopId: string) => void;
+  /** A do/eat idea dropped on a destination bar: it leaves the shelf and lives there. */
+  onAttachIdea?: (ideaId: string, destinationId: string) => void;
   onAddFromPlaces?: () => void;
   /** The shelf card's own pill: idea → planned → done. */
   onCycleIdea?: (ideaId: string) => void;
   /** Opens the app's place picker on a coordless shelf row — the same #69
-   * entrance the stop sheet's card has. */
+   * entrance the destination sheet's card has. */
   onLocateIdea?: (ideaId: string) => void;
   /**
-   * The expanded row's research pad (#82). SHELF-SIDE handlers, not the stop
-   * sheet's: an unattached idea is not in any stop's `ideas`, so the sheet's
-   * `onIdeaRating`/`onIdeaNote` — which all key on `selectedStop.id` — cannot
+   * The expanded row's research pad (#82). SHELF-SIDE handlers, not the destination
+   * sheet's: an unattached idea is not in any destination's `ideas`, so the sheet's
+   * `onIdeaRating`/`onIdeaNote` — which all key on `selectedDestination.id` — cannot
    * reach this row at all.
    */
   onRateIdea?: (ideaId: string, n: number) => void;
@@ -115,7 +115,7 @@ export function Timeline({
   const [expandedIdeaId, setExpandedIdeaId] = useState<string | null>(null);
 
   const openActive = landsOnOpenDays(dragged);
-  const stopActive = landsOnAStop(dragged);
+  const destinationActive = landsOnADestination(dragged);
   const days = model.rhythm.length;
   const minWidth = Math.max(820, days * 30);
 
@@ -143,11 +143,11 @@ export function Timeline({
                 }
               />
               <Ruler cells={model.ruler} />
-              {model.legs.map((leg) => (
-                <SwimLane key={leg.id} kicker={leg.kicker} name={leg.name} columns={days} rowHeight={ROW_HEIGHT}>
-                  {leg.bars.map((b) => (
-                    <StopBar
-                      key={b.stopId}
+              {model.chapters.map((chapter) => (
+                <SwimLane key={chapter.id} kicker={chapter.kicker} name={chapter.name} columns={days} rowHeight={ROW_HEIGHT}>
+                  {chapter.bars.map((b) => (
+                    <DestinationBar
+                      key={b.destinationId}
                       name={b.name}
                       range={b.range}
                       rating={b.rating}
@@ -157,13 +157,13 @@ export function Timeline({
                       span={b.span}
                       arriveMode={b.arriveMode}
                       compact
-                      active={stopActive}
-                      onClick={() => onOpenStop(b.stopId)}
+                      active={destinationActive}
+                      onClick={() => onOpenDestination(b.destinationId)}
                       onDragOver={(e) => {
-                        if (stopActive) e.preventDefault();
+                        if (destinationActive) e.preventDefault();
                       }}
                       onDrop={drop(() => {
-                        if (dragged?.kind === "idea") onAttachIdea?.(dragged.id, b.stopId);
+                        if (dragged?.kind === "idea") onAttachIdea?.(dragged.id, b.destinationId);
                       })}
                     />
                   ))}
@@ -182,7 +182,7 @@ export function Timeline({
                     }}
                     onDrop={drop(() => {
                       if (!dragged) return;
-                      if (dragged.kind === "stop") onSchedule(dragged.id, g);
+                      if (dragged.kind === "destination") onSchedule(dragged.id, g);
                       else if (dragged.category === "stay") onPlanIdea?.(dragged.id, g);
                     })}
                   />
@@ -193,7 +193,7 @@ export function Timeline({
           {/* A horizontal scroll nobody notices is a view that looks truncated.
               Phone-only: at md the whole month fits without scrolling. */}
           <div className="mt-2 font-mono text-[10px] text-rv-ink-faded md:hidden">
-            ← swipe the calendar · the leg column stays put →
+            ← swipe the calendar · the chapter column stays put →
           </div>
           <GanttLegend modes={model.modes} />
         </div>
@@ -201,7 +201,7 @@ export function Timeline({
 
       {/*
         ONE rail, TWO sections, in a fixed order: the Ideas shelf (#80) and then
-        the unchanged "Not yet scheduled" floating stops. The floating half is
+        the unchanged "Not yet scheduled" floating destinations. The floating half is
         byte-for-byte what it shipped as — the shelf is added above it, never
         instead of it.
       */}
@@ -237,7 +237,7 @@ export function Timeline({
           ) : (
             <>
               <p className="m-0 mb-2.5 text-[13px] text-rv-ink-muted">
-                Maybes for this trip. Drag a stay onto open days to plan it, or onto a stop to pin
+                Maybes for this trip. Drag a stay onto open days to plan it, or onto a destination to pin
                 it there.
               </p>
               <div className="mb-3 flex flex-wrap gap-1.5">
@@ -261,15 +261,15 @@ export function Timeline({
                     <ShelfIdeaCard
                       key={row.idea.id}
                       idea={row.idea}
-                      nearestStopName={row.nearestStopName}
+                      nearestDestinationName={row.nearestDestinationName}
                       distanceMi={row.distanceMi}
                       expanded={expandedIdeaId === row.idea.id}
                       actions={ideaActions?.(row.idea)}
                       picker={ideaPicker?.(row.idea)}
-                      /* A shelf idea has no parent stop and so NO LOCALITY:
+                      /* A shelf idea has no parent destination and so NO LOCALITY:
                          every query is the bare title, and the AI-Mode question
-                         drops its " in <locality>" clause. `nearestStopName` is
-                         deliberately not used — "nearest stop you already own"
+                         drops its " in <locality>" clause. `nearestDestinationName` is
+                         deliberately not used — "nearest destination you already own"
                          is a proximity fact, not this place's town. */
                       drill={
                         <DrillRow
@@ -315,7 +315,7 @@ export function Timeline({
           Not yet scheduled
         </div>
         <p className="m-0 mb-3 text-[13px] text-rv-ink-muted">
-          Floating stops — ordered, but dateless. Drag one onto an open span to give it dates.
+          Floating destinations — ordered, but dateless. Drag one onto an open span to give it dates.
         </p>
 
         {model.allScheduled ? (
@@ -323,13 +323,13 @@ export function Timeline({
         ) : (
           <>
             {model.floating.map((f) => (
-              <FloatingStopCard
+              <FloatingDestinationCard
                 key={f.id}
                 name={f.name}
                 note={f.note}
                 firstIdea={f.firstIdea}
-                onClick={() => onOpenStop(f.id)}
-                onDragStart={() => setDragged({ kind: "stop", id: f.id })}
+                onClick={() => onOpenDestination(f.id)}
+                onDragStart={() => setDragged({ kind: "destination", id: f.id })}
                 onDragEnd={() => setDragged(null)}
               />
             ))}
@@ -345,8 +345,8 @@ export function Timeline({
 }
 
 /** Which chip is pressed. A `near` chip is the same chip only when it names the
- * same stop. */
+ * same destination. */
 function sameFilter(a: ShelfFilter, b: ShelfFilter): boolean {
   if (a.kind !== b.kind) return false;
-  return a.kind !== "near" || a.stopId === (b as { kind: "near"; stopId: string }).stopId;
+  return a.kind !== "near" || a.destinationId === (b as { kind: "near"; destinationId: string }).destinationId;
 }

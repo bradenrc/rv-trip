@@ -56,7 +56,7 @@ export function PlacesWorkspace({
   places: SavedPlace[];
   /** Complete trips only — the graduate sheet's "Visited on" list. */
   trips: { id: string; title: string }[];
-  /** "Been there?" candidates — every stop and reservation rated ★4+ on a
+  /** "Been there?" candidates — every destination and reservation rated ★4+ on a
    * complete trip (§7). De-duplication against the library happens here, not in
    * the query, so accepting one drops it on the next render. */
   suggestions?: PlaceSuggestion[];

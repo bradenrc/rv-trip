@@ -1,11 +1,11 @@
 import {
-  DESTINATION_MAX_MILES,
+  AREA_MAX_MILES,
   haversineMeters,
   type LatLng,
   type PlaceDetails,
   type PlaceSummary,
   type PlacesProvider,
-  type ResolvedDestination,
+  type ResolvedArea,
 } from "./index";
 import type { PlaceSearchType } from "./places-search";
 
@@ -35,7 +35,7 @@ import type { PlaceSearchType } from "./places-search";
 export const SEARCH_URL = "https://places.googleapis.com/v1/places:searchText";
 /** Place Details (New). GET .../places/{PLACE_ID}. */
 export const DETAILS_URL_BASE = "https://places.googleapis.com/v1/places/";
-/** Geocoding API — the reverse lookup behind `resolveDestination` (#111). Needs
+/** Geocoding API — the reverse lookup behind `resolveArea` (#111). Needs
  * the Geocoding API enabled on the same key (an operator step). */
 export const GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 
@@ -146,7 +146,7 @@ export class GooglePlacesProvider implements PlacesProvider {
     return parseDetailsResponse(await res.json());
   }
 
-  async resolveDestination(lat: number, lng: number): Promise<ResolvedDestination | null> {
+  async resolveArea(lat: number, lng: number): Promise<ResolvedArea | null> {
     const url = `${GEOCODE_URL}?latlng=${lat},${lng}&result_type=locality&key=${encodeURIComponent(
       this.credentials.apiKey,
     )}`;
@@ -216,17 +216,17 @@ interface GeocodeResult {
 const METERS_PER_MILE = 1609.344;
 
 /**
- * A Geocoding API reverse answer (`result_type=locality`) → the destination,
+ * A Geocoding API reverse answer (`result_type=locality`) → the area,
  * or null. The rule is docs/design/111's, and it is one rule for everywhere:
  *
- * - the locality must be within {@link DESTINATION_MAX_MILES} of the point,
+ * - the locality must be within {@link AREA_MAX_MILES} of the point,
  *   measured to the locality's own geometry, or the save is unanchored;
  * - in the US the name is "Locality, ST" and the region the state's long name
  *   ("Bandon, OR" · "Oregon");
  * - anywhere else the name is "Locality, Country" and the region the country
  *   ("San José, Costa Rica" · "Costa Rica").
  */
-export function parseReverseGeocode(body: unknown, point: LatLng): ResolvedDestination | null {
+export function parseReverseGeocode(body: unknown, point: LatLng): ResolvedArea | null {
   const results = (body as { results?: GeocodeResult[] } | null)?.results ?? [];
   for (const result of results) {
     const comps = result.address_components ?? [];
@@ -236,7 +236,7 @@ export function parseReverseGeocode(body: unknown, point: LatLng): ResolvedDesti
     if (!result.place_id || !locality) continue;
     if (typeof loc?.lat !== "number" || typeof loc?.lng !== "number") continue;
     const at = { lat: loc.lat, lng: loc.lng };
-    if (haversineMeters(point, at) > DESTINATION_MAX_MILES * METERS_PER_MILE) return null;
+    if (haversineMeters(point, at) > AREA_MAX_MILES * METERS_PER_MILE) return null;
     const admin = find("administrative_area_level_1");
     const country = find("country");
     const us = country?.short_name === "US";

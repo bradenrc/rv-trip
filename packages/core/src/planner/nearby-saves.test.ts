@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Idea, NearbySave, SavedPlace, Stop, Trip } from "../domain/types";
+import type { Idea, NearbySave, SavedPlace, Destination, Trip } from "../domain/types";
 import { SURFACE_RADII, ideaCreateInput, nearbySavesResponse as nearbySavesSchema } from "../domain/types";
 import {
   IDEAS_EMPTY_COPY,
@@ -20,7 +20,7 @@ import { NEAR_RADIUS_MI } from "./shelf";
  * Trip surfacing (#111 i3 · docs/design/111 "#102 · trip surfacing").
  *
  * The Oregon Coast fixture EXACTLY as the plan's acceptance states it: two
- * stops (Astoria + Newport) and the seven saves of the design's distance
+ * destinations (Astoria + Newport) and the seven saves of the design's distance
  * table. The coordinates are chosen so haversine gives the table's numbers —
  * South Beach 1.9, Fort Stevens 6.2 (a hair nearer than Beverly Beach's 6.2,
  * which is the order the frame draws), Nehalem Bay 34.3 → "34", Cape Lookout
@@ -31,10 +31,10 @@ import { NEAR_RADIUS_MI } from "./shelf";
 const ASTORIA = { name: "Astoria, OR", lat: 46.1879, lng: -123.8313 };
 const NEWPORT = { name: "Newport, OR", lat: 44.6365, lng: -124.053 };
 
-function stop(id: string, p: { name: string; lat: number | null; lng: number | null }, sortOrder: number): Stop {
+function destination(id: string, p: { name: string; lat: number | null; lng: number | null }, sortOrder: number): Destination {
   return {
     id,
-    legId: "L1",
+    chapterId: "L1",
     place: { ...p, googlePlaceId: null },
     arriveDate: null,
     departDate: null,
@@ -51,7 +51,7 @@ function stop(id: string, p: { name: string; lat: number | null; lng: number | n
 function idea(over: Partial<Idea> & { id: string }): Idea {
   return {
     tripId: "T1",
-    stopId: null,
+    destinationId: null,
     title: "A maybe",
     category: "stay",
     status: "idea",
@@ -65,7 +65,7 @@ function idea(over: Partial<Idea> & { id: string }): Idea {
   };
 }
 
-function coast(ideas: Idea[] = [], stops: Stop[] = [stop("S_ast", ASTORIA, 0), stop("S_new", NEWPORT, 1)]): Trip {
+function coast(ideas: Idea[] = [], destinations: Destination[] = [destination("S_ast", ASTORIA, 0), destination("S_new", NEWPORT, 1)]): Trip {
   return {
     id: "T1",
     ownerId: "dev-user",
@@ -82,7 +82,7 @@ function coast(ideas: Idea[] = [], stops: Stop[] = [stop("S_ast", ASTORIA, 0), s
     lodgingDefault: null,
     rigOn: true,
     surfaceRadiusMi: null,
-    legs: [{ id: "L1", tripId: "T1", title: "Coast", sortOrder: 0, stops }],
+    chapters: [{ id: "L1", tripId: "T1", title: "Coast", sortOrder: 0, destinations }],
     segments: [],
     ideas,
   };
@@ -105,7 +105,7 @@ function save(over: Partial<SavedPlace> & { id: string; name: string; lat: numbe
     again: null,
     anchor: "pin",
     areaLabel: null,
-    destination: null,
+    area: null,
     suggestedPlace: null,
     createdAt: null,
     ...rest,
@@ -128,7 +128,7 @@ describe("nearbySaves — the Oregon Coast fixture", () => {
   it("at 50 mi: South Beach 1.9, Fort Stevens 6.2, Beverly Beach 6.2, Nehalem Bay 34 — beyond is Cape Lookout at 50.3", () => {
     const r = nearbySaves(coast(), SAVES, [], 50);
     expect(r.radiusMi).toBe(50);
-    expect(r.items.map((i) => [i.name, i.nearestStop.name, i.distanceMi])).toEqual([
+    expect(r.items.map((i) => [i.name, i.nearestDestination.name, i.distanceMi])).toEqual([
       ["South Beach State Park", "Newport, OR", 1.9],
       ["Fort Stevens State Park", "Astoria, OR", 6.2],
       ["Beverly Beach State Park", "Newport, OR", 6.2],
@@ -155,7 +155,7 @@ describe("nearbySaves — the Oregon Coast fixture", () => {
     ]);
     const cape = r.items.at(-1)!;
     expect(cape.distanceMi).toBe(50);
-    expect(cape.nearestStop).toEqual({ id: "S_new", name: "Newport, OR" });
+    expect(cape.nearestDestination).toEqual({ id: "S_new", name: "Newport, OR" });
     expect(r.beyond).toEqual({
       radiusMi: 200,
       count: 2,
@@ -197,7 +197,7 @@ describe("nearbySaves — the Oregon Coast fixture", () => {
       rating: 5,
       source: null,
       place: { name: "South Beach State Park", lat: 44.6094, lng: -124.0631, googlePlaceId: null },
-      nearestStop: { id: "S_new", name: "Newport, OR" },
+      nearestDestination: { id: "S_new", name: "Newport, OR" },
       distanceMi: 1.9,
     });
     expect(fort!.source).toBe("Jane & Rick");
@@ -234,11 +234,11 @@ describe("nearbySaves — what is left out", () => {
         place: { name: "Fort Stevens State Park", lat: 46.2045, lng: -123.958, googlePlaceId: null },
       }),
     ]);
-    // …and one already dragged onto a stop still counts as on the trip.
-    trip.legs[0]!.stops[1]!.ideas = [
+    // …and one already dragged onto a destination still counts as on the trip.
+    trip.chapters[0]!.destinations[1]!.ideas = [
       idea({
         id: "i2",
-        stopId: "S_new",
+        destinationId: "S_new",
         title: "South Beach",
         place: { name: "South Beach State Park", lat: 44.6094, lng: -124.0631, googlePlaceId: null },
       }),
@@ -258,14 +258,14 @@ describe("nearbySaves — what is left out", () => {
     expect(names(nearbySaves(trip, SAVES, [], 50).items)).toContain("Beverly Beach State Park");
   });
 
-  it("skips a save with no point at all (no coords, no destination coords)", () => {
+  it("skips a save with no point at all (no coords, no area coords)", () => {
     const r = nearbySaves(coast(), [save({ id: "x", name: "somewhere", lat: null, lng: null, anchor: "area" })], [], 200);
     expect(r.items).toEqual([]);
     expect(r.beyond).toBeNull();
   });
 
-  it("a trip with no located stops surfaces nothing", () => {
-    const trip = coast([], [stop("S_x", { name: "TBD", lat: null, lng: null }, 0)]);
+  it("a trip with no located destinations surfaces nothing", () => {
+    const trip = coast([], [destination("S_x", { name: "TBD", lat: null, lng: null }, 0)]);
     const r = nearbySaves(trip, SAVES, [], 200);
     expect(r.items).toEqual([]);
     expect(r.beyond).toBeNull();
@@ -273,7 +273,7 @@ describe("nearbySaves — what is left out", () => {
 });
 
 describe("nearbySaves — an area save with no coordinates", () => {
-  it("is measured from its destination's coordinates, and keeps its own coordless place", () => {
+  it("is measured from its area's coordinates, and keeps its own coordless place", () => {
     const note = save({
       id: "s_note",
       name: "taco stand Jane mentioned",
@@ -282,7 +282,7 @@ describe("nearbySaves — an area save with no coordinates", () => {
       anchor: "area",
       areaLabel: "Newport, OR",
       type: "dining",
-      destination: {
+      area: {
         id: "d_new",
         name: "Newport, OR",
         region: "Oregon",
@@ -293,7 +293,7 @@ describe("nearbySaves — an area save with no coordinates", () => {
     });
     const r = nearbySaves(coast(), [note], [], 25);
     expect(r.items).toHaveLength(1);
-    expect(r.items[0]!.nearestStop.name).toBe("Newport, OR");
+    expect(r.items[0]!.nearestDestination.name).toBe("Newport, OR");
     expect(r.items[0]!.distanceMi).toBe(0);
     expect(r.items[0]!.place).toEqual({
       name: "taco stand Jane mentioned",
@@ -303,13 +303,13 @@ describe("nearbySaves — an area save with no coordinates", () => {
     });
   });
 
-  it("a save's own coordinates win over its destination's", () => {
+  it("a save's own coordinates win over its area's", () => {
     const pin = save({
       id: "s_pin",
       name: "pin",
       lat: 43.05,
       lng: -124.33,
-      destination: {
+      area: {
         id: "d_new",
         name: "Newport, OR",
         region: "Oregon",
@@ -332,18 +332,18 @@ describe("nextSurfaceRing", () => {
 });
 
 describe("the banner, sheet and Ideas copy", () => {
-  it("banner: '{n} of your saves are near this trip' / 'within {r} mi of a stop · tap to review'", () => {
+  it("banner: '{n} of your saves are near this trip' / 'within {r} mi of a destination · tap to review'", () => {
     expect(nearbyBanner(4, 50)).toEqual({
       title: "4 of your saves are near this trip",
-      sub: "within 50 mi of a stop · tap to review",
+      sub: "within 50 mi of a destination · tap to review",
       dismiss: "Dismiss",
     });
-    expect(nearbyBanner(5, 100).sub).toBe("within 100 mi of a stop · tap to review");
+    expect(nearbyBanner(5, 100).sub).toBe("within 100 mi of a destination · tap to review");
     expect(nearbyBanner(1, 50).title).toBe("1 of your saves is near this trip");
   });
 
   it("the web's banner says 'review' where the phone says 'tap to review' (#111 i4)", () => {
-    expect(nearbyBanner(4, 50, "review").sub).toBe("within 50 mi of a stop · review");
+    expect(nearbyBanner(4, 50, "review").sub).toBe("within 50 mi of a destination · review");
     expect(nearbyBanner(4, 50, "review").title).toBe("4 of your saves are near this trip");
   });
 
@@ -356,7 +356,7 @@ describe("the banner, sheet and Ideas copy", () => {
     expect(nearbyCountLabel(1)).toBe("1 save");
   });
 
-  it("a row reads distance · nearest stop · who", () => {
+  it("a row reads distance · nearest destination · who", () => {
     const [south, fort, , neh] = nearbySaves(coast(), SAVES, [], 50).items;
     expect(nearbyRowLine(fort!)).toBe("6.2 mi · Astoria, OR · Jane & Rick");
     expect(nearbyRowLine(neh!)).toBe("34 mi · Astoria, OR · Jane & Rick");
@@ -396,7 +396,7 @@ describe("nearbyIdeaBody — Add copies the save into the trip's ideas", () => {
     const body = nearbyIdeaBody("0b0b0b0b-0000-4000-8000-000000000001", fort);
     expect(body).toEqual({
       tripId: "0b0b0b0b-0000-4000-8000-000000000001",
-      stopId: null,
+      destinationId: null,
       category: "stay",
       title: "Fort Stevens State Park",
       status: "idea",

@@ -13,12 +13,12 @@ import { haversineMeters } from "../providers/index";
 import { categoryOf } from "../theme/tokens";
 import { dateRange } from "./dates";
 import { ideaCategoryOfSaveType } from "./nearby-saves";
-import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedStops, type StopAnchor } from "./shelf";
+import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedDestinations, type DestinationAnchor } from "./shelf";
 
 /**
  * "For next time" (#113 · #107, Q7 B · Q8 B): a trip that goes back near
  * somewhere you've been shows a "Last time here" card per PAST trip ×
- * destination, above the nearby banner.
+ * area, above the nearby banner.
  *
  * Pure, like `nearbySaves`: `GET /api/trips/:id/for-next-time` (the phone) and
  * app/trips/[id]/page.tsx (the web) are both a read of three things and a call
@@ -26,10 +26,10 @@ import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedStops, type StopAnchor } from "
  *
  * - Past trips: `status = complete`, other than this one, most recent first.
  * - A save belongs to a card when it is a BEEN save whose `trip_id` is that
- *   trip and whose DESTINATION point is within this trip's surfacing radius
- *   (`surfaceRadiusMi ?? 50`) of a located stop. A save with no destination
+ *   trip and whose AREA point is within this trip's surfacing radius
+ *   (`surfaceRadiusMi ?? 50`) of a located destination. A save with no area
  *   (the keyless stub resolves nothing) is measured from its own point and the
- *   card is named by the nearest stop — so a walk without a Google key still
+ *   card is named by the nearest destination — so a walk without a Google key still
  *   shows its write-through saves (dev default, see dev-notes).
  * - Again group: `again = true`, plus `again` not said with ★ ≥
  *   SUGGESTION_MIN_RATING — those carry no badge, so a Been save from before
@@ -70,15 +70,15 @@ export function nextTimeGroup(s: Pick<SavedPlace, "again" | "rating">): "again" 
   return s.rating !== null && s.rating >= SUGGESTION_MIN_RATING ? "again" : null;
 }
 
-/** The point a save is placed BY: its destination's, else its own. */
-function destinationPoint(s: SavedPlace): { lat: number; lng: number } | null {
-  const d = s.destination;
+/** The point a save is placed BY: its area's, else its own. */
+function areaPoint(s: SavedPlace): { lat: number; lng: number } | null {
+  const d = s.area;
   if (d && d.lat !== null && d.lng !== null) return { lat: d.lat, lng: d.lng };
   if (hasCoords(s.place)) return { lat: s.place.lat, lng: s.place.lng };
   return null;
 }
 
-function nearestAnchor(point: { lat: number; lng: number }, anchors: StopAnchor[]) {
+function nearestAnchor(point: { lat: number; lng: number }, anchors: DestinationAnchor[]) {
   let best = anchors[0]!;
   let bestM = haversineMeters(point, best);
   for (const a of anchors.slice(1)) {
@@ -93,9 +93,9 @@ function nearestAnchor(point: { lat: number; lng: number }, anchors: StopAnchor[
 
 /** What is already on THIS trip, as the match rule sees it. */
 function onTrip(trip: Trip): { reservations: MatchCandidate[]; ideas: MatchCandidate[] } {
-  const stops = trip.legs.flatMap((l) => l.stops);
-  const bookings = [...stops.flatMap((s) => s.reservations), ...trip.segments.flatMap((s) => s.reservations)];
-  const ideas = [...trip.ideas, ...stops.flatMap((s) => s.ideas)];
+  const destinations = trip.chapters.flatMap((l) => l.destinations);
+  const bookings = [...destinations.flatMap((s) => s.reservations), ...trip.segments.flatMap((s) => s.reservations)];
+  const ideas = [...trip.ideas, ...destinations.flatMap((s) => s.ideas)];
   return {
     // Rule 4: a reservation is name-only.
     reservations: bookings.map((r) => ({ name: r.name, lat: null, lng: null, googlePlaceId: null })),
@@ -110,9 +110,9 @@ export function forNextTime(
   radiusMi: number | null = trip.surfaceRadiusMi,
 ): ForNextTime {
   const radius = radiusMi ?? NEAR_RADIUS_MI;
-  const anchors = locatedStops(trip);
+  const anchors = locatedDestinations(trip);
   if (anchors.length === 0) return { cards: [], saveIds: [] };
-  const stopById = new Map(trip.legs.flatMap((l) => l.stops).map((s) => [s.id, s]));
+  const destinationById = new Map(trip.chapters.flatMap((l) => l.destinations).map((s) => [s.id, s]));
   const here = onTrip(trip);
   const past = pastTrips
     .filter((t) => t.status === "complete" && t.id !== trip.id)
@@ -125,19 +125,19 @@ export function forNextTime(
       if (s.status !== "been" || s.tripId !== pt.id) continue;
       const group = nextTimeGroup(s);
       if (!group) continue;
-      const point = destinationPoint(s);
+      const point = areaPoint(s);
       if (!point) continue;
       const { anchor, mi } = nearestAnchor(point, anchors);
       if (mi > radius) continue;
-      const key = s.destination?.id ?? `stop:${anchor.id}`;
+      const key = s.area?.id ?? `destination:${anchor.id}`;
       let card = groups.get(key);
       if (!card) {
-        const stop = stopById.get(anchor.id)!;
+        const destination = destinationById.get(anchor.id)!;
         card = {
-          destination: s.destination
-            ? { id: s.destination.id, name: s.destination.name }
+          area: s.area
+            ? { id: s.area.id, name: s.area.name }
             : { id: null, name: anchor.name },
-          stop: { id: stop.id, name: stop.place.name, arriveDate: stop.arriveDate, departDate: stop.departDate },
+          destination: { id: destination.id, name: destination.place.name, arriveDate: destination.arriveDate, departDate: destination.departDate },
           pastTrip: {
             id: pt.id,
             title: pt.title,
@@ -175,8 +175,8 @@ export function forNextTime(
     // Inside one past trip: in this trip's route order by date, then by name.
     mine.sort(
       (a, b) =>
-        (a.stop.arriveDate ?? "9999").localeCompare(b.stop.arriveDate ?? "9999") ||
-        a.destination.name.localeCompare(b.destination.name),
+        (a.destination.arriveDate ?? "9999").localeCompare(b.destination.arriveDate ?? "9999") ||
+        a.area.name.localeCompare(b.area.name),
     );
     cards.push(...mine);
   }
@@ -188,15 +188,15 @@ export function forNextTime(
 
 /** "For next time · Newport, OR". */
 export function nextTimeKicker(card: NextTimeCard): string {
-  return `For next time · ${card.destination.name}`;
+  return `For next time · ${card.area.name}`;
 }
 
 /** "May 23–26, 2025 · you're back Aug 5–9" — the second clause only when the
- * stop has dates. */
+ * destination has dates. */
 export function nextTimeDatesLine(card: NextTimeCard): string {
   const pt = card.pastTrip;
   const then = `${dateRange(pt.startDate, pt.endDate)}, ${pt.endDate.slice(0, 4)}`;
-  const { arriveDate, departDate } = card.stop;
+  const { arriveDate, departDate } = card.destination;
   return arriveDate && departDate ? `${then} · you’re back ${dateRange(arriveDate, departDate)}` : then;
 }
 
@@ -213,7 +213,7 @@ export function nextTimeRowAction(row: NextTimeRow, group: "again" | "once"): "B
 export function nextTimeIdeaBody(tripId: string, row: NextTimeRow): IdeaCreateInput {
   return {
     tripId,
-    stopId: null,
+    destinationId: null,
     category: ideaCategoryOfSaveType(row.type),
     title: row.name,
     status: "idea",

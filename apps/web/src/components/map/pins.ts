@@ -9,7 +9,7 @@ import type {
   RouteMap,
   RouteSource,
   SavedPlace,
-  Stop,
+  Destination,
   Trip,
   Units,
 } from "@rv-trip/core";
@@ -50,8 +50,8 @@ export interface PinReservation {
   cost: number | null;
 }
 
-export interface StopPin {
-  kind: "stop";
+export interface DestinationPin {
+  kind: "destination";
   id: string;
   lat: number;
   lng: number;
@@ -60,14 +60,15 @@ export interface StopPin {
   /** 1-based position in the trip's scheduled sequence; null when floating. */
   ordinal: number | null;
   floating: boolean;
-  /** "Aug 2–5", or null for a floating stop. */
+  /** "Aug 2–5", or null for a floating destination. */
   dates: string | null;
-  /** Nights between arrive and depart; null for a floating stop. */
+  /** Nights between arrive and depart; null for a floating destination. */
   nights: number | null;
   tripId: string;
   tripTitle: string;
-  legTitle: string;
-  /** How many scheduled stops the trip has — the "stop 1 of 3" denominator. */
+  /** Null for an unnamed chapter (#155 · Q1 A) — the popup then names the trip alone. */
+  chapterTitle: string | null;
+  /** How many scheduled destinations the trip has — the "destination 1 of 3" denominator. */
   scheduledTotal: number;
   rating: number | null;
   notes: string | null;
@@ -92,8 +93,8 @@ export interface PlacePin {
 }
 
 /**
- * An idea (#69): the grammar's *maybe*, hanging under a stop. It draws smaller
- * than the stop it belongs to and carries no number, because it is not a
+ * An idea (#69): the grammar's *maybe*, hanging under a destination. It draws smaller
+ * than the destination it belongs to and carries no number, because it is not a
  * commitment and has no position in the drive sequence — it is never an arc
  * endpoint.
  *
@@ -113,15 +114,15 @@ export interface IdeaPin {
    * and the sheet row are recognisably one object. */
   name: string;
   status: IdeaStatus;
-  /** The stop this idea hangs under, or `null` for a SHELF idea (#80): a
-   * trip-level idea is attached to no stop, so there is no name to borrow and
+  /** The destination this idea hangs under, or `null` for a SHELF idea (#80): a
+   * trip-level idea is attached to no destination, so there is no name to borrow and
    * the rail prints the trip alone. */
-  stopName: string | null;
+  destinationName: string | null;
   tripId: string;
   tripTitle: string;
 }
 
-export type MapPin = StopPin | PlacePin | IdeaPin;
+export type MapPin = DestinationPin | PlacePin | IdeaPin;
 
 /** A point the map cannot draw — kept so nothing silently disappears. */
 export interface UnmappedRow {
@@ -137,9 +138,9 @@ export interface UnmappedRow {
  * id names — now a passthrough of the field above.
  *
  * It used to DERIVE the kind from the layer (`layer === "saved" ? "place" :
- * "stop"`), which held only while the three trip layers carried stops alone. An
- * idea on a planning trip derived "stop", so the batch would have asked the
- * stops table for an idea's id, loaded nothing, and reported the row still
+ * "destination"`), which held only while the three trip layers carried destinations alone. An
+ * idea on a planning trip derived "destination", so the batch would have asked the
+ * destinations table for an idea's id, loaded nothing, and reported the row still
  * unmapped forever, silently, on every press. The explicit field deletes a
  * guess about the caller.
  */
@@ -148,8 +149,8 @@ export function locateRowOf(row: UnmappedRow): LocateRow {
 }
 
 /**
- * One drive between consecutive stops in the trip's ONE ordered sequence
- * (`orderedPairs`) — floating stops included, which is why this is no longer
+ * One drive between consecutive destinations in the trip's ONE ordered sequence
+ * (`orderedPairs`) — floating destinations included, which is why this is no longer
  * "the dashed estimate": a routed drive carries the HERE corridor and draws
  * solid, an un-routed one keeps exactly the dash it has always had.
  *
@@ -187,12 +188,12 @@ function layerOf(trip: Trip): Exclude<MapLayer, "saved"> {
   return trip.status === "complete" ? "been" : trip.status;
 }
 
-/** Trip-wide scheduled stops sorted by arriveDate — the same ordering
+/** Trip-wide scheduled destinations sorted by arriveDate — the same ordering
  * `routeSummary()` uses (apps/web/src/lib/trip-logic.ts:294), so the map's
  * sequence and the Route rail's sequence are one sequence. */
-function scheduledSequence(trip: Trip): Stop[] {
-  return trip.legs
-    .flatMap((l) => l.stops)
+function scheduledSequence(trip: Trip): Destination[] {
+  return trip.chapters
+    .flatMap((l) => l.destinations)
     .filter(isScheduled)
     .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
 }
@@ -203,8 +204,8 @@ function nightsBetween(arrive: string, depart: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-function reservationsOf(stop: Stop): PinReservation[] {
-  return stop.reservations.map((r) => {
+function reservationsOf(destination: Destination): PinReservation[] {
+  return destination.reservations.map((r) => {
     const cm = categoryMeta(r.type);
     const dates =
       r.checkIn && r.checkOut ? dateRange(r.checkIn, r.checkOut) : r.checkIn ? dateRange(r.checkIn, r.checkIn) : null;
@@ -219,18 +220,18 @@ function reservationsOf(stop: Stop): PinReservation[] {
 }
 
 /**
- * A trip's ideas, split the same way a stop's own point is: a drawable one
+ * A trip's ideas, split the same way a destination's own point is: a drawable one
  * becomes an `IdeaPin`, a coordless one an `UnmappedRow`.
  *
- * Called twice per trip — once per stop for the ideas hanging under it, and
- * once for `trip.ideas`, the SHELF (#80): the `stop_id IS NULL` rows the trip
- * tree carries beside its legs. One row has one home (queries.ts TRIP_WITH
+ * Called twice per trip — once per destination for the ideas hanging under it, and
+ * once for `trip.ideas`, the SHELF (#80): the `destination_id IS NULL` rows the trip
+ * tree carries beside its chapters. One row has one home (queries.ts TRIP_WITH
  * filters the shelf to unattached rows), so nothing is drawn twice, and
- * `stopName` is the only thing that differs — a shelf idea has no stop to
+ * `destinationName` is the only thing that differs — a shelf idea has no destination to
  * borrow a name from.
  *
  * No new query — `Trip` already carries ideas with a nullable `place`, and
- * `listTripsWithStopsForOwner` already hydrates both lists. Q4 = A: EVERY
+ * `listTripsWithDestinationsForOwner` already hydrates both lists. Q4 = A: EVERY
  * status counts into the unmapped total, because the dashed chip and the Locate
  * button beside it have to tell one story, and a "done" idea with no
  * coordinates is still a row the map cannot draw — and a shelf idea that never
@@ -240,14 +241,14 @@ function pushIdeas(
   pins: MapPin[],
   unmapped: UnmappedRow[],
   trip: Trip,
-  ideas: Stop["ideas"],
-  stopName: string | null,
+  ideas: Destination["ideas"],
+  destinationName: string | null,
   layer: Exclude<MapLayer, "saved">,
 ): void {
   for (const idea of ideas) {
     // `mapIdea` returns a non-null `place` the moment place_name is set, with
     // lat/lng still null — the normal outcome of the picker's free-text escape
-    // row. Half a place is not a pin, so the same `hasCoords` test the stops
+    // row. Half a place is not a pin, so the same `hasCoords` test the destinations
     // make decides it here too.
     if (!idea.place || !hasCoords(idea.place)) {
       unmapped.push({ id: idea.id, name: idea.title, layer, kind: "idea" });
@@ -261,7 +262,7 @@ function pushIdeas(
       layer,
       name: idea.title,
       status: idea.status,
-      stopName,
+      destinationName,
       tripId: trip.id,
       tripTitle: trip.title,
     });
@@ -301,41 +302,41 @@ export function buildMapModel(
     const sequence = scheduledSequence(trip);
     const ordinalOf = new Map(sequence.map((s, i) => [s.id, i + 1]));
 
-    for (const leg of trip.legs) {
-      for (const stop of leg.stops) {
-        const floating = !isScheduled(stop);
-        if (!hasCoords(stop.place)) {
-          unmapped.push({ id: stop.id, name: stop.place.name, layer, kind: "stop" });
-          // The stop has no pin, but its ideas still do — an idea's coordinates
-          // are its own, not borrowed from the stop it hangs under.
-          pushIdeas(pins, unmapped, trip, stop.ideas, stop.place.name, layer);
+    for (const chapter of trip.chapters) {
+      for (const destination of chapter.destinations) {
+        const floating = !isScheduled(destination);
+        if (!hasCoords(destination.place)) {
+          unmapped.push({ id: destination.id, name: destination.place.name, layer, kind: "destination" });
+          // The destination has no pin, but its ideas still do — an idea's coordinates
+          // are its own, not borrowed from the destination it hangs under.
+          pushIdeas(pins, unmapped, trip, destination.ideas, destination.place.name, layer);
           continue;
         }
         pins.push({
-          kind: "stop",
-          id: stop.id,
-          lat: stop.place.lat,
-          lng: stop.place.lng,
+          kind: "destination",
+          id: destination.id,
+          lat: destination.place.lat,
+          lng: destination.place.lng,
           layer,
-          name: stop.place.name,
-          ordinal: ordinalOf.get(stop.id) ?? null,
+          name: destination.place.name,
+          ordinal: ordinalOf.get(destination.id) ?? null,
           floating,
-          dates: isScheduled(stop) ? dateRange(stop.arriveDate, stop.departDate) : null,
-          nights: isScheduled(stop) ? nightsBetween(stop.arriveDate, stop.departDate) : null,
+          dates: isScheduled(destination) ? dateRange(destination.arriveDate, destination.departDate) : null,
+          nights: isScheduled(destination) ? nightsBetween(destination.arriveDate, destination.departDate) : null,
           tripId: trip.id,
           tripTitle: trip.title,
-          legTitle: leg.title,
+          chapterTitle: chapter.title,
           scheduledTotal: sequence.length,
-          rating: stop.rating,
-          notes: stop.notes,
-          reservations: reservationsOf(stop),
+          rating: destination.rating,
+          notes: destination.notes,
+          reservations: reservationsOf(destination),
         });
-        pushIdeas(pins, unmapped, trip, stop.ideas, stop.place.name, layer);
+        pushIdeas(pins, unmapped, trip, destination.ideas, destination.place.name, layer);
       }
     }
 
-    // The shelf, after the legs: the trip's unattached ideas (#80). They are
-    // drawn last, so a maybe never lands between the stops in the rail's
+    // The shelf, after the chapters: the trip's unattached ideas (#80). They are
+    // drawn last, so a maybe never lands between the destinations in the rail's
     // reading order.
     pushIdeas(pins, unmapped, trip, trip.ideas, null, layer);
 
@@ -346,7 +347,7 @@ export function buildMapModel(
     // `orderedPairs`, not the scheduled-only sequence — it is the pair set the
     // Route rail, the dashboard card and the `routes` table all key on, so a
     // corridor resolved by the server can actually be looked up there. It also
-    // already drops any pair touching a coordless stop — coordinates, not
+    // already drops any pair touching a coordless destination — coordinates, not
     // dates, are the precondition (route-order.ts:49-57).
     //
     // What stays here is what is genuinely the web's: the layer this trip

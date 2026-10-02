@@ -27,7 +27,7 @@ import {
   type MapLayer,
   type MapPin,
   type PlacePin,
-  type StopPin,
+  type DestinationPin,
   type UnmappedRow,
 } from "./pins";
 
@@ -88,7 +88,7 @@ export function MapOverview({
         (p) =>
           layers.has(p.layer) &&
           // The category filter scopes to saved places — the only pins that
-          // carry a ReservationType. Neither a Stop (types.ts:79-90) nor an
+          // carry a ReservationType. Neither a Destination (types.ts:79-90) nor an
           // Idea has a category, so both stay visible under their layer. The
           // reason is arithmetic, not taste: the Do chip's count comes from
           // `categoryCounts(places)` (pins.ts), which walks the shelf alone, so
@@ -249,13 +249,13 @@ export function MapOverview({
 
         <div className="dark flex flex-wrap items-center gap-x-[18px] gap-y-2 border-t border-rv-border bg-rv-navy-deep px-3.5 py-[11px] text-[11.5px] text-rv-ink-faded">
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full border-2 border-rv-green bg-rv-green-soft" />}>
-            Trip stop, in order
+            Trip destination, in order
           </LegendKey>
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full border-2 border-rv-green bg-rv-navy-deep" />}>
             Been there
           </LegendKey>
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full border-2 border-dashed border-rv-warning bg-rv-navy-deep" />}>
-            Floating stop
+            Floating destination
           </LegendKey>
           <LegendKey swatch={<i className="size-[13px] flex-none rounded-full bg-rv-accent" />}>Selected</LegendKey>
           <LegendKey swatch={<TeardropKey />}>Saved · want to go</LegendKey>
@@ -264,7 +264,7 @@ export function MapOverview({
               `TeardropKey` gives: an inline `var(--color-rv-*)` read inside this
               `.dark` bar resolves the DOCUMENT half. */}
           <LegendKey swatch={<i className="size-[11px] flex-none rounded-full border-2 border-rv-info-ink bg-transparent" />}>
-            Idea — a maybe under a stop
+            Idea — a maybe under a destination
           </LegendKey>
           <LegendKey swatch={<i className="inline-block w-6 flex-none border-t-2 border-dashed border-rv-accent" />}>
             Estimated drive — straight-line, not a road route
@@ -351,8 +351,8 @@ function TeardropKey({ hollow = false }: { hollow?: boolean }) {
 function SelectedCard({ pin }: { pin: MapPin }) {
   return (
     <div className="rounded-rv-card border border-rv-accent-deep bg-rv-surface px-3.5 py-[13px] shadow-rv-lg">
-      {pin.kind === "stop" ? (
-        <SelectedStop pin={pin} />
+      {pin.kind === "destination" ? (
+        <SelectedDestination pin={pin} />
       ) : pin.kind === "place" ? (
         <SelectedPlace pin={pin} />
       ) : (
@@ -362,7 +362,7 @@ function SelectedCard({ pin }: { pin: MapPin }) {
   );
 }
 
-function SelectedStop({ pin }: { pin: StopPin }) {
+function SelectedDestination({ pin }: { pin: DestinationPin }) {
   return (
     <>
       <div className="flex flex-wrap items-center gap-[9px]">
@@ -373,8 +373,8 @@ function SelectedStop({ pin }: { pin: StopPin }) {
         {pin.rating != null && <Stars value={pin.rating} />}
       </div>
       <div className="mt-[3px] font-mono text-[11.5px] text-rv-ink-faded">
-        {pin.tripTitle} · {pin.legTitle}
-        {pin.ordinal != null ? ` · stop ${pin.ordinal} of ${pin.scheduledTotal}` : " · floating"}
+        {pin.chapterTitle ? `${pin.tripTitle} · ${pin.chapterTitle}` : pin.tripTitle}
+        {pin.ordinal != null ? ` · destination ${pin.ordinal} of ${pin.scheduledTotal}` : " · floating"}
       </div>
       <div className="font-mono text-[11.5px] text-rv-ink-faded">{formatCoords(pin)}</div>
       {pin.notes && (
@@ -427,7 +427,7 @@ function SelectedPlace({ pin }: { pin: PlacePin }) {
 
 /** An idea, in the rail — `SelectedPlace`'s frame with the Do kicker, the
  * idea's own title, and where it hangs. It has no category and no region: the
- * only geography an idea has is the stop it belongs to. */
+ * only geography an idea has is the destination it belongs to. */
 function SelectedIdea({ pin }: { pin: IdeaPin }) {
   return (
     <>
@@ -441,9 +441,9 @@ function SelectedIdea({ pin }: { pin: IdeaPin }) {
         {pin.name}
       </div>
       <div className="font-mono text-[11.5px] text-rv-ink-faded">
-        {/* A SHELF idea (#80) hangs under no stop, so there is no second half
+        {/* A SHELF idea (#80) hangs under no destination, so there is no second half
             to print — the same `filter(Boolean)` the saved-place meta uses. */}
-        {[pin.tripTitle, pin.stopName].filter(Boolean).join(" · ")}
+        {[pin.tripTitle, pin.destinationName].filter(Boolean).join(" · ")}
       </div>
       <div className="font-mono text-[11.5px] text-rv-ink-faded">{formatCoords(pin)}</div>
     </>
@@ -514,11 +514,11 @@ function RailGlyph({ pin }: { pin: MapPin }) {
 }
 
 function railMeta(pin: MapPin): string {
-  if (pin.kind === "stop") {
+  if (pin.kind === "destination") {
     return `${LAYER_LABEL[pin.layer]} · ${pin.dates ?? "floating"}`;
   }
   if (pin.kind === "idea") {
-    return ["Idea", pin.status, pin.stopName].filter(Boolean).join(" · ");
+    return ["Idea", pin.status, pin.destinationName].filter(Boolean).join(" · ");
   }
   const shelf = pin.status === "want" ? "want" : "been";
   return ["Saved", shelf, pin.region].filter(Boolean).join(" · ");

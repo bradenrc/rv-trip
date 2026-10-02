@@ -9,9 +9,9 @@ import { ctx, describeDb, req } from "@/test/db";
 describeDb("POST /api/ideas/[id]/promote", () => {
   it("promotes once and rolls the replay back whole", async () => {
     const trip = await fx.trip();
-    const leg = await fx.leg({ tripId: trip.id });
-    const astoria = await fx.stop({ legId: leg.id });
-    const idea = await fx.idea({ tripId: trip.id, stopId: astoria.id, title: "Fort Stevens bike loop" });
+    const chapter = await fx.chapter({ tripId: trip.id });
+    const astoria = await fx.destination({ chapterId: chapter.id });
+    const idea = await fx.idea({ tripId: trip.id, destinationId: astoria.id, title: "Fort Stevens bike loop" });
 
     // body-less POST — exercises the handler's `.catch(() => ({}))` and
     // ideaPromoteInput's `.default("activity")` (types.ts:268) together
@@ -19,7 +19,7 @@ describeDb("POST /api/ideas/[id]/promote", () => {
 
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({
-      stopId: astoria.id,
+      destinationId: astoria.id,
       type: "activity", // the schema default
       name: "Fort Stevens bike loop", // idea.title carries over
       notes: "Promoted from idea",
@@ -47,16 +47,16 @@ describeDb("POST /api/ideas/[id]/promote", () => {
 /**
  * #80 · a SHELF idea is not bookable.
  *
- * `reservations.stop_id` is NOT NULL, so an unattached idea has nothing to
+ * `reservations.destination_id` is NOT NULL, so an unattached idea has nothing to
  * become a reservation ON. The shelf card renders no Book action at all; this
  * is the server half of the same rule, so a hand-rolled POST answers the same
  * 404 every other missing idea gets rather than a constraint error — and, the
  * part that matters, the idea SURVIVES (promote deletes the row it promotes).
  */
 describeDb("POST /api/ideas/[id]/promote — a shelf idea (#80)", () => {
-  it("404s an idea with no stop, and does not consume it", async () => {
+  it("404s an idea with no destination, and does not consume it", async () => {
     const { trip } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland RV Park" });
+    const idea = await fx.idea({ tripId: trip.id, destinationId: null, title: "Coachland RV Park" });
 
     const res = await POST(req(undefined), ctx(idea.id));
 
@@ -65,13 +65,13 @@ describeDb("POST /api/ideas/[id]/promote — a shelf idea (#80)", () => {
     // The whole transaction rolled back: the idea is still on the shelf.
     const row = (await read.idea(idea.id))!;
     expect(row).not.toBeNull();
-    expect(row.stopId).toBeNull();
+    expect(row.destinationId).toBeNull();
   });
 
   /**
    * …and the guard itself, at the MUTATION, because the handler cannot see it.
    *
-   * `reservations.stop_id` is NOT NULL, so removing the guard still answers 404
+   * `reservations.destination_id` is NOT NULL, so removing the guard still answers 404
    * — the insert just fails on the constraint instead, and the handler's
    * blanket catch renders the same body. The only place the two differ is the
    * error the mutation throws, so that is what this asserts: delete the guard
@@ -81,21 +81,21 @@ describeDb("POST /api/ideas/[id]/promote — a shelf idea (#80)", () => {
    */
   it("throws the handler's OWN 'idea not found', not a constraint violation", async () => {
     const { trip } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland RV Park" });
+    const idea = await fx.idea({ tripId: trip.id, destinationId: null, title: "Coachland RV Park" });
 
     await expect(promoteIdeaToReservation(DEV_OWNER, idea.id)).rejects.toThrow(
       /^idea not found$/,
     );
   });
 
-  it("books it once it HAS been dropped onto a stop", async () => {
+  it("books it once it HAS been dropped onto a destination", async () => {
     const { trip, astoria } = await fx.pacificNorthwestLoop();
-    const idea = await fx.idea({ tripId: trip.id, stopId: null, title: "Coachland RV Park" });
-    await PATCH(req({ stopId: astoria.id }, "PATCH"), ctx(idea.id));
+    const idea = await fx.idea({ tripId: trip.id, destinationId: null, title: "Coachland RV Park" });
+    await PATCH(req({ destinationId: astoria.id }, "PATCH"), ctx(idea.id));
 
     const res = await POST(req(undefined), ctx(idea.id));
 
     expect(res.status).toBe(201);
-    expect(await res.json()).toMatchObject({ stopId: astoria.id, name: "Coachland RV Park" });
+    expect(await res.json()).toMatchObject({ destinationId: astoria.id, name: "Coachland RV Park" });
   });
 });

@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { orderedStops, orderedPairs, drivePairs, routeCacheKey } from "./route-order";
+import { orderedDestinations, orderedPairs, drivePairs, routeCacheKey } from "./route-order";
 import { reconcileSegments } from "./segments";
-import type { Trip, Stop } from "./types";
+import type { Trip, Destination } from "./types";
 
-function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
+function mkDestination(partial: Partial<Destination> & { id: string; chapterId: string }): Destination {
   return {
     id: partial.id,
-    legId: partial.legId,
+    chapterId: partial.chapterId,
     place: partial.place ?? { name: partial.id, lat: 45, lng: -122, googlePlaceId: null },
     arriveDate: partial.arriveDate ?? null,
     departDate: partial.departDate ?? null,
@@ -20,7 +20,7 @@ function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
   };
 }
 
-/** The seed fixture's shape: two legs, three dated stops, one floating. */
+/** The seed fixture's shape: two chapters, three dated destinations, one floating. */
 function seedTrip(): Trip {
   return {
     id: "t1",
@@ -35,24 +35,24 @@ function seedTrip(): Trip {
     rating: null,
     note: null,
     ideas: [],
-    legs: [
+    chapters: [
       {
         id: "coast",
         tripId: "t1",
         title: "Oregon Coast",
         sortOrder: 0,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "astoria",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
             arriveDate: "2026-08-02",
             departDate: "2026-08-05",
             sortOrder: 0,
           }),
-          mkStop({
+          mkDestination({
             id: "newport",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
             arriveDate: "2026-08-05",
             departDate: "2026-08-09",
@@ -65,18 +65,18 @@ function seedTrip(): Trip {
         tripId: "t1",
         title: "Cascades & Home",
         sortOrder: 1,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "bend",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Bend, OR", lat: 44.0582, lng: -121.3153, googlePlaceId: null },
             arriveDate: "2026-08-12",
             departDate: "2026-08-16",
             sortOrder: 0,
           }),
-          mkStop({
+          mkDestination({
             id: "crater",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Crater Lake NP", lat: 42.9446, lng: -122.109, googlePlaceId: null },
             sortOrder: 1,
           }),
@@ -91,9 +91,9 @@ function seedTrip(): Trip {
   };
 }
 
-describe("orderedStops", () => {
-  it("is one trip-wide sequence: legs by sortOrder, then stops within a leg", () => {
-    expect(orderedStops(seedTrip()).map((s) => s.id)).toEqual([
+describe("orderedDestinations", () => {
+  it("is one trip-wide sequence: chapters by sortOrder, then destinations within a chapter", () => {
+    expect(orderedDestinations(seedTrip()).map((s) => s.id)).toEqual([
       "astoria",
       "newport",
       "bend",
@@ -101,15 +101,15 @@ describe("orderedStops", () => {
     ]);
   });
 
-  it("orders a leg's scheduled stops by arrival date, floating ones after by sortOrder", () => {
+  it("orders a chapter's scheduled destinations by arrival date, floating ones after by sortOrder", () => {
     const trip = seedTrip();
-    trip.legs[0]!.stops = [
-      mkStop({ id: "floatB", legId: "coast", sortOrder: 9 }),
-      mkStop({ id: "late", legId: "coast", arriveDate: "2026-08-06", departDate: "2026-08-07" }),
-      mkStop({ id: "floatA", legId: "coast", sortOrder: 2 }),
-      mkStop({ id: "early", legId: "coast", arriveDate: "2026-08-02", departDate: "2026-08-03" }),
+    trip.chapters[0]!.destinations = [
+      mkDestination({ id: "floatB", chapterId: "coast", sortOrder: 9 }),
+      mkDestination({ id: "late", chapterId: "coast", arriveDate: "2026-08-06", departDate: "2026-08-07" }),
+      mkDestination({ id: "floatA", chapterId: "coast", sortOrder: 2 }),
+      mkDestination({ id: "early", chapterId: "coast", arriveDate: "2026-08-02", departDate: "2026-08-03" }),
     ];
-    expect(orderedStops(trip).map((s) => s.id).slice(0, 4)).toEqual([
+    expect(orderedDestinations(trip).map((s) => s.id).slice(0, 4)).toEqual([
       "early",
       "late",
       "floatA",
@@ -117,33 +117,33 @@ describe("orderedStops", () => {
     ]);
   });
 
-  it("respects leg sortOrder rather than array position", () => {
+  it("respects chapter sortOrder rather than array position", () => {
     const trip = seedTrip();
-    trip.legs = [trip.legs[1]!, trip.legs[0]!];
-    expect(orderedStops(trip).map((s) => s.id)).toEqual(["astoria", "newport", "bend", "crater"]);
+    trip.chapters = [trip.chapters[1]!, trip.chapters[0]!];
+    expect(orderedDestinations(trip).map((s) => s.id)).toEqual(["astoria", "newport", "bend", "crater"]);
   });
 });
 
 describe("orderedPairs", () => {
-  it("routes every adjacent pair — including the leg boundary and the floating stop", () => {
+  it("routes every adjacent pair — including the chapter boundary and the floating destination", () => {
     const pairs = orderedPairs(seedTrip());
-    expect(pairs.map((p) => [p.fromStopId, p.toStopId])).toEqual([
+    expect(pairs.map((p) => [p.fromDestinationId, p.toDestinationId])).toEqual([
       ["astoria", "newport"],
       ["newport", "bend"],
       ["bend", "crater"],
     ]);
   });
 
-  it("marks only the pair that crosses a leg boundary", () => {
-    expect(orderedPairs(seedTrip()).map((p) => p.legBoundary)).toEqual([false, true, false]);
+  it("marks only the pair that crosses a chapter boundary", () => {
+    expect(orderedPairs(seedTrip()).map((p) => p.chapterBoundary)).toEqual([false, true, false]);
   });
 
   it("coordinates — not dates — are the precondition", () => {
     const trip = seedTrip();
     // Bend loses its coordinates: both pairs touching it vanish, and no pair is
     // invented across it. Missing coords = no connector rendered.
-    trip.legs[1]!.stops[0]!.place = { name: "Bend, OR", lat: null, lng: null, googlePlaceId: null };
-    expect(orderedPairs(trip).map((p) => [p.fromStopId, p.toStopId])).toEqual([
+    trip.chapters[1]!.destinations[0]!.place = { name: "Bend, OR", lat: null, lng: null, googlePlaceId: null };
+    expect(orderedPairs(trip).map((p) => [p.fromDestinationId, p.toDestinationId])).toEqual([
       ["astoria", "newport"],
     ]);
   });
@@ -154,9 +154,9 @@ describe("orderedPairs", () => {
     expect(first.to).toEqual({ lat: 44.6365, lng: -124.053 });
   });
 
-  it("has no pairs for a trip with a single stop", () => {
+  it("has no pairs for a trip with a single destination", () => {
     const trip = seedTrip();
-    trip.legs = [{ ...trip.legs[0]!, stops: [trip.legs[0]!.stops[0]!] }];
+    trip.chapters = [{ ...trip.chapters[0]!, destinations: [trip.chapters[0]!.destinations[0]!] }];
     expect(orderedPairs(trip)).toEqual([]);
   });
 });
@@ -165,7 +165,7 @@ describe("pair modes + drivePairs (#110 §6)", () => {
   it("reads each pair's mode off its segment", () => {
     const trip = seedTrip();
     trip.segments = reconcileSegments(trip).map((s) =>
-      s.fromStopId === "newport" ? { ...s, mode: "ferry" as const } : s,
+      s.fromDestinationId === "newport" ? { ...s, mode: "ferry" as const } : s,
     );
     expect(orderedPairs(trip).map((p) => p.mode)).toEqual(["drive", "ferry", "drive"]);
   });
@@ -179,9 +179,9 @@ describe("pair modes + drivePairs (#110 §6)", () => {
   it("drivePairs keeps only the driven hops — map arcs keep them all", () => {
     const trip = seedTrip();
     trip.segments = reconcileSegments(trip).map((s) =>
-      s.fromStopId === "astoria" ? { ...s, mode: "fly" as const } : s,
+      s.fromDestinationId === "astoria" ? { ...s, mode: "fly" as const } : s,
     );
-    expect(drivePairs(trip).map((p) => [p.fromStopId, p.toStopId])).toEqual([
+    expect(drivePairs(trip).map((p) => [p.fromDestinationId, p.toDestinationId])).toEqual([
       ["newport", "bend"],
       ["bend", "crater"],
     ]);

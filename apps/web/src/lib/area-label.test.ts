@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { ResolvedDestination } from "@rv-trip/core";
+import type { ResolvedArea } from "@rv-trip/core";
 import { areaLabelNear } from "./area-label";
 
 /**
  * #111 i4 · the web capture's area label (docs/design/111 "Web parity"): the
  * picker's escape row saves an area note, labelled with the locality the
- * browser is in — `/api/destinations/resolve` — when geolocation is granted,
+ * browser is in — `/api/areas/resolve` — when geolocation is granted,
  * else null. The browser and the network are injected, so every branch runs
  * here without either.
  */
-const BEND: ResolvedDestination = {
+const BEND: ResolvedArea = {
   googlePlaceId: "ChIJ_bend",
   name: "Bend, OR",
   region: "Oregon",

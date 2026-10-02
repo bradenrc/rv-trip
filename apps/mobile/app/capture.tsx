@@ -25,7 +25,7 @@ import {
 import { api } from "../src/api";
 import { capture, loadRecents, queueDidIt, useCaptureState } from "../src/capture";
 import { AgainPair, LogCta } from "../src/journal";
-import { addProvisionalIdea, replaceIdea, useTodaysStop } from "../src/store";
+import { addProvisionalIdea, replaceIdea, useTodaysDestination } from "../src/store";
 import { PinMap, useStyleMode } from "../src/map";
 import { C, F, R } from "../src/theme";
 import { CategoryTile, Chip, Stars, Toast } from "../src/ui";
@@ -194,10 +194,10 @@ function Confirm({
 }) {
   const { recents } = useCaptureState();
   const router = useRouter();
-  // #113 · "Did it" — only while a trip is in progress and one of its stops
-  // covers today (core's `todaysStop`, over the bundles the phone holds —
+  // #113 · "Did it" — only while a trip is in progress and one of its destinations
+  // covers today (core's `todaysDestination`, over the bundles the phone holds —
   // persisted for the trip in progress, so this works with no signal).
-  const today = useTodaysStop();
+  const today = useTodaysDestination();
   const [status, setStatus] = useState<SavedPlaceStatus | "did">("want");
   const [rating, setRating] = useState(0);
   const [again, setAgain] = useState<boolean | null>(null);
@@ -219,16 +219,16 @@ function Confirm({
       if (!today) return;
       const clientId = newClientId();
       const body = didItBody(
-        { clientId, tripId: today.trip.id, stopId: today.stop.id },
+        { clientId, tripId: today.trip.id, destinationId: today.destination.id },
         target.kind === "place"
           ? { kind: "place", hit: target.hit }
           : { kind: "note", text: target.text, at: fix, areaLabel: online ? areaName : null },
         { rating: rating === 0 ? null : rating, again, note },
       );
       const tripId = today.trip.id;
-      // The idea is on today's stop at once (provisional id = its clientId);
+      // The idea is on today's destination at once (provisional id = its clientId);
       // the created row replaces it when the POST lands.
-      addProvisionalIdea(tripId, today.stop.id, provisionalIdea(body));
+      addProvisionalIdea(tripId, today.destination.id, provisionalIdea(body));
       router.back();
       void queueDidIt(body, {
         tripTitle: today.trip.title,
@@ -275,7 +275,7 @@ function Confirm({
 
       {didIt && (
         <>
-          <Text style={styles.mono}>{didItContext(today.trip.title, today.stop.place.name)}</Text>
+          <Text style={styles.mono}>{didItContext(today.trip.title, today.destination.place.name)}</Text>
           <Stars value={rating} size={28} onSet={setRating} />
           <Text style={styles.lbl}>Do it again?</Text>
           <AgainPair value={again} onChange={setAgain} />
@@ -331,12 +331,12 @@ function Confirm({
   );
 }
 
-/** The idea as the stop screen shows it before the POST lands. */
+/** The idea as the destination screen shows it before the POST lands. */
 function provisionalIdea(body: DidItBody): Idea {
   return {
     id: body.clientId,
     tripId: body.tripId,
-    stopId: body.stopId ?? null,
+    destinationId: body.destinationId ?? null,
     title: body.title,
     category: body.category ?? "do",
     status: "done",
@@ -522,7 +522,7 @@ function usePlaceSearch(query: string, online: boolean, near: Fix | null): Place
   return results;
 }
 
-/** The destination a point resolves to ("San José, Costa Rica"), or null. */
+/** The area a point resolves to ("San José, Costa Rica"), or null. */
 function useResolvedName(at: { lat: number; lng: number } | null): string | null {
   const [name, setName] = useState<string | null>(null);
   const lat = at?.lat;
@@ -530,7 +530,7 @@ function useResolvedName(at: { lat: number; lng: number } | null): string | null
   useEffect(() => {
     if (lat == null || lng == null) return;
     let live = true;
-    api.destinations
+    api.areas
       .resolve({ lat, lng })
       .then((d) => {
         if (live) setName(d?.name ?? null);

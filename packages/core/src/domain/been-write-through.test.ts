@@ -74,24 +74,24 @@ describe("beenWriteThrough (#113)", () => {
     expect(beenWriteThrough(flight, LIBRARY)).toEqual({ action: "skip", reason: "travel" });
   });
 
-  it("skips what isn't journal-worthy, and an idea or stop with no place", () => {
+  it("skips what isn't journal-worthy, and an idea or destination with no place", () => {
     expect(beenWriteThrough({ ...snorkel, status: "planned", rating: null, again: null }, LIBRARY)).toEqual({
       action: "skip",
       reason: "not-journal-worthy",
     });
     expect(beenWriteThrough({ ...snorkel, place: null }, LIBRARY)).toEqual({ action: "skip", reason: "no-place" });
-    const coordlessStop = {
-      kind: "stop" as const,
+    const coordlessDestination = {
+      kind: "destination" as const,
       place: { name: "Somewhere", lat: null, lng: null, googlePlaceId: null },
       rating: 4,
       again: null,
     };
-    expect(beenWriteThrough(coordlessStop, LIBRARY)).toEqual({ action: "skip", reason: "no-place" });
+    expect(beenWriteThrough(coordlessDestination, LIBRARY)).toEqual({ action: "skip", reason: "no-place" });
   });
 
-  it("files a rated stop as an 'other' save — a town is not a campground", () => {
+  it("files a rated destination as an 'other' save — a town is not a campground", () => {
     const newport = {
-      kind: "stop" as const,
+      kind: "destination" as const,
       place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
       rating: 4,
       again: null,

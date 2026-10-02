@@ -32,16 +32,16 @@ import {
   localIsoDate,
   markRowOnShelf,
   nextTimeIdeaBody,
-  todaysStop,
+  todaysDestination,
   applyHopBooking,
   applySavedPlacePatch,
   nearbyIdeaBody,
   setSegmentMode,
   withReconciledSegments,
-  appendStop,
-  attachIdeaToStop,
-  updateStop,
-  legOrder,
+  appendDestination,
+  attachIdeaToDestination,
+  updateDestination,
+  chapterOrder,
 } from "@rv-trip/core";
 import { tripBundleSchema, type TripBundle } from "@rv-trip/core/api-client";
 import { api } from "./api";
@@ -49,12 +49,12 @@ import { onQueueSent } from "./capture";
 
 /**
  * A tiny in-memory store: the last-fetched trip bundles and the trips list,
- * read through useSyncExternalStore so a rating set on the stop screen shows
+ * read through useSyncExternalStore so a rating set on the destination screen shows
  * on the trip screen behind it without a refetch.
  *
  * #113 (Q5 A · vet HIGH "the Did-it chip has no data path"): the bundle of a
  * trip IN PROGRESS — its dates cover today — is persisted, so the capture
- * sheet can find today's stop and the stop screen can check things off with
+ * sheet can find today's destination and the destination screen can check things off with
  * no signal, even after a relaunch. Nothing else persists.
  */
 interface State {
@@ -153,12 +153,12 @@ export function hydrateInProgress(): Promise<void> {
 }
 
 /**
- * Today's stop (#113 · "Did it"): the stop the chip files onto, from every
+ * Today's destination (#113 · "Did it"): the destination the chip files onto, from every
  * bundle the phone holds — loaded this session or persisted from the last.
  * Online, the trips list is read and each in-progress trip's bundle loaded
  * (and so persisted) if it isn't already.
  */
-export function useTodaysStop() {
+export function useTodaysDestination() {
   const bundles = useSyncExternalStore(subscribe, () => state.bundles);
   const trips = useSyncExternalStore(subscribe, () => state.trips);
   useEffect(() => {
@@ -168,23 +168,23 @@ export function useTodaysStop() {
   useEffect(() => {
     for (const t of trips ?? []) if (inProgress(t) && !state.bundles[t.id]) void loadBundle(t.id);
   }, [trips]);
-  return useMemo(() => todaysStop(Object.values(bundles).map((b) => b.trip), localIsoDate()), [bundles]);
+  return useMemo(() => todaysDestination(Object.values(bundles).map((b) => b.trip), localIsoDate()), [bundles]);
 }
 
-/** A Did-it's provisional idea (id = its clientId) onto today's stop, so the
- * stop screen shows it before — or without — signal. */
-export function addProvisionalIdea(tripId: string, stopId: string, idea: Idea): void {
+/** A Did-it's provisional idea (id = its clientId) onto today's destination, so the
+ * destination screen shows it before — or without — signal. */
+export function addProvisionalIdea(tripId: string, destinationId: string, idea: Idea): void {
   updateTrip(tripId, (t) => ({
     ...t,
-    legs: t.legs.map((l) => ({
+    chapters: t.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => (s.id === stopId ? { ...s, ideas: [...s.ideas, idea] } : s)),
+      destinations: l.destinations.map((s) => (s.id === destinationId ? { ...s, ideas: [...s.ideas, idea] } : s)),
     })),
   }));
 }
 
 /** A Did-it idea still waiting for its POST: its id is its `cap_…` client id,
- * which no PATCH can address yet (the stop screen leaves it alone). */
+ * which no PATCH can address yet (the destination screen leaves it alone). */
 export function isProvisionalIdea(idea: Pick<Idea, "id">): boolean {
   return idea.id.startsWith("cap_");
 }
@@ -199,9 +199,9 @@ onQueueSent((item, value) => {
 export function replaceIdea(tripId: string, oldId: string, next: Idea | null): void {
   updateTrip(tripId, (t) => ({
     ...t,
-    legs: t.legs.map((l) => ({
+    chapters: t.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => ({
+      destinations: l.destinations.map((s) => ({
         ...s,
         ideas: next
           ? s.ideas.map((i) => (i.id === oldId ? next : i))
@@ -246,7 +246,7 @@ export async function loadSaves(): Promise<void> {
  * PATCH a save — the suggestion strip's upgrade and Dismiss. The row changes
  * at once through the web's own echo (`applySavedPlacePatch`); the PATCH
  * answers 204 with no body, so the library is then refetched for what only
- * the server knows (the upgrade's re-resolved destination). A refused write
+ * the server knows (the upgrade's re-resolved area). A refused write
  * is undone by the same refetch.
  */
 export async function patchSave(id: string, patch: SavedPlacePatch): Promise<void> {
@@ -368,12 +368,12 @@ export async function createTrip(input: TripCreateInput): Promise<Trip> {
 
 /** Trip settings' Save (#103 · #143) — only what changed. The bundle is
  * re-read after, so a rig answer that moved re-routes the drives on the server
- * (`tripRig`), and a new destination or home base comes back resolved (the
- * destinations row id, the household coalesce). A refusal (a 409 included)
+ * (`tripRig`), and a new area or home base comes back resolved (the
+ * areas row id, the household coalesce). A refusal (a 409 included)
  * rethrows for the screen after the same re-read has put the trip back. */
 export async function patchTripDefaults(id: string, patch: TripPatchInput): Promise<void> {
   if (Object.keys(patch).length === 0) return;
-  const { destination, ...fields } = patch;
+  const { area, ...fields } = patch;
   updateTrip(
     id,
     (t) =>
@@ -381,7 +381,7 @@ export async function patchTripDefaults(id: string, patch: TripPatchInput): Prom
         ...t,
         ...fields,
         // The picked place has no row id until the server upserts it.
-        ...(destination !== undefined && { destination: destination && { ...destination, id: null } }),
+        ...(area !== undefined && { area: area && { ...area, id: null } }),
       }) as Trip,
   );
   try {
@@ -409,22 +409,22 @@ export async function setHopMode(
   }
 }
 
-/** Save flight / Save ferry — with `moveStop`, the Q8 A "Check out of …
+/** Save flight / Save ferry — with `moveDestination`, the Q8 A "Check out of …
  * instead" fix in one request. Throws on a refusal (the sheet stays open). */
 export async function addHopBooking(
   tripId: string,
   body: ReservationCreateInput,
-  moveStop: boolean,
+  moveDestination: boolean,
 ): Promise<Reservation> {
-  const r = await api.reservations.create(moveStop ? { ...body, moveStop: true } : body);
-  updateTrip(tripId, (t) => withReconciledSegments(applyHopBooking(t, r, moveStop)));
+  const r = await api.reservations.create(moveDestination ? { ...body, moveDestination: true } : body);
+  updateTrip(tripId, (t) => withReconciledSegments(applyHopBooking(t, r, moveDestination)));
   return r;
 }
 
-/** Add stay (#105) — a stop-parented stay of a kind. */
+/** Add stay (#105) — a destination-parented stay of a kind. */
 export async function addStay(tripId: string, body: ReservationCreateInput): Promise<void> {
   const r = await api.reservations.create(body);
-  if (r.stopId) updateTrip(tripId, (t) => appendReservation(t, r.stopId!, r));
+  if (r.destinationId) updateTrip(tripId, (t) => appendReservation(t, r.destinationId!, r));
 }
 
 /** #143 · Q6 B — Edit stay's Save: the same patch the PATCH carries, applied
@@ -432,12 +432,12 @@ export async function addStay(tripId: string, body: ReservationCreateInput): Pro
  * puts the row back) and rethrows for the sheet to say so. */
 export async function editStay(
   tripId: string,
-  stopId: string,
+  destinationId: string,
   resId: string,
   patch: ReservationPatchInput,
 ): Promise<void> {
   if (Object.keys(patch).length === 0) return;
-  updateTrip(tripId, (t) => setReservationFields(t, stopId, resId, patch));
+  updateTrip(tripId, (t) => setReservationFields(t, destinationId, resId, patch));
   try {
     await api.reservations.patch(resId, patch);
   } catch (e) {
@@ -448,8 +448,8 @@ export async function editStay(
 
 /** #143 · Q7 A — Delete stay, after "Are you sure?". Optimistic; a refusal
  * re-reads the trip (the row comes back) and rethrows. */
-export async function deleteStay(tripId: string, stopId: string, resId: string): Promise<void> {
-  updateTrip(tripId, (t) => removeReservation(t, stopId, resId));
+export async function deleteStay(tripId: string, destinationId: string, resId: string): Promise<void> {
+  updateTrip(tripId, (t) => removeReservation(t, destinationId, resId));
   try {
     await api.reservations.remove(resId);
   } catch (e) {
@@ -497,40 +497,40 @@ export async function saveBoundaryFlights(tripId: string, body: BoundaryFlightsB
   updateTrip(tripId, () => trip);
 }
 
-/** #131 · the phone's + Add ▸ Stop — and the stop a stay idea's "Plan it"
- * becomes. Appended to the trip's last leg; the hops reconcile with it. */
-export async function addStop(
+/** #131 · the phone's + Add ▸ Destination — and the destination a stay idea's "Plan it"
+ * becomes. Appended to the trip's last chapter; the hops reconcile with it. */
+export async function addDestination(
   tripId: string,
   place: Place,
   dates: { arriveDate: IsoDate | null; departDate: IsoDate | null } = { arriveDate: null, departDate: null },
 ): Promise<string | null> {
   const trip = state.bundles[tripId]?.trip;
-  const legId = trip ? legOrder(trip).at(-1) : undefined;
-  if (!legId) return null;
-  const stop = await api.stops.create({ legId, place, ...dates });
-  updateTrip(tripId, (t) => appendStop(t, stop));
-  return stop.id;
+  const chapterId = trip ? chapterOrder(trip).at(-1) : undefined;
+  if (!chapterId) return null;
+  const destination = await api.destinations.create({ chapterId, place, ...dates });
+  updateTrip(tripId, (t) => appendDestination(t, destination));
+  return destination.id;
 }
 
-const planned = (t: Trip, stopId: string, ideaId: string): Trip =>
-  updateStop(t, stopId, (s) => ({
+const planned = (t: Trip, destinationId: string, ideaId: string): Trip =>
+  updateDestination(t, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.map((i) => (i.id === ideaId ? { ...i, status: "planned" as const } : i)),
   }));
 
-/** #131 · Plan it on a do/eat maybe: onto the stop you pick, planned. */
-export async function planIdeaToStop(tripId: string, ideaId: string, stopId: string): Promise<void> {
-  await api.ideas.patch(ideaId, { stopId, status: "planned" });
-  updateTrip(tripId, (t) => planned(attachIdeaToStop(t, ideaId, stopId), stopId, ideaId));
+/** #131 · Plan it on a do/eat maybe: onto the destination you pick, planned. */
+export async function planIdeaToDestination(tripId: string, ideaId: string, destinationId: string): Promise<void> {
+  await api.ideas.patch(ideaId, { destinationId, status: "planned" });
+  updateTrip(tripId, (t) => planned(attachIdeaToDestination(t, ideaId, destinationId), destinationId, ideaId));
 }
 
-/** #131 · Plan it on a maybe already pinned to its stop: just planned. */
-export async function planPinnedIdea(tripId: string, stopId: string, ideaId: string): Promise<void> {
+/** #131 · Plan it on a maybe already pinned to its destination: just planned. */
+export async function planPinnedIdea(tripId: string, destinationId: string, ideaId: string): Promise<void> {
   await api.ideas.patch(ideaId, { status: "planned" });
-  updateTrip(tripId, (t) => planned(t, stopId, ideaId));
+  updateTrip(tripId, (t) => planned(t, destinationId, ideaId));
 }
 
-/** #131 · Plan it on a stay maybe: its nights make it a stop, and it is
+/** #131 · Plan it on a stay maybe: its nights make it a destination, and it is
  * planned onto it (the web's `planIdeaOnDates`). */
 export async function planStayIdea(
   tripId: string,
@@ -540,6 +540,6 @@ export async function planStayIdea(
   const it = state.bundles[tripId]?.trip.ideas.find((i) => i.id === ideaId);
   if (!it) return;
   const place = it.place ?? { name: it.title, lat: null, lng: null, googlePlaceId: null };
-  const stopId = await addStop(tripId, place, { arriveDate: span.start, departDate: span.end });
-  if (stopId) await planIdeaToStop(tripId, ideaId, stopId);
+  const destinationId = await addDestination(tripId, place, { arriveDate: span.start, departDate: span.end });
+  if (destinationId) await planIdeaToDestination(tripId, ideaId, destinationId);
 }

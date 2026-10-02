@@ -15,7 +15,7 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
    * #60 Q4 → B, end to end. `homeBasePlace` is one object on the wire and three
    * nullable columns underneath, and `getTripById` has to read them back — the
    * half without which `trip.homeBasePlace` is silently always null and the
-   * first stop of a leg gets no search bias at all.
+   * first destination of a chapter gets no search bias at all.
    */
   it("round-trips the home-base ANCHOR, not just the name", async () => {
     const trip = await fx.trip({ owner: DEV_OWNER, homeBase: "Boise, ID" });
@@ -77,15 +77,15 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
   });
 
   it("refuses a DELETE on another owner's trip — the cascade is the damage", async () => {
-    const { trip, legCoast, astoria } = await fx.pacificNorthwestLoop(OTHER_OWNER);
+    const { trip, chapterCoast, astoria } = await fx.pacificNorthwestLoop(OTHER_OWNER);
 
     const res = await DELETE(req(undefined, "DELETE"), ctx(trip.id));
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "trip not found" });
     expect(await read.trip(trip.id)).not.toBeNull();
-    expect(await read.countLegs(trip.id)).toBe(2);
-    expect(await read.countStops(legCoast.id)).toBe(2);
+    expect(await read.countChapters(trip.id)).toBe(2);
+    expect(await read.countDestinations(chapterCoast.id)).toBe(2);
     expect(await read.countReservations(astoria.id)).toBe(1);
   });
 
@@ -102,9 +102,9 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
     expect(bundle.rigHash).toBe(NO_RIG_HASH); // "no-rig"
     expect(bundle.trip.ownerId).toBe(DEV_OWNER);
     expect(bundle.trip.homeBase).toBe("Boise, ID");
-    expect(bundle.trip.legs).toHaveLength(2);
+    expect(bundle.trip.chapters).toHaveLength(2);
     // `placeName` is the WRITE shape only; the read shape nests `place`.
-    expect(bundle.trip.legs[0]!.stops[0]!.place.name).toBe("Astoria, OR");
+    expect(bundle.trip.chapters[0]!.destinations[0]!.place.name).toBe("Astoria, OR");
 
     // Q5: the clock is pinned, so the DERIVED status is a constant.
     // statusAuto=true, endDate >= today, daysUntil(start, today) = -14 <= 30
@@ -112,9 +112,9 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
     expect(bundle.trip.statusAuto).toBe(true);
     expect(bundle.trip.status).toBe("upcoming");
 
-    // routes: orderedPairs pairs ADJACENT STOPS trip-wide — home base is never
+    // routes: orderedPairs pairs ADJACENT DESTINATIONS trip-wide — home base is never
     // a waypoint, and COORDINATES (not dates) gate a pair. Three
-    // coordinate-bearing stops → exactly two keys.
+    // coordinate-bearing destinations → exactly two keys.
     expect(Object.keys(bundle.routes)).toHaveLength(2);
     const key = routeCacheKey(astoria, newport, NO_RIG_HASH);
     // Assert against the arithmetic, not against magic numbers: estimateRoute
@@ -124,48 +124,48 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
 
   /**
    * #143 · Q8 A — phone Trip settings edits "Where to?". The PATCH upserts the
-   * household's destinations row and repoints `trips.destination_id`; unlike
-   * the create it writes NO stop. `null` clears the pointer.
+   * household's areas row and repoints `trips.area_id`; unlike
+   * the create it writes NO destination. `null` clears the pointer.
    */
-  it("repoints the destination without writing a stop, and null clears it", async () => {
-    const { trip, legCoast, legMountains } = await fx.pacificNorthwestLoop();
-    const stopCount = async () =>
-      (await read.countStops(legCoast.id)) + (await read.countStops(legMountains.id));
-    const before = await stopCount();
+  it("repoints the area without writing a destination, and null clears it", async () => {
+    const { trip, chapterCoast, chapterMountains } = await fx.pacificNorthwestLoop();
+    const destinationCount = async () =>
+      (await read.countDestinations(chapterCoast.id)) + (await read.countDestinations(chapterMountains.id));
+    const before = await destinationCount();
 
-    const destination = { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 };
-    const res = await PATCH(req({ destination }, "PATCH"), ctx(trip.id));
+    const area = { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 };
+    const res = await PATCH(req({ area }, "PATCH"), ctx(trip.id));
     expect(res.status).toBe(204);
 
-    const rows = await read.destinations(DEV_OWNER);
+    const rows = await read.areas(DEV_OWNER);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ googlePlaceId: "ChIJbli", name: "Bellingham, WA" });
-    expect((await read.trip(trip.id))!.destinationId).toBe(rows[0]!.id);
-    expect(await read.countLegs(trip.id)).toBe(2);
-    expect(await stopCount()).toBe(before);
+    expect((await read.trip(trip.id))!.areaId).toBe(rows[0]!.id);
+    expect(await read.countChapters(trip.id)).toBe(2);
+    expect(await destinationCount()).toBe(before);
 
     // The same pick again REUSES the row (owner + place id).
-    await PATCH(req({ destination }, "PATCH"), ctx(trip.id));
-    expect(await read.destinations(DEV_OWNER)).toHaveLength(1);
+    await PATCH(req({ area }, "PATCH"), ctx(trip.id));
+    expect(await read.areas(DEV_OWNER)).toHaveLength(1);
 
     const bundle = tripBundleSchema.parse(await (await GET(req(undefined, "GET"), ctx(trip.id))).json());
-    expect(bundle.trip.destination).toMatchObject({ name: "Bellingham, WA", googlePlaceId: "ChIJbli" });
+    expect(bundle.trip.area).toMatchObject({ name: "Bellingham, WA", googlePlaceId: "ChIJbli" });
 
-    const cleared = await PATCH(req({ destination: null }, "PATCH"), ctx(trip.id));
+    const cleared = await PATCH(req({ area: null }, "PATCH"), ctx(trip.id));
     expect(cleared.status).toBe(204);
-    expect((await read.trip(trip.id))!.destinationId).toBeNull();
-    expect(await stopCount()).toBe(before);
+    expect((await read.trip(trip.id))!.areaId).toBeNull();
+    expect(await destinationCount()).toBe(before);
   });
 
-  it("refuses a destination PATCH on another owner's trip — no row, no repoint", async () => {
+  it("refuses an area PATCH on another owner's trip — no row, no repoint", async () => {
     const theirs = await fx.trip({ owner: OTHER_OWNER });
     const res = await PATCH(
-      req({ destination: { name: "Bellingham, WA", googlePlaceId: "ChIJbli" } }, "PATCH"),
+      req({ area: { name: "Bellingham, WA", googlePlaceId: "ChIJbli" } }, "PATCH"),
       ctx(theirs.id),
     );
     expect(res.status).toBe(404);
-    expect((await read.trip(theirs.id))!.destinationId).toBeNull();
-    expect(await read.destinations(DEV_OWNER)).toHaveLength(0);
+    expect((await read.trip(theirs.id))!.areaId).toBeNull();
+    expect(await read.areas(DEV_OWNER)).toHaveLength(0);
   });
 
   it("404s a GET on another owner's trip, which never reaches the schema", async () => {
@@ -180,16 +180,16 @@ describeDb("GET/PATCH/DELETE /api/trips/[id]", () => {
  * #80 — the trip tree carries the SHELF.
  *
  * `trip.ideas[]` is the trip's UNATTACHED maybes and only those: an idea with a
- * stop already arrives under that stop, and loading it twice would draw it
+ * destination already arrives under that destination, and loading it twice would draw it
  * twice. The bundle schema is the phone's parse of the same payload, so this
  * also proves the wire did not drift.
  */
 describeDb("GET /api/trips/[id] — the idea shelf (#80)", () => {
-  it("returns the unattached ideas beside the legs, and only those", async () => {
+  it("returns the unattached ideas beside the chapters, and only those", async () => {
     const { trip, astoria } = await fx.pacificNorthwestLoop();
     const shelf = await fx.idea({
       tripId: trip.id,
-      stopId: null,
+      destinationId: null,
       category: "stay",
       title: "Coachland RV Park",
     });
@@ -199,13 +199,13 @@ describeDb("GET /api/trips/[id] — the idea shelf (#80)", () => {
     );
 
     expect(bundle.trip.ideas.map((i) => i.id)).toEqual([shelf.id]);
-    expect(bundle.trip.ideas[0]).toMatchObject({ stopId: null, category: "stay" });
+    expect(bundle.trip.ideas[0]).toMatchObject({ destinationId: null, category: "stay" });
     // …and the fixture's ATTACHED idea is still where it always was.
-    const attached = bundle.trip.legs
-      .flatMap((l) => l.stops)
+    const attached = bundle.trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === astoria.id)!.ideas;
     expect(attached).toHaveLength(1);
-    expect(attached[0]!.stopId).toBe(astoria.id);
+    expect(attached[0]!.destinationId).toBe(astoria.id);
     expect(bundle.trip.ideas.map((i) => i.id)).not.toContain(attached[0]!.id);
   });
 

@@ -37,7 +37,7 @@ export function AddFlightSheet({
   /** Resolves true when both (or the one) landed. */
   onSave: (body: BoundaryFlightsBody) => Promise<boolean>;
 }) {
-  const destination = trip.destination?.name ?? trip.legs.flatMap((l) => l.stops)[0]?.place.name ?? "the trip";
+  const area = trip.area?.name ?? trip.chapters.flatMap((l) => l.destinations)[0]?.place.name ?? "the trip";
   const [roundTrip, setRoundTrip] = useState(true);
   const [out, setOut] = useState<HopBookingDraft>(() => ({
     ...blankHopDraft("flight"),
@@ -77,7 +77,7 @@ export function AddFlightSheet({
             <Plane className="size-4" />
             Add flight
             <span className="ml-auto font-mono text-[10.5px] font-normal text-rv-ink-faded">
-              Home {roundTrip ? "⇄" : "→"} {destination}
+              Home {roundTrip ? "⇄" : "→"} {area}
             </span>
           </DialogTitle>
           <DialogDescription className="sr-only">

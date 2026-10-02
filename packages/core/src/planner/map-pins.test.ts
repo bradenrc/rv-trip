@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { boundsCovers, MIN_BOUNDS_SPAN } from "../domain/bounds";
 import { orderedPairs, routeCacheKey } from "../domain/route-order";
-import type { Stop, Trip } from "../domain/types";
+import type { Destination, Trip } from "../domain/types";
 import type { RouteResult } from "../providers/index";
 import { encodeFlexiblePolyline } from "../providers/polyline";
 import type { RouteMap } from "./index";
@@ -11,7 +11,7 @@ import {
   arcVertices,
   mapBounds,
   scheduledOrder,
-  tripStopPins,
+  tripDestinationPins,
 } from "./map-pins";
 
 /**
@@ -31,10 +31,10 @@ import {
 
 const HASH = "test-routing-hash";
 
-function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
+function mkDestination(partial: Partial<Destination> & { id: string; chapterId: string }): Destination {
   return {
     id: partial.id,
-    legId: partial.legId,
+    chapterId: partial.chapterId,
     place: partial.place ?? { name: partial.id, lat: 45, lng: -122, googlePlaceId: null },
     arriveDate: partial.arriveDate ?? null,
     departDate: partial.departDate ?? null,
@@ -48,7 +48,7 @@ function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
   };
 }
 
-/** The seed fixture the wireframe draws: three dated stops, one floating. */
+/** The seed fixture the wireframe draws: three dated destinations, one floating. */
 function seedTrip(): Trip {
   return {
     id: "t1",
@@ -63,24 +63,24 @@ function seedTrip(): Trip {
     rating: null,
     note: null,
     ideas: [],
-    legs: [
+    chapters: [
       {
         id: "coast",
         tripId: "t1",
         title: "Oregon Coast",
         sortOrder: 0,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "astoria",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
             arriveDate: "2026-08-02",
             departDate: "2026-08-05",
             sortOrder: 0,
           }),
-          mkStop({
+          mkDestination({
             id: "newport",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
             arriveDate: "2026-08-05",
             departDate: "2026-08-09",
@@ -93,18 +93,18 @@ function seedTrip(): Trip {
         tripId: "t1",
         title: "Cascades & Home",
         sortOrder: 1,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "bend",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Bend, OR", lat: 44.0582, lng: -121.3153, googlePlaceId: null },
             arriveDate: "2026-08-12",
             departDate: "2026-08-16",
             sortOrder: 0,
           }),
-          mkStop({
+          mkDestination({
             id: "crater",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Crater Lake NP", lat: 42.9446, lng: -122.109, googlePlaceId: null },
             sortOrder: 1,
           }),
@@ -120,7 +120,7 @@ function seedTrip(): Trip {
 }
 
 describe("scheduledOrder", () => {
-  it("numbers the scheduled stops trip-wide by arrival date, and counts them", () => {
+  it("numbers the scheduled destinations trip-wide by arrival date, and counts them", () => {
     const { ordinals, total } = scheduledOrder(seedTrip());
     expect(total).toBe(3);
     expect(ordinals.get("astoria")).toBe(1);
@@ -128,17 +128,17 @@ describe("scheduledOrder", () => {
     expect(ordinals.get("bend")).toBe(3);
   });
 
-  it("gives a floating stop no ordinal and does not count it in the total", () => {
+  it("gives a floating destination no ordinal and does not count it in the total", () => {
     const { ordinals, total } = scheduledOrder(seedTrip());
     expect(ordinals.has("crater")).toBe(false);
     expect(total).toBe(3);
   });
 
-  it("orders across legs by date, not by leg — the sequence is trip-wide", () => {
-    // Move Bend to the front of the calendar while leaving it in the second leg.
+  it("orders across chapters by date, not by chapter — the sequence is trip-wide", () => {
+    // Move Bend to the front of the calendar while leaving it in the second chapter.
     const trip = seedTrip();
-    trip.legs[1]!.stops[0]!.arriveDate = "2026-08-01";
-    trip.legs[1]!.stops[0]!.departDate = "2026-08-02";
+    trip.chapters[1]!.destinations[0]!.arriveDate = "2026-08-01";
+    trip.chapters[1]!.destinations[0]!.departDate = "2026-08-02";
     const { ordinals } = scheduledOrder(trip);
     expect(ordinals.get("bend")).toBe(1);
     expect(ordinals.get("astoria")).toBe(2);
@@ -147,10 +147,10 @@ describe("scheduledOrder", () => {
 
   it("is empty for a trip with nothing scheduled", () => {
     const trip = seedTrip();
-    for (const leg of trip.legs) {
-      for (const stop of leg.stops) {
-        stop.arriveDate = null;
-        stop.departDate = null;
+    for (const chapter of trip.chapters) {
+      for (const destination of chapter.destinations) {
+        destination.arriveDate = null;
+        destination.departDate = null;
       }
     }
     const { ordinals, total } = scheduledOrder(trip);
@@ -159,9 +159,9 @@ describe("scheduledOrder", () => {
   });
 });
 
-describe("tripStopPins", () => {
-  it("draws one pin per stop with coordinates, in leg then stop order", () => {
-    const pins = tripStopPins(seedTrip());
+describe("tripDestinationPins", () => {
+  it("draws one pin per destination with coordinates, in chapter then destination order", () => {
+    const pins = tripDestinationPins(seedTrip());
     expect(pins.map((p) => p.id)).toEqual(["astoria", "newport", "bend", "crater"]);
     expect(pins.map((p) => p.name)).toEqual([
       "Astoria, OR",
@@ -171,24 +171,24 @@ describe("tripStopPins", () => {
     ]);
   });
 
-  it("carries the scheduled ordinal, and null + floating for the floating stop", () => {
-    const pins = tripStopPins(seedTrip());
+  it("carries the scheduled ordinal, and null + floating for the floating destination", () => {
+    const pins = tripDestinationPins(seedTrip());
     expect(pins.map((p) => p.ordinal)).toEqual([1, 2, 3, null]);
     expect(pins.map((p) => p.floating)).toEqual([false, false, false, true]);
   });
 
   it("carries the real coordinates, narrowed — never null", () => {
-    const astoria = tripStopPins(seedTrip())[0]!;
+    const astoria = tripDestinationPins(seedTrip())[0]!;
     expect(astoria.lat).toBe(46.1879);
     expect(astoria.lng).toBe(-123.8313);
   });
 
-  it("drops a coordless stop rather than drawing it at 0,0", () => {
+  it("drops a coordless destination rather than drawing it at 0,0", () => {
     const trip = seedTrip();
-    trip.legs[0]!.stops[1]!.place = { name: "Newport, OR", lat: null, lng: null, googlePlaceId: null };
-    const pins = tripStopPins(trip);
+    trip.chapters[0]!.destinations[1]!.place = { name: "Newport, OR", lat: null, lng: null, googlePlaceId: null };
+    const pins = tripDestinationPins(trip);
     expect(pins.map((p) => p.id)).toEqual(["astoria", "bend", "crater"]);
-    // The ordinal is still the SCHEDULED sequence's, which counts the stop even
+    // The ordinal is still the SCHEDULED sequence's, which counts the destination even
     // though the map cannot draw it — the rail and the map must not disagree.
     expect(pins.find((p) => p.id === "bend")!.ordinal).toBe(3);
   });
@@ -210,7 +210,7 @@ describe("arcFeatureCollection", () => {
 
   it("keeps the decoded corridor geometry untouched — the layers case on `source`", () => {
     const trip = seedTrip();
-    const pair = orderedPairs(trip).find((p) => p.fromStopId === "astoria")!;
+    const pair = orderedPairs(trip).find((p) => p.fromDestinationId === "astoria")!;
     const polyline = encodeFlexiblePolyline([
       { lat: pair.from.lat, lng: pair.from.lng },
       { lat: 45.5, lng: -124.2 },
@@ -259,7 +259,7 @@ describe("arcVertices", () => {
 describe("mapBounds", () => {
   it("encloses the pins when every arc is a two-point chord", () => {
     const trip = seedTrip();
-    const pins = tripStopPins(trip);
+    const pins = tripDestinationPins(trip);
     const bounds = mapBounds(tripArcs(trip), pins)!;
     expect(bounds.north).toBeCloseTo(46.1879, 4);
     expect(bounds.south).toBeCloseTo(42.9446, 4);
@@ -269,7 +269,7 @@ describe("mapBounds", () => {
 
   it("widens to hold a routed corridor that runs outside its endpoints", () => {
     const trip = seedTrip();
-    const pair = orderedPairs(trip).find((p) => p.fromStopId === "astoria")!;
+    const pair = orderedPairs(trip).find((p) => p.fromDestinationId === "astoria")!;
     // US-101 runs WEST of both Astoria and Newport: a vertex at -124.9 is
     // outside the box the four pins alone would produce.
     const polyline = encodeFlexiblePolyline([
@@ -286,7 +286,7 @@ describe("mapBounds", () => {
       notices: [],
     };
     const routes: RouteMap = { [routeCacheKey(pair.from, pair.to, HASH)]: result };
-    const pins = tripStopPins(trip);
+    const pins = tripDestinationPins(trip);
     const withCorridor = mapBounds(tripArcs(trip, routes, HASH), pins)!;
     expect(withCorridor.west).toBeCloseTo(-124.9, 1);
     expect(withCorridor.west).toBeLessThan(mapBounds(tripArcs(trip), pins)!.west);
@@ -311,7 +311,7 @@ describe("mapBounds", () => {
   it("holds a far-flung idea without collapsing the fit", () => {
     const trip = seedTrip();
     const arcs = tripArcs(trip);
-    const pins = tripStopPins(trip);
+    const pins = tripDestinationPins(trip);
     // A shelf idea parked a long way off the route — Moab, UT.
     const idea = { lat: 38.5733, lng: -109.5498 };
 
@@ -333,10 +333,10 @@ describe("mapBounds", () => {
 
   /** The other half of the refit guard: the camera only moves when the new box
    * is NOT already on screen (bounds.ts `boundsCovers`). */
-  it("a near idea is already covered by the box the stops make; the outlier is not", () => {
+  it("a near idea is already covered by the box the destinations make; the outlier is not", () => {
     const trip = seedTrip();
     const arcs = tripArcs(trip);
-    const pins = tripStopPins(trip);
+    const pins = tripDestinationPins(trip);
     const shown = mapBounds(arcs, pins)!;
 
     const near = mapBounds(arcs, [...pins, { lat: 44.0601, lng: -121.3402 }])!;

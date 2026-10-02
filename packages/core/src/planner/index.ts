@@ -2,8 +2,8 @@ import { deriveDays, type DayKind } from "../domain/derive-days";
 import {
   isScheduled,
   type Trip,
-  type Leg,
-  type Stop,
+  type Chapter,
+  type Destination,
   type Reservation,
   type ReservationPatchInput,
   type Idea,
@@ -12,9 +12,16 @@ import {
   type Place,
   type ReservationType,
   type TravelMode,
+  type TransportKind,
   type Segment,
 } from "../domain/types";
-import { drivePairs, orderedLegStops, routeCacheKey, type OrderedPair } from "../domain/route-order";
+import {
+  TRANSPORT_KIND_ORDER,
+  countTransportKind,
+  countsTowardClock,
+  effectiveTransportKind,
+} from "../domain/transport-kind";
+import { drivePairs, orderedChapterDestinations, routeCacheKey, type OrderedPair } from "../domain/route-order";
 import { localDate, withReconciledSegments } from "../domain/segments";
 import { instantToLocal, minutesBetween } from "../domain/airports";
 import { hasCoords } from "../domain/bounds";
@@ -43,29 +50,29 @@ export * from "./dates";
 /** The map's drive arcs — one model, two renderers (#44 i3). `RouteMap` is
  * declared below and imported there as a type, so nothing loads twice. */
 export * from "./map-arcs";
-/** The map's stop discs + camera box — the other half of the same model
- * (#44 i4). Also the home of the scheduled ordinal the stop sheet prints. */
+/** The map's destination discs + camera box — the other half of the same model
+ * (#44 i4). Also the home of the scheduled ordinal the destination sheet prints. */
 export * from "./map-pins";
 /** The trip's idea shelf — the side rail's model (#80 i1). */
 export * from "./shelf";
 /** Trip surfacing — the saves near a trip (#111 i3). */
 export * from "./nearby-saves";
-/** The Journal lens and "Did it"'s today's stop (#113 · #106). */
+/** The Journal lens and "Did it"'s today's destination (#113 · #106). */
 export * from "./journal";
 /** "Last time here" — the saves a past trip left near this one (#113 · #107). */
 export * from "./for-next-time";
 
-export function allStops(trip: Trip): Stop[] {
-  return trip.legs.flatMap((l) => l.stops);
+export function allDestinations(trip: Trip): Destination[] {
+  return trip.chapters.flatMap((l) => l.destinations);
 }
-export function stopMap(trip: Trip): Map<string, Stop> {
-  return new Map(allStops(trip).map((s) => [s.id, s]));
+export function destinationMap(trip: Trip): Map<string, Destination> {
+  return new Map(allDestinations(trip).map((s) => [s.id, s]));
 }
 
 // ── Timeline (gantt) view-model ────────────────────────────────────────────
 
 export interface TimelineBar {
-  stopId: string;
+  destinationId: string;
   name: string;
   range: string;
   startCol: number;
@@ -75,23 +82,25 @@ export interface TimelineBar {
   ideaCount: number;
   showMeta: boolean;
   /**
-   * How the stop was ARRIVED at — its inbound segment's mode (#110 §2). `null`
+   * How the destination was ARRIVED at — its inbound segment's mode (#110 §2). `null`
    * when nothing arrives (Greece's first Athens: no home base, no hop in), so
    * the bar draws no navy edge.
    */
   arriveMode: TravelMode | null;
 }
-export interface TimelineLeg {
+export interface TimelineChapter {
   id: string;
-  kicker: string;
-  name: string;
+  /** "Chapter 2" for a NAMED chapter (N counts named ones only, #155 · Q1 A);
+   * null for an unnamed one, which renders no header. */
+  kicker: string | null;
+  name: string | null;
   bars: TimelineBar[];
 }
 export interface TimelineGap {
   startCol: number;
   span: number;
 }
-export interface FloatingStop {
+export interface FloatingDestination {
   id: string;
   name: string;
   note: string | null;
@@ -112,13 +121,13 @@ export interface RhythmCell {
 export interface TimelineModel {
   rhythm: RhythmCell[];
   ruler: { letter: string; label: string; weekStart: boolean }[];
-  legs: TimelineLeg[];
+  chapters: TimelineChapter[];
   gaps: TimelineGap[];
   openCount: number;
   gapCount: number;
   openLabel: string;
   tailHint: string;
-  floating: FloatingStop[];
+  floating: FloatingDestination[];
   allScheduled: boolean;
   /**
    * The travel modes the trip's rhythm actually has, in legend order (Drive ·
@@ -139,39 +148,39 @@ const KIND_COLOR: Record<DayKind, string> = {
 const MODE_LABEL: Record<TravelMode, string> = { drive: "Drive", fly: "Fly", ferry: "Ferry" };
 
 export function timelineModel(trip: Trip): TimelineModel {
-  const stops = allStops(trip);
-  const byId = stopMap(trip);
-  const { days, unscheduledStopIds } = deriveDays(trip, stops, trip.segments);
+  const destinations = allDestinations(trip);
+  const byId = destinationMap(trip);
+  const { days, unscheduledDestinationIds } = deriveDays(trip, destinations, trip.segments);
 
-  // A travel day belongs to the stop it ARRIVES at (the run rule below), so a
-  // day bound for home belongs to no stop and ends the bar before it.
+  // A travel day belongs to the destination it ARRIVES at (the run rule below), so a
+  // day bound for home belongs to no destination and ends the bar before it.
   const cols = days.map((c, i) => ({
     index: i + 1,
     date: c.date,
     kind: c.kind as DayKind,
     mode: c.mode,
     segmentId: c.segmentId,
-    stopId: c.kind === "stay" ? c.stopId! : c.kind === "travel" ? (c.toStopId ?? null) : null,
+    destinationId: c.kind === "stay" ? c.destinationId! : c.kind === "travel" ? (c.toDestinationId ?? null) : null,
   }));
 
   const rhythm = cols.map((c): RhythmCell => {
-    const stop = c.stopId ? byId.get(c.stopId) : null;
+    const destination = c.destinationId ? byId.get(c.destinationId) : null;
     if (c.kind === "travel") {
       const mode = c.mode ?? "drive";
       return {
         kind: c.kind,
         color: KIND_COLOR[c.kind],
-        title: `${c.date} — ${MODE_LABEL[mode]} → ${stop ? stop.place.name : "home"}`,
+        title: `${c.date} — ${MODE_LABEL[mode]} → ${destination ? destination.place.name : "home"}`,
         mode,
         ...(c.segmentId !== undefined && { segmentId: c.segmentId }),
       };
     }
-    const title = c.kind === "stay" ? `Stay · ${stop?.place.name ?? ""}` : "Open";
+    const title = c.kind === "stay" ? `Stay · ${destination?.place.name ?? ""}` : "Open";
     return { kind: c.kind, color: KIND_COLOR[c.kind], title: `${c.date} — ${title}` };
   });
 
   const arriveModeOf = new Map(
-    trip.segments.flatMap((s) => (s.toStopId === null ? [] : [[s.toStopId, s.mode] as const])),
+    trip.segments.flatMap((s) => (s.toDestinationId === null ? [] : [[s.toDestinationId, s.mode] as const])),
   );
 
   const ruler = cols.map((c, i) => {
@@ -184,31 +193,32 @@ export function timelineModel(trip: Trip): TimelineModel {
     };
   });
 
-  // contiguous same-stop runs → segments
-  const segments: { stopId: string; startCol: number; span: number }[] = [];
+  // contiguous same-destination runs → segments
+  const segments: { destinationId: string; startCol: number; span: number }[] = [];
   cols.forEach((c, i) => {
-    if (!c.stopId) return;
+    if (!c.destinationId) return;
     const prev = cols[i - 1];
-    if (prev && prev.stopId === c.stopId) segments[segments.length - 1]!.span++;
-    else segments.push({ stopId: c.stopId, startCol: c.index, span: 1 });
+    if (prev && prev.destinationId === c.destinationId) segments[segments.length - 1]!.span++;
+    else segments.push({ destinationId: c.destinationId, startCol: c.index, span: 1 });
   });
 
-  const legs: TimelineLeg[] = trip.legs.map((leg, i) => ({
-    id: leg.id,
-    kicker: `Leg ${i + 1}`,
-    name: leg.title,
+  const kickers = chapterKickers(trip.chapters);
+  const chapters: TimelineChapter[] = trip.chapters.map((chapter) => ({
+    id: chapter.id,
+    kicker: kickers.get(chapter.id) ?? null,
+    name: chapter.title,
     bars: segments
-      .filter((s) => byId.get(s.stopId)?.legId === leg.id)
+      .filter((s) => byId.get(s.destinationId)?.chapterId === chapter.id)
       .map((s) => {
-        const stop = byId.get(s.stopId)!;
-        const resCount = stop.reservations.length;
-        const ideaCount = stop.ideas.length;
-        const rating = stop.rating ?? 0;
+        const destination = byId.get(s.destinationId)!;
+        const resCount = destination.reservations.length;
+        const ideaCount = destination.ideas.length;
+        const rating = destination.rating ?? 0;
         return {
-          stopId: s.stopId,
-          name: stop.place.name,
-          range: isScheduled(stop)
-            ? dateRange(stop.arriveDate, stop.departDate)
+          destinationId: s.destinationId,
+          name: destination.place.name,
+          range: isScheduled(destination)
+            ? dateRange(destination.arriveDate, destination.departDate)
             : "",
           startCol: s.startCol,
           span: s.span,
@@ -216,7 +226,7 @@ export function timelineModel(trip: Trip): TimelineModel {
           resCount,
           ideaCount,
           showMeta: rating > 0 || resCount > 0 || ideaCount > 0,
-          arriveMode: arriveModeOf.get(s.stopId) ?? null,
+          arriveMode: arriveModeOf.get(s.destinationId) ?? null,
         };
       }),
   }));
@@ -241,9 +251,9 @@ export function timelineModel(trip: Trip): TimelineModel {
   let tail = 0;
   for (let j = cols.length - 1; j >= 0 && cols[j]!.kind === "empty"; j--) tail++;
   const lastScheduled = [...segments].reverse()[0];
-  const lastName = lastScheduled ? byId.get(lastScheduled.stopId)?.place.name : null;
+  const lastName = lastScheduled ? byId.get(lastScheduled.destinationId)?.place.name : null;
 
-  const floating: FloatingStop[] = unscheduledStopIds
+  const floating: FloatingDestination[] = unscheduledDestinationIds
     .map((id) => byId.get(id)!)
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((s) => ({
@@ -262,7 +272,7 @@ export function timelineModel(trip: Trip): TimelineModel {
   return {
     rhythm,
     ruler,
-    legs,
+    chapters,
     gaps,
     openCount,
     gapCount,
@@ -295,7 +305,7 @@ export interface RouteIdea {
   status: Idea["status"];
 }
 export interface RouteRow {
-  stop: Stop;
+  destination: Destination;
   dates: string | null;
   floating: boolean;
   rating: number;
@@ -303,32 +313,32 @@ export interface RouteRow {
   reservations: RouteReservation[];
   ideas: RouteIdea[];
   showIdeaDivider: boolean;
-  /** The drive OUT of this stop, when the next stop is in the same leg. */
+  /** The drive OUT of this destination, when the next destination is in the same chapter. */
   drive: RouteDrive | null;
-  /** The non-drive hop OUT of this stop (#104), when the next stop is in the
-   * same leg — a travel card where a drive row would be. */
+  /** The non-drive hop OUT of this destination (#104), when the next destination is in the
+   * same chapter — a travel card where a drive row would be. */
   hop: RouteHop | null;
 }
-export interface RouteLeg {
+export interface RouteChapter {
   id: string;
-  kicker: string;
-  name: string;
+  /** "Chapter 2" for a NAMED chapter — N counts named chapters only (#155 ·
+   * Q1 A). Null for an unnamed chapter, which renders no header. */
+  kicker: string | null;
+  name: string | null;
   rows: RouteRow[];
-  /** The drive that crosses out of this leg — drawn after the rows, under a
-   * hairline seam, so it reads as a crossing rather than an orphan row (G1). */
+  /** The drive that crosses out of this chapter — drawn after the rows as a
+   * plain drive row (#155 removed the "LEG 1 → LEG 2" seam above it). */
   outboundDrive: RouteDrive | null;
-  /** "Leg 1 → Leg 2" — set when the leg is left by a drive OR a hop. */
-  outboundSeam: string | null;
   /**
-   * The non-drive hop that crosses OUT of this leg (#104 · vet MED) — the
-   * travel-card twin of `outboundDrive`, drawn under the same hairline seam.
+   * The non-drive hop that crosses OUT of this chapter (#104 · vet MED) — the
+   * travel-card twin of `outboundDrive`, drawn where it is.
    * Greece's Athens → Mykonos flight and Naxos → Athens flight are these.
    */
   outboundHop: RouteHop | null;
-  /** Home → the first stop, drawn above the leg's rows — only when that hop is
+  /** Home → the first destination, drawn above the chapter's rows — only when that hop is
    * NOT a drive, so a drive trip's Route stays exactly as it was. */
   leadingHop: RouteHop | null;
-  /** → home, drawn after the leg's last row — only when a → home row exists
+  /** → home, drawn after the chapter's last row — only when a → home row exists
    * (`reconcileSegments` never invents one) and it is not a drive. */
   returnHop: RouteHop | null;
 }
@@ -338,6 +348,8 @@ export interface RouteHopBooking {
   kind: "booking";
   id: string;
   name: string;
+  /** #155 · Q4 A — the EFFECTIVE kind: the stored one, or the hop's mode. */
+  transportKind: TransportKind;
   /** "06:05" in the zone it leaves from; null for an untimed booking. */
   departTime: string | null;
   departAbbr: string | null;
@@ -359,14 +371,14 @@ export type RouteHopItem = RouteHopBooking | RouteHopLayover;
 export interface RouteHop {
   segmentId: string;
   mode: TravelMode;
-  fromStopId: string | null;
-  toStopId: string | null;
-  /** "Boise" (the home base) or the stop's name. */
+  fromDestinationId: string | null;
+  toDestinationId: string | null;
+  /** "Boise" (the home base) or the destination's name. */
   fromName: string;
   /** "home" for a hop going home. */
   toName: string;
   /** "Sat Jan 16", or "Sun Jan 24 → Mon Jan 25" for an overnight hop. Null for
-   * a hop with no date to borrow (a floating stop on either end). */
+   * a hop with no date to borrow (a floating destination on either end). */
   dayLabel: string | null;
   /** The segment's departAt → arriveAt ("10h 40m"), when it is timed. */
   doorToDoor: string | null;
@@ -375,9 +387,16 @@ export interface RouteHop {
   /** The card's mono meta: "Sat Jan 16 · 10h 40m door to door", or
    * "Sun Jan 24 → Mon Jan 25 · redeye". */
   meta: string | null;
+  /** #155 · Q3 B — always empty: the bookings, layovers, Edit and Add moved to
+   * the hop's Logistics group (`logisticsModel`). Kept so a parked hop and
+   * older readers type unchanged. */
   items: RouteHopItem[];
-  /** How many bookings (flights/ferries) hang on the hop. */
+  /** How many bookings (of any kind) hang on the hop. */
   bookings: number;
+  /** #155 · Q3 B — "2 flights · 1 shuttle → Logistics": the count chip that
+   * replaces the booking rows and jumps to `#hop-<segmentId>`. Null on a parked
+   * hop, which is unchanged. */
+  chip: string | null;
   /**
    * #129 · Q11 A — flights KEPT on a hop that now drives: "1 flight booking
    * parked — comes back if you fly". Such a hop is drawn (mode `drive`, no
@@ -390,7 +409,7 @@ export interface RouteHop {
 /**
  * The server-resolved routes, keyed by `from|to|routingHash` — a map, never a
  * positional array, so it crosses the RSC boundary and survives client-side
- * reordering. A key MISS (you dragged a floating stop and invented a pair the
+ * reordering. A key MISS (you dragged a floating destination and invented a pair the
  * server never routed) falls straight to the synchronous estimate: no spinner,
  * no layout jump, no blocked save.
  */
@@ -556,24 +575,24 @@ function resolveDrives(
   nav: NavMap,
   units: Units = DEFAULT_UNITS,
 ) {
-  const byFromStop = new Map<string, RouteDrive>();
-  // Keyed by the leg the drive leaves, but it carries the leg it ARRIVES in:
-  // an emptied leg in between means the crossing is not always i → i + 1.
-  const boundaryByLeg = new Map<string, { drive: RouteDrive; toLegId: string }>();
+  const byFromDestination = new Map<string, RouteDrive>();
+  // Keyed by the chapter the drive leaves, but it carries the chapter it ARRIVES in:
+  // an emptied chapter in between means the crossing is not always i → i + 1.
+  const boundaryByChapter = new Map<string, { drive: RouteDrive; toChapterId: string }>();
   const all: RouteDrive[] = [];
   const segmentOf = new Map(
-    trip.segments.map((s) => [`${s.fromStopId ?? ""}|${s.toStopId ?? ""}`, s.id] as const),
+    trip.segments.map((s) => [`${s.fromDestinationId ?? ""}|${s.toDestinationId ?? ""}`, s.id] as const),
   );
   // DRIVEN pairs only (#110 §6): a flight or a ferry has no road to route, no
   // corridor to check and no miles on the rail.
   for (const pair of drivePairs(trip)) {
-    const segmentId = segmentOf.get(`${pair.fromStopId}|${pair.toStopId}`) ?? null;
+    const segmentId = segmentOf.get(`${pair.fromDestinationId}|${pair.toDestinationId}`) ?? null;
     const drive = toDrive(pair, routes, routingHash, nav, units, segmentId);
     all.push(drive);
-    if (pair.legBoundary) boundaryByLeg.set(pair.fromLegId, { drive, toLegId: pair.toLegId });
-    else byFromStop.set(pair.fromStopId, drive);
+    if (pair.chapterBoundary) boundaryByChapter.set(pair.fromChapterId, { drive, toChapterId: pair.toChapterId });
+    else byFromDestination.set(pair.fromDestinationId, drive);
   }
-  return { byFromStop, boundaryByLeg, all };
+  return { byFromDestination, boundaryByChapter, all };
 }
 
 export function routeModel(
@@ -585,22 +604,22 @@ export function routeModel(
    * caller with no preference in hand (a test, the seed) keeps the product
    * default rather than having to state it. */
   units: Units = DEFAULT_UNITS,
-): RouteLeg[] {
-  const { byFromStop, boundaryByLeg } = resolveDrives(trip, routes, routingHash, nav, units);
-  const legs = [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder);
-  const legNumber = new Map(legs.map((l, i) => [l.id, i + 1]));
+): RouteChapter[] {
+  const { byFromDestination, boundaryByChapter } = resolveDrives(trip, routes, routingHash, nav, units);
+  const chapters = [...trip.chapters].sort((a, b) => a.sortOrder - b.sortOrder);
+  const kickers = chapterKickers(chapters);
   const hops = resolveHops(trip);
 
-  return legs.map((leg, i) => {
-    const ordered = orderedLegStops(leg.stops);
+  return chapters.map((chapter) => {
+    const ordered = orderedChapterDestinations(chapter.destinations);
 
-    const rows: RouteRow[] = ordered.map((stop) => ({
-      stop,
-      dates: isScheduled(stop) ? dateRange(stop.arriveDate, stop.departDate) : null,
-      floating: !isScheduled(stop),
-      rating: stop.rating ?? 0,
-      note: stop.notes,
-      reservations: stop.reservations.map((r) => ({
+    const rows: RouteRow[] = ordered.map((destination) => ({
+      destination,
+      dates: isScheduled(destination) ? dateRange(destination.arriveDate, destination.departDate) : null,
+      floating: !isScheduled(destination),
+      rating: destination.rating ?? 0,
+      note: destination.notes,
+      reservations: destination.reservations.map((r) => ({
         id: r.id,
         name: r.name,
         type: r.type,
@@ -609,8 +628,8 @@ export function routeModel(
         lodgingKind: r.lodgingKind,
       })),
       // #131 · Itinerary lists KNOWNS only: an idea still at status `idea` is a
-      // maybe, and maybes live on the Ideas tab (grouped under their stop).
-      ideas: stop.ideas
+      // maybe, and maybes live on the Ideas tab (grouped under their destination).
+      ideas: destination.ideas
         .filter((it) => it.status !== "idea")
         .map((it) => ({
           id: it.id,
@@ -619,28 +638,83 @@ export function routeModel(
           status: it.status,
         })),
       showIdeaDivider:
-        stop.reservations.length > 0 && stop.ideas.some((it) => it.status !== "idea"),
-      drive: byFromStop.get(stop.id) ?? null,
-      hop: hops.byFromStop.get(stop.id) ?? null,
+        destination.reservations.length > 0 && destination.ideas.some((it) => it.status !== "idea"),
+      drive: byFromDestination.get(destination.id) ?? null,
+      hop: hops.byFromDestination.get(destination.id) ?? null,
     }));
 
-    const boundary = boundaryByLeg.get(leg.id) ?? null;
-    const boundaryHop = hops.boundaryByLeg.get(leg.id) ?? null;
-    const toLegId = boundary?.toLegId ?? boundaryHop?.toLegId ?? null;
+    const boundary = boundaryByChapter.get(chapter.id) ?? null;
+    const boundaryHop = hops.boundaryByChapter.get(chapter.id) ?? null;
     return {
-      id: leg.id,
-      kicker: `Leg ${i + 1}`,
-      name: leg.title,
+      id: chapter.id,
+      kicker: kickers.get(chapter.id) ?? null,
+      name: chapter.title,
       rows,
       outboundDrive: boundary?.drive ?? null,
-      outboundSeam: toLegId
-        ? `Leg ${i + 1} → Leg ${legNumber.get(toLegId) ?? i + 2}`
-        : null,
       outboundHop: boundaryHop?.hop ?? null,
-      leadingHop: hops.leading?.legId === leg.id ? hops.leading.hop : null,
-      returnHop: hops.home?.legId === leg.id ? hops.home.hop : null,
+      leadingHop: hops.leading?.chapterId === chapter.id ? hops.leading.hop : null,
+      returnHop: hops.home?.chapterId === chapter.id ? hops.home.hop : null,
     };
   });
+}
+
+/**
+ * #155 · Q1 A — "Chapter N" for each NAMED chapter, by sortOrder; N counts the
+ * named ones only, so an unnamed chapter between two named ones never leaves a
+ * gap in the numbering. An unnamed chapter has no entry.
+ */
+export function chapterKickers(chapters: Pick<Chapter, "id" | "title" | "sortOrder">[]): Map<string, string> {
+  const out = new Map<string, string>();
+  let n = 0;
+  for (const c of [...chapters].sort((a, b) => a.sortOrder - b.sortOrder)) {
+    if (c.title) out.set(c.id, `Chapter ${++n}`);
+  }
+  return out;
+}
+
+/**
+ * #155 · Q1 A — the count kicker a trip with NO named chapter shows where a
+ * chapter header would be: "3 destinations" · "1 destination". Null as soon as
+ * one chapter is named (its header carries the screen instead).
+ */
+export function routeCountKicker(trip: Pick<Trip, "chapters">): string | null {
+  if (trip.chapters.some((c) => c.title)) return null;
+  const n = trip.chapters.reduce((a, c) => a + c.destinations.length, 0);
+  return `${n} destination${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * #155 · Q2 A — a destination card's subtitle: the trip's area ("Guanacaste"),
+ * shown only when it is set and the destination's name does not already
+ * contain it. A destination has no locality of its own, so this is the one
+ * place-above-it the trip knows.
+ */
+export function areaSubtitle(trip: Pick<Trip, "area">, destinationName: string): string | null {
+  const area = trip.area?.name?.trim();
+  if (!area) return null;
+  return destinationName.toLowerCase().includes(area.toLowerCase()) ? null : area;
+}
+
+/**
+ * #155 · Q3 B — the hop card's count chip: the non-zero kinds in the order
+ * flight · ferry · shuttle · train · car, each "1 flight" / "2 flights", joined
+ * by " · ", then " → Logistics". With no booking at all it reads "no flight
+ * added → Logistics" ("no ferry added" on a ferry hop — the empty group's word).
+ */
+export function hopChip(mode: TravelMode, bookings: Pick<Reservation, "transportKind">[]): string {
+  if (bookings.length === 0) return `${emptyHopLabel(mode)} → Logistics`;
+  const counts = new Map<TransportKind, number>();
+  for (const b of bookings) {
+    const k = effectiveTransportKind(b, mode);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const parts = TRANSPORT_KIND_ORDER.filter((k) => counts.has(k)).map((k) => countTransportKind(k, counts.get(k)!));
+  return `${parts.join(" · ")} → Logistics`;
+}
+
+/** "no flight added" · "no ferry added" — the empty Logistics row. */
+function emptyHopLabel(mode: TravelMode): string {
+  return mode === "ferry" ? "no ferry added" : "no flight added";
 }
 
 /**
@@ -649,28 +723,28 @@ export function routeModel(
  * flight is not routed), so it is read straight off the segments.
  */
 function resolveHops(trip: Trip) {
-  const stops = stopMap(trip);
-  const byFromStop = new Map<string, RouteHop>();
-  const boundaryByLeg = new Map<string, { hop: RouteHop; toLegId: string }>();
-  let leading: { legId: string; hop: RouteHop } | null = null;
-  let home: { legId: string; hop: RouteHop } | null = null;
+  const destinations = destinationMap(trip);
+  const byFromDestination = new Map<string, RouteHop>();
+  const boundaryByChapter = new Map<string, { hop: RouteHop; toChapterId: string }>();
+  let leading: { chapterId: string; hop: RouteHop } | null = null;
+  let home: { chapterId: string; hop: RouteHop } | null = null;
   for (const seg of trip.segments) {
     // A drive is drawn by `resolveDrives` — unless it carries parked flights
     // (#129), which need their row and their way back to Fly.
     if (seg.mode === "drive" && seg.reservations.length === 0) continue;
-    const from = seg.fromStopId ? stops.get(seg.fromStopId) : undefined;
-    const to = seg.toStopId ? stops.get(seg.toStopId) : undefined;
-    if (seg.fromStopId === null && to) {
-      leading = { legId: to.legId, hop: toHop(trip, seg, from, to) };
-    } else if (seg.toStopId === null && from) {
-      home = { legId: from.legId, hop: toHop(trip, seg, from, to) };
+    const from = seg.fromDestinationId ? destinations.get(seg.fromDestinationId) : undefined;
+    const to = seg.toDestinationId ? destinations.get(seg.toDestinationId) : undefined;
+    if (seg.fromDestinationId === null && to) {
+      leading = { chapterId: to.chapterId, hop: toHop(trip, seg, from, to) };
+    } else if (seg.toDestinationId === null && from) {
+      home = { chapterId: from.chapterId, hop: toHop(trip, seg, from, to) };
     } else if (from && to) {
       const hop = toHop(trip, seg, from, to);
-      if (from.legId === to.legId) byFromStop.set(from.id, hop);
-      else boundaryByLeg.set(from.legId, { hop, toLegId: to.legId });
+      if (from.chapterId === to.chapterId) byFromDestination.set(from.id, hop);
+      else boundaryByChapter.set(from.chapterId, { hop, toChapterId: to.chapterId });
     }
   }
-  return { byFromStop, boundaryByLeg, leading, home };
+  return { byFromDestination, boundaryByChapter, leading, home };
 }
 
 /** "Boise, ID" reads "Boise" on the card — the city, as the ticket names it. */
@@ -678,12 +752,12 @@ function homeName(homeBase: string | null): string {
   return homeBase ? homeBase.split(",")[0]!.trim() : "Home";
 }
 
-function toHop(trip: Trip, seg: Segment, from: Stop | undefined, to: Stop | undefined): RouteHop {
+function toHop(trip: Trip, seg: Segment, from: Destination | undefined, to: Destination | undefined): RouteHop {
   const timed = seg.departAt !== null && seg.arriveAt !== null;
   const departDay = timed ? localDate(seg.departAt!, seg.departTz) : null;
   const arriveDay = timed ? localDate(seg.arriveAt!, seg.arriveTz) : null;
   // An untimed hop borrows its day the way derive-days does: the day of the
-  // stop it arrives at, or — going home — the day it leaves.
+  // destination it arrives at, or — going home — the day it leaves.
   const borrowed = to ? to.arriveDate : (from?.departDate ?? null);
   const overnight = departDay !== null && arriveDay !== null && arriveDay > departDay;
   const dayLabel = departDay
@@ -695,38 +769,15 @@ function toHop(trip: Trip, seg: Segment, from: Stop | undefined, to: Stop | unde
       : null;
 
   const parked = seg.mode === "drive" ? seg.reservations.length : 0;
-  const bookings = [...(parked > 0 ? [] : seg.reservations)].sort(
-    (a, b) => (a.startsAt ? Date.parse(a.startsAt) : Infinity) - (b.startsAt ? Date.parse(b.startsAt) : Infinity),
-  );
-  const items: RouteHopItem[] = [];
-  bookings.forEach((r, i) => {
-    const prev = bookings[i - 1];
-    if (prev?.endsAt && r.startsAt) {
-      const gap = minutesBetween(prev.endsAt, r.startsAt);
-      const at = /→\s*([A-Za-z]{3})$/.exec(prev.name)?.[1]?.toUpperCase();
-      if (gap > 0) {
-        items.push({ kind: "layover", label: `${formatDriveTime(gap)} layover${at ? ` at ${at}` : ""}` });
-      }
-    }
-    const dep = r.startsAt && r.startsTz ? instantToLocal(r.startsAt, r.startsTz) : null;
-    const arr = r.endsAt && r.endsTz ? instantToLocal(r.endsAt, r.endsTz) : null;
-    items.push({
-      kind: "booking",
-      id: r.id,
-      name: r.name,
-      departTime: dep?.hhmm ?? null,
-      departAbbr: dep?.abbr ?? null,
-      arriveTime: arr?.hhmm ?? null,
-      arriveAbbr: arr?.abbr ?? null,
-      duration: r.startsAt && r.endsAt ? formatDriveTime(minutesBetween(r.startsAt, r.endsAt)) : null,
-      reservation: r,
-    });
-  });
+  const bookings = parked > 0 ? [] : seg.reservations;
+  // #155 · Q4 A (vet MED) — only flights and ferries make a connection: a
+  // shuttle beside one flight is not "door to door".
+  const clockBookings = bookings.filter((r) => countsTowardClock(effectiveTransportKind(r, seg.mode)));
 
   // Door to door is worth saying only when it is more than one booking's own
   // time — a connection. A single ferry already carries its 45m.
   const doorToDoor =
-    timed && bookings.length > 1 ? formatDriveTime(minutesBetween(seg.departAt!, seg.arriveAt!)) : null;
+    timed && clockBookings.length > 1 ? formatDriveTime(minutesBetween(seg.departAt!, seg.arriveAt!)) : null;
   const meta = dayLabel
     ? overnight
       ? `${dayLabel} · redeye`
@@ -738,17 +789,147 @@ function toHop(trip: Trip, seg: Segment, from: Stop | undefined, to: Stop | unde
   return {
     segmentId: seg.id,
     mode: seg.mode,
-    fromStopId: seg.fromStopId,
-    toStopId: seg.toStopId,
+    fromDestinationId: seg.fromDestinationId,
+    toDestinationId: seg.toDestinationId,
     fromName: from ? from.place.name : homeName(trip.homeBase),
     toName: to ? to.place.name : "home",
     dayLabel,
     doorToDoor,
     overnight,
     meta,
-    items,
+    // #155 · Q3 B — the rows moved to the hop's Logistics group.
+    items: [],
     bookings: bookings.length,
     parked,
+    chip: parked > 0 ? null : hopChip(seg.mode, bookings),
+  };
+}
+
+// ── Logistics (#155 · Q3 B · Q4 A) ─────────────────────────────────────────
+
+/** One booking in a Logistics group, in local time with its zones. */
+export interface LogisticsBooking extends RouteHopBooking {
+  /** A shuttle / train / car — logistics AROUND the hop, drawn indented. */
+  aside: boolean;
+}
+/** The ghost row of a group with no flight (or ferry) booked: "no flight
+ * added", with the segment's own clock when it has one. */
+export interface LogisticsEmpty {
+  kind: "empty";
+  label: string;
+  departTime: string | null;
+  departAbbr: string | null;
+  arriveTime: string | null;
+  arriveAbbr: string | null;
+}
+export type LogisticsItem = LogisticsBooking | RouteHopLayover | LogisticsEmpty;
+
+export interface LogisticsGroup {
+  segmentId: string;
+  mode: "fly" | "ferry";
+  fromDestinationId: string | null;
+  toDestinationId: string | null;
+  /** "Sat Jan 16" · "Sun Jan 24 → Mon Jan 25" — the hop's own day label. */
+  dayLabel: string | null;
+  fromName: string;
+  toName: string;
+  /** "10h 40m door to door" · "redeye" · null — the hop's meta, without its day. */
+  meta: string | null;
+  /** The hop goes HOME — its shuttles sort before the first flight. */
+  home: boolean;
+  items: LogisticsItem[];
+}
+export interface Logistics {
+  groups: LogisticsGroup[];
+}
+
+/**
+ * The Logistics section (#155 · Q3 B): one group per fly or ferry segment,
+ * booked or not, in segment order. Null when the trip has none — a drive-only
+ * trip renders no section and no kicker. Derived here, beside the hop builder,
+ * so the web and the phone draw the same groups from one function.
+ *
+ * Inside a group: flights and ferries by `startsAt`, with a layover line
+ * between consecutive ones only. Shuttle, train and car sort AFTER the last
+ * flight on an outbound hop and BEFORE the first one on a hop going home. A
+ * group with no flight (or ferry) carries one ghost row in the flights' place.
+ */
+export function logisticsModel(trip: Trip): Logistics | null {
+  const destinations = destinationMap(trip);
+  const groups: LogisticsGroup[] = [...trip.segments]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .filter((seg): seg is Segment & { mode: "fly" | "ferry" } => seg.mode !== "drive")
+    .map((seg) => {
+      const from = seg.fromDestinationId ? destinations.get(seg.fromDestinationId) : undefined;
+      const to = seg.toDestinationId ? destinations.get(seg.toDestinationId) : undefined;
+      const hop = toHop(trip, seg, from, to);
+      const home = seg.toDestinationId === null;
+      const byStart = (a: Reservation, b: Reservation) =>
+        (a.startsAt ? Date.parse(a.startsAt) : Infinity) - (b.startsAt ? Date.parse(b.startsAt) : Infinity);
+      const clock = seg.reservations
+        .filter((r) => countsTowardClock(effectiveTransportKind(r, seg.mode)))
+        .sort(byStart);
+      const asides = seg.reservations
+        .filter((r) => !countsTowardClock(effectiveTransportKind(r, seg.mode)))
+        .sort(byStart);
+
+      const flights: LogisticsItem[] = [];
+      clock.forEach((r, i) => {
+        const prev = clock[i - 1];
+        if (prev?.endsAt && r.startsAt) {
+          const gap = minutesBetween(prev.endsAt, r.startsAt);
+          const at = /→\s*([A-Za-z]{3})$/.exec(prev.name)?.[1]?.toUpperCase();
+          if (gap > 0) {
+            flights.push({ kind: "layover", label: `${formatDriveTime(gap)} layover${at ? ` at ${at}` : ""}` });
+          }
+        }
+        flights.push(logisticsBooking(r, seg.mode, false));
+      });
+      if (clock.length === 0) {
+        const dep = seg.departAt && seg.departTz ? instantToLocal(seg.departAt, seg.departTz) : null;
+        const arr = seg.arriveAt && seg.arriveTz ? instantToLocal(seg.arriveAt, seg.arriveTz) : null;
+        flights.push({
+          kind: "empty",
+          label: emptyHopLabel(seg.mode),
+          departTime: dep?.hhmm ?? null,
+          departAbbr: dep?.abbr ?? null,
+          arriveTime: arr?.hhmm ?? null,
+          arriveAbbr: arr?.abbr ?? null,
+        });
+      }
+      const around = asides.map((r) => logisticsBooking(r, seg.mode, true));
+
+      return {
+        segmentId: seg.id,
+        mode: seg.mode,
+        fromDestinationId: seg.fromDestinationId,
+        toDestinationId: seg.toDestinationId,
+        dayLabel: hop.dayLabel,
+        fromName: hop.fromName,
+        toName: hop.toName,
+        meta: hop.overnight ? "redeye" : hop.doorToDoor ? `${hop.doorToDoor} door to door` : null,
+        home,
+        items: home ? [...around, ...flights] : [...flights, ...around],
+      };
+    });
+  return groups.length > 0 ? { groups } : null;
+}
+
+function logisticsBooking(r: Reservation, mode: TravelMode, aside: boolean): LogisticsBooking {
+  const dep = r.startsAt && r.startsTz ? instantToLocal(r.startsAt, r.startsTz) : null;
+  const arr = r.endsAt && r.endsTz ? instantToLocal(r.endsAt, r.endsTz) : null;
+  return {
+    kind: "booking",
+    id: r.id,
+    name: r.name,
+    transportKind: effectiveTransportKind(r, mode),
+    aside,
+    departTime: dep?.hhmm ?? null,
+    departAbbr: dep?.abbr ?? null,
+    arriveTime: arr?.hhmm ?? null,
+    arriveAbbr: arr?.abbr ?? null,
+    duration: r.startsAt && r.endsAt ? formatDriveTime(minutesBetween(r.startsAt, r.endsAt)) : null,
+    reservation: r,
   };
 }
 
@@ -766,26 +947,26 @@ export interface RouteSummary {
    * a permanent "0 restrictions" would train the eye to skip the slot. */
   restrictionCount: number;
   totalCost: number;
-  stops: number;
+  destinations: number;
   scheduled: number;
   floating: number;
-  /** How many stops have no coordinates — no pin, no connector, no HERE route
+  /** How many destinations have no coordinates — no pin, no connector, no HERE route
    * (#60 Q3 → A). Rendered only when > 0, the same rule `restrictionCount`
    * already follows: a permanent "0 without a place" would train the eye to
    * skip the slot. */
   unmapped: number;
   /**
-   * The coordless stops themselves, in route order. The rail's Locate needs
+   * The coordless destinations themselves, in route order. The rail's Locate needs
    * both halves the count cannot give it — the ids `POST /api/places/locate`
    * addresses, and the NAMES `locateToastMessage` reports back for the rows
    * Google could not place. /map gets these from its own `unmappedVisible`;
    * the planner has no map model, so they come from here.
    */
-  unmappedStops: { id: string; name: string }[];
+  unmappedDestinations: { id: string; name: string }[];
   days: number;
   openCount: number;
   gapCount: number;
-  legs: { id: string; name: string; stops: number; cost: number }[];
+  chapters: { id: string; name: string; destinations: number; cost: number }[];
 }
 
 export function routeSummary(
@@ -793,21 +974,21 @@ export function routeSummary(
   routes: RouteMap = {},
   routingHash: string = NO_ROUTING_HASH,
 ): RouteSummary {
-  const stops = allStops(trip);
-  const stopCost = (s: Stop) => s.reservations.reduce((x, r) => x + (r.cost ?? 0), 0);
-  const { days } = deriveDays(trip, stops, trip.segments);
+  const destinations = allDestinations(trip);
+  const destinationCost = (s: Destination) => s.reservations.reduce((x, r) => x + (r.cost ?? 0), 0);
+  const { days } = deriveDays(trip, destinations, trip.segments);
   const openCount = days.filter((d) => d.kind === "empty").length;
   let gapCount = 0;
   days.forEach((d, i) => {
     if (d.kind === "empty" && (i === 0 || days[i - 1]!.kind !== "empty")) gapCount++;
   });
 
-  // The SAME drives the connectors render — including the leg-boundary drive
+  // The SAME drives the connectors render — including the chapter-boundary drive
   // and the floating one. The rail used to sum trip-wide scheduled pairs while
-  // the screen drew per-leg ones, so the two had never agreed (G1/G2).
+  // the screen drew per-chapter ones, so the two had never agreed (G1/G2).
   // The rail sums miles and minutes; the corridor verdict has no total, so the
   // summary never needs (or pays for) a NavMap.
-  const unmappedStops = stops
+  const unmappedDestinations = destinations
     .filter((s) => !hasCoords(s.place))
     .map((s) => ({ id: s.id, name: s.place.name }));
 
@@ -819,71 +1000,74 @@ export function routeSummary(
     driveMiles: driveMilesTotal,
     driveTime: driveMilesTotal ? formatDriveTime(driveMins) : "—",
     restrictionCount: all.reduce((a, d) => a + d.notices.length, 0),
-    totalCost: stops.reduce((a, s) => a + stopCost(s), 0),
-    stops: stops.length,
-    scheduled: stops.filter(isScheduled).length,
-    floating: stops.filter((s) => !isScheduled(s)).length,
-    unmapped: unmappedStops.length,
-    unmappedStops,
+    totalCost: destinations.reduce((a, s) => a + destinationCost(s), 0),
+    destinations: destinations.length,
+    scheduled: destinations.filter(isScheduled).length,
+    floating: destinations.filter((s) => !isScheduled(s)).length,
+    unmapped: unmappedDestinations.length,
+    unmappedDestinations,
     days: days.length,
     openCount,
     gapCount,
-    legs: [...trip.legs]
+    // #155 · Q1 A — the rail's Chapters block names NAMED chapters only (and
+    // renders not at all when there is none).
+    chapters: [...trip.chapters]
       .sort((a, b) => a.sortOrder - b.sortOrder)
+      .filter((l): l is typeof l & { title: string } => l.title !== null)
       .map((l) => ({
         id: l.id,
         name: l.title,
-        stops: l.stops.length,
-        cost: l.stops.reduce((a, s) => a + stopCost(s), 0),
+        destinations: l.destinations.length,
+        cost: l.destinations.reduce((a, s) => a + destinationCost(s), 0),
       })),
   };
 }
 
 // ── mutations (pure; return a new Trip) ────────────────────────────────────
-function mapLegs(trip: Trip, fn: (l: Leg) => Leg): Trip {
-  return { ...trip, legs: trip.legs.map(fn) };
+function mapChapters(trip: Trip, fn: (l: Chapter) => Chapter): Trip {
+  return { ...trip, chapters: trip.chapters.map(fn) };
 }
-export function updateStop(trip: Trip, stopId: string, patch: (s: Stop) => Stop): Trip {
-  return mapLegs(trip, (l) => ({
+export function updateDestination(trip: Trip, destinationId: string, patch: (s: Destination) => Destination): Trip {
+  return mapChapters(trip, (l) => ({
     ...l,
-    stops: l.stops.map((s) => (s.id === stopId ? patch(s) : s)),
+    destinations: l.destinations.map((s) => (s.id === destinationId ? patch(s) : s)),
   }));
 }
-export function setStopRating(trip: Trip, stopId: string, rating: number): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, rating: rating === 0 ? null : rating }));
+export function setDestinationRating(trip: Trip, destinationId: string, rating: number): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, rating: rating === 0 ? null : rating }));
 }
-export function setStopNote(trip: Trip, stopId: string, note: string): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, notes: note }));
+export function setDestinationNote(trip: Trip, destinationId: string, note: string): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, notes: note }));
 }
-export function setReservationRating(trip: Trip, stopId: string, resId: string, rating: number): Trip {
-  return updateStop(trip, stopId, (s) => ({
+export function setReservationRating(trip: Trip, destinationId: string, resId: string, rating: number): Trip {
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     reservations: s.reservations.map((r) =>
       r.id === resId ? { ...r, rating: r.rating === rating ? null : rating || null } : r,
     ),
   }));
 }
-export function setReservationNote(trip: Trip, stopId: string, resId: string, notes: string): Trip {
-  return updateStop(trip, stopId, (s) => ({
+export function setReservationNote(trip: Trip, destinationId: string, resId: string, notes: string): Trip {
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     reservations: s.reservations.map((r) => (r.id === resId ? { ...r, notes } : r)),
   }));
 }
 /**
- * Splice the reservation `POST /api/reservations` just created onto the stop.
+ * Splice the reservation `POST /api/reservations` just created onto the destination.
  *
  * A create is the one write with nothing to be optimistic about — only the
  * server can mint the id — so this takes the row the 201 handed back rather
  * than inventing one. It is also what an UNDONE delete calls: the row comes
  * back with a new id, which is why the toast re-POSTs instead of resurrecting.
  */
-export function appendReservation(trip: Trip, stopId: string, r: Reservation): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, reservations: [...s.reservations, r] }));
+export function appendReservation(trip: Trip, destinationId: string, r: Reservation): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, reservations: [...s.reservations, r] }));
 }
 
 /** The leaf delete: optimistic, and reversed by re-appending the 201's row. */
-export function removeReservation(trip: Trip, stopId: string, resId: string): Trip {
-  return updateStop(trip, stopId, (s) => ({
+export function removeReservation(trip: Trip, destinationId: string, resId: string): Trip {
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     reservations: s.reservations.filter((r) => r.id !== resId),
   }));
@@ -896,18 +1080,18 @@ export function removeReservation(trip: Trip, stopId: string, resId: string): Tr
  */
 export function setReservationFields(
   trip: Trip,
-  stopId: string,
+  destinationId: string,
   resId: string,
   patch: ReservationPatchInput,
 ): Trip {
-  return updateStop(trip, stopId, (s) => ({
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     reservations: s.reservations.map((r) => (r.id === resId ? { ...r, ...patch } : r)),
   }));
 }
-export function cycleIdeaStatus(trip: Trip, stopId: string, ideaId: string): Trip {
+export function cycleIdeaStatus(trip: Trip, destinationId: string, ideaId: string): Trip {
   const order: Idea["status"][] = ["idea", "planned", "done"];
-  return updateStop(trip, stopId, (s) => ({
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.map((it) =>
       it.id === ideaId
@@ -916,16 +1100,16 @@ export function cycleIdeaStatus(trip: Trip, stopId: string, ideaId: string): Tri
     ),
   }));
 }
-export function setIdeaRating(trip: Trip, stopId: string, ideaId: string, rating: number): Trip {
-  return updateStop(trip, stopId, (s) => ({
+export function setIdeaRating(trip: Trip, destinationId: string, ideaId: string, rating: number): Trip {
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.map((it) =>
       it.id === ideaId ? { ...it, rating: it.rating === rating ? null : rating || null } : it,
     ),
   }));
 }
-export function setIdeaNote(trip: Trip, stopId: string, ideaId: string, notes: string): Trip {
-  return updateStop(trip, stopId, (s) => ({
+export function setIdeaNote(trip: Trip, destinationId: string, ideaId: string, notes: string): Trip {
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.map((it) => (it.id === ideaId ? { ...it, notes } : it)),
   }));
@@ -938,24 +1122,24 @@ export function setIdeaNote(trip: Trip, stopId: string, ideaId: string, notes: s
  */
 export function setIdeaPlace(
   trip: Trip,
-  stopId: string,
+  destinationId: string,
   ideaId: string,
   place: Place | null,
 ): Trip {
-  return updateStop(trip, stopId, (s) => ({
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.map((it) => (it.id === ideaId ? { ...it, place } : it)),
   }));
 }
 
-/** Splice the idea `POST /api/ideas` just created onto the stop. */
-export function appendIdea(trip: Trip, stopId: string, i: Idea): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, ideas: [...s.ideas, i] }));
+/** Splice the idea `POST /api/ideas` just created onto the destination. */
+export function appendIdea(trip: Trip, destinationId: string, i: Idea): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, ideas: [...s.ideas, i] }));
 }
 
 /** The other leaf delete — same shape, same undo. */
-export function removeIdea(trip: Trip, stopId: string, ideaId: string): Trip {
-  return updateStop(trip, stopId, (s) => ({
+export function removeIdea(trip: Trip, destinationId: string, ideaId: string): Trip {
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.filter((it) => it.id !== ideaId),
   }));
@@ -971,11 +1155,11 @@ export function removeIdea(trip: Trip, stopId: string, ideaId: string): Trip {
  */
 export function applyPromotion(
   trip: Trip,
-  stopId: string,
+  destinationId: string,
   ideaId: string,
   r: Reservation,
 ): Trip {
-  return updateStop(trip, stopId, (s) => ({
+  return updateDestination(trip, destinationId, (s) => ({
     ...s,
     ideas: s.ideas.filter((it) => it.id !== ideaId),
     reservations: [...s.reservations, r],
@@ -1002,27 +1186,27 @@ function longestOpenRun(days: { kind: DayKind }[]): [number, number] {
 }
 
 /**
- * Assign dates to a floating stop.
+ * Assign dates to a floating destination.
  *
  * `gap` is the open span it was DROPPED on — the same `TimelineGap` the gantt's
  * `OpenLane` rendered, so `startCol` is a 1-based column into the very day list
- * `deriveDays` builds here. The stop takes the gap's first date and
+ * `deriveDays` builds here. The destination takes the gap's first date and
  * `min(nights, gap.span)` days of it; a 1-day gap therefore yields
- * `arrive === depart`, a legal single-day stop.
+ * `arrive === depart`, a legal single-day destination.
  *
- * `gap === null` — the stop sheet's "Schedule" button, which has no drop target
+ * `gap === null` — the destination sheet's "Schedule" button, which has no drop target
  * — keeps the original behaviour: the LARGEST open run. It is the default, so
  * every existing two-argument call site is unchanged.
  */
 export function scheduleFloating(
   trip: Trip,
-  stopId: string,
+  destinationId: string,
   gap: TimelineGap | null = null,
   nights = 3,
 ): Trip {
   const dates = spanDates(trip, gap, nights);
   if (!dates) return trip;
-  return withReconciledSegments(updateStop(trip, stopId, (s) => ({ ...s, ...dates })));
+  return withReconciledSegments(updateDestination(trip, destinationId, (s) => ({ ...s, ...dates })));
 }
 
 /** The dates a drop lands on, or null when there is nothing to land on. */
@@ -1033,11 +1217,11 @@ export interface PlannedDates {
 
 /**
  * The ONE date rule both drops share. `gap` is the open span that was dropped
- * on; `null` is the stop sheet's "Schedule" button, which has no drop target
+ * on; `null` is the destination sheet's "Schedule" button, which has no drop target
  * and falls back to the trip's longest open run.
  */
 function spanDates(trip: Trip, gap: TimelineGap | null, nights: number): PlannedDates | null {
-  const { days } = deriveDays(trip, allStops(trip), trip.segments);
+  const { days } = deriveDays(trip, allDestinations(trip), trip.segments);
 
   let start: number;
   let runLen: number;
@@ -1059,12 +1243,12 @@ function spanDates(trip: Trip, gap: TimelineGap | null, nights: number): Planned
 }
 
 /**
- * A stay-idea dropped on an open span (#80 Q3 → A): the dates the stop that
+ * A stay-idea dropped on an open span (#80 Q3 → A): the dates the destination that
  * drop CREATES is born with.
  *
  * It is `scheduleFloating`'s rule, not a second one — both call `spanDates`, so
  * a drop on the Oct 18–24 span yields Oct 18 – 20 for an idea exactly as it
- * does for a floating stop. Q3's answer is "identical to the floating-stop
+ * does for a floating destination. Q3's answer is "identical to the floating-destination
  * drop"; this is what identical means.
  */
 export function planIdeaOnGap(
@@ -1075,20 +1259,20 @@ export function planIdeaOnGap(
   return spanDates(trip, gap, nights);
 }
 
-/** Reorder a floating stop within its leg (dragged before target). */
+/** Reorder a floating destination within its chapter (dragged before target). */
 export function reorderFloating(
   trip: Trip,
-  legId: string,
+  chapterId: string,
   draggedId: string,
   targetId: string,
 ): Trip {
   if (draggedId === targetId) return trip;
-  return withReconciledSegments(mapLegs(trip, (l) => {
-    if (l.id !== legId) return l;
-    const scheduled = l.stops
+  return withReconciledSegments(mapChapters(trip, (l) => {
+    if (l.id !== chapterId) return l;
+    const scheduled = l.destinations
       .filter(isScheduled)
       .sort((a, b) => a.arriveDate!.localeCompare(b.arriveDate!));
-    const floats = l.stops
+    const floats = l.destinations
       .filter((s) => !isScheduled(s))
       .sort((a, b) => a.sortOrder - b.sortOrder);
     const from = floats.findIndex((s) => s.id === draggedId);
@@ -1099,13 +1283,13 @@ export function reorderFloating(
     const orderedIds = [...scheduled, ...floats].map((s) => s.id);
     return {
       ...l,
-      stops: l.stops.map((s) => ({ ...s, sortOrder: orderedIds.indexOf(s.id) })),
+      destinations: l.destinations.map((s) => ({ ...s, sortOrder: orderedIds.indexOf(s.id) })),
     };
   }));
 }
 
 
-// ── leg + stop structure (pure; return a new Trip) ─────────────────────────
+// ── chapter + destination structure (pure; return a new Trip) ─────────────────────────
 //
 // Every helper here that can change the ROUTE SEQUENCE also re-runs
 // `reconcileSegments` (#110 §6) — the same function the server persists in the
@@ -1118,41 +1302,41 @@ export function reorderFloating(
 // optimistically, and its caller keeps the pre-change trip as the snapshot a
 // failed write rolls back to.
 
-/** Splice the leg `POST /api/legs` just created onto the end of the trip. */
-export function appendLeg(trip: Trip, leg: Leg): Trip {
-  return { ...trip, legs: [...trip.legs, leg] };
+/** Splice the chapter `POST /api/chapters` just created onto the end of the trip. */
+export function appendChapter(trip: Trip, chapter: Chapter): Trip {
+  return { ...trip, chapters: [...trip.chapters, chapter] };
 }
 
-/** Splice the stop `POST /api/stops` just created into the leg it belongs to. */
-export function appendStop(trip: Trip, stop: Stop): Trip {
+/** Splice the destination `POST /api/destinations` just created into the chapter it belongs to. */
+export function appendDestination(trip: Trip, destination: Destination): Trip {
   return withReconciledSegments(
-    mapLegs(trip, (l) => (l.id === stop.legId ? { ...l, stops: [...l.stops, stop] } : l)),
+    mapChapters(trip, (l) => (l.id === destination.chapterId ? { ...l, destinations: [...l.destinations, destination] } : l)),
   );
 }
 
-/** The leg header's inline rename. */
-export function renameLeg(trip: Trip, legId: string, title: string): Trip {
-  return mapLegs(trip, (l) => (l.id === legId ? { ...l, title } : l));
+/** The chapter header's inline rename. */
+export function renameChapter(trip: Trip, chapterId: string, title: string): Trip {
+  return mapChapters(trip, (l) => (l.id === chapterId ? { ...l, title } : l));
 }
 
 /**
- * The stop row's inline rename. It edits the NAME only — the coordinates and
+ * The destination row's inline rename. It edits the NAME only — the coordinates and
  * the Google id are what the place picker owns (#60), not a text field.
  */
-export function renameStop(trip: Trip, stopId: string, name: string): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, place: { ...s.place, name } }));
+export function renameDestination(trip: Trip, destinationId: string, name: string): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, place: { ...s.place, name } }));
 }
 
 /**
- * The stop directly ABOVE this one in the route list — the picker's search
- * bias. It reads the same `orderedLegStops` sequence the route lens renders, so
- * "the stop above" means the row you can see above, not a sortOrder nobody
- * draws. Null for the first stop of a leg, where home base takes over.
+ * The destination directly ABOVE this one in the route list — the picker's search
+ * bias. It reads the same `orderedChapterDestinations` sequence the route lens renders, so
+ * "the destination above" means the row you can see above, not a sortOrder nobody
+ * draws. Null for the first destination of a chapter, where home base takes over.
  */
-export function stopAbove(trip: Trip, stopId: string): Stop | null {
-  for (const leg of trip.legs) {
-    const ordered = orderedLegStops(leg.stops);
-    const i = ordered.findIndex((s) => s.id === stopId);
+export function destinationAbove(trip: Trip, destinationId: string): Destination | null {
+  for (const chapter of trip.chapters) {
+    const ordered = orderedChapterDestinations(chapter.destinations);
+    const i = ordered.findIndex((s) => s.id === destinationId);
     if (i > 0) return ordered[i - 1]!;
     if (i === 0) return null;
   }
@@ -1165,81 +1349,81 @@ export function stopAbove(trip: Trip, stopId: string): Stop | null {
  * it, so re-picking a coordless name honestly clears the old coordinates
  * instead of leaving a pin at the last spot with the new label.
  */
-export function setStopPlace(trip: Trip, stopId: string, place: Place): Trip {
-  return updateStop(trip, stopId, (s) => ({ ...s, place }));
+export function setDestinationPlace(trip: Trip, destinationId: string, place: Place): Trip {
+  return updateDestination(trip, destinationId, (s) => ({ ...s, place }));
 }
 
-/** Delete a leg. Its stops go with it, the way the FK cascade does server-side. */
-export function removeLeg(trip: Trip, legId: string): Trip {
-  return withReconciledSegments({ ...trip, legs: trip.legs.filter((l) => l.id !== legId) });
+/** Delete a chapter. Its destinations go with it, the way the FK cascade does server-side. */
+export function removeChapter(trip: Trip, chapterId: string): Trip {
+  return withReconciledSegments({ ...trip, chapters: trip.chapters.filter((l) => l.id !== chapterId) });
 }
 
-/** Delete a stop. Its reservations and ideas go with it. */
-export function removeStop(trip: Trip, stopId: string): Trip {
+/** Delete a destination. Its reservations and ideas go with it. */
+export function removeDestination(trip: Trip, destinationId: string): Trip {
   return withReconciledSegments(
-    mapLegs(trip, (l) => ({ ...l, stops: l.stops.filter((s) => s.id !== stopId) })),
+    mapChapters(trip, (l) => ({ ...l, destinations: l.destinations.filter((s) => s.id !== destinationId) })),
   );
 }
 
-/** The leg ids in render order — the whole new order `reorder` POSTs. */
-export function legOrder(trip: Trip): string[] {
-  return [...trip.legs].sort((a, b) => a.sortOrder - b.sortOrder).map((l) => l.id);
+/** The chapter ids in render order — the whole new order `reorder` POSTs. */
+export function chapterOrder(trip: Trip): string[] {
+  return [...trip.chapters].sort((a, b) => a.sortOrder - b.sortOrder).map((l) => l.id);
 }
 
-/** Is there a leg on that side to swap with? (The menu item is disabled if not.) */
-export function canMoveLeg(trip: Trip, legId: string, delta: -1 | 1): boolean {
-  const order = legOrder(trip);
-  const from = order.indexOf(legId);
+/** Is there a chapter on that side to swap with? (The menu item is disabled if not.) */
+export function canMoveChapter(trip: Trip, chapterId: string, delta: -1 | 1): boolean {
+  const order = chapterOrder(trip);
+  const from = order.indexOf(chapterId);
   return from >= 0 && from + delta >= 0 && from + delta < order.length;
 }
 
 /**
- * "Move leg up/down". Every leg is renumbered from its new position, so a
- * half-applied swap can never leave two legs sharing a sortOrder — the same
+ * "Move chapter up/down". Every chapter is renumbered from its new position, so a
+ * half-applied swap can never leave two chapters sharing a sortOrder — the same
  * shape the server's one-transaction renumber uses.
  */
-export function moveLeg(trip: Trip, legId: string, delta: -1 | 1): Trip {
-  if (!canMoveLeg(trip, legId, delta)) return trip;
-  const order = legOrder(trip);
-  const from = order.indexOf(legId);
+export function moveChapter(trip: Trip, chapterId: string, delta: -1 | 1): Trip {
+  if (!canMoveChapter(trip, chapterId, delta)) return trip;
+  const order = chapterOrder(trip);
+  const from = order.indexOf(chapterId);
   const [moved] = order.splice(from, 1);
   order.splice(from + delta, 0, moved!);
   return withReconciledSegments({
     ...trip,
-    legs: trip.legs.map((l) => ({ ...l, sortOrder: order.indexOf(l.id) })),
+    chapters: trip.chapters.map((l) => ({ ...l, sortOrder: order.indexOf(l.id) })),
   });
 }
 
 /**
- * "Move to leg". The stop is re-parented and appended to the end of the
- * destination — the same "the server appends" rule a create follows, so the
+ * "Move to chapter". The destination is re-parented and appended to the end of the
+ * area — the same "the server appends" rule a create follows, so the
  * optimistic tree and the row the PATCH writes agree.
  */
-export function moveStopToLeg(trip: Trip, stopId: string, legId: string): Trip {
-  const moving = stopMap(trip).get(stopId);
-  if (!moving || moving.legId === legId) return trip;
-  const highest = trip.legs
-    .find((l) => l.id === legId)
-    ?.stops.reduce((n, s) => Math.max(n, s.sortOrder), -1);
+export function moveDestinationToChapter(trip: Trip, destinationId: string, chapterId: string): Trip {
+  const moving = destinationMap(trip).get(destinationId);
+  if (!moving || moving.chapterId === chapterId) return trip;
+  const highest = trip.chapters
+    .find((l) => l.id === chapterId)
+    ?.destinations.reduce((n, s) => Math.max(n, s.sortOrder), -1);
   if (highest === undefined) return trip;
-  const moved: Stop = { ...moving, legId, sortOrder: highest + 1 };
+  const moved: Destination = { ...moving, chapterId, sortOrder: highest + 1 };
   return withReconciledSegments(
-    mapLegs(trip, (l) => {
-      if (l.id === moving.legId) return { ...l, stops: l.stops.filter((s) => s.id !== stopId) };
-      if (l.id === legId) return { ...l, stops: [...l.stops, moved] };
+    mapChapters(trip, (l) => {
+      if (l.id === moving.chapterId) return { ...l, destinations: l.destinations.filter((s) => s.id !== destinationId) };
+      if (l.id === chapterId) return { ...l, destinations: [...l.destinations, moved] };
       return l;
     }),
   );
 }
 
-/** The stop-dates dialog, and "Unschedule" — which is both dates going null. */
-export function setStopDates(
+/** The destination-dates dialog, and "Unschedule" — which is both dates going null. */
+export function setDestinationDates(
   trip: Trip,
-  stopId: string,
+  destinationId: string,
   arriveDate: IsoDate | null,
   departDate: IsoDate | null,
 ): Trip {
   return withReconciledSegments(
-    updateStop(trip, stopId, (s) => ({ ...s, arriveDate, departDate })),
+    updateDestination(trip, destinationId, (s) => ({ ...s, arriveDate, departDate })),
   );
 }

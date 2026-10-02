@@ -24,7 +24,7 @@ import { Button, Chip, Kicker, RangePicker } from "../../../../src/ui";
 
 /**
  * New trip (#103 · Q12 C) — the web's three questions in the same order,
- * stacked. With `?edit=<id>` it is "Trip settings" (#143 · Q8 A): Destination,
+ * stacked. With `?edit=<id>` it is "Trip settings" (#143 · Q8 A): Area,
  * Dates and Starts from above the three blocks, prefilled, and Save PATCHes
  * only what changed (Greece reads "Fly & stay", Q2 A). Copy and rules are
  * core's (`TRIP_MODE_CHOICES`, `tripDraftInput`, `phoneTripSettingsPatch`), so
@@ -170,7 +170,7 @@ function NewTrip() {
   const set = (patch: Partial<TripDraft>) => setDraft((d) => ({ ...d, ...patch }));
   const input = tripDraftInput(draft);
   const days = tripDayCount(draft.startDate, draft.endDate);
-  const destRows = usePlaceResults(destQuery, draft.destination?.name);
+  const destRows = usePlaceResults(destQuery, draft.area?.name);
   const homeRows = usePlaceResults(homeQuery, draft.homeBasePlace?.name);
   const home = draft.homeBasePlace?.name ?? household;
 
@@ -204,12 +204,12 @@ function NewTrip() {
         <Kicker color={C.accent}>New trip</Kicker>
         <Text style={styles.ph1}>Where to?</Text>
 
-        <Label>Destination</Label>
+        {/* #155 · Q2 A — no noun: the "Where to?" heading asks. */}
         <Input
           value={destQuery}
           onChangeText={(q) => {
             setDestQuery(q);
-            if (draft.destination && q !== draft.destination.name) set({ destination: null });
+            if (draft.area && q !== draft.area.name) set({ area: null });
           }}
           placeholder="Bellingham, WA"
           autoCapitalize="words"
@@ -218,7 +218,7 @@ function NewTrip() {
           rows={destRows}
           onPick={(r) => {
             const picked = pickedFromSummary(r);
-            set({ destination: picked });
+            set({ area: picked });
             setDestQuery(picked.name);
           }}
         />
@@ -279,7 +279,7 @@ function NewTrip() {
             <Input
               value={draft.title}
               onChangeText={(title) => set({ title })}
-              placeholder={draft.destination?.name ?? "Redwoods Run"}
+              placeholder={draft.area?.name ?? "Redwoods Run"}
               autoCapitalize="words"
             />
 
@@ -299,7 +299,7 @@ function NewTrip() {
 }
 
 /**
- * "Trip settings" (#103 · #143 · Q8 A) — Destination · Dates · Starts from,
+ * "Trip settings" (#103 · #143 · Q8 A) — Area · Dates · Starts from,
  * then the three defaults, prefilled; Save sends only what changed (core's
  * `phoneTripSettingsPatch`). Status, rating and note stay on the web.
  */
@@ -313,14 +313,14 @@ function TripSettings({ id }: { id: string }) {
   const [changingHome, setChangingHome] = useState(false);
   const [saving, setSaving] = useState(false);
   const [household, setHousehold] = useState<string | null>(null);
-  const destRows = usePlaceResults(destQuery, draft?.destination?.name);
+  const destRows = usePlaceResults(destQuery, draft?.area?.name);
   const homeRows = usePlaceResults(homeQuery, draft?.homeBasePlace?.name);
 
   useEffect(() => {
     if (!trip || draft) return;
     const d = phoneTripSettingsDraft(trip);
     setDraft(d);
-    setDestQuery(d.destination?.name ?? "");
+    setDestQuery(d.area?.name ?? "");
   }, [trip, draft]);
 
   // The household default's name — what "Use household default" falls back to.
@@ -352,9 +352,9 @@ function TripSettings({ id }: { id: string }) {
       router.back();
     } catch (e) {
       setSaving(false);
-      // A range that strands a scheduled stop: the server's own sentence.
+      // A range that strands a scheduled destination: the server's own sentence.
       const body = e instanceof ApiError ? (e.body as { error?: string; message?: string } | null) : null;
-      if (e instanceof ApiError && e.status === 409 && body?.error === "date_range_orphans_stops" && body.message) {
+      if (e instanceof ApiError && e.status === 409 && body?.error === "date_range_orphans_destinations" && body.message) {
         Alert.alert("Didn’t save", body.message);
       } else {
         Alert.alert("Didn’t save", "Your trip settings — check your connection and try again.");
@@ -383,14 +383,15 @@ function TripSettings({ id }: { id: string }) {
         {trip && <Text style={styles.pm}>{trip.title}</Text>}
         {draft && (
           <>
-            <Label>Destination</Label>
+            {/* #155 · Q2 A — the trip-level pick is never labelled with a noun. */}
+            <Label>Where to?</Label>
             <Input
               value={destQuery}
               onChangeText={(q) => {
                 setDestQuery(q);
-                // An emptied box clears the destination; typed text is a
+                // An emptied box clears the area; typed text is a
                 // search until a result is picked.
-                if (q.trim() === "") set({ destination: null });
+                if (q.trim() === "") set({ area: null });
               }}
               placeholder="Bellingham, WA"
               autoCapitalize="words"
@@ -399,7 +400,7 @@ function TripSettings({ id }: { id: string }) {
               rows={destRows}
               onPick={(r) => {
                 const picked = pickedFromSummary(r);
-                set({ destination: picked });
+                set({ area: picked });
                 setDestQuery(picked.name);
               }}
             />

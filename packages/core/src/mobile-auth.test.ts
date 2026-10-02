@@ -170,7 +170,7 @@ describe("mobile auth · app/_layout.tsx is the hard gate", () => {
       expect(layout).toContain(`name="${name}"`);
     }
     const trips = read("app/(tabs)/(trips)/_layout.tsx");
-    for (const name of ["index", "trips/[id]/index", "trips/[id]/stops/[stopId]"]) {
+    for (const name of ["index", "trips/[id]/index", "trips/[id]/destinations/[destinationId]"]) {
       expect(trips).toContain(`name="${name}"`);
     }
   });

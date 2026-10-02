@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { LineLayerStyle } from "@rnmapbox/maps";
-import type { Bounds, OverlayPalette, StyleMode, TripArc, TripStopPin } from "@rv-trip/core";
+import type { Bounds, OverlayPalette, StyleMode, TripArc, TripDestinationPin } from "@rv-trip/core";
 import {
   ARC_CASING_WIDTH,
   DEFAULT_STYLE_MODE,
@@ -156,7 +156,7 @@ export type MapFrameState = "loading" | "unavailable" | "empty";
  * gradient dependency to reproduce. The glyph carries the same motif.
  *
  * All three states are reachable on the phone. `unavailable` is the drawn one:
- * no `pk.*` token or no native module. `empty` is a trip whose every stop is
+ * no `pk.*` token or no native module. `empty` is a trip whose every destination is
  * coordless. `loading` covers the one render before AsyncStorage answers with
  * the style preference — there is no lazy chunk to wait for on a native map,
  * which is what it covers on the web.
@@ -311,7 +311,7 @@ function cameraBounds(b: Bounds) {
 const NO_ARCS: TripArc[] = [];
 
 export interface TripMapProps {
-  pins: TripStopPin[];
+  pins: TripDestinationPin[];
   /** Drive corridors from core's `tripArcs`. OMIT for a mini-map: no arcs. */
   arcs?: TripArc[];
   mode: StyleMode;
@@ -327,9 +327,9 @@ export interface TripMapProps {
    * Name labels under each disc, and the mileage label on each corridor.
    *
    * REQUIRED, with no default, on purpose. The web defaults it to `true`
-   * (MapView.tsx:80) and its mini-map inherits that default, so the web's stop
+   * (MapView.tsx:80) and its mini-map inherits that default, so the web's destination
    * sheet does label its one pin. The phone's mini-map deliberately does not —
-   * the sheet names the stop directly above the frame — and making the prop
+   * the sheet names the destination directly above the frame — and making the prop
    * required is what keeps that a decision at each call site rather than an
    * inherited default that can drift.
    */
@@ -342,7 +342,7 @@ export interface TripMapProps {
  * The map. Pins + arcs + mode in, one canvas out.
  *
  * It never filters and it never fetches: it draws exactly what it is handed,
- * from `tripArcs` / `tripStopPins`, both pure functions of the trip the screen
+ * from `tripArcs` / `tripDestinationPins`, both pure functions of the trip the screen
  * already holds.
  */
 export function TripMap({
@@ -416,7 +416,7 @@ export function TripMap({
         {pins.map((pin) => (
           <MarkerView key={pin.id} coordinate={[pin.lng, pin.lat]} allowOverlap>
             <View style={styles.pin}>
-              <StopDisc pin={pin} palette={palette} />
+              <DestinationDisc pin={pin} palette={palette} />
               {showLabels && (
                 <Text style={[styles.pinLabel, { backgroundColor: palette.labelScrim, color: palette.labelInk }]}>
                   {pin.name}
@@ -510,13 +510,13 @@ export function PinMap({
 const GRID_LINES = Array.from({ length: 16 }, (_, i) => i + 1);
 
 /**
- * A trip stop: a numbered disc, green because that is the shipped stop language.
- * A floating stop is an amber DASHED HOLLOW disc with no ordinal — it has no
+ * A trip destination: a numbered disc, green because that is the shipped destination language.
+ * A floating destination is an amber DASHED HOLLOW disc with no ordinal — it has no
  * position in the drive sequence, so it gets no number and no arc. The same
- * grammar as MapView.tsx's `StopDisc` (:336-394) minus selection, which the
+ * grammar as MapView.tsx's `DestinationDisc` (:336-394) minus selection, which the
  * phone has no map interaction to express yet.
  */
-function StopDisc({ pin, palette }: { pin: TripStopPin; palette: OverlayPalette }) {
+function DestinationDisc({ pin, palette }: { pin: TripDestinationPin; palette: OverlayPalette }) {
   const floating = pin.floating;
   return (
     <View

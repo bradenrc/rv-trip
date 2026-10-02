@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ideaPatchColumns, ideaPatchInput } from "@rv-trip/core";
 import { deleteIdea, updateIdeaFields } from "@rv-trip/db";
 import { getActor, getOwner } from "@/lib/owner";
-import { destinationResolver } from "@/lib/places";
+import { areaResolver } from "@/lib/places";
 
 /**
  * The idea PATCH. The schema is core's `ideaPatchInput` — the same grammar the
@@ -14,11 +14,11 @@ import { destinationResolver } from "@/lib/places";
  * when the body actually carried a `place` key. A status cycle, a rating and a
  * note save each send one field, and none of them may erase a located idea.
  *
- * `stopId` IS a real column, so it rides through unflattened — and it is the
+ * `destinationId` IS a real column, so it rides through unflattened — and it is the
  * one key on this body that names a row the WHERE cannot vouch for. The
- * mutation proves the pair and throws "stop not found"; that is a 404 here, the
+ * mutation proves the pair and throws "destination not found"; that is a 404 here, the
  * same answer `POST /api/ideas` gives the same mistake. Anything else rethrows:
- * a database fault is not a missing stop.
+ * a database fault is not a missing destination.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -32,11 +32,11 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       id,
       ideaPatchColumns(parsed.data),
       await getActor(),
-      // #113 · the check-off's Been write-through resolves its destination.
-      { resolveDestination: destinationResolver() },
+      // #113 · the check-off's Been write-through resolves its area.
+      { resolveArea: areaResolver() },
     );
   } catch (e) {
-    if (e instanceof Error && e.message === "stop not found") {
+    if (e instanceof Error && e.message === "destination not found") {
       return NextResponse.json({ error: e.message }, { status: 404 });
     }
     throw e;

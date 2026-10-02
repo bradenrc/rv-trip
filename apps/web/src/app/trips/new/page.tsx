@@ -37,11 +37,11 @@ const FIELD =
  * fly trip or a mix is never asked about the rig; its answer is stored as off.
  * Create stays disabled until a mode is picked (`tripDraftInput` is null).
  *
- * The create seeds one "Leg 1" server-side (POST /api/trips), so the planner
- * this redirects into always has a leg header to hang "Add stop" on.
+ * The create seeds one unnamed chapter server-side (POST /api/trips), so the planner
+ * this redirects into always has a chapter header to hang "Add destination" on.
  *
  * #126 · #127 (docs/design/130 §4): the page now asks **Where to?** first (a
- * PlacePicker — the pick becomes the trip's destination and one stop spanning
+ * PlacePicker — the pick becomes the trip's area and one destination spanning
  * its dates), then **When** on the one `RangePicker`. "Starting from" is no
  * longer asked: the household home base renders as a quiet chip whose
  * "change" writes this trip's override.
@@ -123,8 +123,8 @@ export default function NewTripPage() {
         <div className="mb-4">
           <QuestionLabel n={1}>Where to?</QuestionLabel>
           <PlacePicker
-            value={draft.destination ?? null}
-            onChange={(destination) => set({ destination })}
+            value={draft.area ?? null}
+            onChange={(area) => set({ area })}
             placeholder="A town, a park, a region…"
           />
           <div className="mt-2">
@@ -187,7 +187,7 @@ export default function NewTripPage() {
               <Input
                 value={draft.title}
                 onChange={(e) => set({ title: e.target.value })}
-                placeholder={draft.destination?.name ?? "Redwoods Run"}
+                placeholder={draft.area?.name ?? "Redwoods Run"}
                 className={FIELD}
               />
             </div>

@@ -1,9 +1,9 @@
-import type { IsoDate, Stop, Trip, TripStatus } from "./types";
+import type { IsoDate, Destination, Trip, TripStatus } from "./types";
 import { isScheduled } from "./types";
 
 /**
  * The trip's derived read (its status) and the one guard on its write (a date
- * range that would orphan a scheduled stop). Both are pure and live beside
+ * range that would orphan a scheduled destination). Both are pure and live beside
  * `deriveDays` for the same reason it does: status is a PROJECTION of the
  * calendar, never a stored fact, so a trip crosses from planning into upcoming
  * with the clock without anybody writing to it.
@@ -54,8 +54,8 @@ export function deriveTripStatus(t: TripStatusInput, today: IsoDate): TripStatus
 
 // ── the one refusal on a trip write ────────────────────────────────────────
 
-/** A scheduled stop a proposed trip range would push (partly) off the calendar. */
-export interface OrphanedStop {
+/** A scheduled destination a proposed trip range would push (partly) off the calendar. */
+export interface OrphanedDestination {
   id: string;
   name: string;
   arriveDate: IsoDate;
@@ -63,17 +63,17 @@ export interface OrphanedStop {
 }
 
 /**
- * Scheduled stops that a proposed trip range does not fully contain.
+ * Scheduled destinations that a proposed trip range does not fully contain.
  *
- * `deriveDays` clamps every stop date to the trip window (derive-days.ts), so a
- * stop left hanging outside it does not become wrong — it becomes INVISIBLE.
+ * `deriveDays` clamps every destination date to the trip window (derive-days.ts), so a
+ * destination left hanging outside it does not become wrong — it becomes INVISIBLE.
  * That is the whole reason the write is refused instead of accepted.
  */
-export function stopsOutsideRange(
+export function destinationsOutsideRange(
   range: { startDate: IsoDate; endDate: IsoDate },
-  stops: readonly Stop[],
-): OrphanedStop[] {
-  return stops
+  destinations: readonly Destination[],
+): OrphanedDestination[] {
+  return destinations
     .filter(isScheduled)
     .filter((s) => s.arriveDate < range.startDate || s.departDate > range.endDate)
     .map((s) => ({
@@ -109,8 +109,8 @@ export function formatDateSpan(arrive: IsoDate, depart: IsoDate): string {
   return `${from}–${to}`;
 }
 
-/** The human sentence the 409 carries, built from the offending stops. */
-export function orphanedStopsMessage(orphans: readonly OrphanedStop[]): string {
+/** The human sentence the 409 carries, built from the offending destinations. */
+export function orphanedDestinationsMessage(orphans: readonly OrphanedDestination[]): string {
   const named = orphans
     .map((o) => `${o.name} is scheduled ${formatDateSpan(o.arriveDate, o.departDate)}`)
     .join(", ");
@@ -119,25 +119,25 @@ export function orphanedStopsMessage(orphans: readonly OrphanedStop[]): string {
   } first.`;
 }
 
-// ── the mirror refusal, on a stop write ────────────────────────────────────
+// ── the mirror refusal, on a destination write ────────────────────────────────────
 //
-// Same clamp, other side of the write. `PATCH /api/stops/:id` with dates the
-// trip window does not contain would put the stop in the DB and nowhere on the
-// calendar, so the handler refuses with 409 `stop_dates_outside_trip` and hands
+// Same clamp, other side of the write. `PATCH /api/destinations/:id` with dates the
+// trip window does not contain would put the destination in the DB and nowhere on the
+// calendar, so the handler refuses with 409 `destination_dates_outside_trip` and hands
 // back the trip's range for the dialog to show.
 
-/** The trip window a stop's dates have to live inside. */
+/** The trip window a destination's dates have to live inside. */
 export interface TripDateRange {
   startDate: IsoDate;
   endDate: IsoDate;
 }
 
 /**
- * Would these stop dates fall (partly) outside the trip? A floating stop —
+ * Would these destination dates fall (partly) outside the trip? A floating destination —
  * either date null — is never outside anything: it is not on the calendar at
  * all, which is a legal state, not a lost one.
  */
-export function stopDatesOutsideTrip(
+export function destinationDatesOutsideTrip(
   range: TripDateRange,
   dates: { arriveDate: IsoDate | null; departDate: IsoDate | null },
 ): boolean {
@@ -146,7 +146,7 @@ export function stopDatesOutsideTrip(
 }
 
 /** The human sentence the 409 carries: the span, the trip, the way out. */
-export function stopOutsideTripMessage(
+export function destinationOutsideTripMessage(
   range: TripDateRange,
   arrive: IsoDate,
   depart: IsoDate,

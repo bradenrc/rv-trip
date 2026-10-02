@@ -6,7 +6,7 @@ import {
   savedPlacePatch,
   normalizeSavedPlacePatch,
   placeEnrichment,
-  stop,
+  destination,
   trip,
   tripSummary,
 } from "./types";
@@ -209,8 +209,8 @@ const SUMMARY_ROW = {
   rating: null,
   note: null,
   days: 28,
-  stops: 4,
-  legs: 2,
+  destinations: 4,
+  chapters: 2,
   miles: 427,
   milesEstimated: false,
   open: 14,
@@ -240,7 +240,7 @@ describe("tripSummary — the dashboard row's wire shape", () => {
 // promise, stated as the shape rather than as a hope.
 
 /** A trip EXACTLY as the server shipped it before #78: no `lastChange` on the
- * trip, the stop, the reservation, the attached idea or the shelf idea. */
+ * trip, the destination, the reservation, the attached idea or the shelf idea. */
 const PRE_78_TRIP = {
   id: TRIP_ID,
   ownerId: "dev-household",
@@ -253,16 +253,16 @@ const PRE_78_TRIP = {
   statusAuto: false,
   rating: null,
   note: null,
-  legs: [
+  chapters: [
     {
-      id: "leg-coast",
+      id: "chapter-coast",
       tripId: TRIP_ID,
       title: "Oregon Coast",
       sortOrder: 0,
-      stops: [
+      destinations: [
         {
-          id: "stop-astoria",
-          legId: "leg-coast",
+          id: "destination-astoria",
+          chapterId: "chapter-coast",
           place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
           arriveDate: "2026-08-02",
           departDate: "2026-08-05",
@@ -272,7 +272,7 @@ const PRE_78_TRIP = {
           reservations: [
             {
               id: "res-koa",
-              stopId: "stop-astoria",
+              destinationId: "destination-astoria",
               ideaId: null,
               type: "campground",
               name: "Astoria/Warrenton KOA",
@@ -288,7 +288,7 @@ const PRE_78_TRIP = {
             {
               id: "idea-fort",
               tripId: TRIP_ID,
-              stopId: "stop-astoria",
+              destinationId: "destination-astoria",
               title: "Fort Stevens bike loop",
               category: "do",
               status: "idea",
@@ -306,7 +306,7 @@ const PRE_78_TRIP = {
     {
       id: "idea-shelf",
       tripId: TRIP_ID,
-      stopId: null,
+      destinationId: null,
       title: "Blue Scorcher Bakery",
       category: "eat",
       status: "idea",
@@ -321,11 +321,11 @@ const PRE_78_TRIP = {
 describe("lastChange — the one joined row the byline reads", () => {
   it("parses a pre-#78 trip and defaults lastChange to null everywhere", () => {
     const parsed = trip.parse(PRE_78_TRIP);
-    const parsedStop = parsed.legs[0]!.stops[0]!;
+    const parsedDestination = parsed.chapters[0]!.destinations[0]!;
 
-    expect(parsedStop.lastChange).toBeNull();
-    expect(parsedStop.reservations[0]!.lastChange).toBeNull();
-    expect(parsedStop.ideas[0]!.lastChange).toBeNull();
+    expect(parsedDestination.lastChange).toBeNull();
+    expect(parsedDestination.reservations[0]!.lastChange).toBeNull();
+    expect(parsedDestination.ideas[0]!.lastChange).toBeNull();
     expect(parsed.ideas[0]!.lastChange).toBeNull();
   });
 
@@ -334,17 +334,17 @@ describe("lastChange — the one joined row the byline reads", () => {
     // Everything the planner already reads survives the new field: the only
     // difference between what went in and what came out is `lastChange`.
     expect(parsed.title).toBe("Pacific Northwest Loop");
-    expect(parsed.legs[0]!.stops[0]!.place.name).toBe("Astoria, OR");
-    expect(parsed.legs[0]!.stops[0]!.reservations[0]!.cost).toBe(204);
+    expect(parsed.chapters[0]!.destinations[0]!.place.name).toBe("Astoria, OR");
+    expect(parsed.chapters[0]!.destinations[0]!.reservations[0]!.cost).toBe(204);
     expect(parsed.ideas[0]!.title).toBe("Blue Scorcher Bakery");
   });
 
   it("carries a real row through — the wireframe's 'rated by Jess · Sep 12'", () => {
     const withByline = {
-      ...PRE_78_TRIP.legs[0]!.stops[0]!,
+      ...PRE_78_TRIP.chapters[0]!.destinations[0]!,
       lastChange: { field: "rating", memberName: "Jess", at: "2026-09-12T18:04:11Z" },
     };
-    expect(stop.parse(withByline).lastChange).toEqual({
+    expect(destination.parse(withByline).lastChange).toEqual({
       field: "rating",
       memberName: "Jess",
       at: "2026-09-12T18:04:11Z",
@@ -353,10 +353,10 @@ describe("lastChange — the one joined row the byline reads", () => {
 
   it("speaks only the three shared-voice fields", () => {
     const bogus = {
-      ...PRE_78_TRIP.legs[0]!.stops[0]!,
+      ...PRE_78_TRIP.chapters[0]!.destinations[0]!,
       lastChange: { field: "cost", memberName: "Jess", at: "2026-09-12T18:04:11Z" },
     };
-    expect(stop.safeParse(bogus).success).toBe(false);
+    expect(destination.safeParse(bogus).success).toBe(false);
   });
 
   it("defaults on a saved place too — the /places card's byline", () => {
@@ -487,7 +487,7 @@ describe("savedPlaceCreate — capture fields (#111)", () => {
       type: "campground",
       rating: null,
     });
-    expect(row).toMatchObject({ anchor: "area", areaLabel: null, destination: null, suggestedPlace: null });
+    expect(row).toMatchObject({ anchor: "area", areaLabel: null, area: null, suggestedPlace: null });
   });
 });
 

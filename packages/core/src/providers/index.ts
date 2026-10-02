@@ -32,9 +32,9 @@ export interface RouteNotice {
 }
 
 /**
- * A routed drive between two stops. (G6: this was `RouteLeg`, which collided
- * with the trip leg of the same name in apps/web/src/lib/trip-logic.ts — the
- * one RouteView actually imports. It is a route result, not a leg of a trip.)
+ * A routed drive between two destinations. (G6: this was `RouteChapter`, which collided
+ * with the trip chapter of the same name in apps/web/src/lib/trip-logic.ts — the
+ * one RouteView actually imports. It is a route result, not a chapter of a trip.)
  */
 export interface RouteResult {
   /** driving time in seconds */
@@ -52,7 +52,7 @@ export interface RouteResult {
   notices: RouteNotice[];
 }
 
-/** Drive time/distance between adjacent stops. Implemented by HERE in prod. */
+/** Drive time/distance between adjacent destinations. Implemented by HERE in prod. */
 export interface RoutingProvider {
   route(from: LatLng, to: LatLng, rig?: RigProfileInput | null): Promise<RouteResult>;
 }
@@ -77,10 +77,10 @@ export interface PlaceSummary {
  * A save's locality (#111 · docs/design/111 "One resolver"). `name` is the
  * shelf heading ("Bandon, OR" in the US, "San José, Costa Rica" elsewhere) and
  * `region` the header above it ("Oregon" / "Costa Rica"). `lat`/`lng` are the
- * LOCALITY's, stored on the destinations row so an area save with no
+ * LOCALITY's, stored on the areas row so an area save with no
  * coordinates of its own still has a point to be measured from.
  */
-export interface ResolvedDestination {
+export interface ResolvedArea {
   googlePlaceId: string;
   name: string;
   region: string | null;
@@ -89,7 +89,7 @@ export interface ResolvedDestination {
 }
 
 /** A locality further than this from the point is not the point's town. */
-export const DESTINATION_MAX_MILES = 25;
+export const AREA_MAX_MILES = 25;
 
 /**
  * What a DETAILS call answers with (#82 §7①, #91) — `PlaceSummary` plus the
@@ -118,10 +118,10 @@ export interface PlacesProvider {
   details(googlePlaceId: string): Promise<PlaceDetails | null>;
   /**
    * Reverse-geocode a point to its locality (#111). `null` when there is none
-   * within {@link DESTINATION_MAX_MILES}. Throws on an upstream failure, like
-   * `search`; the save path turns that into a null destination.
+   * within {@link AREA_MAX_MILES}. Throws on an upstream failure, like
+   * `search`; the save path turns that into a null area.
    */
-  resolveDestination(lat: number, lng: number): Promise<ResolvedDestination | null>;
+  resolveArea(lat: number, lng: number): Promise<ResolvedArea | null>;
 }
 
 /** The nominal RV highway speed the straight-line estimate assumes. */
@@ -132,7 +132,7 @@ export const ESTIMATE_AVG_KMH = 75;
  *
  * It has to stay synchronous: routeModel/routeSummary run inside a useMemo in a
  * "use client" component, so the cache-key-miss path (you dragged a floating
- * stop and invented a pair the server never routed) cannot await anything.
+ * destination and invented a pair the server never routed) cannot await anything.
  * StubRoutingProvider wraps this to satisfy the async RoutingProvider
  * interface; both are the same arithmetic, which is the point — there used to
  * be two haversines at two different nominal speeds.
@@ -179,8 +179,8 @@ export class StubPlacesProvider implements PlacesProvider {
   async details(): Promise<PlaceDetails | null> {
     return null;
   }
-  /** No key, no locality: every save is written with a null destination. */
-  async resolveDestination(): Promise<ResolvedDestination | null> {
+  /** No key, no locality: every save is written with a null area. */
+  async resolveArea(): Promise<ResolvedArea | null> {
     return null;
   }
 }

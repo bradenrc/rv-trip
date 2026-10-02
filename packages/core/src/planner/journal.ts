@@ -1,3 +1,4 @@
+import { countTransportKind, effectiveTransportKind } from "../domain/transport-kind";
 import { isJournalWorthy, saveTypeOfIdeaCategory } from "../domain/been-write-through";
 import type {
   Idea,
@@ -5,7 +6,7 @@ import type {
   IsoDate,
   Reservation,
   ReservationType,
-  Stop,
+  Destination,
   Trip,
   TravelMode,
 } from "../domain/types";
@@ -16,19 +17,19 @@ import { categoryOf } from "../theme/tokens";
  * table. Phone and web both render `tripJournal(trip)`, so the two screens
  * cannot disagree about what a traveled trip left behind.
  *
- * - An ENTRY is an idea or a stop-attached reservation whose `status` is
+ * - An ENTRY is an idea or a destination-attached reservation whose `status` is
  *   `done`, or that carries a rating or an `again` answer
  *   (`isJournalWorthy`, the same predicate the Been write-through uses).
- * - Entries are grouped under their stop, stops in STOP-DATE order: scheduled
- *   stops by arrival, then floating stops (no dates) in route sequence — a
- *   floating stop's entries still qualify (vet MED: pinned here).
- * - Inside a stop: Again first, then not said, then Once was enough; inside
+ * - Entries are grouped under their destination, destinations in DESTINATION-DATE order: scheduled
+ *   destinations by arrival, then floating destinations (no dates) in route sequence — a
+ *   floating destination's entries still qualify (vet MED: pinned here).
+ * - Inside a destination: Again first, then not said, then Once was enough; inside
  *   each, ★ high to low, then name. It reads as advice for your future self.
- * - A stop's OWN ★ and Again sit on its header line; a stop with no entries
+ * - A destination's OWN ★ and Again sit on its header line; a destination with no entries
  *   is shown only when it carries one of those itself.
- * - Shelf ideas (no stop) that qualify go in the last group, "Around the trip".
+ * - Shelf ideas (no destination) that qualify go in the last group, "Around the trip".
  * - Folds: "Didn't get to" holds every idea still at idea/planned; "Travel"
- *   holds the segment bookings (and any Travel-category stop booking) —
+ *   holds the segment bookings (and any Travel-category destination booking) —
  *   transport is never rated here.
  */
 
@@ -47,15 +48,15 @@ export interface JournalEntry {
   notes: string | null;
 }
 
-export interface JournalStop {
-  stop: Stop;
+export interface JournalDestination {
+  destination: Destination;
   rating: number | null;
   again: boolean | null;
   entries: JournalEntry[];
 }
 
 export interface JournalTally {
-  /** Entries plus stops that carry their own ★ or Again. */
+  /** Entries plus destinations that carry their own ★ or Again. */
   logged: number;
   again: number;
   once: number;
@@ -66,7 +67,7 @@ export interface JournalTally {
 export interface TripJournal {
   trip: { rating: number | null; note: string | null };
   tally: JournalTally;
-  stops: JournalStop[];
+  destinations: JournalDestination[];
   /** Qualifying shelf ideas — "Around the trip". */
   around: JournalEntry[];
   didntGetTo: Idea[];
@@ -104,7 +105,7 @@ function reservationEntry(r: Reservation): JournalEntry {
 /** Again (true) → not said (null) → Once was enough (false). */
 const againRank = (a: boolean | null) => (a === true ? 0 : a === null ? 1 : 2);
 
-/** The within-stop order: Again group, ★ desc, then name. */
+/** The within-destination order: Again group, ★ desc, then name. */
 export function byJournalOrder(a: JournalEntry, b: JournalEntry): number {
   return (
     againRank(a.again) - againRank(b.again) ||
@@ -114,14 +115,14 @@ export function byJournalOrder(a: JournalEntry, b: JournalEntry): number {
 }
 
 /**
- * Every stop in STOP-DATE order: scheduled stops by `arriveDate`, then the
- * floating ones after them in route sequence (leg order, then sortOrder). Ties
+ * Every destination in DESTINATION-DATE order: scheduled destinations by `arriveDate`, then the
+ * floating ones after them in route sequence (chapter order, then sortOrder). Ties
  * on a date keep route sequence.
  */
-export function stopsInDateOrder(trip: Trip): Stop[] {
-  const inRoute = [...trip.legs]
+export function destinationsInDateOrder(trip: Trip): Destination[] {
+  const inRoute = [...trip.chapters]
     .sort((a, b) => a.sortOrder - b.sortOrder)
-    .flatMap((l) => [...l.stops].sort((a, b) => a.sortOrder - b.sortOrder));
+    .flatMap((l) => [...l.destinations].sort((a, b) => a.sortOrder - b.sortOrder));
   const scheduled = inRoute.filter((s) => s.arriveDate !== null);
   const floating = inRoute.filter((s) => s.arriveDate === null);
   // Array.prototype.sort is stable, so equal dates keep route order.
@@ -130,7 +131,7 @@ export function stopsInDateOrder(trip: Trip): Stop[] {
 }
 
 export function tripJournal(trip: Trip): TripJournal {
-  const stops: JournalStop[] = [];
+  const destinations: JournalDestination[] = [];
   const didntGetTo: Idea[] = [];
   const travel: Reservation[] = trip.segments.flatMap((s) => s.reservations);
   const tally: JournalTally = { logged: 0, again: 0, once: 0, skipped: 0 };
@@ -140,25 +141,25 @@ export function tripJournal(trip: Trip): TripJournal {
     if (t.again === false) tally.once += 1;
   };
 
-  for (const stop of stopsInDateOrder(trip)) {
+  for (const destination of destinationsInDateOrder(trip)) {
     const entries: JournalEntry[] = [];
-    for (const r of stop.reservations) {
+    for (const r of destination.reservations) {
       if (isTravel(r)) {
         travel.push(r);
         continue;
       }
       if (isJournalWorthy(r)) entries.push(reservationEntry(r));
     }
-    for (const i of stop.ideas) {
+    for (const i of destination.ideas) {
       if (isJournalWorthy(i)) entries.push(ideaEntry(i));
       else didntGetTo.push(i);
     }
-    const own = stop.rating !== null || stop.again !== null;
+    const own = destination.rating !== null || destination.again !== null;
     if (entries.length === 0 && !own) continue;
     entries.sort(byJournalOrder);
     entries.forEach(count);
-    if (own) count(stop);
-    stops.push({ stop, rating: stop.rating, again: stop.again, entries });
+    if (own) count(destination);
+    destinations.push({ destination, rating: destination.rating, again: destination.again, entries });
   }
 
   const around: JournalEntry[] = [];
@@ -170,19 +171,19 @@ export function tripJournal(trip: Trip): TripJournal {
   around.forEach(count);
 
   tally.skipped = didntGetTo.length;
-  return { trip: { rating: trip.rating, note: trip.note }, tally, stops, around, didntGetTo, travel };
+  return { trip: { rating: trip.rating, note: trip.note }, tally, destinations, around, didntGetTo, travel };
 }
 
 /** Anything to show above the folds? */
 export function journalIsEmpty(j: TripJournal): boolean {
-  return j.stops.length === 0 && j.around.length === 0;
+  return j.destinations.length === 0 && j.around.length === 0;
 }
 
 // ── copy ─────────────────────────────────────────────────────────────────────
 // The wireframe's strings, once, so the phone and the web say the same thing.
 
 export const JOURNAL_EMPTY_COPY =
-  "Nothing logged on this trip yet. Rate a stop or tick an idea off to start its journal.";
+  "Nothing logged on this trip yet. Rate a destination or tick an idea off to start its journal.";
 
 export const JOURNAL_AROUND_HEADING = "Around the trip";
 
@@ -201,24 +202,21 @@ export function didntGetToLabel(n: number): string {
   return `Didn’t get to · ${n}`;
 }
 
-/** "Travel · 2 flights" — worded by the hops the bookings hang on. */
+/** "Travel · 2 flights" — worded by what the bookings ARE (#155 · Q4 A: the
+ * stored kind, or the hop's mode for a row with none). Mixed kinds — two
+ * flights and a shuttle — read "bookings". */
 export function travelFoldLabel(trip: Trip, travel: Reservation[]): string {
   const modeOf = new Map<string, TravelMode>(trip.segments.map((s) => [s.id, s.mode]));
-  const modes = new Set(travel.map((r) => (r.segmentId ? modeOf.get(r.segmentId) : undefined)));
+  const kinds = new Set(
+    travel.map((r) => {
+      const mode = r.segmentId ? modeOf.get(r.segmentId) : undefined;
+      return mode && mode !== "drive" ? effectiveTransportKind(r, mode) : (r.transportKind ?? undefined);
+    }),
+  );
   const n = travel.length;
-  const word =
-    modes.size === 1 && modes.has("fly")
-      ? n === 1
-        ? "flight"
-        : "flights"
-      : modes.size === 1 && modes.has("ferry")
-        ? n === 1
-          ? "ferry"
-          : "ferries"
-        : n === 1
-          ? "booking"
-          : "bookings";
-  return `Travel · ${n} ${word}`;
+  const [only] = [...kinds];
+  if (kinds.size === 1 && only) return `Travel · ${countTransportKind(only, n)}`;
+  return `Travel · ${n} ${n === 1 ? "booking" : "bookings"}`;
 }
 
 /** The badge an `again` answer wears — null draws none (Q9 A). */
@@ -233,7 +231,7 @@ export function toggleAgain(current: boolean | null, tapped: boolean): boolean |
   return current === tapped ? null : tapped;
 }
 
-// ── #113 · the check-off, as the stop screen applies it ─────────────────────
+// ── #113 · the check-off, as the destination screen applies it ─────────────────────
 
 /** The fields the "How was it?" sheet writes. */
 export interface HowWasIt {
@@ -242,26 +240,26 @@ export interface HowWasIt {
   notes: string | null;
 }
 
-function mapStopIdeas(trip: Trip, fn: (i: Idea) => Idea): Trip {
+function mapDestinationIdeas(trip: Trip, fn: (i: Idea) => Idea): Trip {
   return {
     ...trip,
     ideas: trip.ideas.map(fn),
-    legs: trip.legs.map((l) => ({ ...l, stops: l.stops.map((s) => ({ ...s, ideas: s.ideas.map(fn) })) })),
+    chapters: trip.chapters.map((l) => ({ ...l, destinations: l.destinations.map((s) => ({ ...s, ideas: s.ideas.map(fn) })) })),
   };
 }
 
-/** Patch one idea anywhere on the trip (a stop's or the shelf's). */
+/** Patch one idea anywhere on the trip (a destination's or the shelf's). */
 export function setIdeaFields(trip: Trip, ideaId: string, patch: Partial<Idea>): Trip {
-  return mapStopIdeas(trip, (i) => (i.id === ideaId ? { ...i, ...patch } : i));
+  return mapDestinationIdeas(trip, (i) => (i.id === ideaId ? { ...i, ...patch } : i));
 }
 
-/** Patch one stop-attached reservation. */
-export function setStopReservationFields(trip: Trip, resId: string, patch: Partial<Reservation>): Trip {
+/** Patch one destination-attached reservation. */
+export function setDestinationReservationFields(trip: Trip, resId: string, patch: Partial<Reservation>): Trip {
   return {
     ...trip,
-    legs: trip.legs.map((l) => ({
+    chapters: trip.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => ({
+      destinations: l.destinations.map((s) => ({
         ...s,
         reservations: s.reservations.map((r) => (r.id === resId ? { ...r, ...patch } : r)),
       })),
@@ -269,18 +267,18 @@ export function setStopReservationFields(trip: Trip, resId: string, patch: Parti
   };
 }
 
-/** Patch one stop's own journal fields. */
-export function setStopFields(trip: Trip, stopId: string, patch: Partial<Stop>): Trip {
+/** Patch one destination's own journal fields. */
+export function setDestinationFields(trip: Trip, destinationId: string, patch: Partial<Destination>): Trip {
   return {
     ...trip,
-    legs: trip.legs.map((l) => ({
+    chapters: trip.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => (s.id === stopId ? { ...s, ...patch } : s)),
+      destinations: l.destinations.map((s) => (s.id === destinationId ? { ...s, ...patch } : s)),
     })),
   };
 }
 
-/** A stop's check circle: done ⇄ idea. One tap commits (Q3 B); tapping a done
+/** A destination's check circle: done ⇄ idea. One tap commits (Q3 B); tapping a done
  * idea again un-checks it back to `idea`. */
 export function checkOffStatus(status: IdeaStatus): IdeaStatus {
   return status === "done" ? "idea" : "done";
@@ -293,26 +291,26 @@ export function isRateableReservation(r: Pick<Reservation, "type">): boolean {
   return cat === "Stay" || cat === "Eat" || cat === "Do";
 }
 
-// ── #113 · "Did it": today's stop ──────────────────────────────────────────
+// ── #113 · "Did it": today's destination ──────────────────────────────────────────
 
 /**
- * The stop "Did it" files onto: a stop on a trip in progress
+ * The destination "Did it" files onto: a destination on a trip in progress
  * (`startDate ≤ today ≤ endDate`) whose own dates cover today
- * (`arriveDate ≤ today ≤ departDate`). On a changeover day two stops match,
+ * (`arriveDate ≤ today ≤ departDate`). On a changeover day two destinations match,
  * and the one you're ARRIVING at wins — the later `arriveDate`. A floating
- * stop never matches, and no match is null (the chip isn't shown).
+ * destination never matches, and no match is null (the chip isn't shown).
  */
-export function todaysStop<T extends Pick<Trip, "id" | "title" | "startDate" | "endDate" | "legs">>(
+export function todaysDestination<T extends Pick<Trip, "id" | "title" | "startDate" | "endDate" | "chapters">>(
   trips: readonly T[],
   today: IsoDate,
-): { trip: T; stop: Stop } | null {
-  let best: { trip: T; stop: Stop } | null = null;
+): { trip: T; destination: Destination } | null {
+  let best: { trip: T; destination: Destination } | null = null;
   for (const trip of trips) {
     if (trip.startDate > today || trip.endDate < today) continue;
-    for (const stop of trip.legs.flatMap((l) => l.stops)) {
-      if (stop.arriveDate === null || stop.departDate === null) continue;
-      if (stop.arriveDate > today || stop.departDate < today) continue;
-      if (!best || stop.arriveDate > best.stop.arriveDate!) best = { trip, stop };
+    for (const destination of trip.chapters.flatMap((l) => l.destinations)) {
+      if (destination.arriveDate === null || destination.departDate === null) continue;
+      if (destination.arriveDate > today || destination.departDate < today) continue;
+      if (!best || destination.arriveDate > best.destination.arriveDate!) best = { trip, destination };
     }
   }
   return best;
@@ -327,6 +325,6 @@ export function localIsoDate(now: Date = new Date()): IsoDate {
 }
 
 /** "Costa Rica Fly & Stay · Westin Reserva Conchal · today". */
-export function didItContext(tripTitle: string, stopName: string): string {
-  return `${tripTitle} · ${stopName} · today`;
+export function didItContext(tripTitle: string, destinationName: string): string {
+  return `${tripTitle} · ${destinationName} · today`;
 }

@@ -7,8 +7,8 @@ const GRID = "grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px
 /**
  * The /places grid grouped the way the phone's Saves tab groups it (#111 i4 ·
  * docs/design/111 "Web parity", Q4 B): region headers (most saves first),
- * destination headers with their count, the cards newest first, and the saves
- * with no destination in an Unanchored group last. The ORDER is core's
+ * area headers with their count, the cards newest first, and the saves
+ * with no area in an Unanchored group last. The ORDER is core's
  * `savesShelves`, so the web and the phone cannot disagree about it.
  *
  * Presentational only: the library still owns the shelf, the category filter
@@ -37,11 +37,11 @@ export function SavesGroups({
               {r.region}
             </div>
           )}
-          {r.destinations.map((d) => (
-            <Fragment key={d.destination.id}>
+          {r.areas.map((d) => (
+            <Fragment key={d.area.id}>
               <div className="flex items-baseline gap-2.5">
-                <b data-shelf="destination" className="text-[15px] text-rv-ink">
-                  {d.destination.name}
+                <b data-shelf="area" className="text-[15px] text-rv-ink">
+                  {d.area.name}
                 </b>
                 <span className="font-mono text-[11px] text-rv-ink-faded">{d.saves.length}</span>
               </div>

@@ -3,7 +3,7 @@ import { RangePicker } from "@rv-trip/ui";
 const noop = () => {};
 const trip = { start: "2026-10-10", end: "2026-10-13" };
 
-/** Whole trip — the default for a single-destination trip (Bellingham, Oct 10 – 13). */
+/** Whole trip — the default for a single-area trip (Bellingham, Oct 10 – 13). */
 export const WholeTrip = () => (
   <RangePicker value={trip} tripSpan={trip} onChange={noop} onExtendTrip={noop} />
 );
