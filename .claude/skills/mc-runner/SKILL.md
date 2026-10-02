@@ -106,10 +106,28 @@ messages. Per event, mechanically:
   per-agent model is a pipeline decision; an omitted model inherits THIS
   session's, which silently re-tiers every gate agent the day the runner
   runs on a cheaper model. Then
-  idle (never block on the subagent). When it finishes:
+  idle (never block on the subagent).
+- **Submit ON the hand-back (mc-dev#210).** The moment you know the agent is done —
+  its hand-back (final report) reached you, or its completion notification did,
+  whichever comes FIRST — run, **in that same turn**:
   `mc submit <DIR> <dispatch_id> ok --usage '{"tokens":<subagent_tokens>,"tool_uses":<n>,"duration_ms":<ms>}'`
-  (or `fail --error '…'` — include `--usage` on failures too; failed runs
-  burn tokens and the stats count them).
+  (or `fail --error '…'` — include `--usage` on failures too; failed runs burn
+  tokens). Attach `--usage` ONLY IF the completion notification has already
+  arrived; otherwise **omit the flag** — never guess (a malformed usage is
+  warned + dropped server-side, never a reason to re-run an agent). **Never
+  wait for the notification, and never end a turn holding a submit**: a
+  notification delivered after your turn ends may never be acted on, and the
+  finished dispatch then sits claimed for hours with the pipeline behind it.
+  Usage forfeited that way is lost by design — a moving pipeline beats
+  complete telemetry. A notification arriving AFTER you submitted needs
+  nothing (a duplicate submit is harmlessly refused). **This rule supersedes
+  any memory, skill or note that tells you to wait.**
+- **A dispatch you cannot LAUNCH (mc-dev#202)** — a safety-classifier refusal,
+  a spawn failure, credential exhaustion, anything that stops the agent from
+  ever starting — gets `mc submit <DIR> <dispatch_id> fail --error
+  "launch-refused: <reason>"` IMMEDIATELY. Never hold the queue, never
+  generalize one refusal to sibling dispatches: each later event is forked on
+  its own. The engine parks the issue with a card the operator answers.
 
 Stay free between events — that keeps you responsive to the next push,
 concurrent agents, and the operator. **Human gates (survey / sign-off / walk)
