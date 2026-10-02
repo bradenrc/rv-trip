@@ -6,9 +6,9 @@ import { haversineMeters } from "../providers/index";
  * The trip's idea SHELF — the side-rail model for #80.
  *
  * Everything the rail draws is decided here, so the rail itself is JSX over a
- * model: which rows are on the shelf (`stopId === null` and nothing else),
+ * model: which rows are on the shelf (`destinationId === null` and nothing else),
  * which of the three groups each one sits in, how far it is from the nearest
- * stop you have actually placed, and what the proximity chips above them say.
+ * destination you have actually placed, and what the proximity chips above them say.
  *
  * It is a PURE function of the trip, which is why it lives beside the timeline
  * model rather than inside the React tree: the web renders it in a `useMemo`
@@ -39,12 +39,12 @@ export const SHELF_CATEGORY_LABEL: Record<IdeaCategory, string> = {
 /** One shelf row: the idea, plus where it sits relative to the trip. */
 export interface ShelfIdea {
   idea: Idea;
-  /** The nearest stop that HAS coordinates, or null when either side has none.
+  /** The nearest destination that HAS coordinates, or null when either side has none.
    * This is the source of the row's "… · 12 mi" line — there is no city column
-   * on an idea, so the anchor named is a stop the trip already owns. */
-  nearestStopId: string | null;
-  nearestStopName: string | null;
-  /** Miles to that stop, rounded to one decimal under 10 and whole above it —
+   * on an idea, so the anchor named is a destination the trip already owns. */
+  nearestDestinationId: string | null;
+  nearestDestinationName: string | null;
+  /** Miles to that destination, rounded to one decimal under 10 and whole above it —
    * the precision the frame draws ("1.4 mi", "33 mi"). Null with no anchor. */
   distanceMi: number | null;
 }
@@ -58,7 +58,7 @@ export interface ShelfGroup {
 /** Which chip is pressed. `all` is the default and the reset. */
 export type ShelfFilter =
   | { kind: "all" }
-  | { kind: "near"; stopId: string }
+  | { kind: "near"; destinationId: string }
   | { kind: "coordless" };
 
 export interface ShelfChip {
@@ -102,38 +102,38 @@ function milesBetween(
   return shelfMiles(haversineMeters(a, b) / METERS_PER_MILE);
 }
 
-/** One stop that can anchor a distance. */
-export interface StopAnchor {
+/** One destination that can anchor a distance. */
+export interface DestinationAnchor {
   id: string;
   name: string;
   lat: number;
   lng: number;
 }
 
-/** The trip's stops that can anchor a distance — a coordless stop measures
+/** The trip's destinations that can anchor a distance — a coordless destination measures
  * nothing, which is the same honesty rule the map's pins already follow.
  *
  * Resolved ONCE per shelf and passed down, never rebuilt per row: `ideaShelf`
- * asks the filter question once per (located stop × row) pair, so a call in
- * there would walk every leg of the trip on each of them. */
-export function locatedStops(trip: Trip): StopAnchor[] {
-  return trip.legs
-    .flatMap((l) => l.stops)
+ * asks the filter question once per (located destination × row) pair, so a call in
+ * there would walk every chapter of the trip on each of them. */
+export function locatedDestinations(trip: Trip): DestinationAnchor[] {
+  return trip.chapters
+    .flatMap((l) => l.destinations)
     .map((s) => ({ id: s.id, name: s.place.name, lat: s.place.lat, lng: s.place.lng }))
     .filter(hasCoords);
 }
 
-/** The shelf rows: `stopId === null`, in group-then-sortOrder order. An idea
- * attached to a stop has ONE home and it is not this one. */
-export function shelfIdeas(trip: Trip, anchors: StopAnchor[] = locatedStops(trip)): ShelfIdea[] {
+/** The shelf rows: `destinationId === null`, in group-then-sortOrder order. An idea
+ * attached to a destination has ONE home and it is not this one. */
+export function shelfIdeas(trip: Trip, anchors: DestinationAnchor[] = locatedDestinations(trip)): ShelfIdea[] {
   return trip.ideas
-    .filter((i) => i.stopId === null)
+    .filter((i) => i.destinationId === null)
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((idea) => {
       const place = idea.place;
       if (!place || !hasCoords(place) || anchors.length === 0) {
-        return { idea, nearestStopId: null, nearestStopName: null, distanceMi: null };
+        return { idea, nearestDestinationId: null, nearestDestinationName: null, distanceMi: null };
       }
       let best = anchors[0]!;
       let bestM = haversineMeters(place, best);
@@ -146,56 +146,56 @@ export function shelfIdeas(trip: Trip, anchors: StopAnchor[] = locatedStops(trip
       }
       return {
         idea,
-        nearestStopId: best.id,
-        nearestStopName: best.name,
+        nearestDestinationId: best.id,
+        nearestDestinationName: best.name,
         distanceMi: milesBetween(place, best),
       };
     });
 }
 
-/** Is this row within the radius of that stop? A coordless row is within
+/** Is this row within the radius of that destination? A coordless row is within
  * nothing — it answers the "No place yet" chip instead.
  *
  * It takes the ANCHORS, not the trip: the caller already has them, and this is
- * the function asked (located stops × rows) times. */
-function matchesFilter(row: ShelfIdea, anchors: StopAnchor[], filter: ShelfFilter): boolean {
+ * the function asked (located destinations × rows) times. */
+function matchesFilter(row: ShelfIdea, anchors: DestinationAnchor[], filter: ShelfFilter): boolean {
   if (filter.kind === "all") return true;
   if (filter.kind === "coordless") {
     return row.idea.place === null || !hasCoords(row.idea.place);
   }
   const place = row.idea.place;
   if (!place || !hasCoords(place)) return false;
-  const stop = anchors.find((s) => s.id === filter.stopId);
-  if (!stop) return false;
-  return haversineMeters(place, stop) / METERS_PER_MILE <= NEAR_RADIUS_MI;
+  const destination = anchors.find((s) => s.id === filter.destinationId);
+  if (!destination) return false;
+  return haversineMeters(place, destination) / METERS_PER_MILE <= NEAR_RADIUS_MI;
 }
 
 /**
  * The whole rail, for one pressed chip.
  *
- * The proximity pairs are ideas × LOCATED stops — single digits on a real trip
+ * The proximity pairs are ideas × LOCATED destinations — single digits on a real trip
  * — but this runs in a client `useMemo` on every render of the planner, so the
  * anchors are resolved once here rather than per row, the same bounded-pairs
  * discipline the route model already keeps.
  */
 export function ideaShelf(trip: Trip, filter: ShelfFilter = { kind: "all" }): IdeaShelf {
-  const anchors = locatedStops(trip);
+  const anchors = locatedDestinations(trip);
   const rows = shelfIdeas(trip, anchors);
   const total = rows.length;
   const coordless = rows.filter((r) => r.idea.place === null || !hasCoords(r.idea.place));
   const coordlessCount = coordless.length;
 
   const chips: ShelfChip[] = [];
-  for (const stop of anchors) {
+  for (const destination of anchors) {
     const count = rows.filter((r) =>
-      matchesFilter(r, anchors, { kind: "near", stopId: stop.id }),
+      matchesFilter(r, anchors, { kind: "near", destinationId: destination.id }),
     ).length;
     if (count > 0) {
       chips.push({
-        key: `near:${stop.id}`,
-        label: `Near ${stop.name}`,
+        key: `near:${destination.id}`,
+        label: `Near ${destination.name}`,
         count,
-        filter: { kind: "near", stopId: stop.id },
+        filter: { kind: "near", destinationId: destination.id },
         warn: false,
       });
     }
@@ -252,36 +252,36 @@ export function setShelfIdeaFields(trip: Trip, ideaId: string, patch: Partial<Id
 }
 
 /**
- * The drop that ATTACHES: the idea leaves the shelf and appears under a stop.
- * One tree update, so the rail and the stop never render it twice.
+ * The drop that ATTACHES: the idea leaves the shelf and appears under a destination.
+ * One tree update, so the rail and the destination never render it twice.
  */
-export function attachIdeaToStop(trip: Trip, ideaId: string, stopId: string): Trip {
+export function attachIdeaToDestination(trip: Trip, ideaId: string, destinationId: string): Trip {
   const moving = trip.ideas.find((i) => i.id === ideaId);
   if (!moving) return trip;
-  const attached: Idea = { ...moving, stopId };
+  const attached: Idea = { ...moving, destinationId };
   return {
     ...trip,
     ideas: trip.ideas.filter((i) => i.id !== ideaId),
-    legs: trip.legs.map((l) => ({
+    chapters: trip.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => (s.id === stopId ? { ...s, ideas: [...s.ideas, attached] } : s)),
+      destinations: l.destinations.map((s) => (s.id === destinationId ? { ...s, ideas: [...s.ideas, attached] } : s)),
     })),
   };
 }
 
 /** …and its mirror: an attached idea dragged back to the shelf. */
 export function detachIdeaToShelf(trip: Trip, ideaId: string): Trip {
-  const moving = trip.legs
-    .flatMap((l) => l.stops)
+  const moving = trip.chapters
+    .flatMap((l) => l.destinations)
     .flatMap((s) => s.ideas)
     .find((i) => i.id === ideaId);
   if (!moving) return trip;
   return {
     ...trip,
-    ideas: [...trip.ideas, { ...moving, stopId: null }],
-    legs: trip.legs.map((l) => ({
+    ideas: [...trip.ideas, { ...moving, destinationId: null }],
+    chapters: trip.chapters.map((l) => ({
       ...l,
-      stops: l.stops.map((s) => ({ ...s, ideas: s.ideas.filter((i) => i.id !== ideaId) })),
+      destinations: l.destinations.map((s) => ({ ...s, ideas: s.ideas.filter((i) => i.id !== ideaId) })),
     })),
   };
 }

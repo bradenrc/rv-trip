@@ -12,7 +12,7 @@ import type { RouteMap } from "./index";
  *
  * One entry per `orderedPairs()` pair — the ONE trip-wide ordered sequence the
  * Route rail, the dashboard card and the `routes` table all key on, floating
- * stops included. Each carries the `source` a line layer paints by (solid
+ * destinations included. Each carries the `source` a line layer paints by (solid
  * corridor vs. dash), the miles the rail prints, the road the vendor named, and
  * the drawn geometry.
  *
@@ -27,13 +27,13 @@ import type { RouteMap } from "./index";
  * is a second place for the two to disagree. See `arcLabel` below.
  *
  * Nothing here styles anything and nothing here is async: the cache-key miss
- * (you dragged a floating stop and invented a pair the server never routed)
+ * (you dragged a floating destination and invented a pair the server never routed)
  * falls back to `estimateRoute`, the one surviving synchronous haversine, which
  * is exactly how the rail falls back through the SAME key. That is why the map
  * and the rail — and the phone and the laptop — cannot print different numbers.
  */
 export interface TripArc {
-  /** `"<fromStopId>-><toStopId>"` — stable across a re-render, no index. */
+  /** `"<fromDestinationId>-><toDestinationId>"` — stable across a re-render, no index. */
   id: string;
   /** The pair's endpoints — the chord, for a label's midpoint. */
   from: PairPoint;
@@ -62,7 +62,7 @@ export function tripArcs(
     const key = routeCacheKey(pair.from, pair.to, routingHash);
     const result = routes[key] ?? estimateRoute(pair.from, pair.to);
     return {
-      id: `${pair.fromStopId}->${pair.toStopId}`,
+      id: `${pair.fromDestinationId}->${pair.toDestinationId}`,
       from: pair.from,
       to: pair.to,
       source: result.source,

@@ -47,7 +47,7 @@ describe("estimateRoute — the one surviving haversine", () => {
     expect(estimateRoute(NEWPORT, BEND).polyline).toBeTruthy();
   });
 
-  it("is symmetric and zero for a stop routed to itself", () => {
+  it("is symmetric and zero for a destination routed to itself", () => {
     expect(estimateRoute(BEND, BEND).distanceMeters).toBe(0);
     expect(driveMiles(estimateRoute(NEWPORT, BEND))).toBe(driveMiles(estimateRoute(BEND, NEWPORT)));
   });

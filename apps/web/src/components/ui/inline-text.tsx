@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 
 /**
  * Single-line click-to-edit text — the light weight of the editing grammar
- * (trip title, leg title, stop place name).
+ * (trip title, chapter title, destination place name).
  *
  * It lives here and not in `@rv-trip/ui`: the design system is deliberately
  * display-only (it is mirrored out to `ds-bundle/` for previews and ships no
@@ -20,7 +20,7 @@ import { useRef, useState } from "react";
  * fires blur, and without the flag the cancel would immediately re-save.
  *
  * `autoEdit` opens it already editing, which is how the row menus' "Rename"
- * and a just-created leg/stop reach it — the menu item focuses THIS edit rather
+ * and a just-created chapter/destination reach it — the menu item focuses THIS edit rather
  * than opening a second rename surface. The caller flips it by remounting (a
  * changed `key`), so there is no second source of truth for "am I editing"; it
  * hears the edit end through `onEditEnd`.
@@ -60,7 +60,7 @@ export function InlineText({
     setEditing(false);
     onEditEnd?.();
     const next = draft.trim();
-    // Blank is a cancel, not a delete: the grammar has no nameless trip or leg.
+    // Blank is a cancel, not a delete: the grammar has no nameless trip or chapter.
     if (next === "" || next === value) {
       setDraft(value);
       return;

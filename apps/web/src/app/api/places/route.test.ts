@@ -1,18 +1,18 @@
 import { expect, it, vi } from "vitest";
-import type { PlaceSummary, ResolvedDestination } from "@rv-trip/core";
+import type { PlaceSummary, ResolvedArea } from "@rv-trip/core";
 import { emptySavePlaceForm, pickPlace, savePlaceBody } from "@rv-trip/core";
 import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { POST } from "@/app/api/places/route";
 import { describeDb, req } from "@/test/db";
 
 /**
- * The route resolves destinations through whatever `placesProvider()` answers.
+ * The route resolves areas through whatever `placesProvider()` answers.
  * That is the stub in CI and the real Google provider on a laptop whose .env
  * carries a key — so the suite pins it to a scripted fake and never bills.
  */
 const resolver = vi.hoisted(() => ({
   calls: [] as [number, number][],
-  answer: null as ResolvedDestination | null | "throw",
+  answer: null as ResolvedArea | null | "throw",
   searches: [] as [string, { lat: number; lng: number } | undefined][],
   hits: [] as PlaceSummary[] | "throw",
 }));
@@ -26,7 +26,7 @@ vi.mock("@/lib/places", () => ({
         return resolver.hits;
       },
       details: async () => null,
-      resolveDestination: async (lat: number, lng: number) => {
+      resolveArea: async (lat: number, lng: number) => {
         resolver.calls.push([lat, lng]);
         if (resolver.answer === "throw") throw new Error("Google geocode → 500");
         return resolver.answer;
@@ -35,7 +35,7 @@ vi.mock("@/lib/places", () => ({
   }),
 }));
 
-const BANDON: ResolvedDestination = {
+const BANDON: ResolvedArea = {
   googlePlaceId: "ChIJbandon",
   name: "Bandon, OR",
   region: "Oregon",
@@ -43,7 +43,7 @@ const BANDON: ResolvedDestination = {
   lng: -124.4084,
 };
 
-function reset(answer: ResolvedDestination | null | "throw" = null, hits: PlaceSummary[] | "throw" = []) {
+function reset(answer: ResolvedArea | null | "throw" = null, hits: PlaceSummary[] | "throw" = []) {
   resolver.calls = [];
   resolver.answer = answer;
   resolver.searches = [];
@@ -161,10 +161,10 @@ describeDb("POST /api/places — capture (#111)", () => {
     expect(row.clientId).toBe("cap_01JBX7Q2M4");
   });
 
-  it("resolves the destination, answers it on the 201, and REUSES the row for the next save", async () => {
+  it("resolves the area, answers it on the 201, and REUSES the row for the next save", async () => {
     reset(BANDON);
     const first = await (await POST(req(PIN_BODY))).json();
-    expect(first.destination).toEqual({
+    expect(first.area).toEqual({
       id: expect.any(String),
       name: "Bandon, OR",
       region: "Oregon",
@@ -176,29 +176,29 @@ describeDb("POST /api/places — capture (#111)", () => {
     const second = await (
       await POST(req({ ...PIN_BODY, clientId: "cap_second", name: "chandel", anchor: "area" }))
     ).json();
-    expect(second.destination.id).toBe(first.destination.id);
+    expect(second.area.id).toBe(first.area.id);
 
-    const rows = await read.destinations(DEV_OWNER);
+    const rows = await read.areas(DEV_OWNER);
     expect(rows).toHaveLength(1);
     // The locality's own point is stored — an area save with no coordinates is
     // measured from it (the vet's HIGH finding).
     expect(rows[0]).toMatchObject({ region: "Oregon", lat: 43.119, lng: -124.4084 });
-    expect((await read.savedPlace(first.id))!.destinationId).toBe(first.destination.id);
+    expect((await read.savedPlace(first.id))!.areaId).toBe(first.area.id);
   });
 
-  it("writes the save with a null destination when nothing is within 25 mi", async () => {
+  it("writes the save with a null area when nothing is within 25 mi", async () => {
     reset(null);
     const res = await POST(req({ ...PIN_BODY, name: "pin in the Alvord Desert", lat: 42.53, lng: -118.53 }));
     expect(res.status).toBe(201);
-    expect((await res.json()).destination).toBeNull();
-    expect(await read.destinations(DEV_OWNER)).toEqual([]);
+    expect((await res.json()).area).toBeNull();
+    expect(await read.areas(DEV_OWNER)).toEqual([]);
   });
 
-  it("still saves when Google fails — a null destination, never a failed save", async () => {
+  it("still saves when Google fails — a null area, never a failed save", async () => {
     reset("throw");
     const res = await POST(req(PIN_BODY));
     expect(res.status).toBe(201);
-    expect((await res.json()).destination).toBeNull();
+    expect((await res.json()).area).toBeNull();
     expect(await read.countSavedPlaces(DEV_OWNER)).toBe(1);
   });
 
@@ -207,7 +207,7 @@ describeDb("POST /api/places — capture (#111)", () => {
     const res = await POST(req({ name: "taco truck Dana said", anchor: "area" }));
     expect(res.status).toBe(201);
     expect(resolver.calls).toEqual([]);
-    expect((await res.json()).destination).toBeNull();
+    expect((await res.json()).area).toBeNull();
   });
 });
 
@@ -253,7 +253,7 @@ describeDb("POST /api/places — the offline suggestion (#111 i2)", () => {
     expect((await read.savedPlace(saved.id))!.suggestedPlace).toEqual(want);
     // Still an area note in Bandon until the user takes it.
     expect(saved.anchor).toBe("area");
-    expect(saved.destination.name).toBe("Bandon, OR");
+    expect(saved.area.name).toBe("Bandon, OR");
   });
 
   it("does not search for a note typed ONLINE, nor for an offline pin", async () => {
@@ -305,9 +305,9 @@ describeDb("POST /api/places — the web's escape row (#111 i4)", () => {
     expect(row.anchor).toBe("area");
     expect(row.areaLabel).toBe("Bend, OR");
     // No point went up, so nothing was resolved: the note's label is the
-    // browser's town, and the row has no destination.
+    // browser's town, and the row has no area.
     expect(resolver.calls).toEqual([]);
-    expect(saved.destination).toBeNull();
+    expect(saved.area).toBeNull();
   });
 
   it("saves it as an area note with a null label when geolocation was refused", async () => {

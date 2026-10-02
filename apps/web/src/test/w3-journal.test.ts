@@ -1,11 +1,11 @@
 import { expect, it, vi } from "vitest";
-import type { ResolvedDestination } from "@rv-trip/core";
+import type { ResolvedArea } from "@rv-trip/core";
 import { forNextTimeResponse, nearbySavesResponse } from "@rv-trip/core";
 import { db, schema } from "@rv-trip/db";
 import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { POST as POST_IDEA } from "@/app/api/ideas/route";
 import { PATCH as PATCH_IDEA } from "@/app/api/ideas/[id]/route";
-import { PATCH as PATCH_STOP } from "@/app/api/stops/[id]/route";
+import { PATCH as PATCH_DESTINATION } from "@/app/api/destinations/[id]/route";
 import { PATCH as PATCH_RES } from "@/app/api/reservations/[id]/route";
 import { GET as GET_NEXT_TIME } from "@/app/api/trips/[id]/for-next-time/route";
 import { GET as GET_NEARBY } from "@/app/api/trips/[id]/nearby-saves/route";
@@ -13,7 +13,7 @@ import { ctx, describeDb, req } from "@/test/db";
 
 /**
  * W3 Journal (#113) through the REAL handlers: `again` on the three PATCHes,
- * the Been write-through (match-or-create, the destination resolved with the
+ * the Been write-through (match-or-create, the area resolved with the
  * resolver the ROUTE hands in — vet HIGH), "Did it"'s idempotent POST, and
  * "Last time here" with its saves left out of the nearby banner.
  *
@@ -22,7 +22,7 @@ import { ctx, describeDb, req } from "@/test/db";
  */
 const resolver = vi.hoisted(() => ({
   calls: [] as [number, number][],
-  answer: null as ResolvedDestination | null,
+  answer: null as ResolvedArea | null,
 }));
 vi.mock("@/lib/places", () => ({
   placesProvider: () => ({
@@ -30,26 +30,26 @@ vi.mock("@/lib/places", () => ({
     provider: {
       search: async () => [],
       details: async () => null,
-      resolveDestination: async (lat: number, lng: number) => {
+      resolveArea: async (lat: number, lng: number) => {
         resolver.calls.push([lat, lng]);
         return resolver.answer;
       },
     },
   }),
-  destinationResolver: () => async (lat: number, lng: number) => {
+  areaResolver: () => async (lat: number, lng: number) => {
     resolver.calls.push([lat, lng]);
     return resolver.answer;
   },
 }));
 
-const GUANACASTE: ResolvedDestination = {
+const GUANACASTE: ResolvedArea = {
   googlePlaceId: "ChIJguanacaste",
   name: "Playa Flamingo, Costa Rica",
   region: "Costa Rica",
   lat: 10.4331,
   lng: -85.7836,
 };
-const NEWPORT: ResolvedDestination = {
+const NEWPORT: ResolvedArea = {
   googlePlaceId: "ChIJnewport",
   name: "Newport, OR",
   region: "Oregon",
@@ -57,7 +57,7 @@ const NEWPORT: ResolvedDestination = {
   lng: -124.0535,
 };
 
-function reset(answer: ResolvedDestination | null = null) {
+function reset(answer: ResolvedArea | null = null) {
   resolver.calls = [];
   resolver.answer = answer;
 }
@@ -65,33 +65,33 @@ function reset(answer: ResolvedDestination | null = null) {
 const savesOf = async (owner: string) =>
   (await db.select().from(schema.saves)).filter((s) => s.ownerId === owner);
 
-/** Costa Rica, the way the check-off wireframe starts: one stop, the Westin,
+/** Costa Rica, the way the check-off wireframe starts: one destination, the Westin,
  * two ideas with places, and a flight on the hop out. */
 async function costaRica(owner = DEV_OWNER) {
   const trip = await fx.trip({ owner, title: "Costa Rica Fly & Stay", startDate: "2027-01-16", endDate: "2027-01-25" });
-  const leg = await fx.leg({ tripId: trip.id, title: "Guanacaste" });
-  const conchal = await fx.stop({
-    legId: leg.id,
+  const chapter = await fx.chapter({ tripId: trip.id, title: "Guanacaste" });
+  const conchal = await fx.destination({
+    chapterId: chapter.id,
     placeName: "Westin Reserva Conchal",
     lat: 10.4047,
     lng: -85.8127,
     arriveDate: "2027-01-16",
     departDate: "2027-01-24",
   });
-  const westin = await fx.reservation({ stopId: conchal.id, type: "lodging", name: "Westin Reserva Conchal", rating: null, notes: null });
+  const westin = await fx.reservation({ destinationId: conchal.id, type: "lodging", name: "Westin Reserva Conchal", rating: null, notes: null });
   const snorkel = await fx.idea({
     tripId: trip.id,
-    stopId: conchal.id,
+    destinationId: conchal.id,
     title: "Playa Conchal snorkel",
     placeName: "Playa Conchal",
     lat: 10.4012,
     lng: -85.8123,
   });
-  return { trip, leg, conchal, westin, snorkel };
+  return { trip, chapter, conchal, westin, snorkel };
 }
 
 describeDb("W3 · the check-off writes again, and writes through to a Been save", () => {
-  it("a done idea ★5 Again lands on the idea and creates a Been save anchored to its destination", async () => {
+  it("a done idea ★5 Again lands on the idea and creates a Been save anchored to its area", async () => {
     reset(GUANACASTE);
     const { trip, snorkel } = await costaRica();
 
@@ -115,7 +115,7 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
       lat: 10.4012,
       lng: -85.8123,
     });
-    expect(saves[0]!.destinationId).not.toBeNull();
+    expect(saves[0]!.areaId).not.toBeNull();
     expect(resolver.calls).toEqual([[10.4012, -85.8123]]);
   });
 
@@ -129,7 +129,7 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
     expect(rows.map((r) => [r.from, r.to])).toEqual([[null, "false"]]);
   });
 
-  it("How was it? on the stay writes a NAME-ONLY save, its destination resolved from the stop's point", async () => {
+  it("How was it? on the stay writes a NAME-ONLY save, its area resolved from the destination's point", async () => {
     reset(GUANACASTE);
     const { westin, conchal } = await costaRica();
 
@@ -147,14 +147,14 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
       again: true,
       region: "Westin Reserva Conchal",
     });
-    expect(save!.destinationId).not.toBeNull();
+    expect(save!.areaId).not.toBeNull();
     expect(resolver.calls).toEqual([[conchal.lat, conchal.lng]]);
   });
 
   it("a flight on the hop is never written through, however it is rated", async () => {
     reset(GUANACASTE);
     const { trip, conchal } = await costaRica();
-    const seg = await fx.segment({ tripId: trip.id, fromStopId: null, toStopId: conchal.id, mode: "fly" });
+    const seg = await fx.segment({ tripId: trip.id, fromDestinationId: null, toDestinationId: conchal.id, mode: "fly" });
     const [flight] = await db
       .insert(schema.reservations)
       .values({ segmentId: seg.id, type: "transport", name: "AA 2451 BOI→LAX" })
@@ -165,7 +165,7 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
     expect(await savesOf(DEV_OWNER)).toEqual([]);
   });
 
-  it("a match graduates the existing save in place — and resolves the destination it lacked", async () => {
+  it("a match graduates the existing save in place — and resolves the area it lacked", async () => {
     reset(NEWPORT);
     const { trip, newport } = await fx.pacificNorthwestLoop();
     const want = await fx.savedPlace({
@@ -179,7 +179,7 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
     });
     const idea = await fx.idea({
       tripId: trip.id,
-      stopId: newport.id,
+      destinationId: newport.id,
       title: "Local Ocean Seafoods",
       category: "eat",
       placeName: "Local Ocean Seafoods",
@@ -200,7 +200,7 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
       note: "Bayfront.",
       tripId: trip.id,
     });
-    expect(saves[0]!.destinationId).not.toBeNull();
+    expect(saves[0]!.areaId).not.toBeNull();
   });
 
   it("an un-check leaves the Been save where it is — the write-through never deletes", async () => {
@@ -213,14 +213,14 @@ describeDb("W3 · the check-off writes again, and writes through to a Been save"
     expect(await savesOf(DEV_OWNER)).toHaveLength(1);
   });
 
-  it("a rated stop writes through as an 'other' save; a rename writes nothing", async () => {
+  it("a rated destination writes through as an 'other' save; a rename writes nothing", async () => {
     reset();
     const { conchal } = await costaRica();
-    await PATCH_STOP(req({ placeName: "The Westin" }, "PATCH"), ctx(conchal.id));
+    await PATCH_DESTINATION(req({ placeName: "The Westin" }, "PATCH"), ctx(conchal.id));
     expect(await savesOf(DEV_OWNER)).toEqual([]);
-    const res = await PATCH_STOP(req({ rating: 5, again: true }, "PATCH"), ctx(conchal.id));
+    const res = await PATCH_DESTINATION(req({ rating: 5, again: true }, "PATCH"), ctx(conchal.id));
     expect(res.status).toBe(204);
-    expect(await read.stop(conchal.id)).toMatchObject({ rating: 5, again: true });
+    expect(await read.destination(conchal.id)).toMatchObject({ rating: 5, again: true });
     expect(await savesOf(DEV_OWNER)).toMatchObject([{ name: "The Westin", type: "other", status: "been" }]);
   });
 
@@ -242,7 +242,7 @@ describeDb("W3 · Did it — POST /api/ideas, born done, idempotent on clientId"
     const body = {
       clientId: "cap_didit_1",
       tripId: trip.id,
-      stopId: conchal.id,
+      destinationId: conchal.id,
       title: "Sunset at Playa Flamingo",
       status: "done",
       rating: 5,
@@ -255,7 +255,7 @@ describeDb("W3 · Did it — POST /api/ideas, born done, idempotent on clientId"
     const first = await POST_IDEA(req(body));
     expect(first.status).toBe(201);
     const created = await first.json();
-    expect(created).toMatchObject({ status: "done", rating: 5, again: true, stopId: conchal.id });
+    expect(created).toMatchObject({ status: "done", rating: 5, again: true, destinationId: conchal.id });
 
     const replay = await POST_IDEA(req(body));
     expect(replay.status).toBe(200);
@@ -291,7 +291,7 @@ describeDb("W3 · Last time here — and its saves left out of the nearby banner
       rating: 5,
       note: "South Beach yurts booked early next time.",
     });
-    const dest = await fx.destination({ googlePlaceId: "seed_loc_newport", name: "Newport, OR", lat: 44.6368, lng: -124.0535 });
+    const dest = await fx.area({ googlePlaceId: "seed_loc_newport", name: "Newport, OR", lat: 44.6368, lng: -124.0535 });
     const southBeach = await fx.savedPlace({
       name: "South Beach State Park",
       lat: 44.6094,
@@ -300,7 +300,7 @@ describeDb("W3 · Last time here — and its saves left out of the nearby banner
       rating: 5,
       again: true,
       tripId: coast.id,
-      destinationId: dest.id,
+      areaId: dest.id,
     });
 
     const res = await GET_NEXT_TIME(req(undefined, "GET"), ctx(trip.id));
@@ -308,9 +308,9 @@ describeDb("W3 · Last time here — and its saves left out of the nearby banner
     const nt = forNextTimeResponse.parse(await res.json());
     expect(nt.cards).toHaveLength(1);
     expect(nt.cards[0]).toMatchObject({
-      destination: { id: dest.id, name: "Newport, OR" },
+      area: { id: dest.id, name: "Newport, OR" },
       pastTrip: { id: coast.id, title: "Oregon Coast Weekend", rating: 5 },
-      stop: { name: "Newport, OR", arriveDate: "2026-08-05", departDate: "2026-08-09" },
+      destination: { name: "Newport, OR", arriveDate: "2026-08-05", departDate: "2026-08-09" },
     });
     expect(nt.cards[0]!.again.map((r) => [r.name, r.again])).toEqual([["South Beach State Park", true]]);
     expect(nt.saveIds).toEqual([southBeach.id]);

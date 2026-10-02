@@ -6,7 +6,7 @@ import { db, schema } from "./index";
  * Re-own the seed data (issue #26): move every row owned by the dev household —
  * or by `--from <id>` — to the owner id given as the first argument, so a real
  * signed-in account sees the sample trips, places and rig. Owner-scoped tables
- * only; children (legs, stops, …) hang off trips and need nothing.
+ * only; children (chapters, destinations, …) hang off trips and need nothing.
  *
  *   pnpm db:reown hh_2abc…            # dev-household → hh_2abc…
  *   pnpm db:reown hh_2abc… --from hh_1old…

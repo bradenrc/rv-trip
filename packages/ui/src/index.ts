@@ -17,12 +17,12 @@ export {
   RhythmStrip,
   Ruler,
   SwimLane,
-  StopBar,
+  DestinationBar,
   OpenSpan,
   OpenLane,
   GanttLegend,
 } from "./Gantt";
-export { FloatingStopCard, AllScheduledCard } from "./FloatingStopCard";
+export { FloatingDestinationCard, AllScheduledCard } from "./FloatingDestinationCard";
 export { ReservationLineItem, IdeaLineItem } from "./RouteItems";
 export { MapPlaceholder, ReservationCard, IdeaCard, ShelfIdeaCard } from "./DetailCards";
 export { MapFrame } from "./MapFrame";

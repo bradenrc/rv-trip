@@ -17,12 +17,12 @@ import type {
   TripPatchInput,
   TripSummary,
   BoundaryFlightsBody,
-  Stop,
-  StopCreateInput,
+  Destination,
+  DestinationCreateInput,
 } from "../domain/types";
 import type { RigProfile, RigProfileInput } from "../domain/rig";
 import type { UserPrefs, UserPrefsPatch } from "../domain/prefs";
-import type { LatLng, ResolvedDestination, RouteResult } from "../providers/index";
+import type { LatLng, ResolvedArea, RouteResult } from "../providers/index";
 import type { PlaceSearchType } from "../providers/places-search";
 import {
   tripBundleSchema,
@@ -33,12 +33,12 @@ import {
   savedPlaceListSchema,
   savedPlaceSchema,
   placesEnvelopeSchema,
-  resolvedDestinationSchema,
+  resolvedAreaSchema,
   rigResponseSchema,
   routePairsResponseSchema,
   reservationRowSchema,
   tripSchema,
-  stopSchema,
+  destinationSchema,
   type PlacesSearchEnvelope,
   type TripBundle,
 } from "./schemas";
@@ -112,7 +112,7 @@ export class ApiError extends Error {
 
 /** `again` on the three patches below is #113's "Do it again?" — true is
  * Again, false is Once was enough, null clears it back to "not said". */
-export interface StopPatch {
+export interface DestinationPatch {
   rating?: number | null;
   again?: boolean | null;
   notes?: string | null;
@@ -126,15 +126,15 @@ export interface ReservationPatch {
 }
 export interface IdeaPatch {
   status?: IdeaStatus;
-  /** #131 · Plan it — the stop a maybe is planned onto (null = back to the shelf). */
-  stopId?: string | null;
+  /** #131 · Plan it — the destination a maybe is planned onto (null = back to the shelf). */
+  destinationId?: string | null;
   rating?: number | null;
   again?: boolean | null;
   notes?: string | null;
 }
 /**
- * `POST /api/reservations` — core's own create grammar, pre-parse: a stop OR a
- * segment parent, the clock a flight carries, a stay's kind, and `moveStop`
+ * `POST /api/reservations` — core's own create grammar, pre-parse: a destination OR a
+ * segment parent, the clock a flight carries, a stay's kind, and `moveDestination`
  * (vet HIGH: this used to be a five-field subset that could not carry a
  * flight). A 409 `segment_date_mismatch` throws `ApiError` with its body.
  */
@@ -179,24 +179,24 @@ export interface ApiClient {
     /** PATCH /api/places/:id → 204. On the Saves tab (#111 i2) it carries
      * `{ upgradeToSuggested: true }` (tap the strip) or `{ suggestedPlace: null }`
      * (Dismiss). No body comes back: refetch `list()` for the re-resolved
-     * destination. */
+     * area. */
     patch(id: string, patch: SavedPlacePatch): Promise<void>;
     /** DELETE /api/places/:id — the capture toast's Undo. */
     remove(id: string): Promise<void>;
   };
-  destinations: {
+  areas: {
     /** The locality a point is in, or null (#111). */
-    resolve(near: LatLng): Promise<ResolvedDestination | null>;
+    resolve(near: LatLng): Promise<ResolvedArea | null>;
   };
   rig: {
     get(): Promise<RigProfile | null>;
     save(input: RigProfileInput): Promise<RigProfile>;
   };
-  stops: {
-    patch(id: string, patch: StopPatch): Promise<void>;
-    /** POST /api/stops → 201 Stop — the phone's + Add ▸ Stop, and Plan it on a
+  destinations: {
+    patch(id: string, patch: DestinationPatch): Promise<void>;
+    /** POST /api/destinations → 201 Destination — the phone's + Add ▸ Destination, and Plan it on a
      * stay idea (#131). */
-    create(input: StopCreateInput): Promise<Stop>;
+    create(input: DestinationCreateInput): Promise<Destination>;
   };
   segments: {
     /** PATCH /api/segments/:id → 204 — a hop's mode switch (#104). */
@@ -218,8 +218,8 @@ export interface ApiClient {
     remove(id: string): Promise<void>;
     promote(id: string): Promise<Reservation>;
   };
-  legs: {
-    reorder(legId: string, order: string[]): Promise<void>;
+  chapters: {
+    reorder(chapterId: string, order: string[]): Promise<void>;
   };
   routes: {
     pairs(
@@ -305,11 +305,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         voidResult(request("PATCH", `/api/places/${encodeURIComponent(id)}`, patch)),
       remove: (id) => voidResult(request("DELETE", `/api/places/${encodeURIComponent(id)}`)),
     },
-    destinations: {
+    areas: {
       resolve: (near) =>
         parsed(
-          resolvedDestinationSchema,
-          request("GET", `/api/destinations/resolve?near=${near.lat},${near.lng}`),
+          resolvedAreaSchema,
+          request("GET", `/api/areas/resolve?near=${near.lat},${near.lng}`),
         ),
     },
     rig: {
@@ -320,9 +320,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         return rig;
       },
     },
-    stops: {
-      patch: (id, patch) => voidResult(request("PATCH", `/api/stops/${encodeURIComponent(id)}`, patch)),
-      create: (input) => parsed(stopSchema, request("POST", "/api/stops", input)),
+    destinations: {
+      patch: (id, patch) => voidResult(request("PATCH", `/api/destinations/${encodeURIComponent(id)}`, patch)),
+      create: (input) => parsed(destinationSchema, request("POST", "/api/destinations", input)),
     },
     segments: {
       patch: (id, patch) =>
@@ -342,9 +342,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       promote: (id) =>
         parsed(reservationRowSchema, request("POST", `/api/ideas/${encodeURIComponent(id)}/promote`)),
     },
-    legs: {
-      reorder: (legId, order) =>
-        voidResult(request("POST", `/api/legs/${encodeURIComponent(legId)}/reorder`, { order })),
+    chapters: {
+      reorder: (chapterId, order) =>
+        voidResult(request("POST", `/api/chapters/${encodeURIComponent(chapterId)}/reorder`, { order })),
     },
     routes: {
       pairs: (pairs) => parsed(routePairsResponseSchema, request("POST", "/api/routes", { pairs })),

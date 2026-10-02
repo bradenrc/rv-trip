@@ -22,7 +22,7 @@ export default async function PlacesPage() {
 
   // The graduate sheet's "Visited on" list (docs/design/41 §5): complete trips
   // only, narrowed here to what the dropdown draws so the whole summary — days,
-  // miles, open stops — does not cross into a client island to fill a <select>.
+  // miles, open destinations — does not cross into a client island to fill a <select>.
   const visitedOn = trips
     .filter((t) => t.status === "complete")
     .map((t) => ({ id: t.id, title: t.title }));

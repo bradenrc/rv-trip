@@ -14,7 +14,7 @@ export default function TripsStack() {
       {/* #103 · the setup — and, with ?edit=<id>, Trip defaults. */}
       <Stack.Screen name="trips/new" options={{ title: "New trip" }} />
       <Stack.Screen name="trips/[id]/index" options={{ title: "Trip" }} />
-      <Stack.Screen name="trips/[id]/stops/[stopId]" options={{ title: "Stop" }} />
+      <Stack.Screen name="trips/[id]/destinations/[destinationId]" options={{ title: "Destination" }} />
     </Stack>
   );
 }

@@ -9,8 +9,8 @@ import {
 
 /**
  * The row menu (⋯) — the shelf every structural and destructive verb lives on:
- * the leg header, the stop row, and (this item) the reservation and idea cards
- * inside the stop sheet. One trigger, one surface, so all four read as the same
+ * the chapter header, the destination row, and (this item) the reservation and idea cards
+ * inside the destination sheet. One trigger, one surface, so all four read as the same
  * object rather than four designs.
  *
  * The shadcn primitive's stock look already resolves to the design's palette

@@ -110,7 +110,7 @@ export function boundsCovers(outer: Bounds | null, inner: Bounds | null): boolea
 // ── deterministic spiderfy ─────────────────────────────────────────────────
 //
 // The seed carries four exact coordinate collisions (a saved place sitting on
-// the stop it belongs to, and one town visited on two trips). Clustering is out
+// the destination it belongs to, and one town visited on two trips). Clustering is out
 // of scope, so without this the second pin of each pair is simply invisible.
 
 /** ~26px: far enough that two 27px discs stop overlapping, close enough that
@@ -125,7 +125,7 @@ export interface SpiderPoint {
   id: string;
   lat: number;
   lng: number;
-  /** A trip stop anchors its group: it keeps the true position and the saved
+  /** A trip destination anchors its group: it keeps the true position and the saved
    * places sitting on it are the ones that move. */
   anchor?: boolean;
 }

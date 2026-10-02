@@ -1,6 +1,6 @@
 import { z } from "zod";
 import {
-  stop,
+  destination,
   trip,
   tripSummary,
   savedPlace,
@@ -87,8 +87,8 @@ export const placesEnvelopeSchema = z.object({
 });
 export type PlacesSearchEnvelope = z.infer<typeof placesEnvelopeSchema>;
 
-/** `GET /api/destinations/resolve` — the locality, or null (#111). */
-export const resolvedDestinationSchema = z
+/** `GET /api/areas/resolve` — the locality, or null (#111). */
+export const resolvedAreaSchema = z
   .object({
     googlePlaceId: z.string(),
     name: z.string(),
@@ -116,7 +116,7 @@ export const routePairsResponseSchema = z.object({
 export const reservationRowSchema = z
   .object({
     id: z.string(),
-    stopId: z.string().nullable().optional(),
+    destinationId: z.string().nullable().optional(),
     segmentId: z.string().nullable().optional(),
     ideaId: z.string().nullable().optional(),
     type: reservation.shape.type,
@@ -133,10 +133,12 @@ export const reservationRowSchema = z
     startsTz: z.string().nullable().optional(),
     endsTz: z.string().nullable().optional(),
     lodgingKind: reservation.shape.lodgingKind.optional(),
+    // #155 · Q4 A — optional: a server from before #155 sends none.
+    transportKind: reservation.shape.transportKind.optional(),
   })
   .transform((r) => ({
     id: r.id,
-    stopId: r.stopId ?? null,
+    destinationId: r.destinationId ?? null,
     segmentId: r.segmentId ?? null,
     ideaId: r.ideaId ?? null,
     type: r.type,
@@ -153,6 +155,7 @@ export const reservationRowSchema = z
     startsTz: r.startsTz ?? null,
     endsTz: r.endsTz ?? null,
     lodgingKind: r.lodgingKind ?? null,
+    transportKind: r.transportKind ?? null,
     // A row that was just CREATED has no history yet, and the create response
     // carries none (#78 §6: the byline is joined on the READ path). The client
     // splices this shape straight into its trip, so the field has to be there.
@@ -162,5 +165,5 @@ export const reservationRowSchema = z
 /** `POST /api/trips` → 201: the created trip's whole tree. */
 export const tripSchema = trip;
 
-/** `POST /api/stops` → 201 Stop (#131 · the phone's + Add ▸ Stop / Plan it). */
-export const stopSchema = stop;
+/** `POST /api/destinations` → 201 Destination (#131 · the phone's + Add ▸ Destination / Plan it). */
+export const destinationSchema = destination;

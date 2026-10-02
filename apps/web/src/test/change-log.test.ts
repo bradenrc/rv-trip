@@ -6,7 +6,7 @@ import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { PATCH as PATCH_IDEA } from "@/app/api/ideas/[id]/route";
 import { PATCH as PATCH_PLACE } from "@/app/api/places/[id]/route";
 import { PATCH as PATCH_RES } from "@/app/api/reservations/[id]/route";
-import { PATCH as PATCH_STOP } from "@/app/api/stops/[id]/route";
+import { PATCH as PATCH_DESTINATION } from "@/app/api/destinations/[id]/route";
 import { ctx, describeDb, req } from "@/test/db";
 
 /**
@@ -61,19 +61,19 @@ describe("mutations.ts writes the log from one place", () => {
   });
 });
 
-describeDb("change_log · stops", () => {
+describeDb("change_log · destinations", () => {
   it("logs a rating change with the old and the new value", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const stop = await fx.stop({ legId: loop.legCoast.id, rating: 3, sortOrder: 9 });
+    const destination = await fx.destination({ chapterId: loop.chapterCoast.id, rating: 3, sortOrder: 9 });
 
-    const res = await PATCH_STOP(req({ rating: 5 }, "PATCH"), ctx(stop.id));
+    const res = await PATCH_DESTINATION(req({ rating: 5 }, "PATCH"), ctx(destination.id));
 
     expect(res.status).toBe(204);
-    expect(await logged(stop.id)).toMatchObject([
+    expect(await logged(destination.id)).toMatchObject([
       {
         householdId: DEV_OWNER,
-        entity: "stop",
-        entityId: stop.id,
+        entity: "destination",
+        entityId: destination.id,
         field: "rating",
         from: "3",
         to: "5",
@@ -85,9 +85,9 @@ describeDb("change_log · stops", () => {
 
   it("writes nothing for a no-op save", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const stop = await fx.stop({ legId: loop.legCoast.id, rating: 4, notes: "windy", sortOrder: 9 });
+    const destination = await fx.destination({ chapterId: loop.chapterCoast.id, rating: 4, notes: "windy", sortOrder: 9 });
 
-    const res = await PATCH_STOP(req({ rating: 4, notes: "windy" }, "PATCH"), ctx(stop.id));
+    const res = await PATCH_DESTINATION(req({ rating: 4, notes: "windy" }, "PATCH"), ctx(destination.id));
 
     expect(res.status).toBe(204);
     expect(await logged()).toEqual([]);
@@ -95,22 +95,22 @@ describeDb("change_log · stops", () => {
 
   it("writes nothing for a field outside the three", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const stop = await fx.stop({ legId: loop.legCoast.id, sortOrder: 9 });
+    const destination = await fx.destination({ chapterId: loop.chapterCoast.id, sortOrder: 9 });
 
-    const res = await PATCH_STOP(req({ placeName: "Cannon Beach, OR" }, "PATCH"), ctx(stop.id));
+    const res = await PATCH_DESTINATION(req({ placeName: "Cannon Beach, OR" }, "PATCH"), ctx(destination.id));
 
     expect(res.status).toBe(204);
-    expect((await read.stop(stop.id))!.placeName).toBe("Cannon Beach, OR");
+    expect((await read.destination(destination.id))!.placeName).toBe("Cannon Beach, OR");
     expect(await logged()).toEqual([]);
   });
 
   it("logs one row per changed field when a body carries two", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const stop = await fx.stop({ legId: loop.legCoast.id, rating: 3, notes: null, sortOrder: 9 });
+    const destination = await fx.destination({ chapterId: loop.chapterCoast.id, rating: 3, notes: null, sortOrder: 9 });
 
-    await PATCH_STOP(req({ rating: 4, notes: "Riverfront sites 41–48" }, "PATCH"), ctx(stop.id));
+    await PATCH_DESTINATION(req({ rating: 4, notes: "Riverfront sites 41–48" }, "PATCH"), ctx(destination.id));
 
-    expect(await logged(stop.id)).toMatchObject([
+    expect(await logged(destination.id)).toMatchObject([
       { field: "notes", from: null, to: "Riverfront sites 41–48" },
       { field: "rating", from: "3", to: "4" },
     ]);
@@ -118,21 +118,21 @@ describeDb("change_log · stops", () => {
 
   it("logs a cleared rating as a null `to`", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const stop = await fx.stop({ legId: loop.legCoast.id, rating: 5, sortOrder: 9 });
+    const destination = await fx.destination({ chapterId: loop.chapterCoast.id, rating: 5, sortOrder: 9 });
 
-    await PATCH_STOP(req({ rating: null }, "PATCH"), ctx(stop.id));
+    await PATCH_DESTINATION(req({ rating: null }, "PATCH"), ctx(destination.id));
 
-    expect(await logged(stop.id)).toMatchObject([{ field: "rating", from: "5", to: null }]);
+    expect(await logged(destination.id)).toMatchObject([{ field: "rating", from: "5", to: null }]);
   });
 
   it("writes nothing when the owner scope refuses the patch", async () => {
     // The fixture rates Astoria 5, so 2 is a real move — a refusal, not a no-op.
     const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
 
-    const res = await PATCH_STOP(req({ rating: 2 }, "PATCH"), ctx(theirs.astoria.id));
+    const res = await PATCH_DESTINATION(req({ rating: 2 }, "PATCH"), ctx(theirs.astoria.id));
 
     expect(res.status).toBe(404);
-    expect((await read.stop(theirs.astoria.id))!.rating).toBe(5);
+    expect((await read.destination(theirs.astoria.id))!.rating).toBe(5);
     expect(await logged()).toEqual([]);
   });
 });
@@ -140,7 +140,7 @@ describeDb("change_log · stops", () => {
 describeDb("change_log · reservations", () => {
   it("logs a note change", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const row = await fx.reservation({ stopId: loop.astoria.id, notes: null });
+    const row = await fx.reservation({ destinationId: loop.astoria.id, notes: null });
 
     const res = await PATCH_RES(req({ notes: "Ask for a pull-through" }, "PATCH"), ctx(row.id));
 
@@ -152,7 +152,7 @@ describeDb("change_log · reservations", () => {
 
   it("writes nothing when only the cost moves", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const row = await fx.reservation({ stopId: loop.astoria.id, cost: 204 });
+    const row = await fx.reservation({ destinationId: loop.astoria.id, cost: 204 });
 
     await PATCH_RES(req({ cost: 219.5 }, "PATCH"), ctx(row.id));
 
@@ -164,7 +164,7 @@ describeDb("change_log · reservations", () => {
 describeDb("change_log · ideas", () => {
   it("logs the status cycle", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const row = await fx.idea({ tripId: loop.trip.id, stopId: null, status: "idea" });
+    const row = await fx.idea({ tripId: loop.trip.id, destinationId: null, status: "idea" });
 
     const res = await PATCH_IDEA(req({ status: "planned" }, "PATCH"), ctx(row.id));
 
@@ -176,20 +176,20 @@ describeDb("change_log · ideas", () => {
 
   it("logs a rating alongside an attach", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const row = await fx.idea({ tripId: loop.trip.id, stopId: null, rating: null });
+    const row = await fx.idea({ tripId: loop.trip.id, destinationId: null, rating: null });
 
-    await PATCH_IDEA(req({ rating: 5, stopId: loop.newport.id }, "PATCH"), ctx(row.id));
+    await PATCH_IDEA(req({ rating: 5, destinationId: loop.newport.id }, "PATCH"), ctx(row.id));
 
-    expect((await read.idea(row.id))!.stopId).toBe(loop.newport.id);
+    expect((await read.idea(row.id))!.destinationId).toBe(loop.newport.id);
     expect(await logged(row.id)).toMatchObject([{ field: "rating", from: null, to: "5" }]);
   });
 
   it("writes nothing when the attach is refused", async () => {
     const loop = await fx.pacificNorthwestLoop();
     const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
-    const row = await fx.idea({ tripId: loop.trip.id, stopId: null, rating: null });
+    const row = await fx.idea({ tripId: loop.trip.id, destinationId: null, rating: null });
 
-    const res = await PATCH_IDEA(req({ rating: 5, stopId: theirs.astoria.id }, "PATCH"), ctx(row.id));
+    const res = await PATCH_IDEA(req({ rating: 5, destinationId: theirs.astoria.id }, "PATCH"), ctx(row.id));
 
     expect(res.status).toBe(404);
     expect((await read.idea(row.id))!.rating).toBe(null);

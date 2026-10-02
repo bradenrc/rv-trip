@@ -420,7 +420,7 @@ describe("Slate + Sky — default dark, the toggle, and the chrome islands", () 
   it("§5 (Q4=A): the three chrome bars wear the dark theme itself", () => {
     for (const [file, marker] of [
       ["apps/web/src/components/nav/Nav.tsx", "<nav className=\"dark sticky"],
-      ["apps/web/src/components/trip/StopDetailSheet.tsx", 'className="dark sticky top-0 z-[1] bg-rv-navy'],
+      ["apps/web/src/components/trip/DestinationDetailSheet.tsx", 'className="dark sticky top-0 z-[1] bg-rv-navy'],
       ["apps/web/src/components/map/MapOverview.tsx", 'className="dark flex flex-wrap'],
     ] as const) {
       expect(read(join(REPO, file)), `${file} island`).toContain(marker);

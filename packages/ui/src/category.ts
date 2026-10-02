@@ -7,13 +7,14 @@ import {
   Caravan,
   Plane,
   Ship,
+  Bus,
   Ellipsis,
   MapPin,
   CircleDashed,
   Clock,
   CircleCheck,
 } from "lucide-react";
-import type { IdeaCategory, ReservationType, IdeaStatus, TravelMode } from "@rv-trip/core";
+import type { IdeaCategory, ReservationType, IdeaStatus, TransportKind, TravelMode } from "@rv-trip/core";
 
 /**
  * The design system's category language — every reservation/idea type maps to
@@ -64,7 +65,14 @@ const OTHER = {
  * too. Icon only — the Travel colours are unchanged, and every caller that
  * passes no mode (every shipped one) is unchanged.
  */
-export function categoryMeta(type: ReservationType, mode?: TravelMode): CategoryMeta {
+export function categoryMeta(
+  type: ReservationType,
+  mode?: TravelMode,
+  /** #155 · Q4 A — the booking's own kind wins: a shuttle is a Bus, a flight a
+   * Plane, a ferry a Ship, on whatever hop. Train and car (no icon decided)
+   * and null keep the mode fallback. */
+  transportKind?: TransportKind | null,
+): CategoryMeta {
   switch (type) {
     case "campground":
       return { cat: "Stay", Icon: Tent, ...STAY };
@@ -79,7 +87,18 @@ export function categoryMeta(type: ReservationType, mode?: TravelMode): Category
     case "transport":
       return {
         cat: "Travel",
-        Icon: mode === "fly" ? Plane : mode === "ferry" ? Ship : Caravan,
+        Icon:
+          transportKind === "shuttle"
+            ? Bus
+            : transportKind === "flight"
+              ? Plane
+              : transportKind === "ferry"
+                ? Ship
+                : mode === "fly"
+                  ? Plane
+                  : mode === "ferry"
+                    ? Ship
+                    : Caravan,
         ...TRAVEL,
       };
     default:

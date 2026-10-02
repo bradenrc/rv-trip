@@ -25,7 +25,7 @@ import type { DriveArc, MapPin } from "./pins";
 
 /**
  * The one map component. Three surfaces speak to it: the /map overview (pins,
- * arcs, labels, selection), the stop-detail mini-map (one pin, pan/zoom only)
+ * arcs, labels, selection), the destination-detail mini-map (one pin, pan/zoom only)
  * and the Places library's map lens (the already-filtered shelf).
  *
  * It never filters — it draws exactly the pins it is handed — and it holds no
@@ -69,7 +69,7 @@ export interface MapViewProps {
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   /** Name labels under each pin. Off for the mini-map, where the sheet already
-   * names the stop directly under the frame. */
+   * names the destination directly under the frame. */
   showLabels?: boolean;
   /** CSS length. Omit to fill the cell. */
   height?: string;
@@ -92,14 +92,14 @@ export function MapView({
   const ref = useRef<MapRef | null>(null);
   const palette = MAP_PALETTE[mode];
 
-  // Deterministic spiderfy: a trip stop anchors its group and the saved places
+  // Deterministic spiderfy: a trip destination anchors its group and the saved places
   // sitting on its exact coordinate are the ones that move.
   const placements = useMemo(() => {
     const input: SpiderPoint[] = pins.map((p) => ({
       id: p.id,
       lat: p.lat,
       lng: p.lng,
-      anchor: p.kind === "stop",
+      anchor: p.kind === "destination",
     }));
     return new Map(spiderfy(input).map((s) => [s.id, s]));
   }, [pins]);
@@ -288,19 +288,19 @@ export function MapView({
             longitude={pin.lng}
             latitude={pin.lat}
             offset={[dx, dy]}
-            // Three tiers under the selection: a stop is a commitment, a saved
+            // Three tiers under the selection: a destination is a commitment, a saved
             // place is a want, an idea is a maybe — so an idea can never cover
-            // the stop it belongs to.
+            // the destination it belongs to.
             style={{
-              zIndex: selected ? 4 : pin.kind === "stop" ? 3 : pin.kind === "place" ? 2 : 1,
+              zIndex: selected ? 4 : pin.kind === "destination" ? 3 : pin.kind === "place" ? 2 : 1,
               cursor: onSelect ? "pointer" : "default",
             }}
             onClick={onSelect ? () => onSelect(pin.id) : undefined}
           >
             <div className="relative">
               {at?.spiderfied && <SpiderLeader dx={dx} dy={dy} palette={palette} />}
-              {pin.kind === "stop" ? (
-                <StopDisc pin={pin} selected={selected} palette={palette} />
+              {pin.kind === "destination" ? (
+                <DestinationDisc pin={pin} selected={selected} palette={palette} />
               ) : pin.kind === "place" ? (
                 <PlaceDrop pin={pin} selected={selected} palette={palette} />
               ) : (
@@ -372,17 +372,17 @@ function SpiderLeader({ dx, dy, palette }: { dx: number; dy: number; palette: Ov
 }
 
 /**
- * A trip stop: a numbered disc, green because that is the shipped stop language
- * (StopBar, packages/ui/src/Gantt.tsx:130). Filled = ahead of you, hollow = been
- * there. A floating stop is an amber dashed disc with no ordinal — it has no
+ * A trip destination: a numbered disc, green because that is the shipped destination language
+ * (DestinationBar, packages/ui/src/Gantt.tsx:130). Filled = ahead of you, hollow = been
+ * there. A floating destination is an amber dashed disc with no ordinal — it has no
  * position in the drive sequence, so it gets no number and no arc.
  */
-function StopDisc({
+function DestinationDisc({
   pin,
   selected,
   palette,
 }: {
-  pin: Extract<MapPin, { kind: "stop" }>;
+  pin: Extract<MapPin, { kind: "destination" }>;
   selected: boolean;
   palette: OverlayPalette;
 }) {
@@ -439,7 +439,7 @@ function StopDisc({
 
 /**
  * A saved place: a category-coloured teardrop. Filled = want to go, hollow =
- * been there — the same filled/hollow rule the stop discs use, so one rule reads
+ * been there — the same filled/hollow rule the destination discs use, so one rule reads
  * across the whole map.
  */
 function PlaceDrop({
@@ -476,7 +476,7 @@ function PlaceDrop({
 }
 
 /**
- * An idea: an 11px ring in the Do/activity colour — under half the 27px stop
+ * An idea: an 11px ring in the Do/activity colour — under half the 27px destination
  * disc, which is the whole point. A maybe reads smaller than a commitment,
  * carries no number and is never an arc endpoint.
  *
@@ -493,8 +493,8 @@ function PlaceDrop({
  *   sense (not a commitment) while reading against any basemap.
  * - Selection repaints, rather than only re-shadowing. It used to change its
  *   box-shadow alone, so picking an idea from the rail barely moved anything on
- *   the canvas while a stop and a saved place both repaint. Same two selection
- *   keys `StopDisc` takes, same 11px, still no number.
+ *   the canvas while a destination and a saved place both repaint. Same two selection
+ *   keys `DestinationDisc` takes, same 11px, still no number.
  */
 function IdeaRing({ selected, palette }: { selected: boolean; palette: OverlayPalette }) {
   return (

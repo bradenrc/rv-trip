@@ -285,7 +285,7 @@ describe("GooglePlacesProvider", () => {
   });
 });
 
-// ── #111 · resolveDestination, against mocked Geocoding answers ────────────
+// ── #111 · resolveArea, against mocked Geocoding answers ────────────
 
 /** One `result_type=locality` answer, shaped like Google's. */
 function geocodeAnswer(p: {
@@ -373,7 +373,7 @@ describe("parseReverseGeocode — the one naming rule", () => {
   });
 });
 
-describe("GooglePlacesProvider.resolveDestination", () => {
+describe("GooglePlacesProvider.resolveArea", () => {
   let restore = () => {};
   afterEach(() => restore());
 
@@ -381,7 +381,7 @@ describe("GooglePlacesProvider.resolveDestination", () => {
     const stub = stubFetch(() => ({ json: BANDON }));
     restore = stub.restore;
 
-    const dest = await PROVIDER().resolveDestination(BLM_PIN.lat, BLM_PIN.lng);
+    const dest = await PROVIDER().resolveArea(BLM_PIN.lat, BLM_PIN.lng);
 
     expect(dest?.name).toBe("Bandon, OR");
     expect(dest?.region).toBe("Oregon");
@@ -395,27 +395,27 @@ describe("GooglePlacesProvider.resolveDestination", () => {
   it("resolves San José, Costa Rica", async () => {
     const stub = stubFetch(() => ({ json: SAN_JOSE }));
     restore = stub.restore;
-    const dest = await PROVIDER().resolveDestination(CAPTURE_SAN_JOSE.lat, CAPTURE_SAN_JOSE.lng);
+    const dest = await PROVIDER().resolveArea(CAPTURE_SAN_JOSE.lat, CAPTURE_SAN_JOSE.lng);
     expect(dest).toMatchObject({ name: "San José, Costa Rica", region: "Costa Rica" });
   });
 
   it("is null past 25 mi and on ZERO_RESULTS", async () => {
     let stub = stubFetch(() => ({ json: BURNS }));
     restore = stub.restore;
-    expect(await PROVIDER().resolveDestination(ALVORD_PIN.lat, ALVORD_PIN.lng)).toBeNull();
+    expect(await PROVIDER().resolveArea(ALVORD_PIN.lat, ALVORD_PIN.lng)).toBeNull();
     restore();
     stub = stubFetch(() => ({ json: { status: "ZERO_RESULTS", results: [] } }));
     restore = stub.restore;
-    expect(await PROVIDER().resolveDestination(ALVORD_PIN.lat, ALVORD_PIN.lng)).toBeNull();
+    expect(await PROVIDER().resolveArea(ALVORD_PIN.lat, ALVORD_PIN.lng)).toBeNull();
   });
 
   it("throws on a refused key or an HTTP failure — the caller decides", async () => {
     let stub = stubFetch(() => ({ json: { status: "REQUEST_DENIED", results: [] } }));
     restore = stub.restore;
-    await expect(PROVIDER().resolveDestination(1, 2)).rejects.toThrow(/REQUEST_DENIED/);
+    await expect(PROVIDER().resolveArea(1, 2)).rejects.toThrow(/REQUEST_DENIED/);
     restore();
     stub = stubFetch(() => ({ status: 500 }));
     restore = stub.restore;
-    await expect(PROVIDER().resolveDestination(1, 2)).rejects.toThrow(/500/);
+    await expect(PROVIDER().resolveArea(1, 2)).rejects.toThrow(/500/);
   });
 });

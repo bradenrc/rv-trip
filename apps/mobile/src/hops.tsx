@@ -14,10 +14,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type {
   HopBookingDraft,
+  Logistics,
+  LogisticsGroup,
+  LogisticsItem,
   Place,
   Reservation,
   RouteHop,
-  RouteHopBooking,
+  ShuttleDraft,
   TravelMode,
   Trip,
   ZoneChip,
@@ -33,11 +36,14 @@ import {
   hopDraftZones,
   instantToLocal,
   localToInstant,
+  shuttleBookingInput,
+  shuttleDraftFromBooking,
+  shuttleZone,
   zoneChoices,
 } from "@rv-trip/core";
 import { addHopBooking, deleteHopBooking, editHopBooking, setHopMode } from "./store";
 import { C, F, R } from "./theme";
-import { Button, Chip, Segmented, type SegmentedOption } from "./ui";
+import { Button, CategoryTile, Chip, Kicker, Segmented, type SegmentedOption } from "./ui";
 
 /**
  * The phone's hops (#104 · Q12 C — full parity): the travel card a fly/ferry
@@ -86,24 +92,30 @@ export function switchHop(trip: Trip, segmentId: string, mode: TravelMode) {
   );
 }
 
-/** The travel card: 3px rv-travel left rule, the hop's flights in local time. */
+/** What a booking sheet needs of the hop it books on — a `RouteHop` or a
+ * Logistics group (#155) both qualify. */
+export type HopRef = Pick<RouteHop, "segmentId" | "mode" | "fromDestinationId" | "toDestinationId" | "fromName" | "toName">;
+
+/**
+ * The travel card: 3px rv-travel left rule, the hop's glyph, `from → to` and
+ * its switch. #155 · Q3 B — the flights moved to the hop's Logistics group;
+ * the card carries the count chip ("2 flights · 1 shuttle → Logistics"), and
+ * tapping it scrolls the Route to that group.
+ */
 export function HopRow({
   hop,
   flush,
   showSwitch,
   onMode,
-  onAdd,
-  onEdit,
+  onChip,
 }: {
   hop: RouteHop;
   flush: boolean;
   showSwitch: boolean;
   onMode: (m: TravelMode) => void;
-  onAdd: () => void;
-  /** #143 · a booking line tapped — opens Edit flight / Edit ferry on it. */
-  onEdit?: (bookingId: string) => void;
+  /** #155 · the chip — scroll to the hop's Logistics group. */
+  onChip?: () => void;
 }) {
-  const bookings = hop.items.filter((i): i is RouteHopBooking => i.kind === "booking");
   // #129 · Q11 A — a hop that DRIVES but kept its flights: the switch inline
   // (on any trip mode) and the parked row; the flights come back if it flies.
   if (hop.parked > 0) {
@@ -135,32 +147,99 @@ export function HopRow({
         {hop.overnight && <Text style={styles.pm}>redeye</Text>}
       </View>
       {showSwitch && <Segmented mono value={hop.mode} options={MODE_OPTIONS} onChange={onMode} />}
-      {bookings.map((b) => (
-        <Pressable
-          key={b.id}
-          onPress={() => onEdit?.(b.id)}
-          disabled={!onEdit}
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${hop.mode === "ferry" ? "ferry" : "flight"} ${b.name}`}
-          style={styles.flRow}
-        >
-          <Text style={[styles.pfl, { flex: 1 }]}>
-            {b.name}
-            {b.departTime && b.arriveTime ? (
-              <>
-                {"\n"}
-                {b.departTime} <Text style={styles.z}>{b.departAbbr}</Text> → {b.arriveTime}{" "}
-                <Text style={styles.z}>{b.arriveAbbr}</Text>
-              </>
-            ) : null}
-          </Text>
-          {onEdit && <Text style={styles.chev}>›</Text>}
+      {hop.chip && (
+        <Pressable onPress={onChip} disabled={!onChip} accessibilityRole="link" hitSlop={6} style={styles.jump}>
+          <Text style={styles.jumpText}>{hop.chip}</Text>
         </Pressable>
-      ))}
-      <Pressable onPress={onAdd} accessibilityRole="button" hitSlop={6}>
-        <Text style={[styles.pm, { color: C.ink }]}>+ {hop.mode === "ferry" ? "Add ferry" : "Add flight"}</Text>
-      </Pressable>
+      )}
     </View>
+  );
+}
+
+/**
+ * The Logistics section (#155 · Q3 B), after the last chapter and "+ Add
+ * destination": one group per fly or ferry hop, in segment order — the same
+ * `logisticsModel` the web draws. Each group reports its y (relative to the
+ * section) so a hop chip can scroll the Route to it.
+ */
+export function LogisticsSection({
+  model,
+  onGroupLayout,
+  onAdd,
+  onAddShuttle,
+  onEdit,
+}: {
+  model: Logistics;
+  onGroupLayout?: (segmentId: string, y: number) => void;
+  onAdd: (g: LogisticsGroup) => void;
+  onAddShuttle: (g: LogisticsGroup) => void;
+  onEdit: (g: LogisticsGroup, bookingId: string) => void;
+}) {
+  return (
+    <View style={styles.logi}>
+      <Kicker>Logistics</Kicker>
+      {model.groups.map((g) => (
+        <View
+          key={g.segmentId}
+          onLayout={(e) => onGroupLayout?.(g.segmentId, e.nativeEvent.layout.y)}
+          style={{ gap: 2 }}
+        >
+          <Text style={styles.lday}>
+            {[g.dayLabel, `${g.fromName} → ${g.toName}`].filter(Boolean).join(" · ")}
+          </Text>
+          {g.items.map((item, i) => (
+            <LogisticsRow key={item.kind === "booking" ? item.id : `${item.kind}-${i}`} item={item} onEdit={(id) => onEdit(g, id)} />
+          ))}
+          <View style={styles.ladd}>
+            <Pressable onPress={() => onAdd(g)} accessibilityRole="button" hitSlop={6}>
+              <Text style={styles.laddText}>+ {g.mode === "ferry" ? "Add ferry" : "Add flight"}</Text>
+            </Pressable>
+            <Pressable onPress={() => onAddShuttle(g)} accessibilityRole="button" hitSlop={6}>
+              <Text style={styles.laddText}>+ Add shuttle</Text>
+            </Pressable>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function LogisticsRow({ item, onEdit }: { item: LogisticsItem; onEdit: (bookingId: string) => void }) {
+  if (item.kind === "layover") return <Text style={styles.lay}>{item.label}</Text>;
+  const clock = (
+    <Text style={styles.tm}>
+      {item.departTime}
+      {item.departAbbr ? <Text style={styles.z}> {item.departAbbr}</Text> : null}
+      {item.arriveTime ? " → " : ""}
+      {item.arriveTime}
+      {item.arriveAbbr ? <Text style={styles.z}> {item.arriveAbbr}</Text> : null}
+    </Text>
+  );
+  const timed = item.departTime !== null || item.arriveTime !== null;
+  if (item.kind === "empty") {
+    return (
+      <View style={styles.li}>
+        <CategoryTile type="other" size={24} />
+        <Text style={[styles.nm, styles.ghost]}>{item.label}</Text>
+        {timed && clock}
+      </View>
+    );
+  }
+  return (
+    <Pressable
+      onPress={() => onEdit(item.id)}
+      accessibilityRole="button"
+      accessibilityLabel={`Edit ${item.transportKind} ${item.name}`}
+      style={[styles.li, item.aside && { paddingLeft: 16 }]}
+    >
+      {/* The phone tile is a two-letter mark, so a flight and a shuttle both
+          read "Tr" and differ by name (the Bus icon is web-only). */}
+      <CategoryTile type="transport" size={24} />
+      <Text style={styles.nm} numberOfLines={1}>
+        {item.name}
+      </Text>
+      {timed && clock}
+    </Pressable>
   );
 }
 
@@ -243,13 +322,13 @@ function zoneLabel(zone: string, local: string): string {
  * Add flight / Add ferry. The same fields, chips and fixes as the web form:
  * a chip the table verified is green; one it could not is amber and lists the
  * zones when tapped; Save stays disabled until both ends have a zone; a date
- * clash names the stop and offers the two fixes, and nothing saves until one
+ * clash names the destination and offers the two fixes, and nothing saves until one
  * is picked.
  *
  * #143 — given `editing`, the same sheet is **Edit flight / Edit ferry** (the
  * web's #124): seeded by `hopDraftFromBooking`, saved via `hopBookingPatch`,
  * the clash judged against the hop WITHOUT the booking it replaces, and an
- * amber Delete behind "Are you sure?" (Q7 A). The stop move rides the create
+ * amber Delete behind "Are you sure?" (Q7 A). The destination move rides the create
  * only, so an edit offers just the date fix.
  */
 export function HopBookingSheet({
@@ -259,7 +338,7 @@ export function HopBookingSheet({
   onClose,
 }: {
   trip: Trip;
-  hop: RouteHop | null;
+  hop: HopRef | null;
   /** #143 — the booking being edited (from `trip.segments[].reservations`). */
   editing?: Reservation | null;
   onClose: () => void;
@@ -281,9 +360,9 @@ export function HopBookingSheet({
   }, [hop?.segmentId, editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ports = useMemo(() => {
-    const stops = trip.legs.flatMap((l) => l.stops);
-    const of = (id: string | null): Place | null => stops.find((s) => s.id === id)?.place ?? null;
-    return { from: of(hop?.fromStopId ?? null), to: of(hop?.toStopId ?? null) };
+    const destinations = trip.chapters.flatMap((l) => l.destinations);
+    const of = (id: string | null): Place | null => destinations.find((s) => s.id === id)?.place ?? null;
+    return { from: of(hop?.fromDestinationId ?? null), to: of(hop?.toDestinationId ?? null) };
   }, [trip, hop]);
 
   if (!hop) return null;
@@ -417,7 +496,7 @@ export function HopBookingSheet({
         <View style={styles.pconf}>
           <Text style={styles.w}>⚠ {copy.headline}</Text>
           <Text style={{ color: C.ink, fontSize: 11.5 }}>{copy.sub}</Text>
-          {/* The stop move rides the CREATE only; an edit fixes its date. */}
+          {/* The destination move rides the CREATE only; an edit fixes its date. */}
           {!editing && (
             <Pressable onPress={() => void save(true)} disabled={saving} style={styles.pconfA} accessibilityRole="button">
               <Text style={styles.pconfAText}>{copy.move}</Text>
@@ -435,6 +514,101 @@ export function HopBookingSheet({
 
       <Button onPress={() => void save(false)} disabled={!body || clash !== null || saving}>
         {kind === "ferry" ? "Save ferry" : "Save flight"}
+      </Button>
+      {editing && (
+        <Button tone="warn" onPress={remove} disabled={saving}>
+          {`Delete ${noun}`}
+        </Button>
+      )}
+    </Sheet>
+  );
+}
+
+/**
+ * "+ Add shuttle" (#155 · Q4 A) — the booking sheet's sibling: a name
+ * (required) and two OPTIONAL local times, read in the hop's zone on the
+ * shuttle's side. Writes `transportKind: "shuttle"`; a shuttle never re-times
+ * its hop, so there is no date clash to judge. Given `editing`, Edit shuttle.
+ */
+export function ShuttleSheet({
+  trip,
+  hop,
+  editing = null,
+  onClose,
+}: {
+  trip: Trip;
+  hop: HopRef | null;
+  editing?: Reservation | null;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState<ShuttleDraft>({ name: "", departs: "", arrives: "" });
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setDraft(editing ? shuttleDraftFromBooking(editing) : { name: "", departs: "", arrives: "" });
+    setSaving(false);
+  }, [hop?.segmentId, editing?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!hop) return null;
+  const set = (patch: Partial<ShuttleDraft>) => setDraft((d) => ({ ...d, ...patch }));
+  const body = shuttleBookingInput(hop.segmentId, draft, shuttleZone(trip, hop.segmentId));
+  const noun = editing?.transportKind ?? "shuttle";
+  const what = `That ${noun}`;
+
+  const save = async () => {
+    if (!body || saving) return;
+    setSaving(true);
+    try {
+      if (editing) {
+        await editHopBooking(
+          trip.id,
+          editing.id,
+          hopBookingPatch(editing, {
+            name: body.name,
+            startsAt: body.startsAt,
+            endsAt: body.endsAt,
+            startsTz: body.startsTz,
+            endsTz: body.endsTz,
+          }),
+        );
+      } else {
+        await addHopBooking(trip.id, body, false);
+      }
+      onClose();
+    } catch {
+      setSaving(false);
+      failed(what);
+    }
+  };
+
+  const remove = () => {
+    if (!editing) return;
+    Alert.alert("Are you sure?", undefined, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: `Delete ${noun}`,
+        style: "destructive",
+        onPress: () => {
+          onClose();
+          deleteHopBooking(trip.id, editing.id).catch(() => failed(what));
+        },
+      },
+    ]);
+  };
+
+  return (
+    <Sheet visible onClose={onClose}>
+      <Text style={styles.st}>{editing ? `Edit ${noun}` : "Add shuttle"}</Text>
+      <Text style={styles.pm}>
+        {hop.fromName} → {hop.toName}
+      </Text>
+      <Label>Name</Label>
+      <Input value={draft.name} onChangeText={(name) => set({ name })} placeholder="Airport shuttle" />
+      <Label>Departs · local</Label>
+      <Input mono value={draft.departs} onChangeText={(departs) => set({ departs })} />
+      <Label>Arrives · local</Label>
+      <Input mono value={draft.arrives} onChangeText={(arrives) => set({ arrives })} />
+      <Button onPress={() => void save()} disabled={!body || saving}>
+        {`Save ${noun}`}
       </Button>
       {editing && (
         <Button tone="warn" onPress={remove} disabled={saving}>
@@ -479,9 +653,27 @@ const styles = StyleSheet.create({
   },
   hh: { flexDirection: "row", gap: 6, alignItems: "center", flexWrap: "wrap" },
   hhBold: { color: C.ink, fontWeight: "700", fontSize: 12 },
-  pfl: { fontFamily: F.mono, fontSize: 10.5, color: C.ink },
-  flRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  chev: { fontFamily: F.mono, color: C.inkFaded, fontSize: 14 },
+  // #155 · the hop chip — travel ink, because it names transport bookings.
+  jump: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: C.borderHi,
+    borderRadius: R.pill,
+    paddingVertical: 1,
+    paddingHorizontal: 8,
+  },
+  // RV has no separate travel-ink: in the dark app both are violet-400.
+  jumpText: { fontFamily: F.mono, fontSize: 9.5, color: C.travel },
+  // #155 · the Logistics section.
+  logi: { borderTopWidth: 1, borderTopColor: C.border, paddingTop: 8, marginTop: 4, gap: 6 },
+  lday: { fontFamily: F.mono, fontSize: 9.5, color: C.inkMuted, marginTop: 6 },
+  li: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 5 },
+  nm: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: "600", color: C.ink },
+  ghost: { color: C.inkFaded, fontWeight: "500" },
+  tm: { fontFamily: F.mono, fontSize: 9.5, color: C.inkMuted },
+  lay: { fontFamily: F.mono, fontSize: 9.5, color: C.inkFaded, paddingTop: 3, paddingLeft: 32 },
+  ladd: { flexDirection: "row", gap: 10, paddingTop: 4, paddingLeft: 32 },
+  laddText: { fontSize: 10.5, color: C.ink },
   z: { color: C.inkFaded },
   pm: { fontFamily: F.mono, fontSize: 10.5, color: C.inkFaded },
   st: { fontSize: 16, fontWeight: "800", color: C.ink },

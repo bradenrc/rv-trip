@@ -31,7 +31,7 @@ export interface MatchCandidate {
  * different places (§7). */
 export const SAME_PLACE_METERS = 150;
 
-/** Q4=B: only stops and reservations you actually liked graduate. */
+/** Q4=B: only destinations and reservations you actually liked graduate. */
 export const SUGGESTION_MIN_RATING = 4;
 
 /**
@@ -65,9 +65,9 @@ function hasCoords(c: MatchCandidate): c is MatchCandidate & { lat: number; lng:
  *    be within {@link SAME_PLACE_METERS}. Either side coordless → the guard has
  *    nothing to measure, so name equality alone matches (Gap 3).
  * 4. Borrowed coordinates never enter the comparison. That is a contract on the
- *    CALLER: a reservation may inherit its stop's pin for display, never for
+ *    CALLER: a reservation may inherit its destination's pin for display, never for
  *    matching, so {@link suggestionsFromTrips} leaves a reservation's lat/lng
- *    null rather than copying the stop's. Comparing a campground against a town
+ *    null rather than copying the destination's. Comparing a campground against a town
  *    centroid is the bug this rule exists to avoid.
  */
 export function isAlreadySaved(c: MatchCandidate, library: MatchCandidate[]): boolean {
@@ -90,9 +90,9 @@ export function matchCandidateFromSaved(p: SavedPlace): MatchCandidate {
   };
 }
 
-/** Where a suggestion came from. A reservation names an actual place; a stop
+/** Where a suggestion came from. A reservation names an actual place; a destination
  * names a town — both graduate under Q4=B. */
-export type SuggestionKind = "stop" | "reservation";
+export type SuggestionKind = "destination" | "reservation";
 
 /**
  * A rated row from a complete trip, offered to the library. It is NOT a
@@ -104,9 +104,9 @@ export interface PlaceSuggestion extends MatchCandidate {
   /** `${kind}:${id}` — stable, and the key "Not now" dismisses by. */
   key: string;
   kind: SuggestionKind;
-  /** The source row's id (a stop id or a reservation id). */
+  /** The source row's id (a destination id or a reservation id). */
   id: string;
-  /** Display region. A reservation borrows its parent stop's NAME for the line
+  /** Display region. A reservation borrows its parent destination's NAME for the line
    * under the title — a display string, never a coordinate. */
   region: string | null;
   type: ReservationType;
@@ -119,45 +119,45 @@ export interface PlaceSuggestion extends MatchCandidate {
 }
 
 /**
- * The candidate set (Q4=B): every stop AND every reservation rated >= 4 on a
+ * The candidate set (Q4=B): every destination AND every reservation rated >= 4 on a
  * trip that is `complete`. Ordered most-recent trip first, then by rating, then
  * by name — so the shelf's headline names the trip you just finished.
  *
  * Against the seed exactly as it ships this is EMPTY: the trip with ratings is
  * still `planning` and the two complete trips rate nothing (docs/design/41
  * Gap 3b). Mark Pacific Northwest Loop complete and it is four candidates —
- * two stops (Astoria ★5, Newport ★4) and two reservations (the KOA ★5, South
+ * two destinations (Astoria ★5, Newport ★4) and two reservations (the KOA ★5, South
  * Beach ★4) — of which South Beach is already in the library, leaving three
  * suggestions. The wireframe's §7 worked example counted only reservations and
  * so said one; the rule it specifies is implemented here verbatim, and Q4=B is
- * what makes the stops candidates too.
+ * what makes the destinations candidates too.
  */
 export function suggestionsFromTrips(trips: Trip[]): PlaceSuggestion[] {
   const out: PlaceSuggestion[] = [];
   for (const trip of trips) {
     if (trip.status !== "complete") continue;
     const from = { tripId: trip.id, tripTitle: trip.title, tripEndDate: trip.endDate };
-    for (const leg of trip.legs) {
-      for (const stop of leg.stops) {
-        if (stop.rating !== null && stop.rating >= SUGGESTION_MIN_RATING) {
+    for (const chapter of trip.chapters) {
+      for (const destination of chapter.destinations) {
+        if (destination.rating !== null && destination.rating >= SUGGESTION_MIN_RATING) {
           out.push({
-            key: `stop:${stop.id}`,
-            kind: "stop",
-            id: stop.id,
-            name: stop.place.name,
-            lat: stop.place.lat,
-            lng: stop.place.lng,
-            googlePlaceId: stop.place.googlePlaceId,
-            // A stop's own name IS the region line; it has no second one.
+            key: `destination:${destination.id}`,
+            kind: "destination",
+            id: destination.id,
+            name: destination.place.name,
+            lat: destination.place.lat,
+            lng: destination.place.lng,
+            googlePlaceId: destination.place.googlePlaceId,
+            // A destination's own name IS the region line; it has no second one.
             region: null,
-            // `stops` carry no category — a town is not a campground.
+            // `destinations` carry no category — a town is not a campground.
             type: "other",
-            rating: stop.rating,
-            note: stop.notes,
+            rating: destination.rating,
+            note: destination.notes,
             ...from,
           });
         }
-        for (const res of stop.reservations) {
+        for (const res of destination.reservations) {
           if (res.rating === null || res.rating < SUGGESTION_MIN_RATING) continue;
           out.push({
             key: `reservation:${res.id}`,
@@ -165,12 +165,12 @@ export function suggestionsFromTrips(trips: Trip[]): PlaceSuggestion[] {
             id: res.id,
             name: res.name,
             // Rule 4: `reservations` has no lat/lng column and never borrows
-            // the stop's pin. A graduated reservation lands coordless and shows
+            // the destination's pin. A graduated reservation lands coordless and shows
             // up in the map's "N unmapped" count until Locate places it.
             lat: null,
             lng: null,
             googlePlaceId: null,
-            region: stop.place.name,
+            region: destination.place.name,
             type: res.type,
             rating: res.rating,
             note: res.notes,

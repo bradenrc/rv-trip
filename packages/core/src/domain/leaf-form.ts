@@ -158,7 +158,7 @@ function reservationDates(
   if (!isoDate.safeParse(d.checkIn).success) return undefined;
   if (!hasOut) return { checkIn: d.checkIn, checkOut: null };
   // Both ends present: the same "counts both ends, null when backwards" rule
-  // the trip and stop ranges use.
+  // the trip and destination ranges use.
   if (tripDayCount(d.checkIn, d.checkOut) === null) return undefined;
   return { checkIn: d.checkIn, checkOut: d.checkOut };
 }
@@ -170,7 +170,7 @@ function reservationDates(
  * memory on it yet.
  */
 export function reservationDraftInput(
-  stopId: string,
+  destinationId: string,
   d: ReservationDraft,
 ): ReservationCreateInput | null {
   const name = d.name.trim();
@@ -183,7 +183,7 @@ export function reservationDraftInput(
   const dates = reservationDates(d);
   if (dates === undefined) return null;
   return {
-    stopId,
+    destinationId,
     type: d.type,
     name,
     checkIn: dates.checkIn,
@@ -198,6 +198,8 @@ export function reservationDraftInput(
     endsTz: null,
     // A kind belongs to a stay only: switching the Type off Stay drops it.
     lodgingKind: isStayType(d.type) ? d.lodgingKind : null,
+    // A destination's own paperwork is never a hop booking (#155).
+    transportKind: null,
   };
 }
 
@@ -224,7 +226,7 @@ export function reservationDraftPatch(
   d: ReservationDraft,
 ): ReservationPatchInput | null {
   // Only the validation is borrowed here — a PATCH never carries the parent.
-  const next = reservationDraftInput(r.stopId ?? "", d);
+  const next = reservationDraftInput(r.destinationId ?? "", d);
   if (next === null) return null;
   const patch: ReservationPatchInput = {};
   if (next.type !== r.type) patch.type = next.type;
@@ -246,15 +248,17 @@ export function reservationDraftPatch(
  */
 export function reservationRestoreInput(r: Reservation): ReservationCreateInput {
   return {
-    // The row goes back on the parent it came from — a stop, or (#104) the hop
+    // The row goes back on the parent it came from — a destination, or (#104) the hop
     // a flight or ferry was booked on. Exactly one of the two is set.
-    stopId: r.stopId,
+    destinationId: r.destinationId,
     segmentId: r.segmentId,
     startsAt: r.startsAt,
     endsAt: r.endsAt,
     startsTz: r.startsTz,
     endsTz: r.endsTz,
     lodgingKind: r.lodgingKind,
+    // #155 · an undone shuttle comes back a shuttle, not a null kind.
+    transportKind: r.transportKind,
     type: r.type,
     name: r.name,
     checkIn: r.checkIn,
@@ -274,14 +278,14 @@ export function reservationRestoreInput(r: Reservation): ReservationCreateInput 
  * empty title only: a place without a title is not an idea. When nothing was
  * picked this still returns `place: null`, exactly as it always has.
  *
- * `parent` is the row's HOME (#80): the trip it belongs to (always), the stop
+ * `parent` is the row's HOME (#80): the trip it belongs to (always), the destination
  * it is attached to (the sheet's form) or null (the shelf's "+ Add"), and which
  * of the three kinds it is. One object rather than three positional arguments,
  * so the shelf's create and the sheet's create cannot be confused for each
  * other at a call site.
  */
 export function ideaDraftInput(
-  parent: { tripId: string; stopId?: string | null; category?: IdeaCategory },
+  parent: { tripId: string; destinationId?: string | null; category?: IdeaCategory },
   title: string,
   picked: PickedPlace | null = null,
 ): IdeaCreateInput | null {
@@ -289,7 +293,7 @@ export function ideaDraftInput(
   if (t === "") return null;
   return {
     tripId: parent.tripId,
-    stopId: parent.stopId ?? null,
+    destinationId: parent.destinationId ?? null,
     category: parent.category ?? "do",
     title: t,
     status: "idea",
@@ -338,7 +342,7 @@ export interface IdeaPlaceColumns {
 }
 
 /**
- * The idea PATCH's flattening — the mirror of `stopPatchColumns`. `ideas` has
+ * The idea PATCH's flattening — the mirror of `destinationPatchColumns`. `ideas` has
  * no `place` column and `updateIdeaFields` spreads its patch straight into
  * `db.update(ideas).set()`, so the route calls this between the two or the
  * PATCH is a SQL error on the field this issue exists to write.
@@ -350,10 +354,10 @@ export interface IdeaPlaceColumns {
  * located idea's coordinates on every status cycle, rating and note save,
  * because each of those is a single-field patch.
  *
- * ONLY `place` is flattened. `stopId` (#80) and `category` ARE real columns, so
- * they ride through in `...rest` untouched — an explicit `{ stopId: null }` is
+ * ONLY `place` is flattened. `destinationId` (#80) and `category` ARE real columns, so
+ * they ride through in `...rest` untouched — an explicit `{ destinationId: null }` is
  * the drag back to the shelf and must reach `.set()` as a null, while an absent
- * `stopId` still leaves the attachment alone. Re-deriving that distinction for
+ * `destinationId` still leaves the attachment alone. Re-deriving that distinction for
  * a second key is exactly the bug this function exists to prevent.
  */
 export function ideaPatchColumns(
@@ -375,7 +379,7 @@ export function ideaPatchColumns(
 export function ideaRestoreInput(i: Idea): IdeaCreateInput {
   return {
     tripId: i.tripId,
-    stopId: i.stopId,
+    destinationId: i.destinationId,
     category: i.category,
     title: i.title,
     status: i.status,

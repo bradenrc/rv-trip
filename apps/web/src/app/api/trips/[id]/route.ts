@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import {
   homeBaseColumns,
-  orphanedStopsMessage,
-  stopsOutsideRange,
+  orphanedDestinationsMessage,
+  destinationsOutsideRange,
   tripPatchInput,
   tripRig,
 } from "@rv-trip/core";
@@ -34,9 +34,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
 /**
  * Edit a trip. 204 on success, 404 when the owner-scoped statement matches no
- * row, and 409 `date_range_orphans_stops` when the proposed range would leave a
- * scheduled stop outside it — `deriveDays` clamps to the trip window, so such a
- * stop would go invisible rather than wrong. That is the one refusal.
+ * row, and 409 `date_range_orphans_destinations` when the proposed range would leave a
+ * scheduled destination outside it — `deriveDays` clamps to the trip window, so such a
+ * destination would go invisible rather than wrong. That is the one refusal.
  */
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
@@ -54,16 +54,16 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       startDate: patch.startDate ?? current.startDate,
       endDate: patch.endDate ?? current.endDate,
     };
-    const orphans = stopsOutsideRange(
+    const orphans = destinationsOutsideRange(
       range,
-      current.legs.flatMap((l) => l.stops),
+      current.chapters.flatMap((l) => l.destinations),
     );
     if (orphans.length) {
       return NextResponse.json(
         {
-          error: "date_range_orphans_stops",
-          message: orphanedStopsMessage(orphans),
-          stops: orphans,
+          error: "date_range_orphans_destinations",
+          message: orphanedDestinationsMessage(orphans),
+          destinations: orphans,
         },
         { status: 409 },
       );
@@ -72,9 +72,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
 
   // The nested `homeBasePlace` becomes its three columns; an ABSENT key stays
   // absent, so a patch that never mentions home base leaves the anchor alone.
-  // `destination` (#143 · Q8 A) rides through as the picked place: the
-  // mutation upserts its destinations row and repoints `destination_id` in one
-  // transaction (null clears it) — no stop is written on a PATCH.
+  // `area` (#143 · Q8 A) rides through as the picked place: the
+  // mutation upserts its areas row and repoints `area_id` in one
+  // transaction (null clears it) — no destination is written on a PATCH.
   const { homeBasePlace, ...fields } = patch;
   const columns =
     homeBasePlace === undefined ? fields : { ...fields, ...homeBaseColumns(homeBasePlace) };
@@ -83,7 +83,7 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
   return new NextResponse(null, { status: 204 });
 }
 
-/** Delete a trip. Legs, stops, reservations and ideas cascade with it. */
+/** Delete a trip. Chapters, destinations, reservations and ideas cascade with it. */
 export async function DELETE(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
   const matched = await deleteTrip(await getOwner(), id);

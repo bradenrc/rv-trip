@@ -3,7 +3,7 @@ import { OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { DELETE, PATCH } from "@/app/api/reservations/[id]/route";
 import { ctx, describeDb, req } from "@/test/db";
 
-/** §7 breadth: both writes scope through `ownedStopIds(owner)`. */
+/** §7 breadth: both writes scope through `ownedDestinationIds(owner)`. */
 describeDb("PATCH/DELETE /api/reservations/[id]", () => {
   it("404s a PATCH on another owner's reservation and leaves rating and notes alone", async () => {
     const { reservation } = await fx.pacificNorthwestLoop(OTHER_OWNER);

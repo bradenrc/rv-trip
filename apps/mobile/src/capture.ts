@@ -179,7 +179,7 @@ async function send(item: QueuedItem): Promise<{ status: number; value?: Sent }>
     if (item.kind === "save") return { status: 201, value: await api.places.create(item.body) };
     if (item.kind === "idea") return { status: 201, value: await api.ideas.create(item.body) };
     if (item.entity === "idea") await api.ideas.patch(item.id, item.body);
-    else if (item.entity === "stop") await api.stops.patch(item.id, item.body);
+    else if (item.entity === "destination") await api.destinations.patch(item.id, item.body);
     else await api.reservations.patch(item.id, item.body);
     return { status: 204 };
   } catch (e) {
@@ -246,7 +246,7 @@ async function flush(announce: Announce): Promise<void> {
       showToast(syncedToast(savedValues), "synced");
     }
     // A journal write the server refused (4xx) is gone for good — say so, the
-    // way the stop screen always has.
+    // way the destination screen always has.
     if (out.dropped.some((d) => d.kind !== "save")) {
       Alert.alert("Didn’t save", "A check-off was refused by the server and wasn’t logged.");
     }
@@ -302,7 +302,7 @@ async function queueJournal(item: QueuedItem, journal: JournalAnnounce | null): 
 }
 
 /**
- * A check-off (#113 · Q3 B · Q5 A): `PATCH /api/{ideas,stops,reservations}/:id`
+ * A check-off (#113 · Q3 B · Q5 A): `PATCH /api/{ideas,destinations,reservations}/:id`
  * through the queue. The caller has already updated the local store — the
  * check lands at once, signal or not.
  */

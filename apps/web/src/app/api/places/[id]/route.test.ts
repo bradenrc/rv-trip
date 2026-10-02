@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import type { ResolvedDestination, SuggestedPlace } from "@rv-trip/core";
+import type { ResolvedArea, SuggestedPlace } from "@rv-trip/core";
 import { DEV_OWNER, OTHER_OWNER, fx, read } from "@rv-trip/db/testing";
 import { DELETE, PATCH } from "@/app/api/places/[id]/route";
 import { ctx, describeDb, req } from "@/test/db";
@@ -7,7 +7,7 @@ import { ctx, describeDb, req } from "@/test/db";
 /** Pinned to a scripted resolver, like POST's suite: never the laptop's key. */
 const resolver = vi.hoisted(() => ({
   calls: [] as [number, number][],
-  answer: null as ResolvedDestination | null,
+  answer: null as ResolvedArea | null,
 }));
 vi.mock("@/lib/places", () => ({
   placesProvider: () => ({
@@ -15,7 +15,7 @@ vi.mock("@/lib/places", () => ({
     provider: {
       search: async () => [],
       details: async () => null,
-      resolveDestination: async (lat: number, lng: number) => {
+      resolveArea: async (lat: number, lng: number) => {
         resolver.calls.push([lat, lng]);
         return resolver.answer;
       },
@@ -72,7 +72,7 @@ const SUGGESTION: SuggestedPlace = {
   lng: -124.2179,
   subline: "Restaurant · Coos Bay, OR",
 };
-const COOS_BAY: ResolvedDestination = {
+const COOS_BAY: ResolvedArea = {
   googlePlaceId: "ChIJcoosbay",
   name: "Coos Bay, OR",
   region: "Oregon",
@@ -81,7 +81,7 @@ const COOS_BAY: ResolvedDestination = {
 };
 
 async function chandelNote(owner = DEV_OWNER) {
-  const bandon = await fx.destination({ owner });
+  const bandon = await fx.area({ owner });
   const note = await fx.savedPlace({
     owner,
     name: "chandel",
@@ -90,7 +90,7 @@ async function chandelNote(owner = DEV_OWNER) {
     type: "other",
     anchor: "area",
     areaLabel: "Bandon, OR",
-    destinationId: bandon.id,
+    areaId: bandon.id,
     suggestedPlace: SUGGESTION,
   });
   return { bandon, note };
@@ -117,19 +117,19 @@ describeDb("PATCH /api/places/[id] — the Q3 A suggestion (#111 i2)", () => {
     });
     // Re-resolved from the PLACE's point, not the capture point.
     expect(resolver.calls).toEqual([[43.3665, -124.2179]]);
-    const coos = (await read.destinations(DEV_OWNER)).find((d) => d.googlePlaceId === "ChIJcoosbay")!;
-    expect(row.destinationId).toBe(coos.id);
-    expect(row.destinationId).not.toBe(bandon.id);
+    const coos = (await read.areas(DEV_OWNER)).find((d) => d.googlePlaceId === "ChIJcoosbay")!;
+    expect(row.areaId).toBe(coos.id);
+    expect(row.areaId).not.toBe(bandon.id);
   });
 
-  it("keeps the destination it had when the upgrade resolves nothing (no key)", async () => {
+  it("keeps the area it had when the upgrade resolves nothing (no key)", async () => {
     resolver.calls = [];
     resolver.answer = null;
     const { bandon, note } = await chandelNote();
     expect((await PATCH(req({ upgradeToSuggested: true }, "PATCH"), ctx(note.id))).status).toBe(204);
     const row = (await read.savedPlace(note.id))!;
     expect(row.anchor).toBe("place");
-    expect(row.destinationId).toBe(bandon.id);
+    expect(row.areaId).toBe(bandon.id);
   });
 
   it("suggestedPlace: null (Dismiss) clears the suggestion and nothing else", async () => {
@@ -142,7 +142,7 @@ describeDb("PATCH /api/places/[id] — the Q3 A suggestion (#111 i2)", () => {
       areaLabel: "Bandon, OR",
       name: "chandel",
       googlePlaceId: null,
-      destinationId: bandon.id,
+      areaId: bandon.id,
     });
   });
 

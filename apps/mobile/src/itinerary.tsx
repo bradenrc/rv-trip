@@ -8,7 +8,7 @@ import type {
   ReservationDraft,
   ReservationType,
   SearchAnchor,
-  Stop,
+  Destination,
   Trip,
 } from "@rv-trip/core";
 import {
@@ -18,7 +18,7 @@ import {
   isScheduled,
   lodgingKindOfGoogle,
   nightsLabel,
-  orderedStops,
+  orderedDestinations,
   rangeNights,
   reservationDraftInput,
   searchAnchor,
@@ -33,7 +33,7 @@ import {
 import type { PlacesSearchEnvelope } from "@rv-trip/core/api-client";
 import { api } from "./api";
 import { Input, Label, Sheet, failed } from "./hops";
-import { addStay, addStop, planIdeaToStop, planPinnedIdea, planStayIdea, updateTrip } from "./store";
+import { addStay, addDestination, planIdeaToDestination, planPinnedIdea, planStayIdea, updateTrip } from "./store";
 import { appendShelfIdea } from "@rv-trip/core";
 import { C, F, R } from "./theme";
 import { Button, CategoryTile, Chip, RangePicker, Segmented } from "./ui";
@@ -42,7 +42,7 @@ import { Button, CategoryTile, Chip, RangePicker, Segmented } from "./ui";
  * The phone's Itinerary · Ideas pieces (#131 · #128 · #126 — docs/design/130
  * frames 2–5 and 9): the trip's in-masthead + Add sheet, the anchored place
  * search (never the caller's IP — #126's `searchAnchor`), the Add stay sheet
- * (lodging first, dates from the stop), + Add ▸ Stop, and the Ideas tab with
+ * (lodging first, dates from the destination), + Add ▸ Destination, and the Ideas tab with
  * its Plan it. The tab-bar + stays #112's global capture — unchanged.
  */
 
@@ -156,7 +156,7 @@ export function AddSheet({
   onClose,
   onFlight,
   onStay,
-  onStop,
+  onDestination,
   onIdea,
   onSwitchToIdeas,
 }: {
@@ -164,7 +164,7 @@ export function AddSheet({
   onClose: () => void;
   onFlight: () => void;
   onStay: () => void;
-  onStop: () => void;
+  onDestination: () => void;
   onIdea: (k: IdeaCategory) => void;
   onSwitchToIdeas: () => void;
 }) {
@@ -182,7 +182,7 @@ export function AddSheet({
           <Text style={styles.mh}>Add to Itinerary · the knowns</Text>
           {item("transport", "Flight", "round trip on", onFlight)}
           {item("lodging", "Stay", "hotel · campground · friends", onStay)}
-          {item("other", "Stop", "a new place", onStop)}
+          {item("other", "Destination", "a new place", onDestination)}
           <Text style={styles.mh}>Not sure yet?</Text>
           <Pressable onPress={onSwitchToIdeas} accessibilityRole="button" style={styles.mi}>
             <Text style={[styles.miText, { color: C.inkFaded, fontWeight: "500" }]}>Switch to Ideas → idea · save</Text>
@@ -200,18 +200,18 @@ export function AddSheet({
   );
 }
 
-/** + Add ▸ Stop: a place, appended to the last leg, floating until dated. */
-export function AddStopSheet({ trip, onClose }: { trip: Trip; onClose: () => void }) {
-  const last = orderedStops(trip).at(-1) ?? null;
-  const anchor = searchAnchor(trip, { kind: "after", stopId: last?.id ?? null });
+/** + Add ▸ Destination: a place, appended to the last chapter, floating until dated. */
+export function AddDestinationSheet({ trip, onClose }: { trip: Trip; onClose: () => void }) {
+  const last = orderedDestinations(trip).at(-1) ?? null;
+  const anchor = searchAnchor(trip, { kind: "after", destinationId: last?.id ?? null });
   return (
     <Sheet visible onClose={onClose}>
-      <Text style={styles.st}>Add stop</Text>
+      <Text style={styles.st}>Add destination</Text>
       <PlaceSearchField
         anchor={anchor}
         onPick={(p) => {
           onClose();
-          void addStop(trip.id, placeOf(p)).catch(() => failed("That stop"));
+          void addDestination(trip.id, placeOf(p)).catch(() => failed("That destination"));
         }}
       />
     </Sheet>
@@ -230,7 +230,7 @@ export function AddIdeaSheet({ trip, kind, onClose }: { trip: Trip; kind: IdeaCa
         onPick={(p) => {
           onClose();
           void api.ideas
-            .create({ tripId: trip.id, stopId: null, category: kind, title: p.name, status: "idea", place: placeOf(p) })
+            .create({ tripId: trip.id, destinationId: null, category: kind, title: p.name, status: "idea", place: placeOf(p) })
             .then((idea) => updateTrip(trip.id, (t) => appendShelfIdea(t, idea)))
             .catch(() => failed("That idea"));
         }}
@@ -241,26 +241,26 @@ export function AddIdeaSheet({ trip, kind, onClose }: { trip: Trip; kind: IdeaCa
 
 /**
  * Add stay (frames 4–5 · #128 · Q8 A · Q9 A): the name field IS an anchored
- * lodging search; then the dates, from the stop, with a nights stepper.
+ * lodging search; then the dates, from the destination, with a nights stepper.
  */
 export function AddStaySheetPhone({
   trip,
-  stopId,
+  destinationId,
   onClose,
   onIdeaInstead,
 }: {
   trip: Trip;
-  stopId: string | null;
+  destinationId: string | null;
   onClose: () => void;
   onIdeaInstead: () => void;
 }) {
-  const stops = orderedStops(trip);
-  const target: Stop | null =
-    stops.find((s) => s.id === stopId) ??
-    stops.find((s) => !s.reservations.some((r) => r.type === "lodging" || r.type === "campground")) ??
-    stops[0] ??
+  const destinations = orderedDestinations(trip);
+  const target: Destination | null =
+    destinations.find((s) => s.id === destinationId) ??
+    destinations.find((s) => !s.reservations.some((r) => r.type === "lodging" || r.type === "campground")) ??
+    destinations[0] ??
     null;
-  const anchor = target ? searchAnchor(trip, { kind: "stop", stopId: target.id }) : searchAnchor(trip, { kind: "trip" });
+  const anchor = target ? searchAnchor(trip, { kind: "destination", destinationId: target.id }) : searchAnchor(trip, { kind: "trip" });
   const [picked, setPicked] = useState<Picked | null>(null);
   // #144 · Q9 B — the kind is Google's when its type says lodging/campground,
   // else the trip's default; the chip says which, and opens the switch.
@@ -300,7 +300,7 @@ export function AddStaySheetPhone({
     setSaving(true);
     try {
       let id: string | null = target?.id ?? null;
-      if (!id) id = await addStop(trip.id, placeOf(picked), { arriveDate: complete.start, departDate: complete.end });
+      if (!id) id = await addDestination(trip.id, placeOf(picked), { arriveDate: complete.start, departDate: complete.end });
       const real = id ? reservationDraftInput(id, draft) : null;
       if (real) await addStay(trip.id, real);
       onClose();
@@ -381,9 +381,9 @@ export function AddStaySheetPhone({
 
 /** Ideas (frame 9): every maybe, grouped, with Plan it. */
 export function IdeasTab({ trip }: { trip: Trip }) {
-  const stops = orderedStops(trip);
-  const pinned = stops
-    .map((s) => ({ stop: s, ideas: s.ideas.filter((i) => i.status === "idea") }))
+  const destinations = orderedDestinations(trip);
+  const pinned = destinations
+    .map((s) => ({ destination: s, ideas: s.ideas.filter((i) => i.status === "idea") }))
     .filter((g) => g.ideas.length > 0);
   const shelf = trip.ideas.filter((i) => i.status === "idea");
   const [pickFor, setPickFor] = useState<string | null>(null);
@@ -410,13 +410,13 @@ export function IdeasTab({ trip }: { trip: Trip }) {
       {pinned.length === 0 && shelf.length === 0 && (
         <Text style={styles.rs}>No maybes yet — + Add one, or pull one in from your Saves.</Text>
       )}
-      {pinned.map(({ stop, ideas }) => (
-        <View key={stop.id} style={{ gap: 6 }}>
+      {pinned.map(({ destination, ideas }) => (
+        <View key={destination.id} style={{ gap: 6 }}>
           <Label>
-            Pinned to {stop.place.name} · {ideas.length}
+            Pinned to {destination.place.name} · {ideas.length}
           </Label>
           {ideas.map((i) => (
-            <View key={i.id}>{row(i.title, i.category, () => void planPinnedIdea(trip.id, stop.id, i.id).catch(() => failed("Plan it")))}</View>
+            <View key={i.id}>{row(i.title, i.category, () => void planPinnedIdea(trip.id, destination.id, i.id).catch(() => failed("Plan it")))}</View>
           ))}
         </View>
       ))}
@@ -430,13 +430,13 @@ export function IdeasTab({ trip }: { trip: Trip }) {
       {pickFor && (
         <Sheet visible onClose={() => setPickFor(null)}>
           <Text style={styles.st}>Plan it at…</Text>
-          {stops.map((s) => (
+          {destinations.map((s) => (
             <Pressable
               key={s.id}
               onPress={() => {
                 const id = pickFor;
                 setPickFor(null);
-                void planIdeaToStop(trip.id, id, s.id).catch(() => failed("Plan it"));
+                void planIdeaToDestination(trip.id, id, s.id).catch(() => failed("Plan it"));
               }}
               accessibilityRole="button"
               style={styles.mi}

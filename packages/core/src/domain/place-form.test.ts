@@ -65,7 +65,7 @@ const SAVED: SavedPlace = {
   again: null,
   anchor: "place",
   areaLabel: null,
-  destination: null,
+  area: null,
   suggestedPlace: null,
   createdAt: null,
 };

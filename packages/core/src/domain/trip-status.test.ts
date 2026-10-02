@@ -3,11 +3,11 @@ import {
   deriveTripStatus,
   daysUntil,
   formatDateSpan,
-  orphanedStopsMessage,
-  stopsOutsideRange,
+  orphanedDestinationsMessage,
+  destinationsOutsideRange,
   UPCOMING_WINDOW_DAYS,
 } from "./trip-status";
-import type { Stop, TripStatus } from "./types";
+import type { Destination, TripStatus } from "./types";
 
 /** Evaluated as of 2026-09-08 — the date the design's worked table uses. */
 const TODAY = "2026-09-08";
@@ -26,10 +26,10 @@ function mkTrip(partial: {
   };
 }
 
-function mkStop(partial: Partial<Stop> & { id: string }): Stop {
+function mkDestination(partial: Partial<Destination> & { id: string }): Destination {
   return {
     id: partial.id,
-    legId: partial.legId ?? "leg1",
+    chapterId: partial.chapterId ?? "chapter1",
     place: partial.place ?? { name: partial.id, lat: null, lng: null, googlePlaceId: null },
     arriveDate: partial.arriveDate ?? null,
     departDate: partial.departDate ?? null,
@@ -113,43 +113,43 @@ describe("deriveTripStatus", () => {
   });
 });
 
-describe("stopsOutsideRange", () => {
-  const bend = mkStop({
+describe("destinationsOutsideRange", () => {
+  const bend = mkDestination({
     id: "bend",
     place: { name: "Bend, OR", lat: null, lng: null, googlePlaceId: null },
     arriveDate: "2026-08-12",
     departDate: "2026-08-16",
   });
-  const floating = mkStop({ id: "crater" });
+  const floating = mkDestination({ id: "crater" });
 
-  it("finds a stop the new end date would cut in half", () => {
+  it("finds a destination the new end date would cut in half", () => {
     expect(
-      stopsOutsideRange({ startDate: "2026-08-01", endDate: "2026-08-14" }, [bend, floating]),
+      destinationsOutsideRange({ startDate: "2026-08-01", endDate: "2026-08-14" }, [bend, floating]),
     ).toEqual([
       { id: "bend", name: "Bend, OR", arriveDate: "2026-08-12", departDate: "2026-08-16" },
     ]);
   });
 
-  it("finds a stop the new start date would cut off", () => {
+  it("finds a destination the new start date would cut off", () => {
     expect(
-      stopsOutsideRange({ startDate: "2026-08-13", endDate: "2026-08-28" }, [bend]),
+      destinationsOutsideRange({ startDate: "2026-08-13", endDate: "2026-08-28" }, [bend]),
     ).toHaveLength(1);
   });
 
-  it("accepts a range that fully contains every scheduled stop", () => {
-    expect(stopsOutsideRange({ startDate: "2026-08-12", endDate: "2026-08-16" }, [bend])).toEqual(
+  it("accepts a range that fully contains every scheduled destination", () => {
+    expect(destinationsOutsideRange({ startDate: "2026-08-12", endDate: "2026-08-16" }, [bend])).toEqual(
       [],
     );
   });
 
-  it("ignores floating stops — they are not on the calendar to orphan", () => {
-    expect(stopsOutsideRange({ startDate: "2026-01-01", endDate: "2026-01-02" }, [floating])).toEqual(
+  it("ignores floating destinations — they are not on the calendar to orphan", () => {
+    expect(destinationsOutsideRange({ startDate: "2026-01-01", endDate: "2026-01-02" }, [floating])).toEqual(
       [],
     );
   });
 });
 
-describe("formatDateSpan / orphanedStopsMessage", () => {
+describe("formatDateSpan / orphanedDestinationsMessage", () => {
   it("formats a span inside one month, across months, and a single day", () => {
     expect(formatDateSpan("2026-08-12", "2026-08-16")).toBe("Aug 12–16");
     expect(formatDateSpan("2026-08-28", "2026-09-02")).toBe("Aug 28–Sep 2");
@@ -158,7 +158,7 @@ describe("formatDateSpan / orphanedStopsMessage", () => {
 
   it("writes the refusal sentence the design specifies", () => {
     expect(
-      orphanedStopsMessage([
+      orphanedDestinationsMessage([
         { id: "bend", name: "Bend, OR", arriveDate: "2026-08-12", departDate: "2026-08-16" },
       ]),
     ).toBe("Bend, OR is scheduled Aug 12–16, outside the new range. Move or unschedule it first.");

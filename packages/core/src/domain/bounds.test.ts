@@ -33,7 +33,7 @@ describe("boundsFor", () => {
   });
 
   it("encloses every point when the span is real", () => {
-    // Astoria, Newport, Bend — the Pacific Northwest Loop's scheduled stops.
+    // Astoria, Newport, Bend — the Pacific Northwest Loop's scheduled destinations.
     const b = boundsFor([
       { lat: 46.1879, lng: -123.8313 },
       { lat: 44.6365, lng: -124.053 },
@@ -66,21 +66,21 @@ describe("hasCoords", () => {
 });
 
 describe("spiderfy", () => {
-  const bend: SpiderPoint = { id: "stop-bend", lat: 44.0582, lng: -121.3153, anchor: true };
+  const bend: SpiderPoint = { id: "destination-bend", lat: 44.0582, lng: -121.3153, anchor: true };
   const sunnys: SpiderPoint = { id: "place-sunnys", lat: 44.0582, lng: -121.3153 };
 
   it("leaves an uncontested point exactly where it is", () => {
     const [p] = spiderfy([bend]);
-    expect(p).toEqual({ id: "stop-bend", lat: 44.0582, lng: -121.3153, dx: 0, dy: 0, spiderfied: false });
+    expect(p).toEqual({ id: "destination-bend", lat: 44.0582, lng: -121.3153, dx: 0, dy: 0, spiderfied: false });
   });
 
-  it("keeps the trip stop on its true point and moves the saved place", () => {
+  it("keeps the trip destination on its true point and moves the saved place", () => {
     const out = spiderfy([sunnys, bend]);
-    const stop = out.find((p) => p.id === "stop-bend")!;
+    const destination = out.find((p) => p.id === "destination-bend")!;
     const place = out.find((p) => p.id === "place-sunnys")!;
-    expect(stop.spiderfied).toBe(false);
-    expect(stop.dx).toBe(0);
-    expect(stop.dy).toBe(0);
+    expect(destination.spiderfied).toBe(false);
+    expect(destination.dx).toBe(0);
+    expect(destination.dy).toBe(0);
     expect(place.spiderfied).toBe(true);
     expect(Math.hypot(place.dx, place.dy)).toBeCloseTo(SPIDER_RADIUS_PX, 1);
     // the true coordinate is untouched — the leader line needs it
@@ -95,10 +95,10 @@ describe("spiderfy", () => {
   });
 
   it("preserves the caller's order in the result", () => {
-    expect(spiderfy([sunnys, bend]).map((p) => p.id)).toEqual(["place-sunnys", "stop-bend"]);
+    expect(spiderfy([sunnys, bend]).map((p) => p.id)).toEqual(["place-sunnys", "destination-bend"]);
   });
 
-  it("falls back to the lowest id as anchor when no member is a trip stop", () => {
+  it("falls back to the lowest id as anchor when no member is a trip destination", () => {
     const out = spiderfy([
       { id: "b", lat: 44.5647, lng: -110.3735 },
       { id: "a", lat: 44.5647, lng: -110.3735 },
@@ -135,20 +135,20 @@ describe("spiderfy", () => {
   });
 
   it("resolves all four collisions the seed carries", () => {
-    // Bend / Sunny's · Crater Lake / Rim Drive · Fishing Bridge stop / RV Park ·
+    // Bend / Sunny's · Crater Lake / Rim Drive · Fishing Bridge destination / RV Park ·
     // Newport on two trips (packages/db/src/seed.ts).
     const out = spiderfy([
-      { id: "stop-bend", lat: 44.0582, lng: -121.3153, anchor: true },
+      { id: "destination-bend", lat: 44.0582, lng: -121.3153, anchor: true },
       { id: "place-sunnys", lat: 44.0582, lng: -121.3153 },
-      { id: "stop-crater", lat: 42.9446, lng: -122.109, anchor: true },
+      { id: "destination-crater", lat: 42.9446, lng: -122.109, anchor: true },
       { id: "place-rim", lat: 42.9446, lng: -122.109 },
-      { id: "stop-fishing-bridge", lat: 44.5647, lng: -110.3735, anchor: true },
+      { id: "destination-fishing-bridge", lat: 44.5647, lng: -110.3735, anchor: true },
       { id: "place-fb-rv", lat: 44.5647, lng: -110.3735 },
-      { id: "stop-newport-pnw", lat: 44.6365, lng: -124.053, anchor: true },
-      { id: "stop-newport-weekend", lat: 44.6365, lng: -124.053 },
+      { id: "destination-newport-pnw", lat: 44.6365, lng: -124.053, anchor: true },
+      { id: "destination-newport-weekend", lat: 44.6365, lng: -124.053 },
     ]);
     const moved = out.filter((p) => p.spiderfied).map((p) => p.id);
-    expect(moved).toEqual(["place-sunnys", "place-rim", "place-fb-rv", "stop-newport-weekend"]);
+    expect(moved).toEqual(["place-sunnys", "place-rim", "place-fb-rv", "destination-newport-weekend"]);
     // and every pair now sits SPIDER_RADIUS_PX apart on screen
     for (const p of out.filter((q) => q.spiderfied)) {
       expect(Math.hypot(p.dx, p.dy)).toBeCloseTo(SPIDER_RADIUS_PX, 1);
@@ -158,12 +158,12 @@ describe("spiderfy", () => {
 
 /**
  * #80 i4 — the shelf lets an idea sit anywhere on the trip, not only beside a
- * stop, so the pin set can now grow a genuine outlier. These pin the two
+ * destination, so the pin set can now grow a genuine outlier. These pin the two
  * properties the refit rests on: the box still holds EVERY pin, and it does not
  * collapse to the degenerate floor on the way.
  */
 describe("boundsFor — a far-flung idea joins the pin set", () => {
-  // The Pacific Northwest Loop's three scheduled stops.
+  // The Pacific Northwest Loop's three scheduled destinations.
   const trip = [
     { lat: 46.1879, lng: -123.8313 }, // Astoria
     { lat: 44.6365, lng: -124.053 }, // Newport
@@ -194,8 +194,8 @@ describe("boundsFor — a far-flung idea joins the pin set", () => {
     expect(span(after).lng).toBeGreaterThan(MIN_BOUNDS_SPAN);
   });
 
-  it("a near idea moves nothing the trip's own stops did not already cover", () => {
-    // An idea a couple of miles from Bend, inside the box the stops already make.
+  it("a near idea moves nothing the trip's own destinations did not already cover", () => {
+    // An idea a couple of miles from Bend, inside the box the destinations already make.
     const near = { lat: 44.0601, lng: -121.3402 };
     expect(boundsFor([...trip, near])).toEqual(boundsFor(trip));
   });
@@ -245,18 +245,18 @@ describe("boundsCovers — the refit guard", () => {
 });
 
 /**
- * #80 i4 — an idea pinned at the very place its stop sits (the picker hands
+ * #80 i4 — an idea pinned at the very place its destination sits (the picker hands
  * back the campground's own coordinate often enough). `MapView` passes
- * `anchor: p.kind === "stop"`, so the commitment must keep the true point and
+ * `anchor: p.kind === "destination"`, so the commitment must keep the true point and
  * the maybe must be the one that moves.
  */
-describe("spiderfy — an idea sharing a stop's exact coordinate", () => {
-  const stop: SpiderPoint = { id: "stop-bend", lat: 44.0582, lng: -121.3153, anchor: true };
+describe("spiderfy — an idea sharing a destination's exact coordinate", () => {
+  const destination: SpiderPoint = { id: "destination-bend", lat: 44.0582, lng: -121.3153, anchor: true };
   const idea: SpiderPoint = { id: "idea-float", lat: 44.0582, lng: -121.3153 };
 
-  it("resolves to two distinct screen points with the stop as the anchor", () => {
-    const out = spiderfy([stop, idea]);
-    const s = out.find((p) => p.id === "stop-bend")!;
+  it("resolves to two distinct screen points with the destination as the anchor", () => {
+    const out = spiderfy([destination, idea]);
+    const s = out.find((p) => p.id === "destination-bend")!;
     const i = out.find((p) => p.id === "idea-float")!;
 
     expect(s.spiderfied).toBe(false);
@@ -265,13 +265,13 @@ describe("spiderfy — an idea sharing a stop's exact coordinate", () => {
     // two points, not one: the drawn positions differ by the ring radius
     expect(Math.hypot(i.dx - s.dx, i.dy - s.dy)).toBeCloseTo(SPIDER_RADIUS_PX, 1);
     // both still hang off the one true coordinate — the leader needs it
-    expect([i.lat, i.lng]).toEqual([stop.lat, stop.lng]);
+    expect([i.lat, i.lng]).toEqual([destination.lat, destination.lng]);
   });
 
-  it("anchors on the stop whichever order the pins arrive in", () => {
-    const a = spiderfy([stop, idea]).find((p) => p.id === "idea-float")!;
-    const b = spiderfy([idea, stop]).find((p) => p.id === "idea-float")!;
+  it("anchors on the destination whichever order the pins arrive in", () => {
+    const a = spiderfy([destination, idea]).find((p) => p.id === "idea-float")!;
+    const b = spiderfy([idea, destination]).find((p) => p.id === "idea-float")!;
     expect([a.dx, a.dy]).toEqual([b.dx, b.dy]);
-    expect(spiderfy([idea, stop]).find((p) => p.id === "stop-bend")!.spiderfied).toBe(false);
+    expect(spiderfy([idea, destination]).find((p) => p.id === "destination-bend")!.spiderfied).toBe(false);
   });
 });

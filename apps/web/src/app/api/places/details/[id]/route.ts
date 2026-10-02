@@ -22,7 +22,7 @@ import { placesProvider } from "@/lib/places";
  *
  * §3 draws a `sessionToken` echoed from search onto this call. It is not
  * implemented and takes no query parameter: a session token is a Google
- * Autocomplete↔Details pairing, and the search leg is `places:searchText`,
+ * Autocomplete↔Details pairing, and the search chapter is `places:searchText`,
  * which is billed per request and accepts none. Flagged in i1, still undecided.
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {

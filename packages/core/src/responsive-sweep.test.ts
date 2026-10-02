@@ -9,7 +9,7 @@ import { describe, it, expect } from "vitest";
  * Item 2 is layout: four grids that were pinned by an inline
  * `gridTemplateColumns` (an inline style takes no Tailwind variant, which is
  * why they break on a phone), the Places lens switch, the trip header, the
- * route rail, and the gantt's leg gutter — all rewritten mobile-first against
+ * route rail, and the gantt's chapter gutter — all rewritten mobile-first against
  * ONE `md` breakpoint, bare = phone, `md:` = desktop.
  *
  * None of it is logic that can be executed here: it is JSX and Tailwind class
@@ -176,7 +176,7 @@ describe("the trip header clamps to the phone", () => {
     expect(planner).not.toMatch(/(?<!md:)text-\[44px\]/);
   });
 
-  it("the lens / costs / Add stop cluster is full-width and wraps below md", () => {
+  it("the lens / costs / Add destination cluster is full-width and wraps below md", () => {
     const cluster = className(planner, "md:w-auto");
     for (const cls of ["flex", "w-full", "flex-wrap", "items-center", "gap-3", "md:w-auto"]) {
       expect(cluster, `the control cluster is missing ${cls}`).toContain(cls);
@@ -184,9 +184,9 @@ describe("the trip header clamps to the phone", () => {
     const lens = className(planner, "rounded-rv-pill border border-rv-border");
     expect(lens).toContain("flex-1");
     expect(lens).toContain("md:flex-none");
-    const addStop = className(planner, "bg-rv-accent-deep");
-    expect(addStop).toContain("ml-auto");
-    expect(addStop).toContain("md:ml-0");
+    const addDestination = className(planner, "bg-rv-accent-deep");
+    expect(addDestination).toContain("ml-auto");
+    expect(addDestination).toContain("md:ml-0");
   });
 
   it("the route rail is full-bleed below md and the shipped 260px at md", () => {
@@ -194,7 +194,7 @@ describe("the trip header clamps to the phone", () => {
   });
 });
 
-describe("the gantt's leg column freezes", () => {
+describe("the gantt's chapter column freezes", () => {
   it("there is exactly ONE gutter constant", () => {
     expect(gantt.match(/^const gutter =/gm)?.length).toBe(1);
   });
@@ -239,7 +239,7 @@ describe("the gantt's leg column freezes", () => {
   });
 
   it("Timeline carries the phone-only swipe hint", () => {
-    expect(timeline).toContain("← swipe the calendar · the leg column stays put →");
+    expect(timeline).toContain("← swipe the calendar · the chapter column stays put →");
     expect(timeline).toContain("font-mono text-[10px] text-rv-ink-faded md:hidden");
   });
 });

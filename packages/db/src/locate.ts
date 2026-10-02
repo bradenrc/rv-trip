@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { LocateRow, LocateStore, LocateTarget, PlaceSummary } from "@rv-trip/core";
 import { db } from "./index";
-import { ideas, legs, saves, stops, trips } from "./schema";
+import { ideas, chapters, saves, destinations, trips } from "./schema";
 
 /**
  * The database half of Locate (docs/design/41 §6). The decision tree — the cap,
@@ -11,9 +11,9 @@ import { ideas, legs, saves, stops, trips } from "./schema";
  *
  * Two guarantees live here and nowhere else:
  *
- * 1. **Only this owner's rows.** Stops scope through leg → trip exactly as
- *    mutations.ts scopes every stop write; ideas join straight to their own
- *    `trip_id` (#80 — a shelf idea has no stop to walk through); saved places
+ * 1. **Only this owner's rows.** Destinations scope through chapter → trip exactly as
+ *    mutations.ts scopes every destination write; ideas join straight to their own
+ *    `trip_id` (#80 — a shelf idea has no destination to walk through); saved places
  *    scope on `owner_id` directly. Another tenant's id simply does not come back, so it
  *    is never geocoded and never written.
  * 2. **Only coordless rows.** A row that already has a pin is not re-read and
@@ -25,39 +25,39 @@ import { ideas, legs, saves, stops, trips } from "./schema";
  * unmapped.
  */
 
-/** A stop is coordless when either half of the pair is missing — the same test
+/** A destination is coordless when either half of the pair is missing — the same test
  * `hasCoords` makes in the domain. */
-const coordlessStop = or(isNull(stops.lat), isNull(stops.lng));
+const coordlessDestination = or(isNull(destinations.lat), isNull(destinations.lng));
 const coordlessPlace = or(isNull(saves.lat), isNull(saves.lng));
 const coordlessIdea = or(isNull(ideas.lat), isNull(ideas.lng));
 
-/** The leg-through-trip owner scope, mirrored from mutations.ts (which keeps
+/** The chapter-through-trip owner scope, mirrored from mutations.ts (which keeps
  * its copy private to the write path). */
-const ownedLegIds = (owner: string) =>
+const ownedChapterIds = (owner: string) =>
   db
-    .select({ id: legs.id })
-    .from(legs)
-    .innerJoin(trips, eq(legs.tripId, trips.id))
+    .select({ id: chapters.id })
+    .from(chapters)
+    .innerJoin(trips, eq(chapters.tripId, trips.id))
     .where(eq(trips.ownerId, owner));
 
 /** The IDEA scope (#80). An idea carries `trip_id` attached or not, so the walk
- * is one hop, not four — and a shelf idea (NULL `stop_id`) is in no
- * `ownedStopIds` list, which is why this is the only correct scope for an idea
+ * is one hop, not four — and a shelf idea (NULL `destination_id`) is in no
+ * `ownedDestinationIds` list, which is why this is the only correct scope for an idea
  * write. Mirrored from mutations.ts by the same rule the two above are. */
 const ownedTripIds = (owner: string) =>
   db.select({ id: trips.id }).from(trips).where(eq(trips.ownerId, owner));
 
-async function loadStops(owner: string, ids: string[]): Promise<LocateTarget[]> {
+async function loadDestinations(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
   const rows = await db
-    .select({ id: stops.id, name: stops.placeName })
-    .from(stops)
-    .innerJoin(legs, eq(stops.legId, legs.id))
-    .innerJoin(trips, eq(legs.tripId, trips.id))
-    .where(and(eq(trips.ownerId, owner), inArray(stops.id, ids), coordlessStop));
-  // A stop has no region column — the trip's own geography is not a fact about
+    .select({ id: destinations.id, name: destinations.placeName })
+    .from(destinations)
+    .innerJoin(chapters, eq(destinations.chapterId, chapters.id))
+    .innerJoin(trips, eq(chapters.tripId, trips.id))
+    .where(and(eq(trips.ownerId, owner), inArray(destinations.id, ids), coordlessDestination));
+  // A destination has no region column — the trip's own geography is not a fact about
   // this pullout, so nothing is borrowed and the query is the bare name.
-  return rows.map((r) => ({ kind: "stop" as const, id: r.id, name: r.name, region: null }));
+  return rows.map((r) => ({ kind: "destination" as const, id: r.id, name: r.name, region: null }));
 }
 
 async function loadPlaces(owner: string, ids: string[]): Promise<LocateTarget[]> {
@@ -72,7 +72,7 @@ async function loadPlaces(owner: string, ids: string[]): Promise<LocateTarget[]>
 /**
  * An idea's search text (#80 i3): **`coalesce(place_name, title)`**.
  *
- * A stop searches on `stops.place_name`, and an idea now does the same thing
+ * A destination searches on `destinations.place_name`, and an idea now does the same thing
  * when it has one. It usually does not — `place_name` is null until something
  * locates the row — but the picker's free-text escape row lets a HUMAN type a
  * place onto an idea without ever giving it coordinates ("Tumalo Falls, the
@@ -94,7 +94,7 @@ async function loadPlaces(owner: string, ids: string[]): Promise<LocateTarget[]>
  */
 const ideaSearchText = sql<string>`coalesce(${ideas.placeName}, ${ideas.title})`;
 
-/** `region` is null for the same reason a stop's is: the trip's geography is
+/** `region` is null for the same reason a destination's is: the trip's geography is
  * not a fact about this idea. */
 async function loadIdeas(owner: string, ids: string[]): Promise<LocateTarget[]> {
   if (ids.length === 0) return [];
@@ -116,13 +116,13 @@ async function loadIdeas(owner: string, ids: string[]): Promise<LocateTarget[]> 
  * disagreement about what the row is called.
  */
 export async function listLocateTargetsForOwner(owner: string): Promise<LocateTarget[]> {
-  const [stopRows, placeRows, ideaRows] = await Promise.all([
+  const [destinationRows, placeRows, ideaRows] = await Promise.all([
     db
-      .select({ id: stops.id, name: stops.placeName })
-      .from(stops)
-      .innerJoin(legs, eq(stops.legId, legs.id))
-      .innerJoin(trips, eq(legs.tripId, trips.id))
-      .where(and(eq(trips.ownerId, owner), coordlessStop)),
+      .select({ id: destinations.id, name: destinations.placeName })
+      .from(destinations)
+      .innerJoin(chapters, eq(destinations.chapterId, chapters.id))
+      .innerJoin(trips, eq(chapters.tripId, trips.id))
+      .where(and(eq(trips.ownerId, owner), coordlessDestination)),
     db
       .select({ id: saves.id, name: saves.name, region: saves.region })
       .from(saves)
@@ -134,7 +134,7 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
       .where(and(eq(trips.ownerId, owner), coordlessIdea)),
   ]);
   return [
-    ...stopRows.map((r) => ({ kind: "stop" as const, id: r.id, name: r.name, region: null })),
+    ...destinationRows.map((r) => ({ kind: "destination" as const, id: r.id, name: r.name, region: null })),
     ...placeRows.map((r) => ({
       kind: "place" as const,
       id: r.id,
@@ -145,23 +145,23 @@ export async function listLocateTargetsForOwner(owner: string): Promise<LocateTa
   ];
 }
 
-/** Write the pin Google found onto a stop. Returns false when the id is not
+/** Write the pin Google found onto a destination. Returns false when the id is not
  * this owner's — the same "the WHERE matched nothing" answer the saved-place
  * mutations give. */
-async function setStopCoords(
+async function setDestinationCoords(
   owner: string,
-  stopId: string,
+  destinationId: string,
   found: PlaceSummary,
 ): Promise<boolean> {
   const rows = await db
-    .update(stops)
+    .update(destinations)
     .set({
       lat: found.location!.lat,
       lng: found.location!.lng,
       googlePlaceId: found.googlePlaceId,
     })
-    .where(and(eq(stops.id, stopId), inArray(stops.legId, ownedLegIds(owner))))
-    .returning({ id: stops.id });
+    .where(and(eq(destinations.id, destinationId), inArray(destinations.chapterId, ownedChapterIds(owner))))
+    .returning({ id: destinations.id });
   return rows.length > 0;
 }
 
@@ -219,13 +219,13 @@ export function dbLocateStore(owner: string): LocateStore {
       const ids = (kind: LocateRow["kind"]) =>
         rows.filter((r) => r.kind === kind).map((r) => r.id);
       return Promise.all([
-        loadStops(owner, ids("stop")),
+        loadDestinations(owner, ids("destination")),
         loadPlaces(owner, ids("place")),
         loadIdeas(owner, ids("idea")),
       ]).then(([s, p, i]) => [...s, ...p, ...i]);
     },
     saveCoords(target: LocateTarget, found: PlaceSummary) {
-      if (target.kind === "stop") return setStopCoords(owner, target.id, found);
+      if (target.kind === "destination") return setDestinationCoords(owner, target.id, found);
       if (target.kind === "idea") return writeIdeaPin(owner, target.id, found);
       return setSavedPlaceCoords(owner, target.id, found);
     },

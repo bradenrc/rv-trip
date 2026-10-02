@@ -123,9 +123,9 @@ describe("the capture bodies — each one is a valid POST /api/places", () => {
 describe("the toasts", () => {
   const dest = { id: "d", name: "San José, Costa Rica", region: "Costa Rica", googlePlaceId: "g", lat: null, lng: null };
 
-  it("saved: the name, → the destination from the 201, and the shelf", () => {
+  it("saved: the name, → the area from the 201, and the shelf", () => {
     expect(
-      savedToast({ place: { name: "El Chandelier", lat: null, lng: null, googlePlaceId: null }, destination: dest, status: "want" }),
+      savedToast({ place: { name: "El Chandelier", lat: null, lng: null, googlePlaceId: null }, area: dest, status: "want" }),
     ).toEqual({ title: "Saved El Chandelier", sub: "→ San José, Costa Rica · Want to go" });
   });
 
@@ -134,8 +134,8 @@ describe("the toasts", () => {
   });
 
   it("synced: the count, and the first save that resolved", () => {
-    const pin = { place: { name: "great BLM camp spot", lat: 43.05, lng: -124.33, googlePlaceId: null }, destination: { ...dest, name: "Bandon, OR" } };
-    const note = { place: { name: "chandel", lat: null, lng: null, googlePlaceId: null }, destination: null };
+    const pin = { place: { name: "great BLM camp spot", lat: 43.05, lng: -124.33, googlePlaceId: null }, area: { ...dest, name: "Bandon, OR" } };
+    const note = { place: { name: "chandel", lat: null, lng: null, googlePlaceId: null }, area: null };
     expect(syncedToast([note, pin])).toEqual({ title: "Synced 2 saves", sub: "great BLM camp spot → Bandon, OR" });
     expect(syncedToast([note])).toEqual({ title: "Synced 1 save", sub: null });
   });
@@ -154,7 +154,7 @@ describe("didItBody (#113 · Did it)", () => {
   const where = {
     clientId: "cap_didit",
     tripId: "5d3c9d7e-9b8e-4a8e-8f55-5a1f7b6d2c11",
-    stopId: "0b6c3b2a-1d4e-4f5a-9b8c-7d6e5f4a3b21",
+    destinationId: "0b6c3b2a-1d4e-4f5a-9b8c-7d6e5f4a3b21",
   };
 
   it("files a note as a born-done Do at the phone's fix, carrying the area name", () => {

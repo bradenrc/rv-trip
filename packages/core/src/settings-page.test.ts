@@ -110,7 +110,7 @@ describe("the form — three groups, four controls", () => {
     expect(settingsForm).toContain('label="Default map style"');
     expect(settingsForm).toContain("What every map opens with. Night is the product default.");
     expect(settingsForm).toContain("Track costs");
-    expect(settingsForm).toContain("Show reservation costs and the per-leg rollup.");
+    expect(settingsForm).toContain("Show reservation costs and the per-chapter rollup.");
   });
 
   it("uses the DS SegmentedControl for the three vocabularies, and the lifted switch for the fourth", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SavedPlace } from "../domain/types";
 import { forNextTimeResponse } from "../domain/types";
-import { pnwTrip, seedDestinations, seedSaves, seedTrips } from "../seeds/index";
+import { pnwTrip, seedAreas, seedSaves, seedTrips } from "../seeds/index";
 import {
   forNextTime,
   markRowOnShelf,
@@ -17,15 +17,15 @@ import { nearbySaves } from "./nearby-saves";
  * #113 · #107 "Last time here" (docs/design/113 Screen 4). The seed as the
  * walk renders it: the Pacific Northwest Loop reaches Newport Aug 5–9, and the
  * Oregon Coast Weekend (complete, ★5) left two Been saves anchored to the
- * Newport destination — both `again: true` in the seed.
+ * Newport area — both `again: true` in the seed.
  */
 
-/** The seed's saves as the library read returns them: ids, destinations
+/** The seed's saves as the library read returns them: ids, areas
  * joined, the been trip named by its seed id. */
 function seededLibrary(): SavedPlace[] {
-  const dests = new Map(seedDestinations().map((d) => [d.key, d]));
+  const dests = new Map(seedAreas().map((d) => [d.key, d]));
   return seedSaves().map((s, i) => {
-    const d = s.destination ? dests.get(s.destination)! : null;
+    const d = s.area ? dests.get(s.area)! : null;
     return {
       id: `sv_${i}_${s.name.toLowerCase().replace(/[^a-z]+/g, "_")}`,
       ownerId: "dev-household",
@@ -42,7 +42,7 @@ function seededLibrary(): SavedPlace[] {
       lastChange: null,
       anchor: s.anchor,
       areaLabel: s.areaLabel,
-      destination: d
+      area: d
         ? { id: `dst_${d.key}`, name: d.name, region: d.region, googlePlaceId: d.googlePlaceId, lat: d.lat, lng: d.lng }
         : null,
       suggestedPlace: s.suggestedPlace,
@@ -59,8 +59,8 @@ describe("forNextTime (#113 · #107)", () => {
     const nt = forNextTime(pnwTrip(), seedTrips(), lib);
     expect(nt.cards).toHaveLength(1);
     const card = nt.cards[0]!;
-    expect(card.destination).toEqual({ id: "dst_newport", name: "Newport, OR" });
-    expect(card.stop).toEqual({
+    expect(card.area).toEqual({ id: "dst_newport", name: "Newport, OR" });
+    expect(card.destination).toEqual({
       id: "stp_newport",
       name: "Newport, OR",
       arriveDate: "2026-08-05",
@@ -145,7 +145,7 @@ describe("forNextTime (#113 · #107)", () => {
     const row = nt.cards[0]!.again[1]!;
     expect(nextTimeIdeaBody("trip_pnw", row)).toMatchObject({
       tripId: "trip_pnw",
-      stopId: null,
+      destinationId: null,
       category: "eat",
       title: "Local Ocean Seafoods",
       status: "idea",

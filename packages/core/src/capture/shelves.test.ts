@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { savedPlace, type SavedPlace, type SaveDestination } from "../domain/types";
+import { savedPlace, type SavedPlace, type SaveArea } from "../domain/types";
 import type { PlaceSummary } from "../providers/index";
 import {
   saveRowLine,
@@ -15,7 +15,7 @@ import {
  * Bend 2, Nehalem 1, Newport 1, Tillamook 1, Warrenton 1), Costa Rica 1 and
  * Unanchored 2 — the sum of the rows drawn, 11.
  */
-const dest = (name: string, region: string | null): SaveDestination => ({
+const dest = (name: string, region: string | null): SaveArea => ({
   id: `d_${name}`,
   name,
   region,
@@ -34,7 +34,7 @@ const SAN_JOSE = dest("San José, Costa Rica", "Costa Rica");
 let n = 0;
 function save(
   name: string,
-  destination: SaveDestination | null,
+  area: SaveArea | null,
   createdAt: string,
   extra: Partial<SavedPlace> = {},
 ): SavedPlace {
@@ -47,7 +47,7 @@ function save(
     rating: null,
     lastChange: null,
     again: null,
-    destination,
+    area,
     createdAt,
     ...extra,
   });
@@ -82,9 +82,9 @@ describe("savesShelves — the wireframe's Want to go list", () => {
     ]);
   });
 
-  it("orders destinations alphabetically inside a region, each with its saves", () => {
+  it("orders areas alphabetically inside a region, each with its saves", () => {
     const oregon = shelves.regions[0]!;
-    expect(oregon.destinations.map((d) => [d.destination.name, d.saves.length])).toEqual([
+    expect(oregon.areas.map((d) => [d.area.name, d.saves.length])).toEqual([
       ["Bandon, OR", 2],
       ["Bend, OR", 2],
       ["Nehalem, OR", 1],
@@ -92,18 +92,18 @@ describe("savesShelves — the wireframe's Want to go list", () => {
       ["Tillamook, OR", 1],
       ["Warrenton, OR", 1],
     ]);
-    expect(shelves.regions[1]!.destinations.map((d) => d.destination.name)).toEqual([
+    expect(shelves.regions[1]!.areas.map((d) => d.area.name)).toEqual([
       "San José, Costa Rica",
     ]);
   });
 
-  it("orders saves newest first by createdAt inside a destination", () => {
-    const [bandon, bend] = shelves.regions[0]!.destinations;
+  it("orders saves newest first by createdAt inside an area", () => {
+    const [bandon, bend] = shelves.regions[0]!.areas;
     expect(bandon!.saves.map((s) => s.place.name)).toEqual(["chandel", "great BLM camp spot"]);
     expect(bend!.saves.map((s) => s.place.name)).toEqual(["taco truck Dana said", "Sunny's Smokehouse"]);
   });
 
-  it("puts saves with no destination in Unanchored, newest first, apart from the regions", () => {
+  it("puts saves with no area in Unanchored, newest first, apart from the regions", () => {
     expect(shelves.unanchored.map((s) => s.place.name)).toEqual([
       "pin in the Alvord Desert",
       "Kalaloch Campground",
@@ -119,7 +119,7 @@ describe("savesShelves — the wireframe's Want to go list", () => {
   it("groups the Been there shelf the same way", () => {
     const been = savesShelves([...WANT, BEEN], "been");
     expect(been.regions.map((r) => [r.region, r.count])).toEqual([["Oregon", 1]]);
-    expect(been.regions[0]!.destinations[0]!.saves.map((s) => s.place.name)).toEqual([
+    expect(been.regions[0]!.areas[0]!.saves.map((s) => s.place.name)).toEqual([
       "South Beach State Park",
     ]);
     expect(been.unanchored).toEqual([]);
@@ -136,7 +136,7 @@ describe("savesShelves — the wireframe's Want to go list", () => {
     expect(tied.regions.map((r) => r.region)).toEqual(["Idaho", "Washington"]);
   });
 
-  it("keeps two destinations of one name apart by id, and sorts a save with no createdAt last", () => {
+  it("keeps two areas of one name apart by id, and sorts a save with no createdAt last", () => {
     const shelves2 = savesShelves(
       [
         save("old", BANDON, null as unknown as string),
@@ -144,7 +144,7 @@ describe("savesShelves — the wireframe's Want to go list", () => {
       ],
       "want",
     );
-    expect(shelves2.regions[0]!.destinations[0]!.saves.map((s) => s.place.name)).toEqual(["new", "old"]);
+    expect(shelves2.regions[0]!.areas[0]!.saves.map((s) => s.place.name)).toEqual(["new", "old"]);
   });
 });
 
@@ -163,13 +163,13 @@ describe("saveRowLine — the row's second line", () => {
 
   it("draws an area note by its town: 'note · Bandon area'", () => {
     expect(saveRowLine(WANT[3]!)).toBe("note · Bandon area");
-    // No label of its own: the destination's town.
+    // No label of its own: the area's town.
     const bare = save("taco truck Dana said", BEND, "2026-08-01T00:00:00Z", { anchor: "area" });
     expect(saveRowLine(bare)).toBe("note · Bend area");
     expect(saveRowLine(save("x", null, "2026-01-01T00:00:00Z", { anchor: "area" }))).toBe("note");
   });
 
-  it("draws a place by its kind and destination: 'Restaurant · Bend, OR'", () => {
+  it("draws a place by its kind and area: 'Restaurant · Bend, OR'", () => {
     expect(saveRowLine(WANT[4]!)).toBe("Restaurant · Bend, OR");
   });
 });

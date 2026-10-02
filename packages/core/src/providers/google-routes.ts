@@ -17,7 +17,7 @@ import type { NavCheck } from "./navigation";
  * carry a pass-through waypoint, so the link we hand a driver is the two
  * endpoints and nothing else. This client does not change that link — it asks
  * Google, server-side, whether Google's own answer for those endpoints IS the
- * corridor HERE cleared for the rig, so the UI can stop guessing.
+ * corridor HERE cleared for the rig, so the UI can destination guessing.
  *
  * NOT yet exercised against live Google: GOOGLE_API_KEY is unset locally, so
  * `checkCorridor` is never constructed there and every drive renders verdict
@@ -36,7 +36,7 @@ export const COMPUTE_ROUTES_FIELD_MASK = "routes.polyline.geoJsonLinestring";
 
 /**
  * The cap on sampled `via` points. More than eight and both the request's cost
- * and its size stop being reasonable — and a corridor that needs nine hints is
+ * and its size destination being reasonable — and a corridor that needs nine hints is
  * a corridor Google is not going to hold anyway.
  */
 export const MAX_VIA_POINTS = 8;
@@ -51,7 +51,7 @@ export function buildComputeRoutesBody(
     destination: { location: { latLng: latLng(destination) } },
   };
   // `via: true` is the whole reason this is a server call and not a URL: it is
-  // a pass-through hint, NOT a stop. The deep-link scheme has no equivalent,
+  // a pass-through hint, NOT a destination. The deep-link scheme has no equivalent,
   // which is why every coordinate in `waypoints=` gets snapped to an address.
   if (intermediates.length > 0) {
     body.intermediates = intermediates.map((p) => ({ location: { latLng: latLng(p) }, via: true }));

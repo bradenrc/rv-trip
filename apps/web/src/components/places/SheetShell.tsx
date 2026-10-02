@@ -9,7 +9,7 @@ import { FieldLabel } from "@rv-trip/ui";
  * panel, sticky navy header with a kicker over the title, a scrolling body and
  * a footer that carries a mono hint plus Cancel and the primary action.
  *
- * It is the app's shipped sheet idiom (components/trip/StopDetailSheet.tsx:80-127)
+ * It is the app's shipped sheet idiom (components/trip/DestinationDetailSheet.tsx:80-127)
  * factored out, deliberately NOT the unused shadcn `sheet.tsx`: the planner's
  * sheet is what the app already looks like, and a second sheet grammar on the
  * same product would be the drift this repo keeps out of the DS.

@@ -1,10 +1,10 @@
 import { expect, it } from "vitest";
 import { db, schema } from "@rv-trip/db";
 import { fx, read } from "@rv-trip/db/testing";
-import { POST as POST_STOP } from "@/app/api/stops/route";
-import { DELETE as DELETE_STOP, PATCH as PATCH_STOP } from "@/app/api/stops/[id]/route";
-import { DELETE as DELETE_LEG } from "@/app/api/legs/[id]/route";
-import { POST as REORDER_LEGS } from "@/app/api/trips/[id]/legs/reorder/route";
+import { POST as POST_DESTINATION } from "@/app/api/destinations/route";
+import { DELETE as DELETE_DESTINATION, PATCH as PATCH_DESTINATION } from "@/app/api/destinations/[id]/route";
+import { DELETE as DELETE_CHAPTER } from "@/app/api/chapters/[id]/route";
+import { POST as REORDER_CHAPTERS } from "@/app/api/trips/[id]/chapters/reorder/route";
 import { GET as GET_TRIP, PATCH as PATCH_TRIP } from "@/app/api/trips/[id]/route";
 import { ctx, describeDb, req } from "@/test/db";
 
@@ -12,23 +12,23 @@ import { ctx, describeDb, req } from "@/test/db";
  * The journey's hops, through the REAL handlers (#110 · docs/design/110 §6).
  *
  * Every write that moves the route sequence persists `reconcileSegments` in
- * the same transaction — the five the design named (stop create/delete, leg
- * reorder/delete, stop reorder) AND the two the vet added: `updateStopFields`
- * (re-date, Unschedule, "Move to leg") and `updateTripFields` (home base).
- * `PATCH /api/stops/:id` refuses a date that would put a timed segment out of
- * step with its stop (Q3 A) with 409 `segment_date_mismatch`, writing nothing.
+ * the same transaction — the five the design named (destination create/delete, chapter
+ * reorder/delete, destination reorder) AND the two the vet added: `updateDestinationFields`
+ * (re-date, Unschedule, "Move to chapter") and `updateTripFields` (home base).
+ * `PATCH /api/destinations/:id` refuses a date that would put a timed segment out of
+ * step with its destination (Q3 A) with 409 `segment_date_mismatch`, writing nothing.
  */
 
 type Hop = [string | null, string | null];
 const hops = async (tripId: string): Promise<Hop[]> =>
-  (await read.segments(tripId)).map((s) => [s.fromStopId, s.toStopId]);
+  (await read.segments(tripId)).map((s) => [s.fromDestinationId, s.toDestinationId]);
 
 /** A timed flight INTO Astoria landing on its arriveDate (Aug 2, local). */
 async function flightIntoAstoria(tripId: string, astoriaId: string) {
   return fx.segment({
     tripId,
-    fromStopId: null,
-    toStopId: astoriaId,
+    fromDestinationId: null,
+    toDestinationId: astoriaId,
     mode: "fly",
     departAt: "2026-08-02T14:00:00Z", // 08:00 in Boise
     departTz: "America/Boise",
@@ -38,12 +38,12 @@ async function flightIntoAstoria(tripId: string, astoriaId: string) {
 }
 
 describeDb("travel segments · the writers keep them dense", () => {
-  it("a created stop reconciles the whole trip: one hop per pair + home → first, in the default mode", async () => {
-    const { trip, legMountains, astoria, newport, bend } = await fx.pacificNorthwestLoop();
+  it("a created destination reconciles the whole trip: one hop per pair + home → first, in the default mode", async () => {
+    const { trip, chapterMountains, astoria, newport, bend } = await fx.pacificNorthwestLoop();
 
-    const res = await POST_STOP(
+    const res = await POST_DESTINATION(
       req({
-        legId: legMountains.id,
+        chapterId: chapterMountains.id,
         place: { name: "Crater Lake NP", lat: 42.9446, lng: -122.109 },
         arriveDate: null,
         departDate: null,
@@ -64,11 +64,11 @@ describeDb("travel segments · the writers keep them dense", () => {
   });
 
   it("a kept hop keeps its row — id, mode and times survive an unrelated write", async () => {
-    const { trip, legMountains, astoria } = await fx.pacificNorthwestLoop();
+    const { trip, chapterMountains, astoria } = await fx.pacificNorthwestLoop();
     const flight = await flightIntoAstoria(trip.id, astoria.id);
 
-    await POST_STOP(
-      req({ legId: legMountains.id, place: { name: "Sisters, OR" }, arriveDate: null, departDate: null }),
+    await POST_DESTINATION(
+      req({ chapterId: chapterMountains.id, place: { name: "Sisters, OR" }, arriveDate: null, departDate: null }),
     );
 
     const first = (await read.segments(trip.id))[0]!;
@@ -77,23 +77,23 @@ describeDb("travel segments · the writers keep them dense", () => {
     expect(first.arriveAt?.toISOString()).toBe("2026-08-02T19:00:00.000Z");
   });
 
-  it("a deleted stop joins its neighbours and re-points the → home row instead of cascading it", async () => {
+  it("a deleted destination joins its neighbours and re-points the → home row instead of cascading it", async () => {
     const { trip, astoria, newport, bend } = await fx.pacificNorthwestLoop();
-    await fx.segment({ tripId: trip.id, fromStopId: null, toStopId: astoria.id, sortOrder: 0 });
-    await fx.segment({ tripId: trip.id, fromStopId: astoria.id, toStopId: newport.id, sortOrder: 1 });
-    await fx.segment({ tripId: trip.id, fromStopId: newport.id, toStopId: bend.id, sortOrder: 2 });
+    await fx.segment({ tripId: trip.id, fromDestinationId: null, toDestinationId: astoria.id, sortOrder: 0 });
+    await fx.segment({ tripId: trip.id, fromDestinationId: astoria.id, toDestinationId: newport.id, sortOrder: 1 });
+    await fx.segment({ tripId: trip.id, fromDestinationId: newport.id, toDestinationId: bend.id, sortOrder: 2 });
     const home = await fx.segment({
       tripId: trip.id,
-      fromStopId: bend.id,
-      toStopId: null,
+      fromDestinationId: bend.id,
+      toDestinationId: null,
       mode: "fly",
       sortOrder: 3,
     });
 
-    expect((await DELETE_STOP(req(undefined, "DELETE"), ctx(bend.id))).status).toBe(204);
+    expect((await DELETE_DESTINATION(req(undefined, "DELETE"), ctx(bend.id))).status).toBe(204);
 
     const rows = await read.segments(trip.id);
-    expect(rows.map((s) => [s.fromStopId, s.toStopId])).toEqual([
+    expect(rows.map((s) => [s.fromDestinationId, s.toDestinationId])).toEqual([
       [null, astoria.id],
       [astoria.id, newport.id],
       [newport.id, null],
@@ -101,10 +101,10 @@ describeDb("travel segments · the writers keep them dense", () => {
     expect(rows[2]).toMatchObject({ id: home.id, mode: "fly", sortOrder: 2 });
   });
 
-  it("a leg reorder and a leg delete both reconcile", async () => {
-    const { trip, legCoast, legMountains, astoria, newport, bend } = await fx.pacificNorthwestLoop();
+  it("a chapter reorder and a chapter delete both reconcile", async () => {
+    const { trip, chapterCoast, chapterMountains, astoria, newport, bend } = await fx.pacificNorthwestLoop();
 
-    const reordered = await REORDER_LEGS(req({ order: [legMountains.id, legCoast.id] }), ctx(trip.id));
+    const reordered = await REORDER_CHAPTERS(req({ order: [chapterMountains.id, chapterCoast.id] }), ctx(trip.id));
     expect(reordered.status).toBe(204);
     expect(await hops(trip.id)).toEqual([
       [null, bend.id],
@@ -112,15 +112,15 @@ describeDb("travel segments · the writers keep them dense", () => {
       [astoria.id, newport.id],
     ]);
 
-    expect((await DELETE_LEG(req(undefined, "DELETE"), ctx(legCoast.id))).status).toBe(204);
+    expect((await DELETE_CHAPTER(req(undefined, "DELETE"), ctx(chapterCoast.id))).status).toBe(204);
     expect(await hops(trip.id)).toEqual([[null, bend.id]]);
   });
 
-  it("re-dating a stop reorders the sequence and reconciles (vet HIGH: updateStopFields)", async () => {
+  it("re-dating a destination reorders the sequence and reconciles (vet HIGH: updateDestinationFields)", async () => {
     const { trip, astoria, newport, bend } = await fx.pacificNorthwestLoop();
 
-    // Newport moves before Astoria: the leg sorts scheduled stops by arriveDate.
-    const res = await PATCH_STOP(
+    // Newport moves before Astoria: the chapter sorts scheduled destinations by arriveDate.
+    const res = await PATCH_DESTINATION(
       req({ arriveDate: "2026-08-01", departDate: "2026-08-02" }, "PATCH"),
       ctx(newport.id),
     );
@@ -133,13 +133,13 @@ describeDb("travel segments · the writers keep them dense", () => {
     ]);
   });
 
-  it("\"Move to leg\" reconciles too", async () => {
-    const { trip, legMountains, astoria, newport, bend } = await fx.pacificNorthwestLoop();
+  it("\"Move to chapter\" reconciles too", async () => {
+    const { trip, chapterMountains, astoria, newport, bend } = await fx.pacificNorthwestLoop();
 
-    const res = await PATCH_STOP(req({ legId: legMountains.id, sortOrder: 9 }, "PATCH"), ctx(astoria.id));
+    const res = await PATCH_DESTINATION(req({ chapterId: chapterMountains.id, sortOrder: 9 }, "PATCH"), ctx(astoria.id));
 
     expect(res.status).toBe(204);
-    // Astoria is still scheduled (Aug 2), so it sorts first in its new leg.
+    // Astoria is still scheduled (Aug 2), so it sorts first in its new chapter.
     expect(await hops(trip.id)).toEqual([
       [null, newport.id],
       [newport.id, astoria.id],
@@ -149,7 +149,7 @@ describeDb("travel segments · the writers keep them dense", () => {
 
   it("clearing the home base drops the home → first hop (vet HIGH: updateTripFields)", async () => {
     const { trip, astoria, newport, bend } = await fx.pacificNorthwestLoop();
-    await POST_STOP(req({ legId: (await read.legOrder(trip.id))[1]!, place: { name: "Sisters" } }));
+    await POST_DESTINATION(req({ chapterId: (await read.chapterOrder(trip.id))[1]!, place: { name: "Sisters" } }));
     expect((await hops(trip.id))[0]).toEqual([null, astoria.id]);
 
     const res = await PATCH_TRIP(req({ homeBase: null }, "PATCH"), ctx(trip.id));
@@ -164,12 +164,12 @@ describeDb("travel segments · the writers keep them dense", () => {
   });
 });
 
-describeDb("PATCH /api/stops/[id] · segment_date_mismatch (Q3 A — stop dates win)", () => {
+describeDb("PATCH /api/destinations/[id] · segment_date_mismatch (Q3 A — destination dates win)", () => {
   it("409s a re-date that would put a timed flight out of step, and writes nothing", async () => {
     const { trip, astoria } = await fx.pacificNorthwestLoop();
     const flight = await flightIntoAstoria(trip.id, astoria.id);
 
-    const res = await PATCH_STOP(req({ arriveDate: "2026-08-03" }, "PATCH"), ctx(astoria.id));
+    const res = await PATCH_DESTINATION(req({ arriveDate: "2026-08-03" }, "PATCH"), ctx(astoria.id));
 
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({
@@ -178,7 +178,7 @@ describeDb("PATCH /api/stops/[id] · segment_date_mismatch (Q3 A — stop dates 
       expected: "2026-08-03",
       actual: "2026-08-02",
     });
-    expect((await read.stop(astoria.id))!.arriveDate).toBe("2026-08-02");
+    expect((await read.destination(astoria.id))!.arriveDate).toBe("2026-08-02");
     // Nothing was reconciled either: the flight is still the only hop.
     expect(await hops(trip.id)).toEqual([[null, astoria.id]]);
   });
@@ -187,25 +187,25 @@ describeDb("PATCH /api/stops/[id] · segment_date_mismatch (Q3 A — stop dates 
     const { trip, astoria } = await fx.pacificNorthwestLoop();
     await flightIntoAstoria(trip.id, astoria.id);
 
-    const res = await PATCH_STOP(req({ departDate: "2026-08-04" }, "PATCH"), ctx(astoria.id));
+    const res = await PATCH_DESTINATION(req({ departDate: "2026-08-04" }, "PATCH"), ctx(astoria.id));
 
     expect(res.status).toBe(204);
-    expect((await read.stop(astoria.id))!.departDate).toBe("2026-08-04");
+    expect((await read.destination(astoria.id))!.departDate).toBe("2026-08-04");
   });
 
   it("exempts a floating endpoint: Unschedule next to a flight is allowed", async () => {
     const { trip, astoria } = await fx.pacificNorthwestLoop();
     await flightIntoAstoria(trip.id, astoria.id);
 
-    const res = await PATCH_STOP(req({ arriveDate: null, departDate: null }, "PATCH"), ctx(astoria.id));
+    const res = await PATCH_DESTINATION(req({ arriveDate: null, departDate: null }, "PATCH"), ctx(astoria.id));
 
     expect(res.status).toBe(204);
-    expect((await read.stop(astoria.id))!.arriveDate).toBeNull();
+    expect((await read.destination(astoria.id))!.arriveDate).toBeNull();
   });
 });
 
 describeDb("GET /api/trips/[id] · the segments on the wire", () => {
-  it("carries segments with their own reservations; a stop keeps only its own", async () => {
+  it("carries segments with their own reservations; a destination keeps only its own", async () => {
     const { trip, astoria, reservation } = await fx.pacificNorthwestLoop();
     const flight = await flightIntoAstoria(trip.id, astoria.id);
     await db.insert(schema.reservations).values({
@@ -222,8 +222,8 @@ describeDb("GET /api/trips/[id] · the segments on the wire", () => {
         defaultMode: string;
         rigOn: boolean;
         lodgingDefault: string | null;
-        segments: { id: string; mode: string; departAt: string; reservations: { name: string; stopId: string | null; startsAt: string }[] }[];
-        legs: { stops: { id: string; reservations: { id: string }[] }[] }[];
+        segments: { id: string; mode: string; departAt: string; reservations: { name: string; destinationId: string | null; startsAt: string }[] }[];
+        chapters: { destinations: { id: string; reservations: { id: string }[] }[] }[];
       };
     };
 
@@ -233,9 +233,9 @@ describeDb("GET /api/trips/[id] · the segments on the wire", () => {
       id: flight.id,
       mode: "fly",
       departAt: "2026-08-02T14:00:00.000Z",
-      reservations: [{ name: "AA 2451 BOI→PDX", stopId: null, startsAt: "2026-08-02T14:00:00.000Z" }],
+      reservations: [{ name: "AA 2451 BOI→PDX", destinationId: null, startsAt: "2026-08-02T14:00:00.000Z" }],
     });
-    const astoriaOut = body.legs[0]!.stops.find((s) => s.id === astoria.id)!;
+    const astoriaOut = body.chapters[0]!.destinations.find((s) => s.id === astoria.id)!;
     expect(astoriaOut.reservations.map((r) => r.id)).toEqual([reservation.id]);
   });
 
@@ -246,7 +246,7 @@ describeDb("GET /api/trips/[id] · the segments on the wire", () => {
     await expect(
       db
         .insert(schema.reservations)
-        .values({ stopId: astoria.id, segmentId: flight.id, type: "other", name: "both" }),
+        .values({ destinationId: astoria.id, segmentId: flight.id, type: "other", name: "both" }),
     ).rejects.toThrow();
   });
 });

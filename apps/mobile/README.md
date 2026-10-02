@@ -176,7 +176,7 @@ Two things to know about what you see:
 - `app/(tabs)/(trips)/index.tsx` — Trips (planning / upcoming / traveled), at `/`
 - `app/(tabs)/(trips)/trips/[id]/index.tsx` — the trip, under a **Route ⇄ Map** lens: the day
   strip + route list with drives and Navigate, or the same drives as corridors
-- `app/(tabs)/(trips)/trips/[id]/stops/[stopId].tsx` — stop detail: the mini-map, reservations, ideas (tap to cycle), rating + notes (persist)
+- `app/(tabs)/(trips)/trips/[id]/destinations/[destinationId].tsx` — destination detail: the mini-map, reservations, ideas (tap to cycle), rating + notes (persist)
 - `app/(tabs)/saves.tsx` — Saves (a placeholder until #111 i2's shelves)
 - `app/capture.tsx` — the capture sheet (a root formSheet): one smart field →
   a Google place, a note in the area you're in, or a dropped pin. Works offline:

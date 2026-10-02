@@ -101,7 +101,7 @@ export function SettingsForm({
               <span>
                 <span className="block text-[14px] font-bold text-rv-ink">Track costs</span>
                 <span className="mt-0.5 block text-[12px] text-rv-ink-faded">
-                  Show reservation costs and the per-leg rollup.
+                  Show reservation costs and the per-chapter rollup.
                 </span>
               </span>
               <PrefSwitch checked={costs} onChange={setCosts} ariaLabel="Track costs" />

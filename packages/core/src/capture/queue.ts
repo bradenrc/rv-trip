@@ -19,7 +19,7 @@ import type { IdeaCreateBody, SavedPlaceCreateInput } from "../domain/types";
  *   (back online, app foreground, the next enqueue) tries again from the top.
  *
  * #113 (W3 Journal, Q5 A) widens the item to a discriminated union: besides a
- * save (`POST /api/places`) it carries a check-off PATCH (an idea, a stop or a
+ * save (`POST /api/places`) it carries a check-off PATCH (an idea, a destination or a
  * reservation) and a "Did it" idea (`POST /api/ideas`, born done), so a
  * check-off on a beach with no bars survives. A PATCH is idempotent by value;
  * a queued idea replays on its `clientId` (the server answers 200 with the row
@@ -43,7 +43,7 @@ export interface JournalPatchBody {
   notes?: string | null;
 }
 
-export type PatchEntity = "idea" | "stop" | "reservation";
+export type PatchEntity = "idea" | "destination" | "reservation";
 
 interface QueuedBase {
   clientId: string;
@@ -59,7 +59,7 @@ export interface QueuedSave extends QueuedBase {
   body: CaptureBody;
 }
 
-/** A check-off: `PATCH /api/{ideas,stops,reservations}/:id`. */
+/** A check-off: `PATCH /api/{ideas,destinations,reservations}/:id`. */
 export interface QueuedPatch extends QueuedBase {
   kind: "patch";
   entity: PatchEntity;
@@ -152,11 +152,21 @@ function parseItem(q: unknown): QueuedItem | null {
   };
   const kind = r.kind ?? "save";
   if (kind === "save") return { ...base, kind: "save", body: r.body as CaptureBody };
-  if (kind === "idea") return { ...base, kind: "idea", body: r.body as QueuedIdea["body"] };
+  if (kind === "idea") {
+    // #155 · an idea queued before the rename carries `stopId`; the create
+    // reads `destinationId`, and an unlisted key would parse away (the idea
+    // would land on the shelf instead of today's destination).
+    const { stopId, ...rest } = r.body as Raw;
+    const body = stopId !== undefined && rest.destinationId === undefined ? { ...rest, destinationId: stopId } : r.body;
+    return { ...base, kind: "idea", body: body as QueuedIdea["body"] };
+  }
   if (kind === "patch") {
     if (typeof r.id !== "string") return null;
-    if (r.entity !== "idea" && r.entity !== "stop" && r.entity !== "reservation") return null;
-    return { ...base, kind: "patch", entity: r.entity, id: r.id, body: r.body as JournalPatchBody };
+    // #155 · "stop" is the pre-rename spelling a phone may still hold queued;
+    // it is the same entity, now addressed at /api/destinations.
+    const entity = r.entity === "stop" ? "destination" : r.entity;
+    if (entity !== "idea" && entity !== "destination" && entity !== "reservation") return null;
+    return { ...base, kind: "patch", entity, id: r.id, body: r.body as JournalPatchBody };
   }
   // A kind from a future version: skipped, never a crash.
   return null;

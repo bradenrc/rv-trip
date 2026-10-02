@@ -66,7 +66,7 @@ describeDb("GET /api/trips — derived status", () => {
  * takes its number from `routeSummary().driveMiles` over `orderedPairs`.
  *
  * The two gaps this closes are both asserted on the real listing: the pair set
- * (the drive to a FLOATING stop was never counted) and the metric (a chord,
+ * (the drive to a FLOATING destination was never counted) and the metric (a chord,
  * not the road HERE routed).
  */
 describeDb("GET /api/trips — the miles chip", () => {
@@ -87,11 +87,11 @@ describeDb("GET /api/trips — the miles chip", () => {
     notices: [],
   });
 
-  /** The seed trip plus its floating stop: 3 pairs, the last one floating. */
-  async function loopWithFloatingStop() {
+  /** The seed trip plus its floating destination: 3 pairs, the last one floating. */
+  async function loopWithFloatingDestination() {
     const loop = await fx.pacificNorthwestLoop();
-    await fx.stop({
-      legId: loop.legMountains.id,
+    await fx.destination({
+      chapterId: loop.chapterMountains.id,
       placeName: "Crater Lake NP",
       lat: CRATER.lat,
       lng: CRATER.lng,
@@ -109,8 +109,8 @@ describeDb("GET /api/trips — the miles chip", () => {
     return rows.find((r) => r.id === id)!;
   }
 
-  it("counts the drive to the floating stop, and says it is estimating", async () => {
-    const loop = await loopWithFloatingStop();
+  it("counts the drive to the floating destination, and says it is estimating", async () => {
+    const loop = await loopWithFloatingDestination();
 
     const summary = await row(loop.trip.id);
 
@@ -127,7 +127,7 @@ describeDb("GET /api/trips — the miles chip", () => {
   });
 
   it("takes the ROUTED distance for every pair the cache answers", async () => {
-    const loop = await loopWithFloatingStop();
+    const loop = await loopWithFloatingDestination();
     // 136 mi of US-101, 185 of US-20, 106 to Crater Lake — every pair cached,
     // so nothing falls back and the chip goes away.
     await putCachedRoutes([
@@ -143,7 +143,7 @@ describeDb("GET /api/trips — the miles chip", () => {
   });
 
   it("mixes layers on one row — one hit, two misses, still flagged", async () => {
-    const loop = await loopWithFloatingStop();
+    const loop = await loopWithFloatingDestination();
     await putCachedRoutes([{ key: key(ASTORIA, NEWPORT), result: routed(218_866) }]);
 
     const summary = await row(loop.trip.id);
@@ -157,11 +157,11 @@ describeDb("GET /api/trips — the miles chip", () => {
   });
 
   it("a trip with no routable pair is zero miles and is NOT estimating", async () => {
-    // One stop, so `orderedPairs` is empty: nothing fell back, because nothing
+    // One destination, so `orderedPairs` is empty: nothing fell back, because nothing
     // was asked for. No chip on a card with no drives.
-    const trip = await fx.trip({ title: "One-stop overnight" });
-    const leg = await fx.leg({ tripId: trip.id });
-    await fx.stop({ legId: leg.id });
+    const trip = await fx.trip({ title: "One-destination overnight" });
+    const chapter = await fx.chapter({ tripId: trip.id });
+    await fx.destination({ chapterId: chapter.id });
 
     const summary = await row(trip.id);
 
@@ -174,7 +174,7 @@ describeDb("GET /api/trips — the miles chip", () => {
  * #60 Q4 → B — the CREATE half of the home base anchor. `createTrip` takes a
  * flat input, so the route flattens the wire's nested `homeBasePlace` onto the
  * three columns; without it /trips/new would drop the coordinates the user just
- * picked and the first stop of the trip would have no search bias.
+ * picked and the first destination of the trip would have no search bias.
  */
 describeDb("POST /api/trips — home base is a real place", () => {
   it("stores the picked anchor beside the name, and returns it in the tree", async () => {

@@ -4,12 +4,12 @@ import {
   homeBasePatch,
   homeBasePlaceOf,
   placeOf,
-  stopPatchColumns,
-  stopPlaceCreate,
-  stopPlacePatch,
+  destinationPatchColumns,
+  destinationPlaceCreate,
+  destinationPlacePatch,
 } from "./place-form";
 import { ideaDraftInput, ideaPlace } from "./leaf-form";
-import { stopCreateInput, stopPatchInput, tripPatchInput, type Trip } from "./types";
+import { destinationCreateInput, destinationPatchInput, tripPatchInput, type Trip } from "./types";
 import { nearLabel, nearOf, pickedFromPlace, type PickedPlace } from "../providers/place-picker";
 import { routeSummary } from "../planner/index";
 
@@ -23,7 +23,7 @@ import { routeSummary } from "../planner/index";
  * what the rail's new unmapped count and its Locate rows are counted from.
  */
 
-const LEG = "6f1b6d0e-6d3b-4d9e-9d1f-6a0a7b2c3d4e";
+const CHAPTER = "6f1b6d0e-6d3b-4d9e-9d1f-6a0a7b2c3d4e";
 
 const CAPE: PickedPlace = {
   name: "Cape Lookout State Park",
@@ -61,11 +61,11 @@ describe("placeOf — the picked place as the grammar's Place", () => {
   });
 });
 
-describe("stopPlaceCreate — Add stop IS the pick", () => {
+describe("destinationPlaceCreate — Add destination IS the pick", () => {
   it("posts the name, the coordinates and the place id in ONE write", () => {
-    const body = stopPlaceCreate(LEG, CAPE);
+    const body = destinationPlaceCreate(CHAPTER, CAPE);
     expect(body).toEqual({
-      legId: LEG,
+      chapterId: CHAPTER,
       place: {
         name: "Cape Lookout State Park",
         lat: 45.3612,
@@ -75,36 +75,36 @@ describe("stopPlaceCreate — Add stop IS the pick", () => {
       arriveDate: null,
       departDate: null,
     });
-    expect(stopCreateInput.safeParse(body).success).toBe(true);
+    expect(destinationCreateInput.safeParse(body).success).toBe(true);
   });
 
   it("a coordless escape pick is a legal create — honestly coordless", () => {
-    const body = stopPlaceCreate(LEG, ROGUE)!;
+    const body = destinationPlaceCreate(CHAPTER, ROGUE)!;
     expect(body.place).toEqual({
       name: "rogue ales brewery",
       lat: null,
       lng: null,
       googlePlaceId: null,
     });
-    expect(stopCreateInput.safeParse(body).success).toBe(true);
+    expect(destinationCreateInput.safeParse(body).success).toBe(true);
   });
 
   it("is null on an empty name — the same null the draft row is dismissed on", () => {
-    expect(stopPlaceCreate(LEG, { ...ROGUE, name: "   " })).toBeNull();
+    expect(destinationPlaceCreate(CHAPTER, { ...ROGUE, name: "   " })).toBeNull();
   });
 });
 
-describe("stopPlacePatch — Change place… / Set place", () => {
+describe("destinationPlacePatch — Change place… / Set place", () => {
   it("sends the whole place as one key, and parses as a PATCH body", () => {
-    const patch = stopPlacePatch(CAPE)!;
+    const patch = destinationPlacePatch(CAPE)!;
     expect(patch).toEqual({ place: placeOf(CAPE) });
-    const parsed = stopPatchInput.safeParse(patch);
+    const parsed = destinationPatchInput.safeParse(patch);
     expect(parsed.success).toBe(true);
     expect(parsed.success && parsed.data).toEqual(patch);
   });
 
   it("never sends half a coordinate — the pair travels with the name", () => {
-    const patch = stopPlacePatch({ ...CAPE, lng: null })!;
+    const patch = destinationPlacePatch({ ...CAPE, lng: null })!;
     expect(patch.place).toEqual({
       name: "Cape Lookout State Park",
       lat: 45.3612,
@@ -116,13 +116,13 @@ describe("stopPlacePatch — Change place… / Set place", () => {
   });
 
   it("is null on an empty name", () => {
-    expect(stopPlacePatch({ ...ROGUE, name: "" })).toBeNull();
+    expect(destinationPlacePatch({ ...ROGUE, name: "" })).toBeNull();
   });
 });
 
-describe("stopPatchColumns — the handler's flattening", () => {
-  it("turns the nested place into the three columns updateStopFields writes", () => {
-    expect(stopPatchColumns(stopPatchInput.parse(stopPlacePatch(CAPE)))).toEqual({
+describe("destinationPatchColumns — the handler's flattening", () => {
+  it("turns the nested place into the three columns updateDestinationFields writes", () => {
+    expect(destinationPatchColumns(destinationPatchInput.parse(destinationPlacePatch(CAPE)))).toEqual({
       placeName: "Cape Lookout State Park",
       lat: 45.3612,
       lng: -123.9707,
@@ -132,19 +132,19 @@ describe("stopPatchColumns — the handler's flattening", () => {
 
   it("leaves every other key exactly where it was", () => {
     expect(
-      stopPatchColumns({ arriveDate: "2026-08-09", departDate: null, legId: LEG, sortOrder: 2 }),
-    ).toEqual({ arriveDate: "2026-08-09", departDate: null, legId: LEG, sortOrder: 2 });
+      destinationPatchColumns({ arriveDate: "2026-08-09", departDate: null, chapterId: CHAPTER, sortOrder: 2 }),
+    ).toEqual({ arriveDate: "2026-08-09", departDate: null, chapterId: CHAPTER, sortOrder: 2 });
   });
 
   it("passes a bare rename straight through — `placeName` still works alone", () => {
-    expect(stopPatchColumns({ placeName: "Newport, OR" })).toEqual({ placeName: "Newport, OR" });
+    expect(destinationPatchColumns({ placeName: "Newport, OR" })).toEqual({ placeName: "Newport, OR" });
   });
 
-  /** The #60 vet's MED: `updateStopFields` spreads a flat object into `.set()`,
+  /** The #60 vet's MED: `updateDestinationFields` spreads a flat object into `.set()`,
    * so without this the answer would be decided by key order. */
   it("the whole place OUTRANKS placeName when a body carries both", () => {
     expect(
-      stopPatchColumns({ placeName: "a typo nobody wants", place: placeOf(CAPE) }),
+      destinationPatchColumns({ placeName: "a typo nobody wants", place: placeOf(CAPE) }),
     ).toEqual({
       placeName: "Cape Lookout State Park",
       lat: 45.3612,
@@ -154,7 +154,7 @@ describe("stopPatchColumns — the handler's flattening", () => {
   });
 
   it("a coordless place explicitly NULLS the coordinates a row used to have", () => {
-    expect(stopPatchColumns({ place: placeOf(ROGUE) })).toEqual({
+    expect(destinationPatchColumns({ place: placeOf(ROGUE) })).toEqual({
       placeName: "rogue ales brewery",
       lat: null,
       lng: null,
@@ -163,7 +163,7 @@ describe("stopPatchColumns — the handler's flattening", () => {
   });
 
   it("an empty patch stays empty — a legal no-op, never `.set({})`", () => {
-    expect(stopPatchColumns({})).toEqual({});
+    expect(destinationPatchColumns({})).toEqual({});
   });
 });
 
@@ -203,7 +203,7 @@ describe("home base — one object on the wire, three columns underneath", () =>
   });
 
   /** The read half. Without it `trip.homeBasePlace` is silently always null and
-   * the first stop of a leg has no search bias — the #60 vet's HIGH. */
+   * the first destination of a chapter has no search bias — the #60 vet's HIGH. */
   it("reads back as one place, and as null for a pre-#60 row", () => {
     expect(
       homeBasePlaceOf({
@@ -239,18 +239,18 @@ describe("home base — one object on the wire, three columns underneath", () =>
 
 describe("ideaDraftInput — the picker on Add idea is optional", () => {
   it("still returns place: null when nothing was picked", () => {
-    expect(ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", stopId: "11111111-2222-4333-8444-555566667777" }, "Cape Perpetua overlook")?.place)
+    expect(ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", destinationId: "11111111-2222-4333-8444-555566667777" }, "Cape Perpetua overlook")?.place)
       .toBeNull();
   });
 
   it("attaches the picked place when there is one", () => {
     expect(
-      ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", stopId: "11111111-2222-4333-8444-555566667777" }, "Cape Perpetua overlook", CAPE)?.place,
+      ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", destinationId: "11111111-2222-4333-8444-555566667777" }, "Cape Perpetua overlook", CAPE)?.place,
     ).toEqual(placeOf(CAPE));
   });
 
   it("a place without a title is not an idea", () => {
-    expect(ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", stopId: "11111111-2222-4333-8444-555566667777" }, "   ", CAPE)).toBeNull();
+    expect(ideaDraftInput({ tripId: "11111111-2222-4333-8444-555566667788", destinationId: "11111111-2222-4333-8444-555566667777" }, "   ", CAPE)).toBeNull();
   });
 
   it("ideaPlace drops an empty pick rather than storing a nameless place", () => {
@@ -275,7 +275,7 @@ describe("pickedFromPlace / nearOf — what the mounted picker opens on, and whe
     expect(pickedFromPlace(null)).toBeNull();
   });
 
-  it("biases to the first candidate with a FULL pair — the stop above, else home base", () => {
+  it("biases to the first candidate with a FULL pair — the destination above, else home base", () => {
     const previous = { name: "Newport, OR", lat: 44.6083, lng: -124.064 };
     const home = { name: "Boise, ID", lat: 43.615, lng: -116.2023 };
     expect(nearOf(previous, home)).toEqual(previous);
@@ -292,10 +292,10 @@ describe("pickedFromPlace / nearOf — what the mounted picker opens on, and whe
   });
 });
 
-describe("routeSummary — the rail counts the stops it cannot draw", () => {
-  const stopOf = (id: string, name: string, lat: number | null, lng: number | null) => ({
+describe("routeSummary — the rail counts the destinations it cannot draw", () => {
+  const destinationOf = (id: string, name: string, lat: number | null, lng: number | null) => ({
     id,
-    legId: "l1",
+    chapterId: "l1",
     place: { name, lat, lng, googlePlaceId: null },
     arriveDate: null,
     departDate: null,
@@ -321,16 +321,16 @@ describe("routeSummary — the rail counts the stops it cannot draw", () => {
     rating: null,
     note: null,
     ideas: [],
-    legs: [
+    chapters: [
       {
         id: "l1",
         tripId: "t1",
         title: "Oregon Coast",
         sortOrder: 0,
-        stops: [
-          stopOf("s1", "Newport, OR", 44.6083, -124.064),
-          stopOf("s2", "rogue ales brewery", null, null),
-          stopOf("s3", "New stop", null, null),
+        destinations: [
+          destinationOf("s1", "Newport, OR", 44.6083, -124.064),
+          destinationOf("s2", "rogue ales brewery", null, null),
+          destinationOf("s3", "New destination", null, null),
         ],
       },
     ],
@@ -344,23 +344,23 @@ describe("routeSummary — the rail counts the stops it cannot draw", () => {
   it("counts them, and names them for Locate", () => {
     const s = routeSummary(trip());
     expect(s.unmapped).toBe(2);
-    expect(s.unmappedStops).toEqual([
+    expect(s.unmappedDestinations).toEqual([
       { id: "s2", name: "rogue ales brewery" },
-      { id: "s3", name: "New stop" },
+      { id: "s3", name: "New destination" },
     ]);
   });
 
-  it("is 0 and empty when every stop is mapped — the rail draws nothing", () => {
+  it("is 0 and empty when every destination is mapped — the rail draws nothing", () => {
     const t = trip();
-    t.legs[0]!.stops = [stopOf("s1", "Newport, OR", 44.6083, -124.064)];
+    t.chapters[0]!.destinations = [destinationOf("s1", "Newport, OR", 44.6083, -124.064)];
     const s = routeSummary(t);
     expect(s.unmapped).toBe(0);
-    expect(s.unmappedStops).toEqual([]);
+    expect(s.unmappedDestinations).toEqual([]);
   });
 
   it("half a coordinate still counts as unmapped", () => {
     const t = trip();
-    t.legs[0]!.stops = [stopOf("s1", "Half a pin", 44.6083, null)];
+    t.chapters[0]!.destinations = [destinationOf("s1", "Half a pin", 44.6083, null)];
     expect(routeSummary(t).unmapped).toBe(1);
   });
 });

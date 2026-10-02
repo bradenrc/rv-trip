@@ -18,7 +18,7 @@ const item = (
   saveId: string,
   name: string,
   distanceMi: number,
-  stop: string,
+  destination: string,
   extra: Partial<NearbySave> = {},
 ): NearbySave => ({
   saveId,
@@ -28,7 +28,7 @@ const item = (
   rating: null,
   source: "Jane & Rick",
   place: { name, lat: 45, lng: -124, googlePlaceId: null },
-  nearestStop: { id: `stop_${stop}`, name: stop },
+  nearestDestination: { id: `destination_${destination}`, name: destination },
   distanceMi,
   ...extra,
 });
@@ -53,22 +53,22 @@ const text = (html: string) =>
   html.replace(/<[^>]+>/g, "").replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
 
 describe("the web banner", () => {
-  it("reads '{n} of your saves are near this trip' / 'within {r} mi of a stop'", () => {
+  it("reads '{n} of your saves are near this trip' / 'within {r} mi of a destination'", () => {
     expect(nearbyBannerCopy(AT_50)).toEqual({
       title: "4 of your saves are near this trip",
-      sub: "within 50 mi of a stop · review",
+      sub: "within 50 mi of a destination · review",
       dismiss: "Dismiss",
     });
     const html = renderToStaticMarkup(
       createElement(NearbySavesBanner, { nearby: AT_50, onOpen: noop, onDismiss: noop }),
     );
     expect(text(html)).toContain("4 of your saves are near this trip");
-    expect(text(html)).toContain("within 50 mi of a stop · review");
+    expect(text(html)).toContain("within 50 mi of a destination · review");
     expect(text(html)).toContain("Dismiss");
   });
 
   it("follows the trip's radius", () => {
-    expect(nearbyBannerCopy({ ...AT_50, radiusMi: 100 }).sub).toBe("within 100 mi of a stop · review");
+    expect(nearbyBannerCopy({ ...AT_50, radiusMi: 100 }).sub).toBe("within 100 mi of a destination · review");
   });
 
   it("is the shipped SuggestionBar: rv-info border and soft fill, Sparkles in info-ink, mono faded Dismiss", () => {
@@ -115,7 +115,7 @@ describe("the review sheet", () => {
     for (const r of [25, 100, 200]) expect(html).toMatch(new RegExp(`aria-pressed="false"[^>]*>${r} mi<`));
   });
 
-  it("lists the rows nearest first, each line distance · nearest stop · who", () => {
+  it("lists the rows nearest first, each line distance · nearest destination · who", () => {
     const t = text(sheet());
     const order = ["South Beach", "Fort Stevens", "Beverly Beach", "Nehalem Bay"].map((n) => t.indexOf(n));
     expect(order).toEqual([...order].sort((a, b) => a - b));

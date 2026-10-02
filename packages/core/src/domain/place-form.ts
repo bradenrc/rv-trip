@@ -7,8 +7,8 @@ import type {
   SavedPlaceCreate,
   SavedPlacePatch,
   SavedPlaceStatus,
-  StopCreateInput,
-  StopPatchInput,
+  DestinationCreateInput,
+  DestinationPatchInput,
   TripPatchInput,
 } from "./types";
 
@@ -144,7 +144,7 @@ export function isFreeTextPick(picked: PickedPlace | null): boolean {
  *
  * #111 i4 (docs/design/111 "Web parity"): the escape row is the web's capture,
  * so it saves an AREA note — `anchor: "area"` and `areaLabel`, the locality the
- * browser was in (`/api/destinations/resolve`) or null when geolocation was
+ * browser was in (`/api/areas/resolve`) or null when geolocation was
  * refused or named nothing. A Google pick sends no anchor: the server's
  * `saveAnchorOf` still derives it, as it does for every older caller.
  */
@@ -231,7 +231,7 @@ export function applySavedPlacePatch(
   const keep = <T>(v: T | undefined, current: T): T => (v === undefined ? current : v);
   const status = keep(patch.status, p.status);
   // #111 Q3 A: the upgrade copies the suggestion onto the row, the way the
-  // server does. The re-resolved destination is the server's alone — a
+  // server does. The re-resolved area is the server's alone — a
   // client refetches for it (PATCH answers 204, no body).
   const up = patch.upgradeToSuggested && p.suggestedPlace ? p.suggestedPlace : null;
   if (up) {
@@ -309,31 +309,31 @@ export function placeOf(picked: PickedPlace): Place {
 }
 
 /**
- * `POST /api/stops` — "Add stop" is the pick, so a stop is born with its name,
+ * `POST /api/destinations` — "Add destination" is the pick, so a destination is born with its name,
  * its coordinates and its place id in ONE write rather than as a coordless
- * `"New stop"` a later patch has to repair.
+ * `"New destination"` a later patch has to repair.
  */
-export function stopPlaceCreate(
-  legId: string,
+export function destinationPlaceCreate(
+  chapterId: string,
   picked: PickedPlace,
   dates: { arriveDate: IsoDate | null; departDate: IsoDate | null } = {
     arriveDate: null,
     departDate: null,
   },
-): StopCreateInput | null {
+): DestinationCreateInput | null {
   if (picked.name.trim() === "") return null;
-  return { legId, place: placeOf(picked), ...dates };
+  return { chapterId, place: placeOf(picked), ...dates };
 }
 
-/** `PATCH /api/stops/:id` — "Change place…" / "Set place". The whole place as
+/** `PATCH /api/destinations/:id` — "Change place…" / "Set place". The whole place as
  * one key, never three: half a coordinate is no coordinate. */
-export function stopPlacePatch(picked: PickedPlace): StopPatchInput | null {
+export function destinationPlacePatch(picked: PickedPlace): DestinationPatchInput | null {
   if (picked.name.trim() === "") return null;
   return { place: placeOf(picked) };
 }
 
-/** The stop's place columns, as `updateStopFields` names them. */
-export interface StopPlaceColumns {
+/** The destination's place columns, as `updateDestinationFields` names them. */
+export interface DestinationPlaceColumns {
   placeName: string;
   lat: number | null;
   lng: number | null;
@@ -341,8 +341,8 @@ export interface StopPlaceColumns {
 }
 
 /**
- * The handler's flattening: `stopPatchInput` puts a NESTED `place` on the wire,
- * `updateStopFields` spreads its patch straight into `db.update(stops).set()`
+ * The handler's flattening: `destinationPatchInput` puts a NESTED `place` on the wire,
+ * `updateDestinationFields` spreads its patch straight into `db.update(destinations).set()`
  * and there is no `place` column — so the route calls this between the two or
  * the PATCH is a SQL error on the issue's central verb.
  *
@@ -350,9 +350,9 @@ export interface StopPlaceColumns {
  * BOTH `placeName` and `place`, the whole place wins. `placeName` is the cheap
  * rename and must not be able to outrank the key that also carries coordinates.
  */
-export function stopPatchColumns(
-  patch: StopPatchInput,
-): Omit<StopPatchInput, "place" | "placeName"> & Partial<StopPlaceColumns> {
+export function destinationPatchColumns(
+  patch: DestinationPatchInput,
+): Omit<DestinationPatchInput, "place" | "placeName"> & Partial<DestinationPlaceColumns> {
   const { place: picked, placeName, ...rest } = patch;
   if (picked) {
     return {
@@ -368,7 +368,7 @@ export function stopPatchColumns(
 
 /**
  * Home base, from the picker. `homeBase` stays the NAME the dashboard card and
- * the phone already read; `homeBasePlace` is the anchor the first stop of a leg
+ * the phone already read; `homeBasePlace` is the anchor the first destination of a chapter
  * biases its search to. They travel together so the two can never disagree —
  * clearing the picker clears both.
  */
@@ -385,7 +385,7 @@ export interface HomeBaseColumns {
   homeBasePlaceId: string | null;
 }
 
-/** The trip write's flattening — the mirror of `stopPatchColumns`. `trips` has
+/** The trip write's flattening — the mirror of `destinationPatchColumns`. `trips` has
  * three nullable columns and no `home_base_place` one. */
 export function homeBaseColumns(place: Place | null): HomeBaseColumns {
   return {

@@ -1,7 +1,7 @@
 import "./load-env";
 import { db, schema } from "./index";
 import { sql } from "drizzle-orm";
-import { seedDestinations, seedSaves, seedTrips } from "@rv-trip/core/seeds";
+import { seedAreas, seedSaves, seedTrips } from "@rv-trip/core/seeds";
 import type { Trip } from "@rv-trip/core";
 
 /**
@@ -39,20 +39,20 @@ async function main() {
   // returns.
   const ids = new Map<string, string>();
   const trips = seedTrips();
-  for (const t of trips) await writeTrip(t, ids);
   await db.execute(sql`delete from ${schema.saves} where ${schema.saves.ownerId} = ${OWNER}`);
   await db.execute(
-    sql`delete from ${schema.destinations} where ${schema.destinations.ownerId} = ${OWNER}`,
+    sql`delete from ${schema.areas} where ${schema.areas.ownerId} = ${OWNER}`,
   );
 
-  // ── Saves: the cross-trip queue + archive, grouped by destination (#111 i2) ─
+  // ── Saves: the cross-trip queue + archive, grouped by area (#111 i2) ─
   // PURE DATA in @rv-trip/core/seeds (saves.ts), judged in seeds.test.ts — the
-  // walk's Saves tab. Destinations first, so each save can point at its row.
+  // walk's Saves tab. Areas first, so each save — and (#155 · Q2 A) a trip's
+  // own area — can point at its row.
   const destIds = new Map<string, string>();
   const dests = await db
-    .insert(schema.destinations)
+    .insert(schema.areas)
     .values(
-      seedDestinations().map((d) => ({
+      seedAreas().map((d) => ({
         ownerId: OWNER,
         googlePlaceId: d.googlePlaceId,
         name: d.name,
@@ -62,9 +62,11 @@ async function main() {
       })),
     )
     .returning();
-  for (const d of seedDestinations()) {
+  for (const d of seedAreas()) {
     destIds.set(d.key, dests.find((r) => r.googlePlaceId === d.googlePlaceId)!.id);
   }
+  const areaIdByPlace = new Map(dests.map((r) => [r.googlePlaceId, r.id]));
+  for (const t of trips) await writeTrip(t, ids, areaIdByPlace);
   const saves = seedSaves();
   await db.insert(schema.saves).values(
     saves.map((s) => ({
@@ -75,7 +77,7 @@ async function main() {
       areaLabel: s.areaLabel,
       lat: s.lat,
       lng: s.lng,
-      destinationId: s.destination === null ? null : destIds.get(s.destination)!,
+      areaId: s.area === null ? null : destIds.get(s.area)!,
       type: s.type,
       status: s.status,
       source: s.source,
@@ -95,8 +97,8 @@ async function main() {
 
 const instant = (v: string | null) => (v === null ? null : new Date(v));
 
-/** One seed trip, top to bottom: trip → legs → stops → segments → paperwork. */
-async function writeTrip(t: Trip, ids: Map<string, string>) {
+/** One seed trip, top to bottom: trip → chapters → destinations → segments → paperwork. */
+async function writeTrip(t: Trip, ids: Map<string, string>, areaIdByPlace: Map<string, string>) {
   const [trip] = await db
     .insert(schema.trips)
     .values({
@@ -112,22 +114,24 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
       defaultMode: t.defaultMode,
       lodgingDefault: t.lodgingDefault,
       rigOn: t.rigOn,
+      // #155 · Q2 A — the trip's area, by the seeded areas row's place id.
+      areaId: t.area ? (areaIdByPlace.get(t.area.googlePlaceId) ?? null) : null,
     })
     .returning();
   ids.set(t.id, trip!.id);
   const id = (local: string | null) => (local === null ? null : ids.get(local)!);
 
-  for (const l of t.legs) {
-    const [leg] = await db
-      .insert(schema.legs)
+  for (const l of t.chapters) {
+    const [chapter] = await db
+      .insert(schema.chapters)
       .values({ tripId: trip!.id, title: l.title, sortOrder: l.sortOrder })
       .returning();
-    ids.set(l.id, leg!.id);
-    for (const s of l.stops) {
-      const [stop] = await db
-        .insert(schema.stops)
+    ids.set(l.id, chapter!.id);
+    for (const s of l.destinations) {
+      const [destination] = await db
+        .insert(schema.destinations)
         .values({
-          legId: leg!.id,
+          chapterId: chapter!.id,
           placeName: s.place.name,
           lat: s.place.lat,
           lng: s.place.lng,
@@ -140,7 +144,7 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
           notes: s.notes,
         })
         .returning();
-      ids.set(s.id, stop!.id);
+      ids.set(s.id, destination!.id);
     }
   }
 
@@ -149,8 +153,8 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
       .insert(schema.travelSegments)
       .values({
         tripId: trip!.id,
-        fromStopId: id(seg.fromStopId),
-        toStopId: id(seg.toStopId),
+        fromDestinationId: id(seg.fromDestinationId),
+        toDestinationId: id(seg.toDestinationId),
         mode: seg.mode,
         departAt: instant(seg.departAt),
         arriveAt: instant(seg.arriveAt),
@@ -162,15 +166,15 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
     ids.set(seg.id, row!.id);
   }
 
-  const stops = t.legs.flatMap((l) => l.stops);
+  const destinations = t.chapters.flatMap((l) => l.destinations);
   const paperwork = [
-    ...stops.flatMap((s) => s.reservations),
+    ...destinations.flatMap((s) => s.reservations),
     ...t.segments.flatMap((s) => s.reservations),
   ];
   if (paperwork.length > 0) {
     await db.insert(schema.reservations).values(
       paperwork.map((r) => ({
-        stopId: id(r.stopId),
+        destinationId: id(r.destinationId),
         segmentId: id(r.segmentId),
         type: r.type,
         name: r.name,
@@ -186,16 +190,17 @@ async function writeTrip(t: Trip, ids: Map<string, string>) {
         startsTz: r.startsTz,
         endsTz: r.endsTz,
         lodgingKind: r.lodgingKind,
+        transportKind: r.transportKind,
       })),
     );
   }
 
-  const ideas = [...stops.flatMap((s) => s.ideas), ...t.ideas];
+  const ideas = [...destinations.flatMap((s) => s.ideas), ...t.ideas];
   if (ideas.length > 0) {
     await db.insert(schema.ideas).values(
       ideas.map((i) => ({
         tripId: trip!.id,
-        stopId: id(i.stopId),
+        destinationId: id(i.destinationId),
         title: i.title,
         category: i.category,
         status: i.status,

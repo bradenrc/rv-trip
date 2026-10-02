@@ -11,13 +11,13 @@ import type {
  * walk's Saves tab — the wireframe's Want to go list (Oregon 8, Costa Rica 1,
  * Unanchored 2 = 11) and its Been there 4.
  *
- * Destinations carry `seed_loc_*` ids in place of Google's locality place ids:
+ * Areas carry `seed_loc_*` ids in place of Google's locality place ids:
  * the seed runs with no key, and the unique (owner, google_place_id) only needs
  * them to be stable. A real capture of the same town on a keyed server writes
  * its own `ChIJ…` row beside them.
  */
 
-export interface SeedDestination {
+export interface SeedArea {
   /** Local key the saves point at. */
   key: string;
   googlePlaceId: string;
@@ -29,8 +29,8 @@ export interface SeedDestination {
 
 export interface SeedSave {
   name: string;
-  /** A `SeedDestination.key`, or null — Unanchored. */
-  destination: string | null;
+  /** A `SeedArea.key`, or null — Unanchored. */
+  area: string | null;
   anchor: SaveAnchor;
   areaLabel: string | null;
   region: string | null;
@@ -46,12 +46,12 @@ export interface SeedSave {
   trip: string | null;
   note: string | null;
   suggestedPlace: SuggestedPlace | null;
-  /** ISO — created_at. Sets the newest-first order inside a destination. */
+  /** ISO — created_at. Sets the newest-first order inside an area. */
   createdAt: string;
 }
 
-export function seedDestinations(): SeedDestination[] {
-  const d = (key: string, name: string, region: string, lat: number, lng: number): SeedDestination => ({
+export function seedAreas(): SeedArea[] {
+  const d = (key: string, name: string, region: string, lat: number, lng: number): SeedArea => ({
     key,
     googlePlaceId: `seed_loc_${key}`,
     name,
@@ -67,6 +67,8 @@ export function seedDestinations(): SeedDestination[] {
     d("bandon", "Bandon, OR", "Oregon", 43.119, -124.4084),
     d("bend", "Bend, OR", "Oregon", 44.0582, -121.3153),
     d("sanjose", "San José, Costa Rica", "Costa Rica", 9.9281, -84.0907),
+    // #155 · the Costa Rica trip's area (Q2 A) — no save points at it.
+    d("guanacaste", "Guanacaste", "Costa Rica", 10.4, -85.5),
     d("westyellowstone", "West Yellowstone, MT", "Montana", 44.6621, -111.1041),
   ];
 }
@@ -91,7 +93,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Fort Stevens State Park",
-      destination: "warrenton",
+      area: "warrenton",
       region: "Warrenton, OR",
       lat: 46.2045,
       lng: -123.9626,
@@ -102,7 +104,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Nehalem Bay State Park",
-      destination: "nehalem",
+      area: "nehalem",
       region: "Nehalem, OR",
       lat: 45.6967,
       lng: -123.9335,
@@ -112,7 +114,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Beverly Beach State Park",
-      destination: "newport",
+      area: "newport",
       region: "Newport, OR",
       lat: 44.7262,
       lng: -124.0578,
@@ -122,7 +124,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Cape Lookout State Park",
-      destination: "tillamook",
+      area: "tillamook",
       region: "Tillamook, OR",
       lat: 45.3637,
       lng: -123.9728,
@@ -132,7 +134,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "great BLM camp spot",
-      destination: "bandon",
+      area: "bandon",
       lat: 43.05,
       lng: -124.33,
       createdAt: "2026-09-26T00:14:00Z",
@@ -142,7 +144,7 @@ export function seedSaves(): SeedSave[] {
       // once it synced. The drawn "Did you mean El Chandelier?" strip.
       ...base,
       name: "chandel",
-      destination: "bandon",
+      area: "bandon",
       anchor: "area",
       areaLabel: "Bandon, OR",
       lat: 43.0512,
@@ -160,7 +162,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "taco truck Dana said",
-      destination: "bend",
+      area: "bend",
       anchor: "area",
       areaLabel: "Bend, OR",
       lat: 44.0569,
@@ -171,7 +173,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Sunny's Smokehouse",
-      destination: "bend",
+      area: "bend",
       region: "Bend, OR",
       lat: 44.0582,
       lng: -121.3153,
@@ -184,7 +186,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "El Chandelier",
-      destination: "sanjose",
+      area: "sanjose",
       region: "San José, Costa Rica",
       lat: 9.9325,
       lng: -84.0521,
@@ -196,7 +198,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Kalaloch Campground",
-      destination: null,
+      area: null,
       region: "Olympic NP, WA",
       lat: 47.6118,
       lng: -124.3762,
@@ -207,7 +209,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "pin in the Alvord Desert",
-      destination: null,
+      area: null,
       lat: 42.53,
       lng: -118.53,
       type: "other",
@@ -217,7 +219,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "South Beach State Park",
-      destination: "newport",
+      area: "newport",
       region: "Newport, OR",
       lat: 44.6094,
       lng: -124.0631,
@@ -232,7 +234,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Local Ocean Seafoods",
-      destination: "newport",
+      area: "newport",
       region: "Newport, OR",
       lat: 44.6297,
       lng: -124.0526,
@@ -248,7 +250,7 @@ export function seedSaves(): SeedSave[] {
       // No town within 25 mi of Fishing Bridge: Unanchored.
       ...base,
       name: "Fishing Bridge RV Park",
-      destination: null,
+      area: null,
       region: "Yellowstone NP, WY",
       lat: 44.5647,
       lng: -110.3735,
@@ -261,7 +263,7 @@ export function seedSaves(): SeedSave[] {
     {
       ...base,
       name: "Old Faithful Loop",
-      destination: "westyellowstone",
+      area: "westyellowstone",
       region: "Yellowstone NP, WY",
       lat: 44.4605,
       lng: -110.8281,

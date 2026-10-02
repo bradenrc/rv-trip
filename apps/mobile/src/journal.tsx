@@ -223,16 +223,16 @@ export function JournalView({
           ))}
         </View>
       )}
-      {j.stops.map((g) => (
-        <View key={g.stop.id} style={{ gap: 8 }}>
+      {j.destinations.map((g) => (
+        <View key={g.destination.id} style={{ gap: 8 }}>
           <View style={styles.dayhd}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1, flexWrap: "wrap" }}>
-              <Text style={styles.dayName}>{g.stop.place.name}</Text>
+              <Text style={styles.dayName}>{g.destination.place.name}</Text>
               {g.rating !== null && <Stars value={g.rating} size={10} />}
               <AgainBadge again={g.again} />
             </View>
-            {g.stop.arriveDate && g.stop.departDate ? (
-              <Text style={styles.dayDates}>{dateRange(g.stop.arriveDate, g.stop.departDate)}</Text>
+            {g.destination.arriveDate && g.destination.departDate ? (
+              <Text style={styles.dayDates}>{dateRange(g.destination.arriveDate, g.destination.departDate)}</Text>
             ) : null}
           </View>
           {g.entries.length > 0 && <EntryRows entries={g.entries} onOpen={onOpen} />}
@@ -303,7 +303,7 @@ function Fold({ label, items, open, onToggle }: { label: string; items: string[]
 
 // ── "Last time here" ────────────────────────────────────────────────────────
 
-/** One card per past trip × destination, directly above the nearby banner. No
+/** One card per past trip × area, directly above the nearby banner. No
  * card is the empty state: nothing renders. */
 export function LastTimeHere({
   nextTime,
@@ -316,7 +316,7 @@ export function LastTimeHere({
   return (
     <View style={{ gap: 8 }}>
       {nextTime.cards.map((card) => (
-        <LastTimeCard key={`${card.pastTrip.id}:${card.destination.id ?? card.stop.id}`} card={card} onAdd={onAdd} />
+        <LastTimeCard key={`${card.pastTrip.id}:${card.area.id ?? card.destination.id}`} card={card} onAdd={onAdd} />
       ))}
     </View>
   );

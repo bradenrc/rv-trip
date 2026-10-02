@@ -38,7 +38,7 @@ import {
   tripCreateInput,
   type Place,
   type Segment,
-  type Stop,
+  type Destination,
   type Trip,
 } from "./types";
 
@@ -52,10 +52,10 @@ const place = (name: string, lat: number | null = null, lng: number | null = nul
 const BELLINGHAM = { name: "Bellingham, WA", googlePlaceId: "ChIJbham", lat: 48.7519, lng: -122.4787 };
 const BOISE = place("Boise, ID", 43.615, -116.2023);
 
-function stop(id: string, p: Place, arriveDate: string | null = null, departDate: string | null = null): Stop {
+function destination(id: string, p: Place, arriveDate: string | null = null, departDate: string | null = null): Destination {
   return {
     id,
-    legId: "leg1",
+    chapterId: "chapter1",
     place: p,
     arriveDate,
     departDate,
@@ -72,8 +72,8 @@ function stop(id: string, p: Place, arriveDate: string | null = null, departDate
 function seg(p: Partial<Segment> & { id: string }): Segment {
   return {
     tripId: "t",
-    fromStopId: null,
-    toStopId: null,
+    fromDestinationId: null,
+    toDestinationId: null,
     mode: "drive",
     departAt: null,
     arriveAt: null,
@@ -85,40 +85,40 @@ function seg(p: Partial<Segment> & { id: string }): Segment {
   };
 }
 
-function bham(stops: Stop[], extra: Partial<Trip> = {}): Trip {
+function bham(destinations: Destination[], extra: Partial<Trip> = {}): Trip {
   return {
     ...costaRicaTrip(),
     id: "t",
     title: "Bellingham Long Weekend",
     homeBase: "Boise, ID",
     homeBasePlace: BOISE,
-    destination: { id: "d1", ...BELLINGHAM },
+    area: { id: "d1", ...BELLINGHAM },
     startDate: "2026-10-10",
     endDate: "2026-10-13",
     defaultMode: "fly",
-    legs: [{ id: "leg1", tripId: "t", title: "Leg 1", sortOrder: 0, stops }],
+    chapters: [{ id: "chapter1", tripId: "t", title: "Chapter 1", sortOrder: 0, destinations }],
     segments: [],
     ideas: [],
     ...extra,
   };
 }
 
-// ── #126 · the trip grammar carries a destination ─────────────────────────
-describe("#126 · tripCreateInput carries the destination (vet MED: .pick() is closed)", () => {
-  it("keeps destination with its coordinates", () => {
+// ── #126 · the trip grammar carries an area ─────────────────────────
+describe("#126 · tripCreateInput carries the area (vet MED: .pick() is closed)", () => {
+  it("keeps area with its coordinates", () => {
     const parsed = tripCreateInput.parse({
       title: "Bellingham Long Weekend",
       startDate: "2026-10-10",
       endDate: "2026-10-13",
       defaultMode: "fly",
-      destination: BELLINGHAM,
+      area: BELLINGHAM,
     });
-    expect(parsed.destination).toEqual(BELLINGHAM);
+    expect(parsed.area).toEqual(BELLINGHAM);
     expect(parsed.homeBase).toBeNull();
   });
-  it("an older client with no destination still parses", () => {
+  it("an older client with no area still parses", () => {
     expect(
-      tripCreateInput.parse({ title: "x", startDate: "2026-10-10", endDate: "2026-10-13" }).destination,
+      tripCreateInput.parse({ title: "x", startDate: "2026-10-10", endDate: "2026-10-13" }).area,
     ).toBeUndefined();
   });
 });
@@ -150,36 +150,36 @@ describe("#126 · resolveHomeBase", () => {
   });
 });
 
-// ── #126 · the anchor order: stop → destination → located stop → null ─────
+// ── #126 · the anchor order: destination → area → located destination → null ─────
 describe("#126 · searchAnchor", () => {
-  const coast = stop("s1", place("Fairhaven", 48.72, -122.5), "2026-10-10", "2026-10-11");
-  const bare = stop("s2", place("Somewhere"));
-  const last = stop("s3", place("Lummi Island", 48.7, -122.67), "2026-10-12", "2026-10-13");
+  const coast = destination("s1", place("Fairhaven", 48.72, -122.5), "2026-10-10", "2026-10-11");
+  const bare = destination("s2", place("Somewhere"));
+  const last = destination("s3", place("Lummi Island", 48.7, -122.67), "2026-10-12", "2026-10-13");
 
-  it("a stop's own add-stay search is anchored to the stop", () => {
-    const a = searchAnchor(bham([coast]), { kind: "stop", stopId: "s1" });
-    expect(a).toMatchObject({ name: "Fairhaven", source: "stop" });
-    expect(searchAnchorChip(a)).toBe("near Fairhaven — this stop");
+  it("a destination's own add-stay search is anchored to the destination", () => {
+    const a = searchAnchor(bham([coast]), { kind: "destination", destinationId: "s1" });
+    expect(a).toMatchObject({ name: "Fairhaven", source: "destination" });
+    expect(searchAnchorChip(a)).toBe("near Fairhaven — this destination");
   });
-  it("then the trip's destination", () => {
-    const a = searchAnchor(bham([bare]), { kind: "stop", stopId: "s2" });
-    expect(a).toMatchObject({ name: "Bellingham, WA", lat: 48.7519, source: "destination" });
+  it("then the trip's area", () => {
+    const a = searchAnchor(bham([bare]), { kind: "destination", destinationId: "s2" });
+    expect(a).toMatchObject({ name: "Bellingham, WA", lat: 48.7519, source: "area" });
     expect(searchAnchorChip(a)).toBe("near Bellingham, WA — from this trip");
   });
-  it("then a located stop (first for the trip, last for ideas)", () => {
-    const t = bham([coast, bare, last], { destination: null });
+  it("then a located destination (first for the trip, last for ideas)", () => {
+    const t = bham([coast, bare, last], { area: null });
     expect(searchAnchor(t, { kind: "trip" })).toMatchObject({ name: "Fairhaven", source: "trip" });
     expect(searchAnchor(t, { kind: "ideas" })).toMatchObject({ name: "Lummi Island", source: "trip" });
   });
   it("then null — NEVER the home base (it anchors a drive, not a search)", () => {
-    const t = bham([bare], { destination: null, homeBasePlace: BOISE });
+    const t = bham([bare], { area: null, homeBasePlace: BOISE });
     expect(searchAnchor(t, { kind: "trip" })).toBeNull();
-    expect(searchAnchor(t, { kind: "after", stopId: null })).toBeNull();
+    expect(searchAnchor(t, { kind: "after", destinationId: null })).toBeNull();
     expect(searchAnchorChip(null)).toBe("Search near…?");
   });
-  it("a new stop leans on the stop above it, then the destination", () => {
-    expect(searchAnchor(bham([coast]), { kind: "after", stopId: "s1" })).toMatchObject({ name: "Fairhaven" });
-    expect(searchAnchor(bham([coast]), { kind: "after", stopId: null })).toMatchObject({
+  it("a new destination leans on the destination above it, then the area", () => {
+    expect(searchAnchor(bham([coast]), { kind: "after", destinationId: "s1" })).toMatchObject({ name: "Fairhaven" });
+    expect(searchAnchor(bham([coast]), { kind: "after", destinationId: null })).toMatchObject({
       name: "Bellingham, WA",
     });
   });
@@ -249,7 +249,7 @@ describe("#128 · places search accepts type=lodging", () => {
       async details() {
         return null;
       },
-      async resolveDestination() {
+      async resolveArea() {
         return null;
       },
     };
@@ -299,23 +299,23 @@ describe("#129 · round trip", () => {
     expect(boundaryFlightsInput.safeParse({ ...body, roundTrip: true }).success).toBe(false);
   });
   it("withReturnHop births the → home hop exactly once (vet HIGH)", () => {
-    const t = bham([stop("s1", place("Bellingham, WA", 48.75, -122.48), "2026-10-10", "2026-10-13")], {
-      segments: [seg({ id: "out", toStopId: "s1", mode: "fly" })],
+    const t = bham([destination("s1", place("Bellingham, WA", 48.75, -122.48), "2026-10-10", "2026-10-13")], {
+      segments: [seg({ id: "out", toDestinationId: "s1", mode: "fly" })],
     });
     let n = 0;
     const once = withReturnHop(t, () => `new${n++}`);
-    expect(boundarySegments(once).return).toMatchObject({ id: "new0", fromStopId: "s1", toStopId: null, mode: "fly" });
+    expect(boundarySegments(once).return).toMatchObject({ id: "new0", fromDestinationId: "s1", toDestinationId: null, mode: "fly" });
     expect(withReturnHop(once, () => "again").segments).toHaveLength(2);
   });
 });
 
 describe("#129 · Q11 A · keep or remove on Fly → Drive", () => {
   const flight = { ...costaRicaTrip().segments[0]!.reservations[0]! };
-  const t = bham([stop("s1", BOISE, "2026-10-10", "2026-10-13")], {
+  const t = bham([destination("s1", BOISE, "2026-10-10", "2026-10-13")], {
     segments: [
       seg({
         id: "home",
-        fromStopId: "s1",
+        fromDestinationId: "s1",
         mode: "fly",
         departAt: flight.startsAt,
         arriveAt: flight.endsAt,
@@ -341,8 +341,8 @@ describe("#129 · Q11 A · keep or remove on Fly → Drive", () => {
   });
   it("the Route draws a parked hop with its count, never its flight rows", () => {
     const parked = setSegmentMode(t, "home", "drive", "keep");
-    const [leg] = routeModel(parked);
-    expect(leg!.returnHop).toMatchObject({ mode: "drive", parked: 1, items: [] });
+    const [chapter] = routeModel(parked);
+    expect(chapter!.returnHop).toMatchObject({ mode: "drive", parked: 1, items: [] });
   });
   it("segmentPatchInput carries the choice; absent reads as keep at the server", () => {
     expect(segmentPatchInput.parse({ mode: "drive", bookings: "keep" })).toEqual({ mode: "drive", bookings: "keep" });
@@ -359,19 +359,19 @@ describe("#124 · boundary fly/ferry hops own their days", () => {
     expect(m.rhythm[1]).toMatchObject({ kind: "stay" });
   });
   it("a boundary fly hop wins its day over an untimed drive that borrows the same date", () => {
-    const a = stop("a", place("A"), "2026-10-10", "2026-10-10");
-    const b = stop("b", place("B"), "2026-10-10", "2026-10-13");
+    const a = destination("a", place("A"), "2026-10-10", "2026-10-10");
+    const b = destination("b", place("B"), "2026-10-10", "2026-10-13");
     const segments = [
-      seg({ id: "out", toStopId: "a", mode: "fly", sortOrder: 0 }),
-      seg({ id: "ab", fromStopId: "a", toStopId: "b", mode: "drive", sortOrder: 1 }),
+      seg({ id: "out", toDestinationId: "a", mode: "fly", sortOrder: 0 }),
+      seg({ id: "ab", fromDestinationId: "a", toDestinationId: "b", mode: "drive", sortOrder: 1 }),
     ];
     const { days } = deriveDays({ startDate: "2026-10-10", endDate: "2026-10-13" }, [a, b], segments);
     expect(days[0]).toMatchObject({ kind: "travel", mode: "fly", segmentId: "out" });
   });
   it("a fresh Bellingham trip with both boundary hops paints Oct 10 and Oct 13 as ✈", () => {
-    const s1 = stop("s1", place("Bellingham, WA", 48.75, -122.48), "2026-10-10", "2026-10-13");
+    const s1 = destination("s1", place("Bellingham, WA", 48.75, -122.48), "2026-10-10", "2026-10-13");
     const t = bham([s1], {
-      segments: [seg({ id: "out", toStopId: "s1", mode: "fly" }), seg({ id: "home", fromStopId: "s1", mode: "fly", sortOrder: 1 })],
+      segments: [seg({ id: "out", toDestinationId: "s1", mode: "fly" }), seg({ id: "home", fromDestinationId: "s1", mode: "fly", sortOrder: 1 })],
     });
     expect(timelineModel(t).rhythm.map((c) => c.mode ?? c.kind)).toEqual(["fly", "stay", "stay", "fly"]);
   });
@@ -400,7 +400,7 @@ describe("#131 · Route rows show planned/done ideas only", () => {
   it("status idea stays off the Route", () => {
     const t = pnwTrip();
     const rows = routeModel(t).flatMap((l) => l.rows);
-    const all = t.legs.flatMap((l) => l.stops).flatMap((s) => s.ideas);
+    const all = t.chapters.flatMap((l) => l.destinations).flatMap((s) => s.ideas);
     const shown = rows.flatMap((r) => r.ideas);
     expect(shown.every((i) => i.status !== "idea")).toBe(true);
     expect(shown.length).toBe(all.filter((i) => i.status !== "idea").length);
@@ -408,19 +408,19 @@ describe("#131 · Route rows show planned/done ideas only", () => {
 });
 
 // ── #126 · the create form's "Where to?" ────────────────────────────────────
-describe("#126 · tripDraftInput carries the destination", () => {
+describe("#126 · tripDraftInput carries the area", () => {
   const picked = { ...BELLINGHAM, address: null, rating: null, primaryType: null };
   const base = { ...withTripMode(BLANK_TRIP_DRAFT, "air"), startDate: "2026-10-10", endDate: "2026-10-13" };
-  it("a Google place becomes the destination, and names an untitled trip", () => {
-    expect(tripDraftInput({ ...base, destination: picked })).toMatchObject({
+  it("a Google place becomes the area, and names an untitled trip", () => {
+    expect(tripDraftInput({ ...base, area: picked })).toMatchObject({
       title: "Bellingham, WA",
-      destination: BELLINGHAM,
+      area: BELLINGHAM,
       homeBase: null,
     });
   });
-  it("a free-text pick names the trip but is no destination", () => {
-    const body = tripDraftInput({ ...base, destination: { ...picked, googlePlaceId: null } });
+  it("a free-text pick names the trip but is no area", () => {
+    const body = tripDraftInput({ ...base, area: { ...picked, googlePlaceId: null } });
     expect(body?.title).toBe("Bellingham, WA");
-    expect(body).not.toHaveProperty("destination");
+    expect(body).not.toHaveProperty("area");
   });
 });

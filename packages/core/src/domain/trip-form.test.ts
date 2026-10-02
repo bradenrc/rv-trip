@@ -6,14 +6,13 @@ import {
   tripSettingsDraft,
   tripSettingsPatch,
   tripCascadeCounts,
-  legCascadeCounts,
-  stopCascadeCounts,
+  chapterCascadeCounts,
+  destinationCascadeCounts,
   cascadeLossSentence,
-  nextLegTitle,
-  stopDatesDraft,
-  stopDatesHelp,
-  stopDatesPatch,
-  unscheduleStopPatch,
+  destinationDatesDraft,
+  destinationDatesHelp,
+  destinationDatesPatch,
+  unscheduleDestinationPatch,
   withTripMode,
   lodgingChoices,
   tripModeChoice,
@@ -21,7 +20,7 @@ import {
   type TripModeChoice,
   type TripSettingsDraft,
 } from "./trip-form";
-import { tripCreateInput, tripPatchInput, type Leg, type Stop, type Trip } from "./types";
+import { tripCreateInput, tripPatchInput, type Chapter, type Destination, type Trip } from "./types";
 
 /** What the picker hands back for "Boise, ID" — a mapped pick. */
 const BOISE = {
@@ -53,7 +52,7 @@ function fixture(over: Partial<Trip> = {}): Trip {
     rigOn: true,
     surfaceRadiusMi: null,
     ideas: [],
-    legs: [],
+    chapters: [],
     segments: [],
     ...over,
   };
@@ -319,9 +318,9 @@ describe("tripSettingsPatch — only what changed", () => {
 });
 
 describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names the loss", () => {
-  const stopOf = (id: string, res: number, ideas: number) => ({
+  const destinationOf = (id: string, res: number, ideas: number) => ({
     id,
-    legId: "l1",
+    chapterId: "l1",
     place: { name: id, lat: null, lng: null, googlePlaceId: null },
     arriveDate: null,
     departDate: null,
@@ -330,7 +329,7 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
     notes: null,
     reservations: Array.from({ length: res }, (_, i) => ({
       id: `${id}-r${i}`,
-      stopId: id,
+      destinationId: id,
       ideaId: null,
       type: "campground" as const,
       name: "res",
@@ -346,13 +345,14 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
       lastChange: null,
       again: null,
     })),
     ideas: Array.from({ length: ideas }, (_, i) => ({
       id: `${id}-i${i}`,
       tripId: "t1",
-      stopId: id,
+      destinationId: id,
       title: "idea",
       category: "do" as const,
       status: "idea" as const,
@@ -368,46 +368,46 @@ describe("tripCascadeCounts + cascadeLossSentence — the delete confirm names t
   });
 
   const peopled = fixture({
-    legs: [
-      { id: "l1", tripId: "t1", title: "Oregon Coast", sortOrder: 0, stops: [stopOf("a", 2, 1), stopOf("b", 1, 1)] },
-      { id: "l2", tripId: "t1", title: "Cascades", sortOrder: 1, stops: [] },
+    chapters: [
+      { id: "l1", tripId: "t1", title: "Oregon Coast", sortOrder: 0, destinations: [destinationOf("a", 2, 1), destinationOf("b", 1, 1)] },
+      { id: "l2", tripId: "t1", title: "Cascades", sortOrder: 1, destinations: [] },
     ],
   });
 
   it("counts the whole tree", () => {
-    expect(tripCascadeCounts(peopled)).toEqual({ legs: 2, stops: 2, reservations: 3, ideas: 2 });
+    expect(tripCascadeCounts(peopled)).toEqual({ chapters: 2, destinations: 2, reservations: 3, ideas: 2 });
   });
 
   it("writes the loss line the confirm shows", () => {
     expect(cascadeLossSentence(tripCascadeCounts(peopled))).toBe(
-      "Its 2 legs, 2 stops, 3 reservations and 2 ideas are deleted with it. This can't be undone.",
+      "Its 2 chapters, 2 destinations, 3 reservations and 2 ideas are deleted with it. This can't be undone.",
     );
   });
 
   it("singulars are singular", () => {
-    expect(cascadeLossSentence({ legs: 1, stops: 1, reservations: 1, ideas: 1 })).toBe(
-      "Its 1 leg, 1 stop, 1 reservation and 1 idea are deleted with it. This can't be undone.",
+    expect(cascadeLossSentence({ chapters: 1, destinations: 1, reservations: 1, ideas: 1 })).toBe(
+      "Its 1 chapter, 1 destination, 1 reservation and 1 idea are deleted with it. This can't be undone.",
     );
   });
 
   it("omits what is not there", () => {
-    expect(cascadeLossSentence({ legs: 1, stops: 0, reservations: 0, ideas: 0 })).toBe(
-      "Its 1 leg is deleted with it. This can't be undone.",
+    expect(cascadeLossSentence({ chapters: 1, destinations: 0, reservations: 0, ideas: 0 })).toBe(
+      "Its 1 chapter is deleted with it. This can't be undone.",
     );
   });
 
   it("an empty tree says only what is true", () => {
-    expect(cascadeLossSentence({ legs: 0, stops: 0, reservations: 0, ideas: 0 })).toBe(
+    expect(cascadeLossSentence({ chapters: 0, destinations: 0, reservations: 0, ideas: 0 })).toBe(
       "This can't be undone.",
     );
   });
 });
 
-describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () => {
-  const idea = (id: string, stopId: string, i: number) => ({
+describe("chapterCascadeCounts / destinationCascadeCounts — the other two confirms", () => {
+  const idea = (id: string, destinationId: string, i: number) => ({
     id,
     tripId: "t1",
-    stopId,
+    destinationId,
     title: "idea",
     category: "do" as const,
     status: "idea" as const,
@@ -418,9 +418,9 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     lastChange: null,
     again: null,
   });
-  const res = (id: string, stopId: string) => ({
+  const res = (id: string, destinationId: string) => ({
     id,
-    stopId,
+    destinationId,
     ideaId: null,
     type: "campground" as const,
     name: "res",
@@ -436,12 +436,13 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     startsTz: null,
     endsTz: null,
     lodgingKind: null,
+    transportKind: null,
     lastChange: null,
     again: null,
   });
-  const stopOf = (id: string, resCount: number, ideaCount: number): Stop => ({
+  const destinationOf = (id: string, resCount: number, ideaCount: number): Destination => ({
     id,
-    legId: "l1",
+    chapterId: "l1",
     place: { name: id, lat: null, lng: null, googlePlaceId: null },
     arriveDate: null,
     departDate: null,
@@ -453,62 +454,44 @@ describe("legCascadeCounts / stopCascadeCounts — the other two confirms", () =
     lastChange: null,
     again: null,
   });
-  const leg: Leg = {
+  const chapter: Chapter = {
     id: "l1",
     tripId: "t1",
     title: "Oregon Coast",
     sortOrder: 0,
-    stops: [stopOf("Astoria, OR", 2, 1), stopOf("Newport, OR", 1, 1)],
+    destinations: [destinationOf("Astoria, OR", 2, 1), destinationOf("Newport, OR", 1, 1)],
   };
 
-  it("a leg never counts itself — the sentence is about what goes WITH it", () => {
-    expect(legCascadeCounts(leg)).toEqual({ legs: 0, stops: 2, reservations: 3, ideas: 2 });
-    expect(cascadeLossSentence(legCascadeCounts(leg))).toBe(
-      "Its 2 stops, 3 reservations and 2 ideas are deleted with it. This can't be undone.",
+  it("a chapter never counts itself — the sentence is about what goes WITH it", () => {
+    expect(chapterCascadeCounts(chapter)).toEqual({ chapters: 0, destinations: 2, reservations: 3, ideas: 2 });
+    expect(cascadeLossSentence(chapterCascadeCounts(chapter))).toBe(
+      "Its 2 destinations, 3 reservations and 2 ideas are deleted with it. This can't be undone.",
     );
   });
 
-  it("a stop counts only its own leaves", () => {
-    expect(stopCascadeCounts(stopOf("Bend, OR", 1, 2))).toEqual({
-      legs: 0,
-      stops: 0,
+  it("a destination counts only its own leaves", () => {
+    expect(destinationCascadeCounts(destinationOf("Bend, OR", 1, 2))).toEqual({
+      chapters: 0,
+      destinations: 0,
       reservations: 1,
       ideas: 2,
     });
-    expect(cascadeLossSentence(stopCascadeCounts(stopOf("Bend, OR", 1, 2)))).toBe(
+    expect(cascadeLossSentence(destinationCascadeCounts(destinationOf("Bend, OR", 1, 2)))).toBe(
       "Its 1 reservation and 2 ideas are deleted with it. This can't be undone.",
     );
   });
 
-  it("a childless stop still confirms, it just has nothing to name", () => {
-    expect(cascadeLossSentence(stopCascadeCounts(stopOf("Bend, OR", 0, 0)))).toBe(
+  it("a childless destination still confirms, it just has nothing to name", () => {
+    expect(cascadeLossSentence(destinationCascadeCounts(destinationOf("Bend, OR", 0, 0)))).toBe(
       "This can't be undone.",
     );
   });
 });
 
-describe("nextLegTitle — 'Add leg' names the leg the way createTrip seeds it", () => {
-  const legOf = (id: string, sortOrder: number): Leg => ({
-    id,
-    tripId: "t1",
-    title: id,
-    sortOrder,
-    stops: [],
-  });
-
-  it("counts the legs there are, never the highest sortOrder", () => {
-    expect(nextLegTitle(fixture({ legs: [legOf("a", 0), legOf("b", 4)] }))).toBe("Leg 3");
-  });
-
-  it("a trip with no legs starts at Leg 1 — the same name createTrip seeds", () => {
-    expect(nextLegTitle(fixture())).toBe("Leg 1");
-  });
-});
-
-describe("the stop-dates dialog", () => {
-  const stopOf = (arriveDate: string | null, departDate: string | null): Stop => ({
+describe("the destination-dates dialog", () => {
+  const destinationOf = (arriveDate: string | null, departDate: string | null): Destination => ({
     id: "s1",
-    legId: "l1",
+    chapterId: "l1",
     place: { name: "Bend, OR", lat: null, lng: null, googlePlaceId: null },
     arriveDate,
     departDate,
@@ -521,41 +504,41 @@ describe("the stop-dates dialog", () => {
     again: null,
   });
 
-  it("opens on the stop's dates, and on blanks for a floating stop", () => {
-    expect(stopDatesDraft(stopOf("2026-08-12", "2026-08-16"))).toEqual({
+  it("opens on the destination's dates, and on blanks for a floating destination", () => {
+    expect(destinationDatesDraft(destinationOf("2026-08-12", "2026-08-16"))).toEqual({
       arriveDate: "2026-08-12",
       departDate: "2026-08-16",
     });
-    expect(stopDatesDraft(stopOf(null, null))).toEqual({ arriveDate: "", departDate: "" });
+    expect(destinationDatesDraft(destinationOf(null, null))).toEqual({ arriveDate: "", departDate: "" });
   });
 
   it("writes the help line the design shows", () => {
-    expect(stopDatesHelp({ arriveDate: "2026-08-12", departDate: "2026-08-16" })).toBe(
+    expect(destinationDatesHelp({ arriveDate: "2026-08-12", departDate: "2026-08-16" })).toBe(
       "5 days · Aug 12 is the drive day in",
     );
   });
 
   it("has no help line to write until both dates are a usable range", () => {
-    expect(stopDatesHelp({ arriveDate: "2026-08-12", departDate: "" })).toBeNull();
-    expect(stopDatesHelp({ arriveDate: "2026-08-16", departDate: "2026-08-12" })).toBeNull();
+    expect(destinationDatesHelp({ arriveDate: "2026-08-12", departDate: "" })).toBeNull();
+    expect(destinationDatesHelp({ arriveDate: "2026-08-16", departDate: "2026-08-12" })).toBeNull();
   });
 
   it("sends both dates, and only when they changed", () => {
-    const stop = stopOf("2026-08-12", "2026-08-16");
-    expect(stopDatesPatch(stop, { arriveDate: "2026-08-13", departDate: "2026-08-16" })).toEqual({
+    const destination = destinationOf("2026-08-12", "2026-08-16");
+    expect(destinationDatesPatch(destination, { arriveDate: "2026-08-13", departDate: "2026-08-16" })).toEqual({
       arriveDate: "2026-08-13",
       departDate: "2026-08-16",
     });
-    expect(stopDatesPatch(stop, { arriveDate: "2026-08-12", departDate: "2026-08-16" })).toEqual({});
+    expect(destinationDatesPatch(destination, { arriveDate: "2026-08-12", departDate: "2026-08-16" })).toEqual({});
   });
 
   it("refuses a backwards or half-typed range — the Save button reads the same null", () => {
-    const stop = stopOf(null, null);
-    expect(stopDatesPatch(stop, { arriveDate: "2026-08-16", departDate: "2026-08-12" })).toBeNull();
-    expect(stopDatesPatch(stop, { arriveDate: "2026-08-12", departDate: "" })).toBeNull();
+    const destination = destinationOf(null, null);
+    expect(destinationDatesPatch(destination, { arriveDate: "2026-08-16", departDate: "2026-08-12" })).toBeNull();
+    expect(destinationDatesPatch(destination, { arriveDate: "2026-08-12", departDate: "" })).toBeNull();
   });
 
   it("Unschedule is one patch setting BOTH dates to null", () => {
-    expect(unscheduleStopPatch()).toEqual({ arriveDate: null, departDate: null });
+    expect(unscheduleDestinationPatch()).toEqual({ arriveDate: null, departDate: null });
   });
 });

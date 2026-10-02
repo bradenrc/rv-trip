@@ -1,5 +1,5 @@
 import { hopBookingInput, hopDraftZones, bookingLocalTimes, type HopBookingDraft } from "./hops";
-import { orderedStops, type RouteStop } from "./route-order";
+import { orderedDestinations, type RouteDestination } from "./route-order";
 import type {
   BoundaryBooking,
   BoundaryFlightsBody,
@@ -21,36 +21,36 @@ import type {
 interface BoundaryTrip {
   id: string;
   defaultMode: TravelMode;
-  legs: { sortOrder: number; stops: RouteStop[] }[];
+  chapters: { sortOrder: number; destinations: RouteDestination[] }[];
   segments: Segment[];
 }
 
-/** The trip's two boundary hops: home → first stop, and last stop → home. */
+/** The trip's two boundary hops: home → first destination, and last destination → home. */
 export function boundarySegments(trip: Pick<Trip, "segments">): {
   outbound: Segment | null;
   return: Segment | null;
 } {
   return {
-    outbound: trip.segments.find((s) => s.fromStopId === null && s.toStopId !== null) ?? null,
-    return: trip.segments.find((s) => s.toStopId === null && s.fromStopId !== null) ?? null,
+    outbound: trip.segments.find((s) => s.fromDestinationId === null && s.toDestinationId !== null) ?? null,
+    return: trip.segments.find((s) => s.toDestinationId === null && s.fromDestinationId !== null) ?? null,
   };
 }
 
 /**
- * The trip with a → home hop from its last stop when it has none — the ONE
+ * The trip with a → home hop from its last destination when it has none — the ONE
  * place a return hop is born (vet HIGH: `reconcileSegments` never invents one).
- * Trip create (with a destination) and the round-trip save run it; once it
- * exists, `reconcileSegments` re-points it to whatever stop is last.
+ * Trip create (with an area) and the round-trip save run it; once it
+ * exists, `reconcileSegments` re-points it to whatever destination is last.
  */
 export function withReturnHop<T extends BoundaryTrip>(trip: T, newId: () => string): T {
-  const stops = orderedStops(trip);
-  const last = stops[stops.length - 1];
+  const destinations = orderedDestinations(trip);
+  const last = destinations[destinations.length - 1];
   if (!last || boundarySegments(trip).return) return trip;
   const hop: Segment = {
     id: newId(),
     tripId: trip.id,
-    fromStopId: last.id,
-    toStopId: null,
+    fromDestinationId: last.id,
+    toDestinationId: null,
     mode: trip.defaultMode,
     departAt: null,
     arriveAt: null,

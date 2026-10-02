@@ -6,7 +6,7 @@ import { getOwner } from "@/lib/owner";
 import { routePairs } from "@/lib/routing";
 
 /**
- * The post-reorder upgrade. Drag a floating stop and you invent a pair the
+ * The post-reorder upgrade. Drag a floating destination and you invent a pair the
  * server never routed; the client renders it immediately from the synchronous
  * estimate and asks here for the real thing. This is the one lazy piece of the
  * routing story, and only because reordering is not page load.

@@ -10,7 +10,7 @@ import type { IsoDate } from "./types";
  * asks for a zone.
  *
  * Each row also carries the airport's coordinates, which is how a FERRY port
- * gets a zone: a port stop has coordinates but no zone, so it takes the zone
+ * gets a zone: a port destination has coordinates but no zone, so it takes the zone
  * of the nearest listed airport (`zoneNearPoint` — Mykonos → JMK →
  * Europe/Athens).
  */
@@ -173,7 +173,7 @@ export function zoneForAirport(code: string): string | null {
 const NEAR_POINT_MAX_KM = 800;
 
 /**
- * The zone of the nearest listed airport — how a ferry port (a stop with
+ * The zone of the nearest listed airport — how a ferry port (a destination with
  * coordinates and no zone) gets one. Null when nothing listed is within
  * reach, which renders the amber "pick a zone" chip.
  */

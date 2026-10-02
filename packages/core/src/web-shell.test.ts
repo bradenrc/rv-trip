@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
  *
  * What this guards, criterion for criterion against the item's acceptance:
  *
- *   1. Five destinations, declared ONCE — `/settings` (an orphan route until
+ *   1. Five areas, declared ONCE — `/settings` (an orphan route until
  *      now) included — and mapped exactly twice.
  *   2. The masthead keeps its `dark sticky` island and 62px height, takes
  *      `px-4 md:px-7`, and its link row is behind `hidden … md:flex`.
@@ -79,7 +79,7 @@ function webSources(): string[] {
     .map((p) => join("apps/web/src", p));
 }
 
-describe("five destinations, declared once", () => {
+describe("five areas, declared once", () => {
   it("adds /settings to LINKS, so the orphan route finally has an entry point", () => {
     expect(navFlat).toContain(
       '{ href: "/settings", label: "Settings", Icon: Settings, match: (p) => p.startsWith("/settings") }',
@@ -90,7 +90,7 @@ describe("five destinations, declared once", () => {
     expect(navCode).toMatch(/import \{[^}]*\bSettings\b[^}]*\} from "lucide-react"/);
   });
 
-  it("keeps the four shipped destinations beside it, in order", () => {
+  it("keeps the four shipped areas beside it, in order", () => {
     const links = navFlat.slice(navFlat.indexOf("const LINKS"));
     const hrefs = [...links.slice(0, links.indexOf("];")).matchAll(/href: "([^"]*)"/g)].map(
       (m) => m[1],

@@ -3,11 +3,11 @@ import type {
   IdeaCategory,
   IdeaStatus,
   IsoDate,
-  Leg,
+  Chapter,
   Place,
   Reservation,
   Segment,
-  Stop,
+  Destination,
   Trip,
 } from "../domain/types";
 import { reconcileSegments, type SegmentIdFactory } from "../domain/segments";
@@ -35,9 +35,9 @@ const at = (name: string, lat: number, lng: number): Place => ({
   googlePlaceId: null,
 });
 
-function mkStop(
-  s: Pick<Stop, "id" | "legId" | "place" | "sortOrder"> & Partial<Stop>,
-): Stop {
+function mkDestination(
+  s: Pick<Destination, "id" | "chapterId" | "place" | "sortOrder"> & Partial<Destination>,
+): Destination {
   return {
     arriveDate: null,
     departDate: null,
@@ -55,7 +55,7 @@ function mkRes(
   r: Pick<Reservation, "id" | "type" | "name"> & Partial<Reservation>,
 ): Reservation {
   return {
-    stopId: null,
+    destinationId: null,
     segmentId: null,
     ideaId: null,
     checkIn: null,
@@ -69,6 +69,7 @@ function mkRes(
     startsTz: null,
     endsTz: null,
     lodgingKind: null,
+    transportKind: null,
     lastChange: null,
     again: null,
     ...r,
@@ -77,7 +78,7 @@ function mkRes(
 
 function mkIdea(
   i: Pick<Idea, "id" | "tripId" | "title" | "sortOrder"> & {
-    stopId?: string | null;
+    destinationId?: string | null;
     category?: IdeaCategory;
     status?: IdeaStatus;
     place?: Place | null;
@@ -87,7 +88,7 @@ function mkIdea(
   },
 ): Idea {
   return {
-    stopId: null,
+    destinationId: null,
     category: "do",
     status: "idea",
     place: null,
@@ -100,7 +101,7 @@ function mkIdea(
 }
 
 function mkTrip(
-  t: Pick<Trip, "id" | "title" | "startDate" | "endDate" | "legs"> & Partial<Trip>,
+  t: Pick<Trip, "id" | "title" | "startDate" | "endDate" | "chapters"> & Partial<Trip>,
 ): Trip {
   return {
     ownerId: SEED_OWNER,
@@ -135,17 +136,23 @@ function withSegments(trip: Trip, ids: SegmentIdFactory, patch: (s: Segment[]) =
   return { ...trip, segments: patch(reconcileSegments(trip, ids)) };
 }
 
-function leg(id: string, tripId: string, title: string, sortOrder: number, stops: Stop[]): Leg {
-  return { id, tripId, title, sortOrder, stops };
+function chapter(
+  id: string,
+  tripId: string,
+  title: string | null,
+  sortOrder: number,
+  destinations: Destination[],
+): Chapter {
+  return { id, tripId, title, sortOrder, destinations };
 }
 
 // ── Pacific Northwest Loop — kept exactly as seeded before the reset ───────
 
 export function pnwTrip(): Trip {
   const T = "trip_pnw";
-  const astoria = mkStop({
+  const astoria = mkDestination({
     id: "stp_astoria",
-    legId: "leg_coast",
+    chapterId: "chapter_coast",
     place: at("Astoria, OR", 46.1879, -123.8313),
     arriveDate: "2026-08-02",
     departDate: "2026-08-05",
@@ -155,7 +162,7 @@ export function pnwTrip(): Trip {
     reservations: [
       mkRes({
         id: "res_koa",
-        stopId: "stp_astoria",
+        destinationId: "stp_astoria",
         type: "campground",
         name: "Astoria/Warrenton KOA",
         checkIn: "2026-08-02",
@@ -167,7 +174,7 @@ export function pnwTrip(): Trip {
       }),
       mkRes({
         id: "res_maritime",
-        stopId: "stp_astoria",
+        destinationId: "stp_astoria",
         type: "tour",
         name: "Columbia River Maritime Museum",
         checkIn: "2026-08-03",
@@ -175,9 +182,9 @@ export function pnwTrip(): Trip {
       }),
     ],
   });
-  const newport = mkStop({
+  const newport = mkDestination({
     id: "stp_newport",
-    legId: "leg_coast",
+    chapterId: "chapter_coast",
     place: at("Newport, OR", 44.6365, -124.053),
     arriveDate: "2026-08-05",
     departDate: "2026-08-09",
@@ -186,7 +193,7 @@ export function pnwTrip(): Trip {
     reservations: [
       mkRes({
         id: "res_southbeach",
-        stopId: "stp_newport",
+        destinationId: "stp_newport",
         type: "campground",
         name: "South Beach State Park",
         checkIn: "2026-08-05",
@@ -200,7 +207,7 @@ export function pnwTrip(): Trip {
       mkIdea({
         id: "idea_aquarium",
         tripId: T,
-        stopId: "stp_newport",
+        destinationId: "stp_newport",
         title: "Oregon Coast Aquarium",
         status: "planned",
         notes: "Half day. Go early to beat crowds.",
@@ -209,16 +216,16 @@ export function pnwTrip(): Trip {
       mkIdea({
         id: "idea_rogue",
         tripId: T,
-        stopId: "stp_newport",
+        destinationId: "stp_newport",
         title: "Rogue Ales brewery lunch",
         category: "eat",
         sortOrder: 1,
       }),
     ],
   });
-  const bend = mkStop({
+  const bend = mkDestination({
     id: "stp_bend",
-    legId: "leg_mountains",
+    chapterId: "chapter_mountains",
     place: at("Bend, OR", 44.0582, -121.3153),
     arriveDate: "2026-08-12",
     departDate: "2026-08-16",
@@ -227,15 +234,15 @@ export function pnwTrip(): Trip {
       mkIdea({
         id: "idea_deschutes",
         tripId: T,
-        stopId: "stp_bend",
+        destinationId: "stp_bend",
         title: "Deschutes River float",
         sortOrder: 0,
       }),
     ],
   });
-  const crater = mkStop({
+  const crater = mkDestination({
     id: "stp_crater",
-    legId: "leg_mountains",
+    chapterId: "chapter_mountains",
     place: at("Crater Lake NP", 42.9446, -122.109),
     sortOrder: 1,
     notes: "Maybe on the way home if we have time — take it as it comes.",
@@ -243,7 +250,7 @@ export function pnwTrip(): Trip {
       mkIdea({
         id: "idea_rimdrive",
         tripId: T,
-        stopId: "stp_crater",
+        destinationId: "stp_crater",
         title: "Rim Drive scenic loop",
         sortOrder: 0,
       }),
@@ -264,9 +271,9 @@ export function pnwTrip(): Trip {
     lodgingDefault: "campground",
     rigOn: true,
     surfaceRadiusMi: null,
-    legs: [
-      leg("leg_coast", T, "Oregon Coast", 0, [astoria, newport]),
-      leg("leg_mountains", T, "Cascades & Home", 1, [bend, crater]),
+    chapters: [
+      chapter("chapter_coast", T, "Oregon Coast", 0, [astoria, newport]),
+      chapter("chapter_mountains", T, "Cascades & Home", 1, [bend, crater]),
     ],
     // The SHELF (#80): one of each kind.
     ideas: [
@@ -302,9 +309,9 @@ export function pnwTrip(): Trip {
 
 export function costaRicaTrip(): Trip {
   const T = "trip_cr";
-  const conchal = mkStop({
+  const conchal = mkDestination({
     id: "stp_conchal",
-    legId: "leg_guanacaste",
+    chapterId: "chapter_guanacaste",
     place: at("Westin Reserva Conchal", 10.4047, -85.8127),
     arriveDate: "2027-01-16",
     departDate: "2027-01-24",
@@ -312,7 +319,7 @@ export function costaRicaTrip(): Trip {
     reservations: [
       mkRes({
         id: "res_westin",
-        stopId: "stp_conchal",
+        destinationId: "stp_conchal",
         type: "lodging",
         name: "Westin Reserva Conchal",
         checkIn: "2027-01-16",
@@ -323,14 +330,14 @@ export function costaRicaTrip(): Trip {
       mkIdea({
         id: "idea_snorkel",
         tripId: T,
-        stopId: "stp_conchal",
+        destinationId: "stp_conchal",
         title: "Playa Conchal snorkel",
         sortOrder: 0,
       }),
       mkIdea({
         id: "idea_surf",
         tripId: T,
-        stopId: "stp_conchal",
+        destinationId: "stp_conchal",
         title: "Tamarindo surf lesson",
         sortOrder: 1,
       }),
@@ -346,8 +353,23 @@ export function costaRicaTrip(): Trip {
     lodgingDefault: "hotel",
     rigOn: false,
     surfaceRadiusMi: null,
-    legs: [leg("leg_guanacaste", T, "Guanacaste", 0, [conchal])],
+    // #155 · Q2 A — the trip's area: a bare place name in the masthead
+    // ("Fly & stay · Guanacaste") and the destination card's subtitle. The
+    // same row as `seedAreas()`'s "guanacaste" (seed.ts points the trip at it).
+    area: {
+      id: null,
+      name: "Guanacaste",
+      googlePlaceId: "seed_loc_guanacaste",
+      lat: 10.4,
+      lng: -85.5,
+    },
+    // #155 · Q1 A — one UNNAMED chapter: no header, a "1 destination" count.
+    chapters: [chapter("chapter_guanacaste", T, null, 0, [conchal])],
   });
+  // #155 · Q4 A — the done-when's airport shuttles, untimed: after the outbound
+  // arrival, and before the home departure. Never a layover, never door to door.
+  const shuttle = (id: string, segmentId: string, name: string) =>
+    mkRes({ id, segmentId, type: "transport", transportKind: "shuttle", name });
   return withSegments(trip, named(["seg_out"]), (segs) => [
     // BOI 06:05 MST → LIR 17:45 CST, two flights, on the segment (Q2 A).
     ...segs.map((s) =>
@@ -379,6 +401,7 @@ export function costaRicaTrip(): Trip {
                 endsAt: "2027-01-16T23:45:00Z",
                 endsTz: "America/Costa_Rica",
               }),
+              shuttle("res_shuttle_out", "seg_out", "Airport shuttle · LIR → hotel"),
             ],
           }
         : s,
@@ -388,15 +411,15 @@ export function costaRicaTrip(): Trip {
     {
       id: "seg_home",
       tripId: T,
-      fromStopId: "stp_conchal",
-      toStopId: null,
+      fromDestinationId: "stp_conchal",
+      toDestinationId: null,
       mode: "fly",
       departAt: "2027-01-25T01:30:00Z",
       departTz: "America/Costa_Rica",
       arriveAt: "2027-01-25T15:50:00Z",
       arriveTz: "America/Boise",
       sortOrder: segs.length,
-      reservations: [],
+      reservations: [shuttle("res_shuttle_home", "seg_home", "Airport shuttle · hotel → LIR")],
     },
   ]);
 }
@@ -419,38 +442,38 @@ function athensHop(date: IsoDate, depart: string, arrive: string) {
 
 export function greeceTrip(): Trip {
   const T = "trip_gr";
-  const hotel = (stopId: string, name: string, checkIn: IsoDate, checkOut: IsoDate) =>
-    mkRes({ id: `res_${stopId}`, stopId, type: "lodging", name, checkIn, checkOut });
-  const athens1 = mkStop({
+  const hotel = (destinationId: string, name: string, checkIn: IsoDate, checkOut: IsoDate) =>
+    mkRes({ id: `res_${destinationId}`, destinationId, type: "lodging", name, checkIn, checkOut });
+  const athens1 = mkDestination({
     id: "stp_athens1",
-    legId: "leg_athens",
+    chapterId: "chapter_athens",
     place: at("Athens", 37.9838, 23.7275),
     arriveDate: "2027-05-10",
     departDate: "2027-05-12",
     sortOrder: 0,
     reservations: [hotel("stp_athens1", "Electra Palace Athens", "2027-05-10", "2027-05-12")],
   });
-  const mykonos = mkStop({
+  const mykonos = mkDestination({
     id: "stp_mykonos",
-    legId: "leg_cyclades",
+    chapterId: "chapter_cyclades",
     place: at("Mykonos", 37.4467, 25.3289),
     arriveDate: "2027-05-12",
     departDate: "2027-05-16",
     sortOrder: 0,
     reservations: [hotel("stp_mykonos", "Mykonos Town hotel", "2027-05-12", "2027-05-16")],
   });
-  const naxos = mkStop({
+  const naxos = mkDestination({
     id: "stp_naxos",
-    legId: "leg_cyclades",
+    chapterId: "chapter_cyclades",
     place: at("Naxos", 37.1036, 25.3763),
     arriveDate: "2027-05-16",
     departDate: "2027-05-19",
     sortOrder: 1,
     reservations: [hotel("stp_naxos", "Naxos Chora hotel", "2027-05-16", "2027-05-19")],
   });
-  const athens2 = mkStop({
+  const athens2 = mkDestination({
     id: "stp_athens2",
-    legId: "leg_back",
+    chapterId: "chapter_back",
     place: at("Athens", 37.9838, 23.7275),
     arriveDate: "2027-05-19",
     departDate: "2027-05-20",
@@ -467,10 +490,10 @@ export function greeceTrip(): Trip {
     lodgingDefault: "hotel",
     rigOn: false,
     surfaceRadiusMi: null,
-    legs: [
-      leg("leg_athens", T, "Athens", 0, [athens1]),
-      leg("leg_cyclades", T, "Cyclades", 1, [mykonos, naxos]),
-      leg("leg_back", T, "Back to Athens", 2, [athens2]),
+    chapters: [
+      chapter("chapter_athens", T, "Athens", 0, [athens1]),
+      chapter("chapter_cyclades", T, "Cyclades", 1, [mykonos, naxos]),
+      chapter("chapter_back", T, "Back to Athens", 2, [athens2]),
     ],
   });
   const times: Record<string, Partial<Segment>> = {
@@ -485,13 +508,13 @@ export function greeceTrip(): Trip {
 
 // ── the secondary trips, across the dashboard's statuses ────────────────────
 
-type SecondaryStop = {
+type SecondaryDestination = {
   name: string;
   lat: number;
   lng: number;
   arriveDate: IsoDate | null;
   departDate: IsoDate | null;
-  /** The stop's own journal fields + entries (#146) — default to empty. */
+  /** The destination's own journal fields + entries (#146) — default to empty. */
   rating?: number | null;
   again?: boolean | null;
   reservations?: Reservation[];
@@ -501,22 +524,22 @@ type SecondaryStop = {
 function secondary(
   id: string,
   t: Pick<Trip, "title" | "startDate" | "endDate" | "status"> & Partial<Trip>,
-  legs: { title: string; stops: SecondaryStop[] }[],
+  chapters: { title: string; destinations: SecondaryDestination[] }[],
 ): Trip {
   const trip = mkTrip({
     id,
     homeBase: "Boise, ID",
     ...t,
-    legs: legs.map((l, li) =>
-      leg(
-        `${id}_leg${li}`,
+    chapters: chapters.map((l, li) =>
+      chapter(
+        `${id}_chapter${li}`,
         id,
         l.title,
         li,
-        l.stops.map((s, si) =>
-          mkStop({
-            id: `${id}_leg${li}_stp${si}`,
-            legId: `${id}_leg${li}`,
+        l.destinations.map((s, si) =>
+          mkDestination({
+            id: `${id}_chapter${li}_stp${si}`,
+            chapterId: `${id}_chapter${li}`,
             place: at(s.name, s.lat, s.lng),
             arriveDate: s.arriveDate,
             departDate: s.departDate,
@@ -545,14 +568,14 @@ export function desertTrip(): Trip {
     [
       {
         title: "Utah",
-        stops: [
+        destinations: [
           { name: "Moab, UT", lat: 38.5733, lng: -109.5498, arriveDate: "2026-01-10", departDate: "2026-01-20" },
           { name: "Zion NP", lat: 37.2982, lng: -113.0263, arriveDate: null, departDate: null },
         ],
       },
       {
         title: "Arizona",
-        stops: [
+        destinations: [
           { name: "Sedona, AZ", lat: 34.8697, lng: -111.761, arriveDate: "2026-01-25", departDate: "2026-02-05" },
           { name: "Tucson, AZ", lat: 32.2226, lng: -110.9747, arriveDate: "2026-02-10", departDate: "2026-03-01" },
         ],
@@ -575,7 +598,7 @@ export function coastWeekendTrip(): Trip {
     [
       {
         title: "Coast",
-        stops: [
+        destinations: [
           {
             name: "Newport, OR",
             lat: 44.6365,
@@ -588,7 +611,7 @@ export function coastWeekendTrip(): Trip {
             reservations: [
               mkRes({
                 id: "res_coast_southbeach",
-                stopId: "trip_coast_leg0_stp0",
+                destinationId: "trip_coast_chapter0_stp0",
                 type: "campground",
                 name: "South Beach State Park",
                 checkIn: "2025-05-23",
@@ -602,7 +625,7 @@ export function coastWeekendTrip(): Trip {
               mkIdea({
                 id: "idea_coast_localocean",
                 tripId: "trip_coast",
-                stopId: "trip_coast_leg0_stp0",
+                destinationId: "trip_coast_chapter0_stp0",
                 sortOrder: 0,
                 title: "Local Ocean Seafoods",
                 category: "eat",
@@ -615,7 +638,7 @@ export function coastWeekendTrip(): Trip {
               mkIdea({
                 id: "idea_coast_aquarium",
                 tripId: "trip_coast",
-                stopId: "trip_coast_leg0_stp0",
+                destinationId: "trip_coast_chapter0_stp0",
                 sortOrder: 1,
                 title: "Oregon Coast Aquarium",
                 category: "do",
@@ -628,7 +651,7 @@ export function coastWeekendTrip(): Trip {
               mkIdea({
                 id: "idea_coast_yaquina",
                 tripId: "trip_coast",
-                stopId: "trip_coast_leg0_stp0",
+                destinationId: "trip_coast_chapter0_stp0",
                 sortOrder: 2,
                 title: "Yaquina Head tide pools",
                 category: "do",
@@ -656,7 +679,7 @@ export function yellowstoneTrip(): Trip {
     [
       {
         title: "Yellowstone",
-        stops: [
+        destinations: [
           {
             name: "Fishing Bridge, WY",
             lat: 44.5647,
@@ -664,11 +687,11 @@ export function yellowstoneTrip(): Trip {
             arriveDate: "2024-09-08",
             departDate: "2024-09-14",
             // Journals only what its two Been saves already say (#146 Q2 B):
-            // notes verbatim from saves.ts, no Again, no stop rating.
+            // notes verbatim from saves.ts, no Again, no destination rating.
             reservations: [
               mkRes({
                 id: "res_ystone_fishingbridge",
-                stopId: "trip_ystone_leg0_stp0",
+                destinationId: "trip_ystone_chapter0_stp0",
                 type: "campground",
                 name: "Fishing Bridge RV Park",
                 checkIn: "2024-09-08",
@@ -681,7 +704,7 @@ export function yellowstoneTrip(): Trip {
               mkIdea({
                 id: "idea_ystone_oldfaithful",
                 tripId: "trip_ystone",
-                stopId: "trip_ystone_leg0_stp0",
+                destinationId: "trip_ystone_chapter0_stp0",
                 sortOrder: 0,
                 title: "Old Faithful Loop",
                 category: "do",
@@ -697,7 +720,7 @@ export function yellowstoneTrip(): Trip {
       },
       {
         title: "Tetons",
-        stops: [
+        destinations: [
           { name: "Jackson, WY", lat: 43.4799, lng: -110.7624, arriveDate: "2024-09-15", departDate: "2024-09-19" },
         ],
       },

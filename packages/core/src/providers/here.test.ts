@@ -249,7 +249,7 @@ describe("parseRouteResponse", () => {
 
 // ── graceful degradation ───────────────────────────────────────────────────
 // This is the property the whole feature rests on: an unproven vendor must
-// never be able to stop a trip from opening. Every failure the network can
+// never be able to destination a trip from opening. Every failure the network can
 // hand us has to come back as the honest straight-line estimate, and the
 // token grant has to happen once per process rather than once per drive.
 //

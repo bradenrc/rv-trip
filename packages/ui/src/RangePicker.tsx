@@ -22,7 +22,7 @@ import {
  * RangePicker (#127 · Q6 A · Q7 B) — one picker for every date pair, with the
  * trip's own span always visible as a band.
  *
- * Replaces the native `<input type="date">` pairs in trip creation, the stop's
+ * Replaces the native `<input type="date">` pairs in trip creation, the destination's
  * dates, Trip settings and the stay form. Outside days stay PICKABLE: a pick
  * that leaves the trip goes amber and offers "Extend trip to …", which hands
  * `onExtendTrip` the widened span — a guard, never a block. With no

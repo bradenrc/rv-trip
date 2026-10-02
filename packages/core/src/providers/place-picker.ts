@@ -251,8 +251,8 @@ export interface NearPlace {
 }
 
 /**
- * The search bias a picker mounted on a stop row gets: the stop above it in the
- * leg, then the trip's home base when there is nothing above it. Null when
+ * The search bias a picker mounted on a destination row gets: the destination above it in the
+ * chapter, then the trip's home base when there is nothing above it. Null when
  * neither has a FULL pair — half a coordinate is no coordinate here either, and
  * the search still runs, just unranked.
  */

@@ -26,8 +26,8 @@ const summary = {
   rating: null,
   note: null,
   days: 10,
-  stops: 3,
-  legs: 2,
+  destinations: 3,
+  chapters: 2,
   miles: 412,
   milesEstimated: false,
   open: 3,
@@ -71,21 +71,21 @@ describe("createApiClient", () => {
   it("PATCHes JSON and resolves void on 204", async () => {
     const f = fakeFetch(204);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
-    await expect(api.stops.patch("s1", { rating: 4 })).resolves.toBeUndefined();
+    await expect(api.destinations.patch("s1", { rating: 4 })).resolves.toBeUndefined();
     const { url, init } = f.calls[0]!;
-    expect(url).toBe("http://x/api/stops/s1");
+    expect(url).toBe("http://x/api/destinations/s1");
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(init.body as string)).toEqual({ rating: 4 });
     expect((init.headers as Record<string, string>)["content-type"]).toBe("application/json");
   });
 
   it("coerces a created reservation row into the domain shape", async () => {
-    const f = fakeFetch(201, { id: "r1", stopId: "s1", type: "dining", name: "Taco", cost: "42.50" });
+    const f = fakeFetch(201, { id: "r1", destinationId: "s1", type: "dining", name: "Taco", cost: "42.50" });
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
-    const r = await api.reservations.create({ stopId: "s1", type: "dining", name: "Taco", cost: 42.5, checkIn: null });
+    const r = await api.reservations.create({ destinationId: "s1", type: "dining", name: "Taco", cost: 42.5, checkIn: null });
     expect(r).toEqual({
       id: "r1",
-      stopId: "s1",
+      destinationId: "s1",
       ideaId: null,
       type: "dining",
       name: "Taco",
@@ -102,6 +102,7 @@ describe("createApiClient", () => {
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
       // A create carries no history: the byline is joined on the READ path
       // (#78 §6), so a just-made row comes back with `lastChange: null, again: null`.
       lastChange: null,
@@ -112,7 +113,7 @@ describe("createApiClient", () => {
   it("keeps a flight's segment and clock, and a stay's kind (vet HIGH · #104/#105)", async () => {
     const flight = {
       id: "r2",
-      stopId: null,
+      destinationId: null,
       segmentId: "seg1",
       type: "transport" as const,
       name: "AA 1190 LIR→DFW",
@@ -124,13 +125,13 @@ describe("createApiClient", () => {
     };
     const f = fakeFetch(201, flight);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
-    const r = await api.reservations.create({ ...flight, moveStop: true });
-    expect(r).toMatchObject({ stopId: null, segmentId: "seg1", startsTz: "America/Costa_Rica", endsTz: "America/Chicago" });
-    expect(JSON.parse(f.calls[0]!.init.body as string).moveStop).toBe(true);
+    const r = await api.reservations.create({ ...flight, moveDestination: true });
+    expect(r).toMatchObject({ destinationId: null, segmentId: "seg1", startsTz: "America/Costa_Rica", endsTz: "America/Chicago" });
+    expect(JSON.parse(f.calls[0]!.init.body as string).moveDestination).toBe(true);
 
-    const g = fakeFetch(201, { id: "r3", stopId: "s1", type: "lodging", name: "Jane & Rick", lodgingKind: "friends" });
+    const g = fakeFetch(201, { id: "r3", destinationId: "s1", type: "lodging", name: "Jane & Rick", lodgingKind: "friends" });
     const stay = await createApiClient({ baseUrl: "http://x", fetch: g.fn }).reservations.create({
-      stopId: "s1",
+      destinationId: "s1",
       type: "lodging",
       name: "Jane & Rick",
       lodgingKind: "friends",
@@ -149,7 +150,7 @@ describe("createApiClient", () => {
       lodgingDefault: "hotel",
       rigOn: false,
       rating: null,
-      legs: [],
+      chapters: [],
     });
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
     const trip = await api.trips.create({
@@ -182,7 +183,7 @@ describe("createApiClient", () => {
         startDate: "2026-08-01",
         endDate: "2026-08-10",
         rating: null,
-        legs: [],
+        chapters: [],
       },
       routes: {
         "1,2|3,4|no-rig": {
@@ -301,7 +302,7 @@ const SAVED_ROW = {
   again: null,
   anchor: "place",
   areaLabel: null,
-  destination: {
+  area: {
     id: "d7a00000-0000-4000-8000-000000000001",
     name: "San José, Costa Rica",
     region: "Costa Rica",
@@ -313,23 +314,23 @@ const SAVED_ROW = {
 };
 
 describe("createApiClient — capture (#111)", () => {
-  it("POSTs a save and reads the destination off the answer", async () => {
+  it("POSTs a save and reads the area off the answer", async () => {
     const f = fakeFetch(201, SAVED_ROW);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
     const body = { clientId: "cap_1", name: "El Chandelier", googlePlaceId: "ChIJchandelier", anchor: "place" as const };
     const saved = await api.places.create(body);
-    expect(saved.destination?.name).toBe("San José, Costa Rica");
+    expect(saved.area?.name).toBe("San José, Costa Rica");
     expect(f.calls[0]!.url).toBe("http://x/api/places");
     expect(f.calls[0]!.init.method).toBe("POST");
     expect(JSON.parse(f.calls[0]!.init.body as string)).toEqual(body);
   });
 
   it("defaults the capture fields on a save from an older server", async () => {
-    const { anchor, areaLabel, destination, suggestedPlace, ...old } = SAVED_ROW;
-    void anchor, void areaLabel, void destination, void suggestedPlace;
+    const { anchor, areaLabel, area, suggestedPlace, ...old } = SAVED_ROW;
+    void anchor, void areaLabel, void area, void suggestedPlace;
     const api = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(200, old).fn });
     const saved = await api.places.create({ name: "El Chandelier" });
-    expect(saved.destination).toBeNull();
+    expect(saved.area).toBeNull();
     expect(saved.suggestedPlace).toBeNull();
   });
 
@@ -383,14 +384,14 @@ describe("createApiClient — capture (#111)", () => {
     expect(f.calls[0]!.init.method).toBe("DELETE");
   });
 
-  it("resolves a point to its destination, or null", async () => {
+  it("resolves a point to its area, or null", async () => {
     const dest = { googlePlaceId: "ChIJsanjose", name: "San José, Costa Rica", region: "Costa Rica", lat: 9.9281, lng: -84.0907 };
     const f = fakeFetch(200, dest);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
-    expect(await api.destinations.resolve({ lat: 9.9325, lng: -84.0521 })).toEqual(dest);
-    expect(f.calls[0]!.url).toBe("http://x/api/destinations/resolve?near=9.9325,-84.0521");
+    expect(await api.areas.resolve({ lat: 9.9325, lng: -84.0521 })).toEqual(dest);
+    expect(f.calls[0]!.url).toBe("http://x/api/areas/resolve?near=9.9325,-84.0521");
     const none = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(200, null).fn });
-    expect(await none.destinations.resolve({ lat: 42.53, lng: -118.53 })).toBeNull();
+    expect(await none.areas.resolve({ lat: 42.53, lng: -118.53 })).toBeNull();
   });
 });
 
@@ -403,7 +404,7 @@ describe("createApiClient — trip surfacing (#111 i3)", () => {
     rating: null,
     source: "Jane & Rick",
     place: { name: "Fort Stevens State Park", lat: 46.2045, lng: -123.958, googlePlaceId: null },
-    nearestStop: { id: "st1", name: "Astoria, OR" },
+    nearestDestination: { id: "st1", name: "Astoria, OR" },
     distanceMi: 6.2,
   };
 
@@ -449,7 +450,7 @@ describe("createApiClient — trip surfacing (#111 i3)", () => {
     const created = {
       id: "i1",
       tripId: "t1",
-      stopId: null,
+      destinationId: null,
       title: "Fort Stevens State Park",
       category: "stay",
       status: "idea",
@@ -464,7 +465,7 @@ describe("createApiClient — trip surfacing (#111 i3)", () => {
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
     const body = {
       tripId: "t1",
-      stopId: null,
+      destinationId: null,
       category: "stay" as const,
       title: "Fort Stevens State Park",
       status: "idea" as const,

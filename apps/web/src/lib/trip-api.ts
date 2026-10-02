@@ -3,9 +3,9 @@ import type {
   IdeaCreateBody,
   IdeaPatchInput,
   LatLng,
-  Leg,
-  LegCreateInput,
-  LegPatchInput,
+  Chapter,
+  ChapterCreateInput,
+  ChapterPatchInput,
   LocateResponse,
   LocateRow,
   NearbySaves,
@@ -24,9 +24,9 @@ import type {
   PlaceSearchType,
   Place,
   UserPrefs,
-  Stop,
-  StopCreateInput,
-  StopPatchInput,
+  Destination,
+  DestinationCreateInput,
+  DestinationPatchInput,
   Trip,
   TripCreateInput,
   TripPatchInput,
@@ -45,7 +45,7 @@ async function req(url: string, method: string, body?: unknown) {
 
 export const tripApi = {
   /**
-   * Create a trip. 201 carries the whole tree — including the one empty "Leg 1"
+   * Create a trip. 201 carries the whole tree — including the one empty, unnamed chapter
    * the create seeds — so the page can redirect straight into the planner.
    */
   createTrip: (input: TripCreateInput): Promise<Trip> =>
@@ -65,41 +65,41 @@ export const tripApi = {
   dismissSaves: (tripId: string, saveIds: string[]) =>
     req(`/api/trips/${tripId}/dismissed-saves`, "POST", { saveIds }),
 
-  /** Legs, stops, reservations and ideas cascade with it. */
+  /** Chapters, destinations, reservations and ideas cascade with it. */
   deleteTrip: (id: string) => req(`/api/trips/${id}`, "DELETE"),
 
   /**
-   * "Add leg". 201 carries the created leg (with an empty `stops`), because
+   * "Add chapter". 201 carries the created chapter (with an empty `destinations`), because
    * only the server can mint the id — so this one write is not optimistic.
    */
-  createLeg: (input: LegCreateInput): Promise<Leg> =>
-    req(`/api/legs`, "POST", input) as Promise<Leg>,
+  createChapter: (input: ChapterCreateInput): Promise<Chapter> =>
+    req(`/api/chapters`, "POST", input) as Promise<Chapter>,
 
-  /** The leg header's inline rename. */
-  updateLeg: (id: string, patch: LegPatchInput) => req(`/api/legs/${id}`, "PATCH", patch),
+  /** The chapter header's inline rename. */
+  updateChapter: (id: string, patch: ChapterPatchInput) => req(`/api/chapters/${id}`, "PATCH", patch),
 
-  /** Stops — and their reservations and ideas — cascade with it. */
-  deleteLeg: (id: string) => req(`/api/legs/${id}`, "DELETE"),
+  /** Destinations — and their reservations and ideas — cascade with it. */
+  deleteChapter: (id: string) => req(`/api/chapters/${id}`, "DELETE"),
 
-  /** "Move leg up/down" sends the WHOLE new order, so the renumber is one
-   * transaction and two legs can never end up sharing a sortOrder. */
-  reorderLegs: (tripId: string, order: string[]) =>
-    req(`/api/trips/${tripId}/legs/reorder`, "POST", { order }),
+  /** "Move chapter up/down" sends the WHOLE new order, so the renumber is one
+   * transaction and two chapters can never end up sharing a sortOrder. */
+  reorderChapters: (tripId: string, order: string[]) =>
+    req(`/api/trips/${tripId}/chapters/reorder`, "POST", { order }),
 
-  /** "Add stop". 201 carries the created stop, for the same reason a leg does. */
-  createStop: (input: StopCreateInput): Promise<Stop> =>
-    req(`/api/stops`, "POST", input) as Promise<Stop>,
+  /** "Add destination". 201 carries the created destination, for the same reason a chapter does. */
+  createDestination: (input: DestinationCreateInput): Promise<Destination> =>
+    req(`/api/destinations`, "POST", input) as Promise<Destination>,
 
   /**
-   * The widened stop write: rename (`placeName`), move (`legId`), reorder
+   * The widened destination write: rename (`placeName`), move (`chapterId`), reorder
    * (`sortOrder`), the dates (both null is "Unschedule") and rating/notes.
-   * A 409 `stop_dates_outside_trip` comes back as a rejected promise like any
+   * A 409 `destination_dates_outside_trip` comes back as a rejected promise like any
    * other non-2xx, so `persist()` rolls the optimistic change back.
    */
-  updateStop: (id: string, patch: StopPatchInput) => req(`/api/stops/${id}`, "PATCH", patch),
+  updateDestination: (id: string, patch: DestinationPatchInput) => req(`/api/destinations/${id}`, "PATCH", patch),
 
   /** Reservations and ideas cascade with it. */
-  deleteStop: (id: string) => req(`/api/stops/${id}`, "DELETE"),
+  deleteDestination: (id: string) => req(`/api/destinations/${id}`, "DELETE"),
 
   /**
    * "Add reservation" — and what an undone delete re-POSTs, which is why the
@@ -150,8 +150,8 @@ export const tripApi = {
   promoteIdea: (id: string, type: ReservationType): Promise<Reservation> =>
     req(`/api/ideas/${id}/promote`, "POST", { type }) as Promise<Reservation>,
 
-  reorderLeg: (legId: string, order: string[]) =>
-    req(`/api/legs/${legId}/reorder`, "POST", { order }),
+  reorderChapter: (chapterId: string, order: string[]) =>
+    req(`/api/chapters/${chapterId}/reorder`, "POST", { order }),
 
   /** The rig is a singleton at a fixed URL, so saving it is a PUT upsert. */
   saveRig: (input: RigProfileInput) => req(`/api/rig`, "PUT", input),

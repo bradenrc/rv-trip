@@ -14,19 +14,19 @@ import {
  * load-bearing: `promote`'s type is OPTIONAL and defaults to the "activity"
  * the mutation used to hardcode (so a caller that posts no body is
  * unaffected); an omitted PATCH key stays ABSENT rather than becoming a
- * phantom reset; and unknown keys are stripped, so `id`/`stopId` can never be
+ * phantom reset; and unknown keys are stripped, so `id`/`destinationId` can never be
  * written through an edit.
  */
 
-const STOP = "6f1c5b4e-0000-4000-8000-000000000001";
+const DESTINATION = "6f1c5b4e-0000-4000-8000-000000000001";
 const TRIP = "6f1c5b4e-0000-4000-8000-0000000000aa";
 
 describe("reservationCreateInput", () => {
   it("fills the optional half of the form with nulls", () => {
     expect(
-      reservationCreateInput.parse({ stopId: STOP, type: "campground", name: "Fort Stevens" }),
+      reservationCreateInput.parse({ destinationId: DESTINATION, type: "campground", name: "Fort Stevens" }),
     ).toEqual({
-      stopId: STOP,
+      destinationId: DESTINATION,
       type: "campground",
       name: "Fort Stevens",
       checkIn: null,
@@ -40,12 +40,13 @@ describe("reservationCreateInput", () => {
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
     });
   });
 
   it("carries the whole row an undone delete puts back", () => {
     const body = {
-      stopId: STOP,
+      destinationId: DESTINATION,
       type: "dining" as const,
       name: "Rogue Ales brewery lunch",
       checkIn: "2026-08-18",
@@ -59,21 +60,22 @@ describe("reservationCreateInput", () => {
       startsTz: null,
       endsTz: null,
       lodgingKind: null,
+      transportKind: null,
     };
     expect(reservationCreateInput.parse(body)).toEqual(body);
   });
 
   it("refuses a blank name, a bad type, a non-ISO date and a negative cost", () => {
-    const base = { stopId: STOP, type: "dining", name: "X" };
+    const base = { destinationId: DESTINATION, type: "dining", name: "X" };
     expect(reservationCreateInput.safeParse({ ...base, name: "" }).success).toBe(false);
     expect(reservationCreateInput.safeParse({ ...base, type: "brunch" }).success).toBe(false);
     expect(reservationCreateInput.safeParse({ ...base, checkIn: "Aug 18" }).success).toBe(false);
     expect(reservationCreateInput.safeParse({ ...base, cost: -1 }).success).toBe(false);
-    expect(reservationCreateInput.safeParse({ ...base, stopId: "not-a-uuid" }).success).toBe(false);
+    expect(reservationCreateInput.safeParse({ ...base, destinationId: "not-a-uuid" }).success).toBe(false);
   });
 });
 
-describe("reservationCreateInput · #104 a stop OR a segment parent", () => {
+describe("reservationCreateInput · #104 a destination OR a segment parent", () => {
   const SEG = "6f1c5b4e-0000-4000-8000-0000000000b1";
   const flight = {
     segmentId: SEG,
@@ -87,14 +89,14 @@ describe("reservationCreateInput · #104 a stop OR a segment parent", () => {
 
   it("takes a segment parent with its clock", () => {
     expect(reservationCreateInput.parse(flight)).toMatchObject({ segmentId: SEG, startsTz: "America/Costa_Rica" });
-    expect(reservationCreateInput.parse({ ...flight, moveStop: true }).moveStop).toBe(true);
+    expect(reservationCreateInput.parse({ ...flight, moveDestination: true }).moveDestination).toBe(true);
   });
 
   it("rejects a body with both parents, or neither — the CHECK, at the boundary", () => {
-    expect(reservationCreateInput.safeParse({ ...flight, stopId: STOP }).success).toBe(false);
+    expect(reservationCreateInput.safeParse({ ...flight, destinationId: DESTINATION }).success).toBe(false);
     const { segmentId: _, ...orphan } = flight;
     expect(reservationCreateInput.safeParse(orphan).success).toBe(false);
-    expect(reservationCreateInput.safeParse({ ...orphan, stopId: null, segmentId: null }).success).toBe(false);
+    expect(reservationCreateInput.safeParse({ ...orphan, destinationId: null, segmentId: null }).success).toBe(false);
   });
 
   it("refuses half a clock and a booking that lands before it leaves", () => {
@@ -107,7 +109,7 @@ describe("reservationCreateInput · #104 a stop OR a segment parent", () => {
 
   it("carries a stay's kind", () => {
     expect(
-      reservationCreateInput.parse({ stopId: STOP, type: "lodging", name: "Jane & Rick", lodgingKind: "friends" })
+      reservationCreateInput.parse({ destinationId: DESTINATION, type: "lodging", name: "Jane & Rick", lodgingKind: "friends" })
         .lodgingKind,
     ).toBe("friends");
   });
@@ -128,7 +130,7 @@ describe("reservationPatchInput", () => {
 
   it("passes through only what was sent, and strips what is not editable", () => {
     expect(
-      reservationPatchInput.parse({ name: "Renamed", id: "r1", stopId: STOP, ideaId: "i1" }),
+      reservationPatchInput.parse({ name: "Renamed", id: "r1", destinationId: DESTINATION, ideaId: "i1" }),
     ).toEqual({ name: "Renamed" });
   });
 
@@ -143,10 +145,10 @@ describe("reservationPatchInput", () => {
 describe("ideaCreateInput", () => {
   it("defaults a fresh idea to the 'idea' status with no place", () => {
     expect(
-      ideaCreateInput.parse({ tripId: TRIP, stopId: STOP, title: "Cape Perpetua overlook" }),
+      ideaCreateInput.parse({ tripId: TRIP, destinationId: DESTINATION, title: "Cape Perpetua overlook" }),
     ).toEqual({
       tripId: TRIP,
-      stopId: STOP,
+      destinationId: DESTINATION,
       category: "do",
       title: "Cape Perpetua overlook",
       status: "idea",
@@ -159,18 +161,18 @@ describe("ideaCreateInput", () => {
 
   it("never lets the client pick a sortOrder — the server appends", () => {
     expect(
-      ideaCreateInput.parse({ tripId: TRIP, stopId: STOP, title: "X", sortOrder: 99 }),
+      ideaCreateInput.parse({ tripId: TRIP, destinationId: DESTINATION, title: "X", sortOrder: 99 }),
     ).not.toHaveProperty("sortOrder");
   });
 
-  /** #80 — the shelf create. A maybe belongs to the TRIP; the stop is the
+  /** #80 — the shelf create. A maybe belongs to the TRIP; the destination is the
    * optional half, and the trip is the half that cannot be left out. */
-  it("takes a shelf idea: an explicit null stopId and a category", () => {
+  it("takes a shelf idea: an explicit null destinationId and a category", () => {
     expect(
-      ideaCreateInput.parse({ tripId: TRIP, stopId: null, category: "stay", title: "Coachland" }),
+      ideaCreateInput.parse({ tripId: TRIP, destinationId: null, category: "stay", title: "Coachland" }),
     ).toEqual({
       tripId: TRIP,
-      stopId: null,
+      destinationId: null,
       category: "stay",
       title: "Coachland",
       status: "idea",
@@ -181,12 +183,12 @@ describe("ideaCreateInput", () => {
     });
   });
 
-  it("defaults stopId to null — an idea with no stop in hand is a shelf idea", () => {
-    expect(ideaCreateInput.parse({ tripId: TRIP, title: "Hot springs" }).stopId).toBeNull();
+  it("defaults destinationId to null — an idea with no destination in hand is a shelf idea", () => {
+    expect(ideaCreateInput.parse({ tripId: TRIP, title: "Hot springs" }).destinationId).toBeNull();
   });
 
   it("refuses a create with no trip — there is no other ownership path", () => {
-    expect(ideaCreateInput.safeParse({ stopId: STOP, title: "Orphan" }).success).toBe(false);
+    expect(ideaCreateInput.safeParse({ destinationId: DESTINATION, title: "Orphan" }).success).toBe(false);
     expect(ideaCreateInput.safeParse({ tripId: "not-a-uuid", title: "Orphan" }).success).toBe(false);
   });
 });
@@ -227,17 +229,17 @@ describe("ideaPatchInput", () => {
     });
   });
 
-  /** #80 — the drop. `stop_id` IS a column, so unlike `place` it is editable
+  /** #80 — the drop. `destination_id` IS a column, so unlike `place` it is editable
    * through this patch: an id attaches, an explicit null sends the row back to
    * the shelf, and an absent key still leaves the attachment alone. */
-  it("carries the drop's stopId, including an explicit null", () => {
-    expect(ideaPatchInput.parse({ stopId: STOP })).toEqual({ stopId: STOP });
-    expect(ideaPatchInput.parse({ stopId: null })).toEqual({ stopId: null });
-    expect("stopId" in ideaPatchInput.parse({ status: "planned" })).toBe(false);
+  it("carries the drop's destinationId, including an explicit null", () => {
+    expect(ideaPatchInput.parse({ destinationId: DESTINATION })).toEqual({ destinationId: DESTINATION });
+    expect(ideaPatchInput.parse({ destinationId: null })).toEqual({ destinationId: null });
+    expect("destinationId" in ideaPatchInput.parse({ status: "planned" })).toBe(false);
   });
 
-  it("refuses a stopId that is not a uuid — it addresses a real uuid column", () => {
-    expect(ideaPatchInput.safeParse({ stopId: "nope" }).success).toBe(false);
+  it("refuses a destinationId that is not a uuid — it addresses a real uuid column", () => {
+    expect(ideaPatchInput.safeParse({ destinationId: "nope" }).success).toBe(false);
   });
 
   it("carries the category — a maybe can be re-filed from Do to Eat", () => {

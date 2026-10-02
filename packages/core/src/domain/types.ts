@@ -45,7 +45,7 @@ export const rating = z.number().int().min(1).max(5).nullable();
 /**
  * "Do it again?" (#113 · W3 Journal, Q2 A) — a separate yes/no beside the
  * stars: `true` is Again, `false` is Once was enough, and `null` is "not said".
- * Carried by ideas, stops, reservations and saves. Nullable with a `null`
+ * Carried by ideas, destinations, reservations and saves. Nullable with a `null`
  * default, so a payload from before W3 (a cached bundle, an older phone) still
  * parses and reads as "not said".
  */
@@ -64,7 +64,7 @@ export type ChangeField = z.infer<typeof changeField>;
 
 /** The four things a change is logged against. `save` was `savedPlace` before
  * the W0 reset (#110 §5) — the table it names is now `saves`. */
-export const changeEntity = z.enum(["stop", "idea", "reservation", "save"]);
+export const changeEntity = z.enum(["destination", "idea", "reservation", "save"]);
 export type ChangeEntity = z.infer<typeof changeEntity>;
 
 /**
@@ -119,12 +119,22 @@ export const place = z.object({
 export type Place = z.infer<typeof place>;
 
 /**
- * How a hop between two stops is travelled (#110 · Q1 A). Mode lives on the
- * SEGMENT, never on a stop or a day: HERE routing and the RV-safety corridor key
+ * How a hop between two destinations is travelled (#110 · Q1 A). Mode lives on the
+ * SEGMENT, never on a destination or a day: HERE routing and the RV-safety corridor key
  * off `drive` only. `train` is a later wave.
  */
 export const travelMode = z.enum(["drive", "fly", "ferry"]);
 export type TravelMode = z.infer<typeof travelMode>;
+
+/**
+ * What a transport booking IS (#155 · Q4 A). Nullable on the reservation: null
+ * reads as the hop's own mode (`effectiveTransportKind`, transport-kind.ts), so
+ * every row written before #155 behaves exactly as it did. Only `flight` and
+ * `ferry` count toward a layover or door to door. Mirrors the `transport_kind`
+ * pgEnum (packages/db/src/schema.ts).
+ */
+export const transportKind = z.enum(["flight", "ferry", "shuttle", "train", "car"]);
+export type TransportKind = z.infer<typeof transportKind>;
 
 /** A trip's lodging default (#110 §5, Q7 A) — a default, never a constraint. */
 export const lodgingKind = z.enum(["hotel", "friends", "airbnb", "campground"]);
@@ -141,14 +151,14 @@ const instant = z.string().nullable().default(null);
 const ianaZone = z.string().nullable().default(null);
 
 /**
- * A reservation hangs on EXACTLY ONE parent (#110 Q2 A): a stop (lodging, a
+ * A reservation hangs on EXACTLY ONE parent (#110 Q2 A): a destination (lodging, a
  * tour) or a travel segment (a flight, a ferry ticket). The database enforces
- * it with `CHECK num_nonnulls(stop_id, segment_id) = 1`; `stop.reservations`
- * carries only the stop-attached rows and `segment.reservations` the rest.
+ * it with `CHECK num_nonnulls(destination_id, segment_id) = 1`; `destination.reservations`
+ * carries only the destination-attached rows and `segment.reservations` the rest.
  */
 export const reservation = z.object({
   id: z.string(),
-  stopId: z.string().nullable(),
+  destinationId: z.string().nullable(),
   segmentId: z.string().nullable().default(null),
   ideaId: z.string().nullable().default(null),
   type: reservationType,
@@ -174,6 +184,9 @@ export const reservation = z.object({
    * `categoryMeta` and every Stay tile keep reading `type` alone.
    */
   lodgingKind: lodgingKind.nullable().default(null),
+  /** #155 · Q4 A — flight · ferry · shuttle · train · car; null = the hop's
+   * mode decides. Defaulted so a payload from an older server still parses. */
+  transportKind: transportKind.nullable().default(null),
   lastChange: lastChangeField,
 });
 export type Reservation = z.infer<typeof reservation>;
@@ -181,13 +194,13 @@ export type Reservation = z.infer<typeof reservation>;
 /**
  * An idea is the grammar's MAYBE. It belongs to the TRIP (#80): `tripId` is
  * always set — it is the single ownership path every idea write scopes on —
- * and `stopId` is optional. A null `stopId` is a *shelf* idea: a maybe you have
- * not committed to a stop yet, which is the whole of #80.
+ * and `destinationId` is optional. A null `destinationId` is a *shelf* idea: a maybe you have
+ * not committed to a destination yet, which is the whole of #80.
  */
 export const idea = z.object({
   id: z.string(),
   tripId: z.string(),
-  stopId: z.string().nullable().default(null),
+  destinationId: z.string().nullable().default(null),
   title: z.string().min(1),
   category: ideaCategory.default("do"),
   status: ideaStatus.default("idea"),
@@ -201,16 +214,16 @@ export const idea = z.object({
 export type Idea = z.infer<typeof idea>;
 
 /**
- * A Stop is a place you go — the anchor of the grammar.
- * sortOrder is ALWAYS present (defines sequence within the leg).
- * arriveDate/departDate are OPTIONAL: a stop with dates is "scheduled" (it
- * contributes to the calendar and to derived drive/stay days); a stop without
+ * A Destination is a place you go — the anchor of the grammar.
+ * sortOrder is ALWAYS present (defines sequence within the chapter).
+ * arriveDate/departDate are OPTIONAL: a destination with dates is "scheduled" (it
+ * contributes to the calendar and to derived drive/stay days); a destination without
  * dates is "floating" (it lives in the route sequence only). A trip freely
  * mixes both.
  */
-export const stop = z.object({
+export const destination = z.object({
   id: z.string(),
-  legId: z.string(),
+  chapterId: z.string(),
   place,
   arriveDate: isoDate.nullable().default(null),
   departDate: isoDate.nullable().default(null),
@@ -222,33 +235,37 @@ export const stop = z.object({
   ideas: z.array(idea).default([]),
   lastChange: lastChangeField,
 });
-export type Stop = z.infer<typeof stop>;
+export type Destination = z.infer<typeof destination>;
 
-/** A named segment of the journey ("Pacific Coast"), grouping stops. */
-export const leg = z.object({
+/**
+ * A group of destinations (#155 · Q1 A) — OPTIONAL by name: a null title is an
+ * unnamed chapter, which renders no header at all. A named one ("Oregon Coast")
+ * renders "CHAPTER N", where N counts the named chapters only.
+ */
+export const chapter = z.object({
   id: z.string(),
   tripId: z.string(),
-  title: z.string().min(1),
+  title: z.string().min(1).nullable(),
   sortOrder: z.number().int(),
-  stops: z.array(stop).default([]),
+  destinations: z.array(destination).default([]),
 });
-export type Leg = z.infer<typeof leg>;
+export type Chapter = z.infer<typeof chapter>;
 
 /**
  * One hop of the journey (#110 · Q1 A): every adjacent pair of the route
- * sequence has a row, plus home → first stop when the trip has a home base.
- * `fromStopId === null` is the home base; `toStopId === null` is home. The row
+ * sequence has a row, plus home → first destination when the trip has a home base.
+ * `fromDestinationId === null` is the home base; `toDestinationId === null` is home. The row
  * set is kept dense by `reconcileSegments` (segments.ts) — never hand-edited.
  *
  * Timed (`departAt` + `arriveAt`) or untimed. A timed segment is travel on
  * every LOCAL date it touches (Q4 B); an untimed one borrows its day from the
- * stop it arrives at (derive-days.ts).
+ * destination it arrives at (derive-days.ts).
  */
 export const segment = z.object({
   id: z.string(),
   tripId: z.string(),
-  fromStopId: z.string().nullable(),
-  toStopId: z.string().nullable(),
+  fromDestinationId: z.string().nullable(),
+  toDestinationId: z.string().nullable(),
   mode: travelMode,
   departAt: instant,
   arriveAt: instant,
@@ -279,24 +296,24 @@ export type TripStatus = z.infer<typeof tripStatus>;
 
 /**
  * Where a trip is GOING (#126 · Q4 A) — the locality-grain place the "Where
- * to?" question picked, stored as a `destinations` row (one per household +
- * Google place id) that `trips.destination_id` points at. Its point is the
+ * to?" question picked, stored as a `areas` row (one per household +
+ * Google place id) that `trips.area_id` points at. Its point is the
  * second choice of every trip-context place search (`searchAnchor`), so a
  * search never falls back to the caller's IP.
  */
-export const tripDestination = z.object({
+export const tripArea = z.object({
   id: z.string().nullable().default(null),
   name: z.string().min(1),
   googlePlaceId: z.string().min(1),
   lat: z.number().nullable().default(null),
   lng: z.number().nullable().default(null),
 });
-export type TripDestination = z.infer<typeof tripDestination>;
+export type TripArea = z.infer<typeof tripArea>;
 
-/** The create body's destination — the picked place, never an id: the server
+/** The create body's area — the picked place, never an id: the server
  * upserts the row by owner + place id. */
-export const tripDestinationInput = tripDestination.omit({ id: true });
-export type TripDestinationInput = z.infer<typeof tripDestinationInput>;
+export const tripAreaInput = tripArea.omit({ id: true });
+export type TripAreaInput = z.infer<typeof tripAreaInput>;
 
 export const trip = z.object({
   id: z.string(),
@@ -307,9 +324,9 @@ export const trip = z.object({
    * Home base as a real PLACE — name, coordinates and place id together (#60
    * Q4 → B). `homeBase` above stays the NAME column so every shipped read path
    * (`tripSummary`, the dashboard card, the phone) is untouched; this is the
-   * anchor the planner's first-stop search biases to when there is no previous
-   * stop above it. One object on the wire, three nullable columns underneath —
-   * the same shape the stop write uses, and for the same reason
+   * anchor the planner's first-destination search biases to when there is no previous
+   * destination above it. One object on the wire, three nullable columns underneath —
+   * the same shape the destination write uses, and for the same reason
    * (`pickedCoordLabel`: half a coordinate is no coordinate).
    */
   homeBasePlace: place.nullable().default(null),
@@ -323,7 +340,7 @@ export const trip = z.object({
   homeBaseFromHousehold: z.boolean().optional(),
   /** #126 · Q4 A — where the trip is going; null/absent for a trip made
    * before it. Optional for the same reason. */
-  destination: tripDestination.nullable().optional(),
+  area: tripArea.nullable().optional(),
   startDate: isoDate,
   endDate: isoDate,
   status: tripStatus.default("planning"),
@@ -340,17 +357,17 @@ export const trip = z.object({
   defaultMode: travelMode.default("drive"),
   lodgingDefault: lodgingKind.nullable().default(null),
   rigOn: z.boolean().default(true),
-  /** How far from a stop a save may sit and still surface on this trip
+  /** How far from a destination a save may sit and still surface on this trip
    * (#111 Q7 B · `trips.surface_radius_mi`). Null → the 50 mi default. */
   surfaceRadiusMi: surfaceRadiusMi.nullable().default(null),
-  legs: z.array(leg).default([]),
+  chapters: z.array(chapter).default([]),
   /** Every hop of the journey, by `sortOrder` (#110 Q1 A). */
   segments: z.array(segment).default([]),
   /**
    * The idea SHELF (#80) — the trip's unattached maybes, the rows whose
-   * `stopId` is null. It sits beside `legs`, not inside it, because that is
-   * exactly what the column says: one row, one home. An idea attached to a stop
-   * keeps rendering under that stop (`stop.ideas`) and is NOT mirrored here.
+   * `destinationId` is null. It sits beside `chapters`, not inside it, because that is
+   * exactly what the column says: one row, one home. An idea attached to a destination
+   * keeps rendering under that destination (`destination.ideas`) and is NOT mirrored here.
    */
   ideas: z.array(idea).default([]),
 });
@@ -359,7 +376,7 @@ export type Trip = z.infer<typeof trip>;
 /**
  * The trip WRITE contract, derived from the grammar above rather than re-typed
  * beside it — so a new field lands in the schema once and the handlers inherit
- * it. `id`, `ownerId` and `legs` are never client-supplied.
+ * it. `id`, `ownerId` and `chapters` are never client-supplied.
  */
 
 /** `POST /api/trips`. `homeBase` defaults to null when omitted. */
@@ -380,11 +397,11 @@ export const tripCreateInput = trip.pick({
 }).extend({
   /**
    * #126 · Q4 A — "Where to?". Optional (an older client sends none); when
-   * present the server upserts the `destinations` row, points the trip at it and
-   * writes one stop spanning the whole trip on Leg 1. The picked coordinates
+   * present the server upserts the `areas` row, points the trip at it and
+   * writes one destination spanning the whole trip on Chapter 1. The picked coordinates
    * travel with it (vet MED): they are the "near …" anchor's point.
    */
-  destination: tripDestinationInput.nullable().optional(),
+  area: tripAreaInput.nullable().optional(),
 });
 export type TripCreateInput = z.infer<typeof tripCreateInput>;
 
@@ -414,20 +431,20 @@ export const tripPatchInput = trip
   .partial()
   .extend({
     /**
-     * #143 · Q8 A — phone Trip settings' Destination. Same picked-place shape as
-     * the create's; the server upserts the household's `destinations` row and
-     * repoints `trips.destination_id` (null clears it). Unlike the create, a
-     * PATCH writes NO stop — the itinerary is already the user's.
+     * #143 · Q8 A — phone Trip settings' Area. Same picked-place shape as
+     * the create's; the server upserts the household's `areas` row and
+     * repoints `trips.area_id` (null clears it). Unlike the create, a
+     * PATCH writes NO destination — the itinerary is already the user's.
      */
-    destination: tripDestinationInput.nullable().optional(),
+    area: tripAreaInput.nullable().optional(),
   });
 export type TripPatchInput = z.infer<typeof tripPatchInput>;
 
 /**
- * The leg + stop WRITE contract — derived from the grammar above for the same
+ * The chapter + destination WRITE contract — derived from the grammar above for the same
  * reason the trip one is: a field lands in the schema once and the handlers
  * inherit it. `id` and `sortOrder` are never client-supplied on a create (the
- * server appends), and `legs`/`stops`/`reservations`/`ideas` are never written
+ * server appends), and `chapters`/`destinations`/`reservations`/`ideas` are never written
  * through their parent.
  *
  * The id-shaped fields are tightened to `.uuid()` here rather than in the
@@ -436,37 +453,40 @@ export type TripPatchInput = z.infer<typeof tripPatchInput>;
  * shipped handlers already use (`api/reservations/route.ts:7`).
  */
 
-/** `POST /api/legs` — the "Add leg" button. The server appends the sortOrder. */
-export const legCreateInput = leg
-  .pick({ title: true })
-  .extend({ tripId: z.string().uuid() });
-export type LegCreateInput = z.infer<typeof legCreateInput>;
+/** `POST /api/chapters` — the "Add chapter" button. The server appends the
+ * sortOrder. #155 · the button sends `title: null` (an unnamed chapter, as a new
+ * trip's first one is) and the rename names it; an omitted title is null too. */
+export const chapterCreateInput = z.object({
+  title: chapter.shape.title.default(null),
+  tripId: z.string().uuid(),
+});
+export type ChapterCreateInput = z.infer<typeof chapterCreateInput>;
 
-/** `PATCH /api/legs/:id` — the inline rename. Order moves through reorder. */
-export const legPatchInput = leg.pick({ title: true }).partial();
-export type LegPatchInput = z.infer<typeof legPatchInput>;
+/** `PATCH /api/chapters/:id` — the inline rename. Order moves through reorder. */
+export const chapterPatchInput = chapter.pick({ title: true }).partial();
+export type ChapterPatchInput = z.infer<typeof chapterPatchInput>;
 
-/** `POST /api/trips/:id/legs/reorder` — "Move leg up/down" sends the whole new
+/** `POST /api/trips/:id/chapters/reorder` — "Move chapter up/down" sends the whole new
  * order, so the renumber is one transaction rather than a swap of two rows. */
-export const legReorderInput = z.object({
+export const chapterReorderInput = z.object({
   order: z.array(z.string().uuid()).min(1),
 });
-export type LegReorderInput = z.infer<typeof legReorderInput>;
+export type ChapterReorderInput = z.infer<typeof chapterReorderInput>;
 
-/** `POST /api/stops` — per-leg "Add stop". A stop is born floating unless the
+/** `POST /api/destinations` — per-chapter "Add destination". A destination is born floating unless the
  * caller already has dates for it; the server appends the sortOrder. */
-export const stopCreateInput = stop
+export const destinationCreateInput = destination
   .pick({ place: true, arriveDate: true, departDate: true })
-  .extend({ legId: z.string().uuid() });
-export type StopCreateInput = z.infer<typeof stopCreateInput>;
+  .extend({ chapterId: z.string().uuid() });
+export type DestinationCreateInput = z.infer<typeof destinationCreateInput>;
 
 /**
- * `PATCH /api/stops/:id` — the widened stop write. `placeName` is the rename
- * (the row menu edits the name, never the coordinates), `legId` is "Move to
- * leg", `sortOrder` is the floating-rail reorder, and both dates going null is
+ * `PATCH /api/destinations/:id` — the widened destination write. `placeName` is the rename
+ * (the row menu edits the name, never the coordinates), `chapterId` is "Move to
+ * chapter", `sortOrder` is the floating-rail reorder, and both dates going null is
  * "Unschedule". Every key optional: the menu sends one field at a time.
  */
-export const stopPatchInput = stop
+export const destinationPatchInput = destination
   .pick({
     arriveDate: true,
     departDate: true,
@@ -484,21 +504,21 @@ export const stopPatchInput = stop
      * coordinate: a lone latitude cannot be drawn, and a patch that could send
      * one would be a way to manufacture exactly that.
      *
-     * There is no `place` COLUMN — `updateStopFields` spreads its patch into
+     * There is no `place` COLUMN — `updateDestinationFields` spreads its patch into
      * drizzle's `.set()` — so the handler flattens this through
-     * `stopPatchColumns` (place-form.ts) before the mutation sees it. When a
+     * `destinationPatchColumns` (place-form.ts) before the mutation sees it. When a
      * body carries both keys the whole place wins; `placeName` is the cheap
      * rename and cannot outrank the thing that carries coordinates.
      */
     place,
-    legId: z.string().uuid(),
+    chapterId: z.string().uuid(),
   })
   .partial();
-export type StopPatchInput = z.infer<typeof stopPatchInput>;
+export type DestinationPatchInput = z.infer<typeof destinationPatchInput>;
 
 /**
  * The reservation + idea WRITE contract — the two LEAVES of the tree, derived
- * from the grammar for the same reason the trip/leg/stop ones are.
+ * from the grammar for the same reason the trip/chapter/destination ones are.
  *
  * Both creates carry the whole editable row rather than the handful of fields
  * the add form fills in, because a create is also how an UNDONE DELETE puts a
@@ -506,7 +526,7 @@ export type StopPatchInput = z.infer<typeof stopPatchInput>;
  * "Undo" re-POSTs the row it was holding rather than resurrecting the id. A
  * body that could not carry `rating`/`notes` would silently drop them.
  *
- * `id`, `stopId` (path/body-supplied) and `ideaId` (only `promote` sets it) are
+ * `id`, `destinationId` (path/body-supplied) and `ideaId` (only `promote` sets it) are
  * never client-editable, and `sortOrder` is the server's to append.
  */
 
@@ -515,18 +535,18 @@ export type StopPatchInput = z.infer<typeof stopPatchInput>;
 const instantInput = z.string().datetime({ offset: true }).nullable().default(null);
 
 /**
- * `POST /api/reservations` — the stop sheet's reservation form, a hop's Add
+ * `POST /api/reservations` — the destination sheet's reservation form, a hop's Add
  * flight / Add ferry (#104), and the undo.
  *
- * The parent is a STOP or a SEGMENT, exactly one (#110 Q2 A) — the refine
+ * The parent is a DESTINATION or a SEGMENT, exactly one (#110 Q2 A) — the refine
  * mirrors the `reservations_one_parent` CHECK, so a body naming both or
  * neither is a 400 at the boundary rather than a constraint error deeper in.
  * A segment-parented row carries its clock (`startsAt`/`endsAt`, each with its
  * IANA zone); the server re-times the segment from its bookings.
  *
- * `moveStop` is the Q8 A "Check out of … on … instead" fix: save the booking
- * AND move the stop's date to agree with it, in one transaction. Without it a
- * booking whose date disagrees with the stop is refused (409).
+ * `moveDestination` is the Q8 A "Check out of … on … instead" fix: save the booking
+ * AND move the destination's date to agree with it, in one transaction. Without it a
+ * booking whose date disagrees with the destination is refused (409).
  */
 export const reservationCreateInput = reservation
   .pick({
@@ -540,22 +560,25 @@ export const reservationCreateInput = reservation
     startsTz: true,
     endsTz: true,
     lodgingKind: true,
+    // #155 · Q4 A (vet HIGH) — explicit: `.pick()` is a closed list, and an
+    // unlisted key would parse away, saving every shuttle as a null kind.
+    transportKind: true,
   })
   .extend({
-    stopId: z.string().uuid().nullish(),
+    destinationId: z.string().uuid().nullish(),
     segmentId: z.string().uuid().nullish(),
     rating: rating.default(null),
     startsAt: instantInput,
     endsAt: instantInput,
-    moveStop: z.boolean().optional(),
+    moveDestination: z.boolean().optional(),
   })
   .superRefine((b, ctx) => {
-    const parents = (b.stopId ? 1 : 0) + (b.segmentId ? 1 : 0);
+    const parents = (b.destinationId ? 1 : 0) + (b.segmentId ? 1 : 0);
     if (parents !== 1) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["stopId"],
-        message: "exactly one of stopId / segmentId",
+        path: ["destinationId"],
+        message: "exactly one of destinationId / segmentId",
       });
     }
     // Half a clock is no clock: an instant with no zone cannot be shown as
@@ -597,6 +620,8 @@ export const reservationPatchInput = reservation
     // flight without an error.
     startsTz: true,
     endsTz: true,
+    // #155 · Q4 A — explicit for the same reason as the create's.
+    transportKind: true,
   })
   .extend({
     startsAt: z.string().datetime({ offset: true }).nullable(),
@@ -629,7 +654,7 @@ export type SegmentBookingsChoice = z.infer<typeof segmentBookingsChoice>;
 /**
  * `PATCH /api/segments/:id` (#104 · Q7 B) — a hop's mode switch. The mode is
  * the only thing a client writes on a segment: its ends are reconciled from
- * the stop sequence and its clock is re-timed from its bookings. `bookings`
+ * the destination sequence and its clock is re-timed from its bookings. `bookings`
  * (#129) answers the keep-or-remove prompt; absent reads as `keep`, the
  * choice that loses nothing.
  */
@@ -664,7 +689,7 @@ export type BoundaryBooking = z.infer<typeof boundaryBooking>;
 /**
  * `POST /api/trips/:id/boundary-flights` (#129 · Q10 A · vet HIGH) — Add flight
  * with Round trip on: BOTH boundary hops' bookings in one transactional save.
- * `outbound` lands on home → first stop; `return` on last stop → home, which
+ * `outbound` lands on home → first destination; `return` on last destination → home, which
  * the server creates when the trip has none (reconcileSegments never invents
  * one). Round trip off sends `return: null` and books the outbound alone.
  */
@@ -682,19 +707,19 @@ export type BoundaryFlightsInput = z.infer<typeof boundaryFlightsInput>;
 export type BoundaryFlightsBody = z.input<typeof boundaryFlightsInput>;
 
 /**
- * `POST /api/ideas` — the stop sheet's "Add idea", the shelf's "+ Add", the
+ * `POST /api/ideas` — the destination sheet's "Add idea", the shelf's "+ Add", the
  * Add-from-Places copy, and the undo.
  *
  * `tripId` is REQUIRED (#80): an idea belongs to the trip whether or not it is
- * attached to a stop, and that is the column every idea write is owner-scoped
- * on. `stopId` is nullable and defaults to null — a shelf idea is the create
- * with no stop in hand, and the handler's 404 arm proves the TRIP in that case.
+ * attached to a destination, and that is the column every idea write is owner-scoped
+ * on. `destinationId` is nullable and defaults to null — a shelf idea is the create
+ * with no destination in hand, and the handler's 404 arm proves the TRIP in that case.
  */
 export const ideaCreateInput = idea
   .pick({ title: true, status: true, place: true, notes: true, category: true })
   .extend({
     tripId: z.string().uuid(),
-    stopId: z.string().uuid().nullable().default(null),
+    destinationId: z.string().uuid().nullable().default(null),
     rating: rating.default(null),
     /** #113 · the undo re-POSTs it, and "Did it" is born with it. */
     again: again,
@@ -713,7 +738,7 @@ export const ideaCreateInput = idea
     areaLabel: z.string().nullable().optional(),
   });
 export type IdeaCreateInput = z.infer<typeof ideaCreateInput>;
-/** Pre-parse: what a client sends — `again`, `rating`, `stopId` may be omitted. */
+/** Pre-parse: what a client sends — `again`, `rating`, `destinationId` may be omitted. */
 export type IdeaCreateBody = z.input<typeof ideaCreateInput>;
 
 /**
@@ -728,20 +753,20 @@ export type IdeaCreateBody = z.input<typeof ideaCreateInput>;
  *
  * There is no `place` COLUMN — the handler flattens this through
  * `ideaPatchColumns` (leaf-form.ts) before the mutation sees it, exactly as the
- * stop write flattens through `stopPatchColumns`.
+ * destination write flattens through `destinationPatchColumns`.
  */
 export const ideaPatchInput = idea
   // #113 · `again` — the check-off sheet's Again / Once was enough.
   .pick({ status: true, rating: true, notes: true, place: true, category: true, again: true })
   .extend({
     /**
-     * The drop (#80). Unlike `place`, `stop_id` IS a real column, so this key
+     * The drop (#80). Unlike `place`, `destination_id` IS a real column, so this key
      * passes through `ideaPatchColumns` untouched. Three gestures write it: a
-     * stay-idea dropped on open days (the new stop's id), a do/eat idea dropped
-     * on a stop bar (that stop's id), and an attached idea dragged back to the
+     * stay-idea dropped on open days (the new destination's id), a do/eat idea dropped
+     * on a destination bar (that destination's id), and an attached idea dragged back to the
      * shelf (an EXPLICIT null). Absent still means "leave it alone".
      */
-    stopId: z.string().uuid().nullable(),
+    destinationId: z.string().uuid().nullable(),
   })
   .partial();
 export type IdeaPatchInput = z.infer<typeof ideaPatchInput>;
@@ -773,11 +798,11 @@ export type SaveAnchor = z.infer<typeof saveAnchor>;
 
 /**
  * The locality a save resolved to (#111 · docs/design/111 "One resolver"): a
- * `destinations` row, named "Bandon, OR" / "San José, Costa Rica", with its
+ * `areas` row, named "Bandon, OR" / "San José, Costa Rica", with its
  * region header ("Oregon" / "Costa Rica") and the locality's own coordinates —
  * the point an area save with no coordinates of its own is measured from.
  */
-export const saveDestination = z.object({
+export const saveArea = z.object({
   id: z.string(),
   name: z.string(),
   region: z.string().nullable().default(null),
@@ -785,7 +810,7 @@ export const saveDestination = z.object({
   lat: z.number().nullable().default(null),
   lng: z.number().nullable().default(null),
 });
-export type SaveDestination = z.infer<typeof saveDestination>;
+export type SaveArea = z.infer<typeof saveArea>;
 
 /**
  * The one-tap upgrade an offline note is offered after sync (#111 Q3 A): the
@@ -826,10 +851,10 @@ export const savedPlace = z.object({
   /** An area save's human label ("Bend, OR"). Null for place and pin saves. */
   areaLabel: z.string().nullable().default(null),
   /** Null = unanchored: no locality within 25 mi, or no provider key. */
-  destination: saveDestination.nullable().default(null),
+  area: saveArea.nullable().default(null),
   suggestedPlace: suggestedPlace.nullable().default(null),
   /** When the save was captured (`saves.created_at`, ISO) — the Saves tab's
-   * newest-first order inside a destination (#111 i2). Null from a server that
+   * newest-first order inside an area (#111 i2). Null from a server that
    * predates it. */
   createdAt: z.string().nullable().default(null),
 });
@@ -944,7 +969,7 @@ export const savedPlacePatch = savedPlaceFields
     /**
      * #111 Q3 A, "tap the strip": the save becomes its `suggested_place` — the
      * name, Place ID and point are copied, the anchor goes area → place, the
-     * destination is re-resolved and the suggestion is cleared. PATCH-only: it
+     * area is re-resolved and the suggestion is cleared. PATCH-only: it
      * is an action on a row that exists, never a create field.
      */
     upgradeToSuggested: z.literal(true).optional(),
@@ -969,7 +994,7 @@ export function normalizeSavedPlacePatch(patch: SavedPlacePatch): SavedPlacePatc
 
 /**
  * `GET /api/trips/:id/nearby-saves` (#111 i3 · docs/design/111 "Contracts"):
- * the saves within the trip's radius of a located stop, nearest first, and the
+ * the saves within the trip's radius of a located destination, nearest first, and the
  * next ring out. Computed by `nearbySaves` (planner/nearby-saves.ts).
  *
  * Each item carries the save's `place` as well as the design's display fields:
@@ -983,10 +1008,10 @@ export const nearbySave = z.object({
   status: savedPlaceStatus,
   rating,
   source: z.string().nullable(),
-  /** The save's OWN place — its own coordinates, never the destination's it
+  /** The save's OWN place — its own coordinates, never the area's it
    * was measured from, so the idea it becomes is exactly the save. */
   place,
-  nearestStop: z.object({ id: z.string(), name: z.string() }),
+  nearestDestination: z.object({ id: z.string(), name: z.string() }),
   /** At the shelf's precision: one decimal under 10 mi, whole miles above. */
   distanceMi: z.number(),
 });
@@ -1013,7 +1038,7 @@ export type NearbySaves = z.infer<typeof nearbySavesResponse>;
 
 /**
  * `GET /api/trips/:id/for-next-time` (#113 · #107 "Last time here", Q7 B ·
- * Q8 B): one card per PAST trip × destination that this trip goes back near.
+ * Q8 B): one card per PAST trip × area that this trip goes back near.
  * Computed by `forNextTime` (planner/for-next-time.ts) — the web page calls
  * the same function server-side, so the phone and the web draw one answer.
  */
@@ -1034,10 +1059,10 @@ export type NextTimeRow = z.infer<typeof nextTimeRow>;
 
 export const nextTimeCard = z.object({
   /** The locality the saves resolved to. `id` is null when a save carries no
-   * destination (no provider key) and the card is named by its stop instead. */
-  destination: z.object({ id: z.string().nullable(), name: z.string() }),
-  /** This trip's stop nearest the destination — "you're back {its dates}". */
-  stop: z.object({
+   * area (no provider key) and the card is named by its destination instead. */
+  area: z.object({ id: z.string().nullable(), name: z.string() }),
+  /** This trip's destination nearest the area — "you're back {its dates}". */
+  destination: z.object({
     id: z.string(),
     name: z.string(),
     arriveDate: isoDate.nullable(),
@@ -1072,10 +1097,10 @@ export const dismissSavesInput = z.object({
 });
 export type DismissSavesInput = z.infer<typeof dismissSavesInput>;
 
-/** A stop is "scheduled" iff it has both dates. */
+/** A destination is "scheduled" iff it has both dates. */
 export function isScheduled(
-  s: Pick<Stop, "arriveDate" | "departDate">,
-): s is Stop & { arriveDate: IsoDate; departDate: IsoDate } {
+  s: Pick<Destination, "arriveDate" | "departDate">,
+): s is Destination & { arriveDate: IsoDate; departDate: IsoDate } {
   return s.arriveDate !== null && s.departDate !== null;
 }
 
@@ -1097,8 +1122,8 @@ export const tripSummary = z.object({
   rating,
   note: z.string().nullable(),
   days: z.number().int(),
-  stops: z.number().int(),
-  legs: z.number().int(),
+  destinations: z.number().int(),
+  chapters: z.number().int(),
   miles: z.number(),
   /** At least one drive on the trip fell back to a straight-line estimate, so
    * `miles` is not (yet) a road distance. The card renders the neutral

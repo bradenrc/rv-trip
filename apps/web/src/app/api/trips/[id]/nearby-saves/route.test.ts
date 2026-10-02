@@ -16,9 +16,9 @@ import { ctx, describeDb, req } from "@/test/db";
 /** The Oregon Coast trip: Astoria + Newport, both floating. */
 async function coastTrip(owner = DEV_OWNER) {
   const trip = await fx.trip({ owner, title: "Oregon Coast, summer '27", homeBase: null });
-  const leg = await fx.leg({ tripId: trip.id, title: "Coast" });
-  await fx.stop({ legId: leg.id, placeName: "Astoria, OR", lat: 46.1879, lng: -123.8313, arriveDate: null, departDate: null, sortOrder: 0 });
-  await fx.stop({ legId: leg.id, placeName: "Newport, OR", lat: 44.6365, lng: -124.053, arriveDate: null, departDate: null, sortOrder: 1 });
+  const chapter = await fx.chapter({ tripId: trip.id, title: "Coast" });
+  await fx.destination({ chapterId: chapter.id, placeName: "Astoria, OR", lat: 46.1879, lng: -123.8313, arriveDate: null, departDate: null, sortOrder: 0 });
+  await fx.destination({ chapterId: chapter.id, placeName: "Newport, OR", lat: 44.6365, lng: -124.053, arriveDate: null, departDate: null, sortOrder: 1 });
   return trip;
 }
 
@@ -46,7 +46,7 @@ describeDb("GET /api/trips/[id]/nearby-saves · POST dismissed-saves · PATCH su
     await coastSaves();
     const body = await nearby(trip.id);
     expect(body.radiusMi).toBe(50);
-    expect(body.items.map((i) => [i.name, i.nearestStop.name, i.distanceMi])).toEqual([
+    expect(body.items.map((i) => [i.name, i.nearestDestination.name, i.distanceMi])).toEqual([
       ["South Beach State Park", "Newport, OR", 1.9],
       ["Fort Stevens State Park", "Astoria, OR", 6.2],
       ["Beverly Beach State Park", "Newport, OR", 6.2],
@@ -55,12 +55,12 @@ describeDb("GET /api/trips/[id]/nearby-saves · POST dismissed-saves · PATCH su
     expect(body.beyond).toEqual({ radiusMi: 100, count: 1, nearestMi: 50.3, nearestName: "Cape Lookout State Park" });
   });
 
-  it("measures an area save with no coordinates from its destination", async () => {
+  it("measures an area save with no coordinates from its area", async () => {
     const trip = await coastTrip();
-    const newport = await fx.destination({ googlePlaceId: "ChIJnewport", name: "Newport, OR", lat: 44.6368, lng: -124.0535 });
-    await fx.savedPlace({ name: "taco stand", anchor: "area", areaLabel: "Newport, OR", destinationId: newport.id, type: "dining" });
+    const newport = await fx.area({ googlePlaceId: "ChIJnewport", name: "Newport, OR", lat: 44.6368, lng: -124.0535 });
+    await fx.savedPlace({ name: "taco stand", anchor: "area", areaLabel: "Newport, OR", areaId: newport.id, type: "dining" });
     const body = await nearby(trip.id);
-    expect(body.items.map((i) => [i.name, i.nearestStop.name])).toEqual([["taco stand", "Newport, OR"]]);
+    expect(body.items.map((i) => [i.name, i.nearestDestination.name])).toEqual([["taco stand", "Newport, OR"]]);
   });
 
   it("never surfaces another owner's saves", async () => {
@@ -163,7 +163,7 @@ describeDb("GET /api/trips/[id]/nearby-saves · POST dismissed-saves · PATCH su
     const idea = await res.json();
     expect(idea).toMatchObject({
       tripId: trip.id,
-      stopId: null,
+      destinationId: null,
       title: "South Beach State Park",
       category: "stay",
       place: { name: "South Beach State Park", lat: 44.6094, lng: -124.0631 },

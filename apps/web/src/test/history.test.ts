@@ -6,7 +6,7 @@ import { DEV_OWNER, OTHER_OWNER, fx } from "@rv-trip/db/testing";
 import { GET as GET_HISTORY } from "@/app/api/history/route";
 import { GET as GET_PLACES } from "@/app/api/places/route";
 import { GET as GET_TRIP } from "@/app/api/trips/[id]/route";
-import { PATCH as PATCH_STOP } from "@/app/api/stops/[id]/route";
+import { PATCH as PATCH_DESTINATION } from "@/app/api/destinations/[id]/route";
 import { ctx, describeDb, req } from "@/test/db";
 
 /**
@@ -24,7 +24,7 @@ import { ctx, describeDb, req } from "@/test/db";
  * on them would be flaky by construction.
  */
 
-type Entity = "stop" | "idea" | "reservation" | "save";
+type Entity = "destination" | "idea" | "reservation" | "save";
 
 /** One planted change_log row. `at` is minutes into 2026-09-12, so "newest
  * first" is readable in the assertion rather than inferred from a clock. */
@@ -64,10 +64,10 @@ describeDb("GET /api/history", () => {
   it("returns at most five rows, newest first", async () => {
     const loop = await fx.pacificNorthwestLoop();
     for (const minute of [1, 2, 3, 4, 5, 6, 7]) {
-      await log("stop", loop.astoria.id, { minute, to: String(minute) });
+      await log("destination", loop.astoria.id, { minute, to: String(minute) });
     }
 
-    const res = await history("stop", loop.astoria.id);
+    const res = await history("destination", loop.astoria.id);
     const rows = await res.json();
 
     expect(res.status).toBe(200);
@@ -78,9 +78,9 @@ describeDb("GET /api/history", () => {
 
   it("answers the wire shape the popover renders", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    await log("stop", loop.astoria.id, { field: "notes", from: null, to: "Nice riverwalk", minute: 4 });
+    await log("destination", loop.astoria.id, { field: "notes", from: null, to: "Nice riverwalk", minute: 4 });
 
-    const [row] = await (await history("stop", loop.astoria.id)).json();
+    const [row] = await (await history("destination", loop.astoria.id)).json();
 
     expect(changeHistoryRow.parse(row)).toEqual({
       field: "notes",
@@ -95,40 +95,40 @@ describeDb("GET /api/history", () => {
   it("answers an empty list for an owned entity nothing has ever changed", async () => {
     const loop = await fx.pacificNorthwestLoop();
 
-    const res = await history("stop", loop.newport.id);
+    const res = await history("destination", loop.newport.id);
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
   });
 
-  it("404s a stop that belongs to another household", async () => {
+  it("404s a destination that belongs to another household", async () => {
     const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
-    await log("stop", theirs.astoria.id, { household: OTHER_OWNER, minute: 1 });
+    await log("destination", theirs.astoria.id, { household: OTHER_OWNER, minute: 1 });
 
-    const res = await history("stop", theirs.astoria.id);
+    const res = await history("destination", theirs.astoria.id);
 
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not found" });
   });
 
   it("404s a well-formed id that is no entity at all", async () => {
-    expect((await history("stop", NO_SUCH_UUID)).status).toBe(404);
+    expect((await history("destination", NO_SUCH_UUID)).status).toBe(404);
   });
 
   it("refuses a malformed id and an unknown entity at the parse", async () => {
     const loop = await fx.pacificNorthwestLoop();
     // A non-uuid would reach a uuid column and 500 at the driver, so it is
     // turned away here — the shipped precedent is api/places/[id]'s `placeId`.
-    expect((await history("stop", "not-a-uuid")).status).toBe(400);
+    expect((await history("destination", "not-a-uuid")).status).toBe(400);
     expect((await history("trip", loop.trip.id)).status).toBe(400);
     expect((await GET_HISTORY(new Request("http://test.local/api/history"))).status).toBe(400);
   });
 
-  it("never serves another household's rows about MY stop", async () => {
+  it("never serves another household's rows about MY destination", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    await log("stop", loop.astoria.id, { household: OTHER_OWNER, minute: 9, to: "5" });
+    await log("destination", loop.astoria.id, { household: OTHER_OWNER, minute: 9, to: "5" });
 
-    const res = await history("stop", loop.astoria.id);
+    const res = await history("destination", loop.astoria.id);
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
@@ -164,7 +164,7 @@ describeDb("GET /api/history", () => {
     const theirs = await fx.pacificNorthwestLoop(OTHER_OWNER);
     const res = await GET_HISTORY(
       new Request(
-        `http://test.local/api/history?entity=stop&id=${theirs.astoria.id}&household=${OTHER_OWNER}`,
+        `http://test.local/api/history?entity=destination&id=${theirs.astoria.id}&household=${OTHER_OWNER}`,
       ),
     );
     expect(res.status).toBe(404);
@@ -177,37 +177,37 @@ describeDb("lastChange on the wire", () => {
 
     // Newport is seeded at 4 stars, so 4 again would be the no-op that writes
     // nothing (i5) — the byline only appears when a value actually moved.
-    const patched = await PATCH_STOP(req({ rating: 2 }, "PATCH"), ctx(loop.newport.id));
+    const patched = await PATCH_DESTINATION(req({ rating: 2 }, "PATCH"), ctx(loop.newport.id));
     expect(patched.status).toBe(204);
 
-    const stop = (await bundle(loop.trip.id)).trip.legs
-      .flatMap((l) => l.stops)
+    const destination = (await bundle(loop.trip.id)).trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === loop.newport.id)!;
 
-    expect(stop.lastChange).toMatchObject({ field: "rating", memberName: "dev-user" });
-    expect(Date.parse(stop.lastChange!.at)).not.toBeNaN();
+    expect(destination.lastChange).toMatchObject({ field: "rating", memberName: "dev-user" });
+    expect(Date.parse(destination.lastChange!.at)).not.toBeNaN();
   });
 
-  it("is null on a stop nothing has ever changed", async () => {
+  it("is null on a destination nothing has ever changed", async () => {
     const loop = await fx.pacificNorthwestLoop();
 
-    const stop = (await bundle(loop.trip.id)).trip.legs
-      .flatMap((l) => l.stops)
+    const destination = (await bundle(loop.trip.id)).trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === loop.bend.id)!;
 
-    expect(stop.lastChange).toBeNull();
+    expect(destination.lastChange).toBeNull();
   });
 
   it("carries the NEWEST row, not the first one written", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    await log("stop", loop.astoria.id, { field: "rating", minute: 1, member: "braden" });
-    await log("stop", loop.astoria.id, { field: "notes", minute: 40, member: "jess" });
+    await log("destination", loop.astoria.id, { field: "rating", minute: 1, member: "braden" });
+    await log("destination", loop.astoria.id, { field: "notes", minute: 40, member: "jess" });
 
-    const stop = (await bundle(loop.trip.id)).trip.legs
-      .flatMap((l) => l.stops)
+    const destination = (await bundle(loop.trip.id)).trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === loop.astoria.id)!;
 
-    expect(stop.lastChange).toEqual({
+    expect(destination.lastChange).toEqual({
       field: "notes",
       memberName: "jess",
       at: "2026-09-12T18:40:00.000Z",
@@ -219,17 +219,17 @@ describeDb("lastChange on the wire", () => {
     await log("reservation", loop.reservation.id, { field: "notes", minute: 5 });
     await log("idea", loop.idea.id, { field: "status", minute: 6 });
 
-    const stop = (await bundle(loop.trip.id)).trip.legs
-      .flatMap((l) => l.stops)
+    const destination = (await bundle(loop.trip.id)).trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === loop.astoria.id)!;
 
-    expect(stop.reservations[0]!.lastChange).toMatchObject({ field: "notes" });
-    expect(stop.ideas[0]!.lastChange).toMatchObject({ field: "status" });
+    expect(destination.reservations[0]!.lastChange).toMatchObject({ field: "notes" });
+    expect(destination.ideas[0]!.lastChange).toMatchObject({ field: "status" });
   });
 
-  it("rides on a SHELF idea, which hangs off the trip and not a stop", async () => {
+  it("rides on a SHELF idea, which hangs off the trip and not a destination", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    const shelf = await fx.idea({ tripId: loop.trip.id, stopId: null, title: "Blue Scorcher" });
+    const shelf = await fx.idea({ tripId: loop.trip.id, destinationId: null, title: "Blue Scorcher" });
     await log("idea", shelf.id, { field: "rating", minute: 7 });
 
     const trip = (await bundle(loop.trip.id)).trip;
@@ -252,14 +252,14 @@ describeDb("lastChange on the wire", () => {
     });
   });
 
-  it("never joins another household's row onto my stop", async () => {
+  it("never joins another household's row onto my destination", async () => {
     const loop = await fx.pacificNorthwestLoop();
-    await log("stop", loop.astoria.id, { household: OTHER_OWNER, minute: 50 });
+    await log("destination", loop.astoria.id, { household: OTHER_OWNER, minute: 50 });
 
-    const stop = (await bundle(loop.trip.id)).trip.legs
-      .flatMap((l) => l.stops)
+    const destination = (await bundle(loop.trip.id)).trip.chapters
+      .flatMap((l) => l.destinations)
       .find((s) => s.id === loop.astoria.id)!;
 
-    expect(stop.lastChange).toBeNull();
+    expect(destination.lastChange).toBeNull();
   });
 });

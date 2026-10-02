@@ -7,7 +7,7 @@ export const Campground = () => (
     <ReservationCard
       reservation={{
         id: "r1",
-        stopId: "s1",
+        destinationId: "s1",
         ideaId: null,
         type: "campground",
         name: "Astoria/Warrenton KOA",
@@ -31,7 +31,7 @@ export const Tour = () => (
     <ReservationCard
       reservation={{
         id: "r2",
-        stopId: "s1",
+        destinationId: "s1",
         ideaId: null,
         type: "tour",
         name: "Columbia River Maritime Museum",

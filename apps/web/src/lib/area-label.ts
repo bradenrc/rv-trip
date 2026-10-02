@@ -1,4 +1,4 @@
-import type { LatLng, ResolvedDestination } from "@rv-trip/core";
+import type { LatLng, ResolvedArea } from "@rv-trip/core";
 
 /**
  * The web capture's area label (#111 i4 · docs/design/111 "Web parity"). The
@@ -13,13 +13,13 @@ import type { LatLng, ResolvedDestination } from "@rv-trip/core";
  */
 export async function areaLabelNear(
   getPosition: () => Promise<LatLng | null>,
-  resolve: (near: LatLng) => Promise<ResolvedDestination | null>,
+  resolve: (near: LatLng) => Promise<ResolvedArea | null>,
 ): Promise<string | null> {
   try {
     const here = await getPosition();
     if (!here) return null;
-    const destination = await resolve(here);
-    return destination?.name ?? null;
+    const area = await resolve(here);
+    return area?.name ?? null;
   } catch {
     return null;
   }
@@ -38,14 +38,14 @@ export function browserPosition(): Promise<LatLng | null> {
   });
 }
 
-/** `GET /api/destinations/resolve?near=lat,lng` — the destination or null. */
-export async function resolveDestinationNear(near: LatLng): Promise<ResolvedDestination | null> {
-  const res = await fetch(`/api/destinations/resolve?near=${near.lat},${near.lng}`);
+/** `GET /api/areas/resolve?near=lat,lng` — the area or null. */
+export async function resolveAreaNear(near: LatLng): Promise<ResolvedArea | null> {
+  const res = await fetch(`/api/areas/resolve?near=${near.lat},${near.lng}`);
   if (!res.ok) return null;
-  return (await res.json()) as ResolvedDestination | null;
+  return (await res.json()) as ResolvedArea | null;
 }
 
 /** The escape row's label, from the browser: geolocation, then the resolver. */
 export function browserAreaLabel(): Promise<string | null> {
-  return areaLabelNear(browserPosition, resolveDestinationNear);
+  return areaLabelNear(browserPosition, resolveAreaNear);
 }

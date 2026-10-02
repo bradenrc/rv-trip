@@ -12,7 +12,7 @@ import { ctx, describeDb, req } from "@/test/db";
 
 /**
  * Epic #130 · dogfood pass 1, through the REAL handlers — the Bellingham
- * replay: create with a destination (#126), the household home base (#126 ·
+ * replay: create with an area (#126), the household home base (#126 ·
  * Q5 A), round trip in one save (#129 · Q10 A), the reversible mode switch
  * (#129 · Q11 A) and a hop booking's Edit (#124).
  */
@@ -24,7 +24,7 @@ async function createBellingham(extra: Record<string, unknown> = {}) {
   const res = await POST_TRIP(
     req({
       title: "Bellingham Long Weekend",
-      destination: BELLINGHAM,
+      area: BELLINGHAM,
       startDate: "2026-10-10",
       endDate: "2026-10-13",
       defaultMode: "fly",
@@ -56,41 +56,41 @@ const RETURN = {
   endsTz: "America/Boise",
 };
 
-describeDb("#126 · create writes the destination + one spanning stop", () => {
-  it("upserts destinations, sets trips.destination_id, and one stop equals the trip span", async () => {
+describeDb("#126 · create writes the area + one spanning destination", () => {
+  it("upserts areas, sets trips.area_id, and one destination equals the trip span", async () => {
     await fx.prefs({ homeBase: "Boise, ID", homeBaseLat: BOISE.lat, homeBaseLng: BOISE.lng });
     const trip = await createBellingham();
 
     const row = await read.trip(trip.id);
-    expect(row!.destinationId).not.toBeNull();
-    const dest = await db.query.destinations.findFirst({
-      where: (d, { eq }) => eq(d.id, row!.destinationId!),
+    expect(row!.areaId).not.toBeNull();
+    const dest = await db.query.areas.findFirst({
+      where: (d, { eq }) => eq(d.id, row!.areaId!),
     });
     expect(dest).toMatchObject({ ownerId: DEV_OWNER, googlePlaceId: "ChIJbham", lat: 48.7519 });
 
-    const stops = trip.legs.flatMap((l) => l.stops);
-    expect(stops).toHaveLength(1);
-    expect(stops[0]).toMatchObject({
+    const destinations = trip.chapters.flatMap((l) => l.destinations);
+    expect(destinations).toHaveLength(1);
+    expect(destinations[0]).toMatchObject({
       place: { name: "Bellingham, WA", lat: 48.7519, lng: -122.4787, googlePlaceId: "ChIJbham" },
       arriveDate: "2026-10-10",
       departDate: "2026-10-13",
     });
-    expect(trip.destination).toMatchObject({ name: "Bellingham, WA", lat: 48.7519 });
+    expect(trip.area).toMatchObject({ name: "Bellingham, WA", lat: 48.7519 });
 
     // A second trip to the same place REUSES the row.
     const again = await createBellingham({ title: "Bellingham again" });
-    expect((await read.trip(again.id))!.destinationId).toBe(row!.destinationId);
+    expect((await read.trip(again.id))!.areaId).toBe(row!.areaId);
   });
 
   it("home base not sent → the household's; both boundary hops exist on the fresh trip (vet HIGH ×2)", async () => {
     await fx.prefs({ homeBase: "Boise, ID", homeBaseLat: BOISE.lat, homeBaseLng: BOISE.lng });
     const trip = await createBellingham();
-    const stopId = trip.legs[0]!.stops[0]!.id;
+    const destinationId = trip.chapters[0]!.destinations[0]!.id;
     expect(trip.homeBase).toBe("Boise, ID");
     expect(trip.homeBaseFromHousehold).toBe(true);
-    expect((await read.segments(trip.id)).map((s) => [s.fromStopId, s.toStopId, s.mode])).toEqual([
-      [null, stopId, "fly"],
-      [stopId, null, "fly"],
+    expect((await read.segments(trip.id)).map((s) => [s.fromDestinationId, s.toDestinationId, s.mode])).toEqual([
+      [null, destinationId, "fly"],
+      [destinationId, null, "fly"],
     ]);
     // …which is what paints Oct 10 and Oct 13 as ✈ (#124).
     expect(timelineModel(await bundle(trip.id)).rhythm.map((c) => c.mode ?? c.kind)).toEqual([
@@ -101,7 +101,7 @@ describeDb("#126 · create writes the destination + one spanning stop", () => {
     ]);
   });
 
-  it("no home base anywhere → the stop, and no hops invented", async () => {
+  it("no home base anywhere → the destination, and no hops invented", async () => {
     const trip = await createBellingham();
     expect(trip.homeBase).toBeNull();
     expect(await read.segments(trip.id)).toHaveLength(0);
@@ -128,7 +128,7 @@ describeDb("#126 · Q5 A · home base: trip override first, then user_prefs", ()
     expect(await read.segments(trip.id)).toHaveLength(0);
     expect((await PUT_PREFS(req({ homeBasePlace: BOISE }, "PUT"))).status).toBe(200);
     const hops = await read.segments(trip.id);
-    expect(hops.map((s) => [s.fromStopId, s.toStopId])).toEqual([[null, trip.legs[0]!.stops[0]!.id]]);
+    expect(hops.map((s) => [s.fromDestinationId, s.toDestinationId])).toEqual([[null, trip.chapters[0]!.destinations[0]!.id]]);
   });
 });
 
@@ -140,28 +140,28 @@ describeDb("#129 · Q10 A · round trip in one request", () => {
     expect(res.status).toBe(201);
     const body = (await res.json()) as Trip;
     const [out, home] = body.segments;
-    expect(out).toMatchObject({ fromStopId: null, mode: "fly", departAt: OUTBOUND.startsAt });
+    expect(out).toMatchObject({ fromDestinationId: null, mode: "fly", departAt: OUTBOUND.startsAt });
     expect(out!.reservations.map((r) => r.name)).toEqual(["AS 2291 BOI→BLI"]);
-    expect(home).toMatchObject({ toStopId: null, mode: "fly", departAt: RETURN.startsAt });
+    expect(home).toMatchObject({ toDestinationId: null, mode: "fly", departAt: RETURN.startsAt });
     expect(home!.reservations.map((r) => r.name)).toEqual(["AS 2298 BLI→BOI"]);
   });
 
   it("creates the → home hop when the trip has none (vet HIGH)", async () => {
-    // A trip made WITHOUT a destination, its stop added later: reconcile never
+    // A trip made WITHOUT an area, its destination added later: reconcile never
     // invents a → home row, so the round trip must.
     const trip = await fx.trip({ homeBase: "Boise, ID", startDate: "2026-10-10", endDate: "2026-10-13", defaultMode: "fly" });
-    const leg = await fx.leg({ tripId: trip.id });
-    const bham = await fx.stop({ legId: leg.id, placeName: "Bellingham, WA", arriveDate: "2026-10-10", departDate: "2026-10-13" });
-    await fx.segment({ tripId: trip.id, fromStopId: null, toStopId: bham.id, mode: "fly" });
+    const chapter = await fx.chapter({ tripId: trip.id });
+    const bham = await fx.destination({ chapterId: chapter.id, placeName: "Bellingham, WA", arriveDate: "2026-10-10", departDate: "2026-10-13" });
+    await fx.segment({ tripId: trip.id, fromDestinationId: null, toDestinationId: bham.id, mode: "fly" });
     const res = await POST_BOUNDARY(req({ roundTrip: true, outbound: OUTBOUND, return: RETURN }), ctx(trip.id));
     expect(res.status).toBe(201);
-    expect((await read.segments(trip.id)).map((s) => [s.fromStopId, s.toStopId])).toEqual([
+    expect((await read.segments(trip.id)).map((s) => [s.fromDestinationId, s.toDestinationId])).toEqual([
       [null, bham.id],
       [bham.id, null],
     ]);
   });
 
-  it("refuses a flight that disagrees with the stop — nothing written; 404 for another owner's trip", async () => {
+  it("refuses a flight that disagrees with the destination — nothing written; 404 for another owner's trip", async () => {
     await fx.prefs({ homeBase: "Boise, ID", homeBaseLat: BOISE.lat, homeBaseLng: BOISE.lng });
     const trip = await createBellingham();
     const early = { ...RETURN, startsAt: "2026-10-13T01:40:00.000Z", endsAt: "2026-10-13T03:05:00.000Z" };
@@ -180,7 +180,7 @@ describeDb("#129 · Q11 A · PATCH segment keep / remove", () => {
     await fx.prefs({ homeBase: "Boise, ID", homeBaseLat: BOISE.lat, homeBaseLng: BOISE.lng });
     const trip = await createBellingham();
     await POST_BOUNDARY(req({ roundTrip: true, outbound: OUTBOUND, return: RETURN }), ctx(trip.id));
-    const home = (await read.segments(trip.id)).find((s) => s.toStopId === null)!;
+    const home = (await read.segments(trip.id)).find((s) => s.toDestinationId === null)!;
     return { trip, home };
   }
 
@@ -214,7 +214,7 @@ describeDb("#124 · a hop booking PATCH updates it (vet HIGH: the clock is no lo
     await fx.prefs({ homeBase: "Boise, ID", homeBaseLat: BOISE.lat, homeBaseLng: BOISE.lng });
     const trip = await createBellingham();
     await POST_BOUNDARY(req({ roundTrip: false, outbound: OUTBOUND }), ctx(trip.id));
-    const out = (await read.segments(trip.id)).find((s) => s.fromStopId === null)!;
+    const out = (await read.segments(trip.id)).find((s) => s.fromDestinationId === null)!;
     const [booking] = await read.segmentBookings(out.id);
     const later = "2026-10-10T15:05:00.000Z"; // 09:05 MDT
     const res = await PATCH_RES(
@@ -227,11 +227,11 @@ describeDb("#124 · a hop booking PATCH updates it (vet HIGH: the clock is no lo
     expect((await read.segments(trip.id)).find((s) => s.id === out.id)!.departAt!.toISOString()).toBe(later);
   });
 
-  it("a clock with no zone is a 400; a clock that misses the stop's day is a 409", async () => {
+  it("a clock with no zone is a 400; a clock that misses the destination's day is a 409", async () => {
     await fx.prefs({ homeBase: "Boise, ID", homeBaseLat: BOISE.lat, homeBaseLng: BOISE.lng });
     const trip = await createBellingham();
     await POST_BOUNDARY(req({ roundTrip: false, outbound: OUTBOUND }), ctx(trip.id));
-    const out = (await read.segments(trip.id)).find((s) => s.fromStopId === null)!;
+    const out = (await read.segments(trip.id)).find((s) => s.fromDestinationId === null)!;
     const [booking] = await read.segmentBookings(out.id);
     expect((await PATCH_RES(req({ startsAt: "2026-10-10T15:05:00.000Z" }, "PATCH"), ctx(booking!.id))).status).toBe(400);
     const dayLate = await PATCH_RES(

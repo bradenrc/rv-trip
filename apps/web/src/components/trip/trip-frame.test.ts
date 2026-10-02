@@ -48,7 +48,7 @@ describe("#131 · TripPlanner renders Itinerary · Ideas · Journal", () => {
 });
 
 describe("#126 · every trip-context picker reads searchAnchor, never the home base", () => {
-  for (const f of ["TripPlanner.tsx", "RouteView.tsx", "StopDetailSheet.tsx"]) {
+  for (const f of ["TripPlanner.tsx", "RouteView.tsx", "DestinationDetailSheet.tsx"]) {
     it(`${f} has no nearOf(…, homeBasePlace)`, () => {
       const s = src(f);
       expect(s).not.toMatch(/nearOf\(/);

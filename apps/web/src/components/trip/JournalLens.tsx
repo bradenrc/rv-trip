@@ -73,17 +73,17 @@ export function JournalLens({
 
       <div className="flex flex-col gap-2">
         {journalIsEmpty(j) && <p className="m-0 text-[13px] text-rv-ink-faded">{JOURNAL_EMPTY_COPY}</p>}
-        {j.stops.map((g) => (
-          <div key={g.stop.id} className="flex flex-col gap-2">
+        {j.destinations.map((g) => (
+          <div key={g.destination.id} className="flex flex-col gap-2">
             <div className="flex items-baseline justify-between gap-2 px-0.5 pt-1">
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <b className="text-[15px] text-rv-ink">{g.stop.place.name}</b>
+                <b className="text-[15px] text-rv-ink">{g.destination.place.name}</b>
                 {g.rating !== null && <Stars value={g.rating} size={13} />}
                 <AgainBadge again={g.again} />
               </span>
-              {g.stop.arriveDate && g.stop.departDate && (
+              {g.destination.arriveDate && g.destination.departDate && (
                 <span className="flex-none font-mono text-[11px] text-rv-ink-faded">
-                  {dateRange(g.stop.arriveDate, g.stop.departDate)}
+                  {dateRange(g.destination.arriveDate, g.destination.departDate)}
                 </span>
               )}
             </div>

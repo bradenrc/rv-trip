@@ -15,14 +15,14 @@ import {
   stayKindIsFromGoogle,
   stayKindType,
   stepNights,
-  orderedStops,
+  orderedDestinations,
   withStayKind,
   type DateRangeValue,
   type LodgingKind,
   type PickedPlace,
   type ReservationDraft,
   type SearchAnchor,
-  type Stop,
+  type Destination,
   type Trip,
 } from "@rv-trip/core";
 import { CategoryTile, FieldLabel, RangePicker, SegmentedControl } from "@rv-trip/ui";
@@ -34,10 +34,10 @@ import { KIND_OPTIONS } from "./stay-kinds";
 /**
  * #128 · Q8 A · Q9 A — the name field of a stay IS an anchored search.
  *
- * The chip says where the search leans (#126's `searchAnchor`: this stop, else
- * the trip's destination, else it ASKS — never the caller's IP). Results are
+ * The chip says where the search leans (#126's `searchAnchor`: this destination, else
+ * the trip's area, else it ASKS — never the caller's IP). Results are
  * lodging first; the list's last row, "Show all places, not just lodging",
- * drops the type. Shared by the Add stay sheet and the stop sheet's Stay form
+ * drops the type. Shared by the Add stay sheet and the destination sheet's Stay form
  * (the Reservations Stay form "reuses it").
  */
 export function StayPlaceField({
@@ -74,48 +74,48 @@ export function StayPlaceField({
   );
 }
 
-/** The stop a stay lands on when none was pressed: the first one with no stay
- * yet, else the first stop. */
-function defaultStop(trip: Trip): Stop | null {
-  const stops = orderedStops(trip);
-  const bare = stops.find((s) => !s.reservations.some((r) => r.type === "lodging" || r.type === "campground"));
-  return bare ?? stops[0] ?? null;
+/** The destination a stay lands on when none was pressed: the first one with no stay
+ * yet, else the first destination. */
+function defaultDestination(trip: Trip): Destination | null {
+  const destinations = orderedDestinations(trip);
+  const bare = destinations.find((s) => !s.reservations.some((r) => r.type === "lodging" || r.type === "campground"));
+  return bare ?? destinations[0] ?? null;
 }
 
 /**
  * The first-class Add stay sheet (#128 · Q8 A): two doors — Itinerary ▸ Add ▸
- * Stay (`stopId` null) and a stop card's "+ Add stay" (`stopId` set). Step 1
- * is the anchored lodging search; step 2 the dates, defaulting to the stop's
+ * Stay (`destinationId` null) and a destination card's "+ Add stay" (`destinationId` set). Step 1
+ * is the anchored lodging search; step 2 the dates, defaulting to the destination's
  * span with a nights stepper, then Save.
  */
 export function AddStaySheet({
   trip,
-  stopId,
+  destinationId,
   onClose,
   onSave,
   onSaveIdea,
 }: {
   trip: Trip;
-  /** The stop the stay is for; null → the sheet picks one (or makes one). */
-  stopId: string | null;
+  /** The destination the stay is for; null → the sheet picks one (or makes one). */
+  destinationId: string | null;
   onClose: () => void;
-  /** Resolves true when the stay landed. `stopId` null = no stop yet: the
+  /** Resolves true when the stay landed. `destinationId` null = no destination yet: the
    * caller creates one from the place and these dates first. */
   onSave: (input: {
-    stopId: string | null;
+    destinationId: string | null;
     place: PickedPlace;
     /** The stay as the one reservation form holds it — the caller builds the
-     * POST body with `reservationDraftInput` once the stop id is known. */
+     * POST body with `reservationDraftInput` once the destination id is known. */
     draft: ReservationDraft;
   }) => Promise<boolean>;
   /** "Just considering? Save it as an idea instead." */
   onSaveIdea: (place: PickedPlace | null) => void;
 }) {
-  const stops = orderedStops(trip);
-  const [targetId, setTargetId] = useState<string | null>(stopId ?? defaultStop(trip)?.id ?? null);
-  const target = stops.find((s) => s.id === targetId) ?? null;
+  const destinations = orderedDestinations(trip);
+  const [targetId, setTargetId] = useState<string | null>(destinationId ?? defaultDestination(trip)?.id ?? null);
+  const target = destinations.find((s) => s.id === targetId) ?? null;
   const anchor = target
-    ? searchAnchor(trip, { kind: "stop", stopId: target.id })
+    ? searchAnchor(trip, { kind: "destination", destinationId: target.id })
     : searchAnchor(trip, { kind: "trip" });
   const [picked, setPicked] = useState<PickedPlace | null>(null);
   // #144 · Q9 B — the kind is Google's when its type says lodging/campground,
@@ -160,7 +160,7 @@ export function AddStaySheet({
   const save = async () => {
     if (!picked || !draft || !input || saving) return;
     setSaving(true);
-    const ok = await onSave({ stopId: target?.id ?? null, place: picked, draft });
+    const ok = await onSave({ destinationId: target?.id ?? null, place: picked, draft });
     if (!ok) setSaving(false);
   };
 
@@ -172,7 +172,7 @@ export function AddStaySheet({
             <Bed className="size-4" />
             Add stay
             <span className="ml-auto font-mono text-[10.5px] font-normal text-rv-ink-faded">
-              {picked ? "step 2 of 2" : (target?.place.name ?? trip.destination?.name ?? "")}
+              {picked ? "step 2 of 2" : (target?.place.name ?? trip.area?.name ?? "")}
             </span>
           </DialogTitle>
           <DialogDescription className="sr-only">
@@ -181,19 +181,19 @@ export function AddStaySheet({
         </DialogHeader>
 
         <div className="mt-3 flex flex-col gap-2.5">
-          {stops.length > 1 && stopId === null && (
+          {destinations.length > 1 && destinationId === null && (
             <label className="flex flex-col gap-1">
-              <FieldLabel>For the stop</FieldLabel>
+              <FieldLabel>For the destination</FieldLabel>
               <select
                 value={targetId ?? ""}
                 onChange={(e) => {
-                  const next = stops.find((s) => s.id === e.target.value) ?? null;
+                  const next = destinations.find((s) => s.id === e.target.value) ?? null;
                   setTargetId(next?.id ?? null);
                   if (next && isScheduled(next)) setRange({ start: next.arriveDate, end: next.departDate });
                 }}
                 className="h-auto min-h-9 rounded-rv-md border border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] text-[13px] text-rv-ink"
               >
-                {stops.map((s) => (
+                {destinations.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.place.name}
                   </option>

@@ -1,6 +1,6 @@
 import type {
   ReservationType,
-  SaveDestination,
+  SaveArea,
   SavedPlace,
   SavedPlaceStatus,
   SuggestedPlace,
@@ -14,26 +14,26 @@ import { formatCoords, placeRowSubline } from "./sheet";
  * runner runs.
  */
 
-export interface DestinationShelf {
-  destination: SaveDestination;
+export interface AreaShelf {
+  area: SaveArea;
   /** Newest first by `createdAt`. */
   saves: SavedPlace[];
 }
 
 export interface RegionShelf {
-  /** `destinations.region` ("Oregon", "Costa Rica"). A header only. Null when
-   * the resolver named no region — those destinations still group together. */
+  /** `areas.region` ("Oregon", "Costa Rica"). A header only. Null when
+   * the resolver named no region — those areas still group together. */
   region: string | null;
-  /** Saves under this header, summed across its destinations. */
+  /** Saves under this header, summed across its areas. */
   count: number;
   /** Alphabetical by name. */
-  destinations: DestinationShelf[];
+  areas: AreaShelf[];
 }
 
 export interface SavesShelves {
   /** Most saves first; a tie goes to the region name. */
   regions: RegionShelf[];
-  /** `destination` null — no locality within 25 mi, or no provider key.
+  /** `area` null — no locality within 25 mi, or no provider key.
    * Newest first. Always drawn last. */
   unanchored: SavedPlace[];
 }
@@ -50,32 +50,32 @@ function newestFirst(a: SavedPlace, b: SavedPlace): number {
 }
 
 /**
- * One shelf (`status`) of the library, grouped by destination under region
- * headers: regions by save count (most first, ties by name), destinations
- * alphabetically, saves newest first, and the saves with no destination in
+ * One shelf (`status`) of the library, grouped by area under region
+ * headers: regions by save count (most first, ties by name), areas
+ * alphabetically, saves newest first, and the saves with no area in
  * `unanchored`.
  */
 export function savesShelves(saves: SavedPlace[], status: SavedPlaceStatus): SavesShelves {
-  const regions = new Map<string | null, Map<string, DestinationShelf>>();
+  const regions = new Map<string | null, Map<string, AreaShelf>>();
   const unanchored: SavedPlace[] = [];
   for (const s of saves) {
     if (s.status !== status) continue;
-    if (!s.destination) {
+    if (!s.area) {
       unanchored.push(s);
       continue;
     }
-    const region = s.destination.region;
+    const region = s.area.region;
     let dests = regions.get(region);
     if (!dests) regions.set(region, (dests = new Map()));
-    let shelf = dests.get(s.destination.id);
-    if (!shelf) dests.set(s.destination.id, (shelf = { destination: s.destination, saves: [] }));
+    let shelf = dests.get(s.area.id);
+    if (!shelf) dests.set(s.area.id, (shelf = { area: s.area, saves: [] }));
     shelf.saves.push(s);
   }
   const out: RegionShelf[] = [...regions].map(([region, dests]) => {
-    const destinations = [...dests.values()]
+    const areas = [...dests.values()]
       .map((d) => ({ ...d, saves: [...d.saves].sort(newestFirst) }))
-      .sort((a, b) => byName(a.destination.name, b.destination.name));
-    return { region, count: destinations.reduce((n, d) => n + d.saves.length, 0), destinations };
+      .sort((a, b) => byName(a.area.name, b.area.name));
+    return { region, count: areas.reduce((n, d) => n + d.saves.length, 0), areas };
   });
   out.sort((a, b) => b.count - a.count || byName(a.region ?? "", b.region ?? ""));
   return { regions: out, unanchored: unanchored.sort(newestFirst) };
@@ -117,10 +117,10 @@ export function saveRowLine(s: SavedPlace): string {
     return `pin · ${formatCoords(s.place.lat, s.place.lng)}`;
   }
   if (s.anchor === "area") {
-    const label = s.areaLabel ?? s.destination?.name ?? null;
+    const label = s.areaLabel ?? s.area?.name ?? null;
     return label ? `note · ${town(label)} area` : "note";
   }
-  const where = s.destination?.name ?? s.region;
+  const where = s.area?.name ?? s.region;
   return where ? `${KIND_WORD[s.type]} · ${where}` : KIND_WORD[s.type];
 }
 

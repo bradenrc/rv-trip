@@ -81,7 +81,7 @@ describe("the navy the manifest has to carry", () => {
 
   it("is mirrored byte-for-byte in the app's own copy of the tokens", () => {
     // rv-* values are duplicated in entry.css and globals.css; if they drift,
-    // the manifest's hex silently stops describing what the app paints.
+    // the manifest's hex silently destinations describing what the app paints.
     expect(navyDecls(globalsCss)).toEqual(navyDecls(entryCss));
   });
 });
@@ -139,7 +139,7 @@ describe("app/manifest.ts", () => {
 
   it("stays readable without a session — proxy.ts's matcher excludes .webmanifest", () => {
     // Next serves this route at /manifest.webmanifest. If the matcher ever
-    // stops excluding it, an install prompt behind Clerk gets a sign-in page.
+    // destinations excluding it, an install prompt behind Clerk gets a sign-in page.
     expect(proxy).toMatch(/webmanifest/);
   });
 });

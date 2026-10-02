@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Car, Check, CircleAlert, Plane, Plus, Ship, Trash2 } from "lucide-react";
+import { Car, Check, CircleAlert, Plane, Ship, Trash2 } from "lucide-react";
 import {
   blankHopDraft,
   hopBookingPatch,
@@ -25,19 +25,18 @@ import {
   type Trip,
   type ZoneChip,
 } from "@rv-trip/core";
-import { CategoryTile, FieldLabel, SegmentedControl, categoryMeta } from "@rv-trip/ui";
-import type { RouteHop, RouteHopBooking } from "@/lib/trip-logic";
+import { FieldLabel, SegmentedControl } from "@rv-trip/ui";
+import type { RouteHop } from "@/lib/trip-logic";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { MENU_ITEM_WARN, MenuHint, RowMenu } from "./row-menu";
 
 /**
  * A non-drive hop on the Route lens (#104) — the travel card: the drive
  * card's structural accent (a 3px rv-travel left rule) on its fly and ferry
- * siblings. It carries the hop's bookings in LOCAL time with their zones, the
- * layovers between them, the DS `SegmentedControl` (mono) mode switch, and the
- * inline Add flight / Add ferry form (Q5 A).
+ * siblings, with the DS `SegmentedControl` (mono) mode switch. Since #155 (Q3
+ * B) its bookings live in the hop's Logistics group (./Logistics.tsx); the
+ * card carries a count chip that jumps there. The Add / Edit flight form
+ * (Q5 A) is exported from here and mounted in that group.
  */
 
 export const MODE_OPTIONS = [
@@ -61,38 +60,38 @@ export interface HopCardActions {
   onMode: (segmentId: string, mode: TravelMode) => void;
   onOpenForm: (segmentId: string | null) => void;
   /** Resolves true when the booking landed (the form then closes). */
-  onSave: (body: ReservationCreateInput, moveStop: boolean) => Promise<boolean>;
+  onSave: (body: ReservationCreateInput, moveDestination: boolean) => Promise<boolean>;
   onDelete: (resId: string) => void;
   /** #124 · a booking's Edit, saved through `PATCH /api/reservations/:id`
    * with its clock. Resolves true when it landed. */
   onEdit: (resId: string, patch: ReservationPatchInput) => Promise<boolean>;
 }
 
+/** What a booking form needs of the hop it books on — a `RouteHop` or a
+ * Logistics group (#155) both qualify. */
+export type HopRef = Pick<RouteHop, "segmentId" | "fromDestinationId" | "toDestinationId" | "fromName" | "toName">;
+
+/**
+ * #155 · Q3 B — the hop card keeps its mode glyph, `from → to`, meta and the
+ * Drive/Fly/Ferry switch. Its booking rows, layovers, Edit and "Add flight"
+ * moved to the hop's Logistics group; in their place, the count chip, which
+ * jumps there (`#hop-<segmentId>` now anchors the GROUP, not this card).
+ */
 export function HopCard({
   hop,
-  trip,
   flush,
-  formOpen,
   actions,
 }: {
   hop: RouteHop;
-  trip: Trip;
-  /** A hop to or from home sits flush with the leg, not indented under a stop. */
+  /** A hop to or from home sits flush with the chapter, not indented under a destination. */
   flush: boolean;
-  formOpen: boolean;
   actions: HopCardActions;
 }) {
-  const [editingId, setEditingId] = useState<string | null>(null);
   if (hop.parked > 0) return <ParkedHop hop={hop} flush={flush} actions={actions} />;
   const ModeIcon = hop.mode === "ferry" ? Ship : Plane;
-  const kind = hop.mode === "ferry" ? "ferry" : "flight";
-  const editing = hop.items.find(
-    (i): i is RouteHopBooking => i.kind === "booking" && i.id === editingId,
-  );
   return (
     <div
-      id={`hop-${hop.segmentId}`}
-      className={`my-2 scroll-mt-6 rounded-rv-md border border-l-[3px] border-rv-border border-l-rv-travel bg-rv-surface px-[13px] pb-3 pt-2.5 shadow-rv-sm ${
+      className={`my-2 rounded-rv-md border border-l-[3px] border-rv-border border-l-rv-travel bg-rv-surface px-[13px] pb-3 pt-2.5 shadow-rv-sm ${
         flush ? "ml-0" : "ml-8"
       }`}
     >
@@ -109,72 +108,24 @@ export function HopCard({
           <HopModeSwitch value={hop.mode} onChange={(m) => actions.onMode(hop.segmentId, m)} />
         </span>
       </div>
-
-      {hop.items.map((item, i) =>
-        item.kind === "layover" ? (
-          <div key={`lay-${i}`} className="pl-10 pt-1.5 font-mono text-[11px] text-rv-ink-faded">
-            {item.label}
-          </div>
-        ) : (
-          <HopBooking
-            key={item.id}
-            item={item}
-            mode={hop.mode}
-            onEdit={() => {
-              actions.onOpenForm(null);
-              setEditingId(item.id);
-            }}
-            onDelete={() => actions.onDelete(item.id)}
-          />
-        ),
-      )}
-
-      {editing ? (
-        <HopForm
-          key={`edit-${editing.id}`}
-          hop={hop}
-          trip={trip}
-          kind={kind}
-          editing={editing.reservation}
-          onSave={actions.onSave}
-          onEdit={async (patch) => {
-            const ok = await actions.onEdit(editing.id, patch);
-            if (ok) setEditingId(null);
-            return ok;
+      {hop.chip && (
+        <a
+          href={`#hop-${hop.segmentId}`}
+          onClick={(e) => {
+            const group = document.getElementById(`hop-${hop.segmentId}`);
+            if (!group) return;
+            e.preventDefault();
+            group.scrollIntoView({ behavior: "smooth", block: "start" });
           }}
-          onDelete={() => {
-            setEditingId(null);
-            actions.onDelete(editing.id);
-          }}
-          onCancel={() => setEditingId(null)}
-        />
-      ) : formOpen ? (
-        <HopForm
-          key={hop.segmentId}
-          hop={hop}
-          trip={trip}
-          kind={kind}
-          onSave={actions.onSave}
-          onCancel={() => actions.onOpenForm(null)}
-        />
-      ) : (
-        <div className="mt-[9px]">
-          <button
-            type="button"
-            onClick={() => actions.onOpenForm(hop.segmentId)}
-            className="inline-flex cursor-pointer items-center gap-[5px] rounded-rv-md border border-dashed border-rv-border-hi bg-transparent px-2.5 py-[3px] text-[12px] font-bold text-rv-ink-muted"
-          >
-            <Plus className="size-[13px]" />
-            {kind === "ferry" ? "Add ferry" : "Add flight"}
-          </button>
-        </div>
+          className="mt-2 inline-block rounded-rv-pill border border-rv-border-hi px-2.5 py-0.5 font-mono text-[11.5px] text-rv-travel-ink no-underline"
+        >
+          {hop.chip}
+        </a>
       )}
     </div>
   );
 }
 
-/** One flight or ferry: the Travel tile (Plane / Ship through `categoryMeta`'s
- * mode hint), its name as stored, and its local times with their zones. */
 /**
  * #129 · Q11 A — a hop that DRIVES but kept its flights: the mode switch
  * inline (on any trip mode — the drive row's ⋯ menu was the missing way back)
@@ -209,71 +160,7 @@ function ParkedHop({ hop, flush, actions }: { hop: RouteHop; flush: boolean; act
   );
 }
 
-function HopBooking({
-  item,
-  mode,
-  onEdit,
-  onDelete,
-}: {
-  item: RouteHopBooking;
-  mode: TravelMode;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const sameZone = item.departAbbr !== null && item.departAbbr === item.arriveAbbr;
-  return (
-    <div className="mt-[9px] flex items-center gap-2.5 rounded-rv-card border border-rv-border-soft bg-rv-surface-alt px-[11px] py-[9px]">
-      <CategoryTile meta={categoryMeta("transport", mode)} />
-      <div className="min-w-0 flex-1">
-        <div className="text-[13.5px] font-bold text-rv-ink">{item.name}</div>
-        {item.departTime && item.arriveTime && (
-          <div>
-            {sameZone ? (
-              <>
-                <span className="font-mono text-[12px] text-rv-ink">
-                  {item.departTime} → {item.arriveTime}
-                </span>{" "}
-                <span className="font-mono text-[10.5px] text-rv-ink-faded">
-                  {item.arriveAbbr}
-                  {item.duration ? ` · ${item.duration}` : ""}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="font-mono text-[12px] text-rv-ink">{item.departTime}</span>{" "}
-                <span className="font-mono text-[10.5px] text-rv-ink-faded">{item.departAbbr}</span>{" "}
-                <span className="font-mono text-[12px] text-rv-ink">→ {item.arriveTime}</span>{" "}
-                <span className="font-mono text-[10.5px] text-rv-ink-faded">
-                  {item.arriveAbbr}
-                  {item.duration ? ` · ${item.duration}` : ""}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-      {/* #124 · Edit opens the same form, prefilled; Delete stays in it. */}
-      <button
-        type="button"
-        onClick={onEdit}
-        className="cursor-pointer border-none bg-transparent p-0 text-[12px] font-semibold text-rv-ink-muted underline"
-      >
-        Edit
-      </button>
-      {/* A mistyped flight re-times its hop, so it has to be removable
-          (vet MED). Undo re-POSTs it onto the same hop. */}
-      <RowMenu label={`Actions for ${item.name}`}>
-        <DropdownMenuItem className={MENU_ITEM_WARN} onSelect={onDelete}>
-          <Trash2 />
-          Delete
-          <MenuHint>undo</MenuHint>
-        </DropdownMenuItem>
-      </RowMenu>
-    </div>
-  );
-}
-
-const FORM_FIELD =
+export const FORM_FIELD =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] text-[13px] text-rv-ink md:text-[13px]";
 export const FORM_FIELD_MONO =
   "h-auto min-h-9 rounded-rv-md border-rv-border-hi bg-rv-navy-deep px-2.5 py-[7px] font-mono text-[12px] text-rv-ink md:text-[12px]";
@@ -286,14 +173,14 @@ export const SBTN =
 /**
  * Add flight / Add ferry (Q5 A · Q6 A · Q8 A). The times are the ones printed
  * on the ticket; each end's zone comes from its airport code (a ferry: from
- * its port stops). An amber chip is a question, not an error — pressing it
+ * its port destinations). An amber chip is a question, not an error — pressing it
  * opens the zone list — and Save stays disabled until both ends have a zone.
  *
  * The date clash is judged HERE, before the POST, by core's
  * `hopBookingClash` — the same check the server repeats — and nothing saves
  * until one of its two fixes is picked.
  */
-function HopForm({
+export function HopForm({
   hop,
   trip,
   kind,
@@ -303,19 +190,19 @@ function HopForm({
   onDelete,
   onCancel,
 }: {
-  hop: RouteHop;
+  hop: HopRef;
   trip: Trip;
   kind: "flight" | "ferry";
   /** #124 · the booking being edited — the form opens on its values. */
   editing?: Reservation | null;
-  onSave: (body: ReservationCreateInput, moveStop: boolean) => Promise<boolean>;
+  onSave: (body: ReservationCreateInput, moveDestination: boolean) => Promise<boolean>;
   onEdit?: (patch: ReservationPatchInput) => Promise<boolean>;
   onDelete?: () => void;
   onCancel: () => void;
 }) {
-  const stops = trip.legs.flatMap((l) => l.stops);
-  const portOf = (id: string | null): Place | null => stops.find((s) => s.id === id)?.place ?? null;
-  const ports = { from: portOf(hop.fromStopId), to: portOf(hop.toStopId) };
+  const destinations = trip.chapters.flatMap((l) => l.destinations);
+  const portOf = (id: string | null): Place | null => destinations.find((s) => s.id === id)?.place ?? null;
+  const ports = { from: portOf(hop.fromDestinationId), to: portOf(hop.toDestinationId) };
   const [draft, setDraft] = useState<HopBookingDraft>(() =>
     editing ? hopDraftFromBooking(editing, kind) : blankHopDraft(kind, { from: hop.fromName, to: hop.toName }),
   );
@@ -410,7 +297,7 @@ function HopForm({
             <br />
             {copy.sub}
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {/* The stop move rides the CREATE only; an edit fixes its date. */}
+              {/* The destination move rides the CREATE only; an edit fixes its date. */}
               {!editing && (
                 <button type="button" disabled={saving} onClick={() => void save(true)} className={SBTN}>
                   {copy.move}

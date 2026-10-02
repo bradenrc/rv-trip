@@ -30,7 +30,7 @@ import type { NavCheck, RouteResult, SuggestedPlace } from "@rv-trip/core";
  *
  * v2 (#110 · docs/design/110 §5): ONE migration, drizzle/0000_v2, generated
  * fresh against a wiped database — no data carried (Q8 A). What v2 adds is the
- * journey: `travel_segments` between stops, reservations that hang on a stop
+ * journey: `travel_segments` between destinations, reservations that hang on a destination
  * OR a segment, the trip's three defaults, and `saves` (was saved_places).
  */
 
@@ -67,6 +67,12 @@ export const travelMode = pgEnum("travel_mode", ["drive", "fly", "ferry"]);
 // A trip's lodging DEFAULT (#110 Q7 A) — never a constraint.
 export const lodgingKind = pgEnum("lodging_kind", ["hotel", "friends", "airbnb", "campground"]);
 
+// What a transport booking IS (#155 · Q4 A). Nullable on the row: null reads
+// as the hop's own mode (fly → flight, ferry → ferry), so every row written
+// before #155 behaves exactly as it did. Only flight and ferry count toward a
+// layover or door to door; a shuttle never stretches the hop's clock.
+export const transportKind = pgEnum("transport_kind", ["flight", "ferry", "shuttle", "train", "car"]);
+
 // What a save is anchored to (#110 §5): a Google place, a named area
 // ("Oregon coast"), or a dropped pin.
 export const saveAnchor = pgEnum("save_anchor", ["place", "area", "pin"]);
@@ -90,7 +96,7 @@ export const trips = pgTable(
     title: text("title").notNull(),
     homeBase: text("home_base"),
     // Home base as a real place (#60 Q4 → B). `home_base` stays the NAME; these
-    // three are the anchor the planner's first-stop search biases to. Additive
+    // three are the anchor the planner's first-destination search biases to. Additive
     // and nullable — an existing trip keeps its string and simply has no anchor
     // until someone re-picks.
     homeBaseLat: doublePrecision("home_base_lat"),
@@ -110,16 +116,16 @@ export const trips = pgTable(
     defaultMode: travelMode("default_mode").notNull().default("drive"),
     lodgingDefault: lodgingKind("lodging_default"),
     rigOn: boolean("rig_on").notNull().default(true),
-    // #111 Q7 B: how far from a stop a save may sit and still surface on this
+    // #111 Q7 B: how far from a destination a save may sit and still surface on this
     // trip — the review sheet's four chips. Null = never picked, which reads as
     // core's NEAR_RADIUS_MI (50). The CHECK mirrors core's `surfaceRadiusMi`
     // literal union, so a value the grammar would refuse can't land either.
     surfaceRadiusMi: smallint("surface_radius_mi"),
-    // #126 · Q4 A — where the trip is going: the household's `destinations`
+    // #126 · Q4 A — where the trip is going: the household's `areas`
     // row for the "Where to?" pick (upserted by owner + place id at create).
     // Nullable and additive: every trip made before it simply has none. A
-    // deleted destination leaves the trip, destination-less.
-    destinationId: uuid("destination_id").references((): AnyPgColumn => destinations.id, {
+    // deleted area leaves the trip, area-less.
+    areaId: uuid("area_id").references((): AnyPgColumn => areas.id, {
       onDelete: "set null",
     }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -131,26 +137,28 @@ export const trips = pgTable(
   ],
 );
 
-export const legs = pgTable(
-  "legs",
+export const chapters = pgTable(
+  "chapters",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tripId: uuid("trip_id")
       .notNull()
       .references(() => trips.id, { onDelete: "cascade" }),
-    title: text("title").notNull(),
+    // #155 · Q1 A — a chapter is OPTIONAL: null is an unnamed group, which
+    // renders no header. Only a named one earns "CHAPTER N".
+    title: text("title"),
     sortOrder: integer("sort_order").notNull(),
   },
-  (t) => [index("legs_trip_idx").on(t.tripId)],
+  (t) => [index("chapters_trip_idx").on(t.tripId)],
 );
 
-export const stops = pgTable(
-  "stops",
+export const destinations = pgTable(
+  "destinations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    legId: uuid("leg_id")
+    chapterId: uuid("chapter_id")
       .notNull()
-      .references(() => legs.id, { onDelete: "cascade" }),
+      .references(() => chapters.id, { onDelete: "cascade" }),
     placeName: text("place_name").notNull(),
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
@@ -165,19 +173,19 @@ export const stops = pgTable(
     again: boolean("again"),
     notes: text("notes"),
   },
-  (t) => [index("stops_leg_idx").on(t.legId)],
+  (t) => [index("destinations_chapter_idx").on(t.chapterId)],
 );
 
 /**
- * An idea belongs to the TRIP; a stop is optional (#80).
+ * An idea belongs to the TRIP; a destination is optional (#80).
  *
  * `trip_id` is NOT NULL for every idea, attached or not, and it is the single
- * ownership path every idea write scopes on — a NULL `stop_id` is in no
- * `ownedStopIds` list, so scoping through the stop would make every shelf
+ * ownership path every idea write scopes on — a NULL `destination_id` is in no
+ * `ownedDestinationIds` list, so scoping through the destination would make every shelf
  * write a silent no-op on exactly the rows this epic exists to create.
  *
- * The one invariant no FK can span the join: when `stop_id` is set, that stop's
- * leg must belong to `trip_id`. `createIdea` proves it; nothing else may set
+ * The one invariant no FK can span the join: when `destination_id` is set, that destination's
+ * chapter must belong to `trip_id`. `createIdea` proves it; nothing else may set
  * the pair.
  */
 export const ideas = pgTable(
@@ -187,8 +195,8 @@ export const ideas = pgTable(
     tripId: uuid("trip_id")
       .notNull()
       .references(() => trips.id, { onDelete: "cascade" }),
-    // Null => a SHELF idea: a maybe not committed to a stop yet.
-    stopId: uuid("stop_id").references(() => stops.id, { onDelete: "cascade" }),
+    // Null => a SHELF idea: a maybe not committed to a destination yet.
+    destinationId: uuid("destination_id").references(() => destinations.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     // Every idea shipped before #80 was a blue "Do", so that is the default the
     // backfill leaves them on.
@@ -210,7 +218,7 @@ export const ideas = pgTable(
     clientId: text("client_id"),
   },
   (t) => [
-    index("ideas_stop_idx").on(t.stopId),
+    index("ideas_destination_idx").on(t.destinationId),
     index("ideas_trip_idx").on(t.tripId),
     unique("ideas_trip_client_uq").on(t.tripId, t.clientId),
   ],
@@ -218,13 +226,13 @@ export const ideas = pgTable(
 
 /**
  * One hop of the journey (#110 · Q1 A): every adjacent pair of the route
- * sequence has a row, plus home → first stop when the trip has a home base.
- * `from_stop_id` null = the home base; `to_stop_id` null = home. Kept dense by
- * core's `reconcileSegments`, persisted in the SAME transaction as the stop/leg
+ * sequence has a row, plus home → first destination when the trip has a home base.
+ * `from_destination_id` null = the home base; `to_destination_id` null = home. Kept dense by
+ * core's `reconcileSegments`, persisted in the SAME transaction as the destination/chapter
  * write that moved the sequence (mutations.ts `syncSegments`).
  *
  * `depart_at`/`arrive_at` are INSTANTS (timestamptz) with their IANA zones
- * beside them — a flight has a clock, a trip day does not. Stop dates stay the
+ * beside them — a flight has a clock, a trip day does not. Destination dates stay the
  * authority (Q3 A): a timed segment must agree with them.
  */
 export const travelSegments = pgTable(
@@ -234,8 +242,8 @@ export const travelSegments = pgTable(
     tripId: uuid("trip_id")
       .notNull()
       .references(() => trips.id, { onDelete: "cascade" }),
-    fromStopId: uuid("from_stop_id").references(() => stops.id, { onDelete: "cascade" }),
-    toStopId: uuid("to_stop_id").references(() => stops.id, { onDelete: "cascade" }),
+    fromDestinationId: uuid("from_destination_id").references(() => destinations.id, { onDelete: "cascade" }),
+    toDestinationId: uuid("to_destination_id").references(() => destinations.id, { onDelete: "cascade" }),
     mode: travelMode("mode").notNull(),
     departAt: timestamp("depart_at", { withTimezone: true }),
     arriveAt: timestamp("arrive_at", { withTimezone: true }),
@@ -247,15 +255,15 @@ export const travelSegments = pgTable(
 );
 
 /**
- * Paperwork. A reservation hangs on EXACTLY ONE parent (#110 Q2 A): a stop
+ * Paperwork. A reservation hangs on EXACTLY ONE parent (#110 Q2 A): a destination
  * (lodging, a tour) or a travel segment (a flight). The CHECK is the whole
- * rule; `stop.reservations` reads only the stop-attached rows.
+ * rule; `destination.reservations` reads only the destination-attached rows.
  */
 export const reservations = pgTable(
   "reservations",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    stopId: uuid("stop_id").references(() => stops.id, { onDelete: "cascade" }),
+    destinationId: uuid("destination_id").references(() => destinations.id, { onDelete: "cascade" }),
     segmentId: uuid("segment_id").references(() => travelSegments.id, { onDelete: "cascade" }),
     // A reservation can be promoted from an idea; keep the link, don't require it.
     ideaId: uuid("idea_id").references(() => ideas.id, { onDelete: "set null" }),
@@ -278,21 +286,24 @@ export const reservations = pgTable(
     // What kind of stay a lodging row is (#105 · Q9 A) — the trip default's own
     // enum, nullable: null for anything that is not a stay.
     lodgingKind: lodgingKind("lodging_kind"),
+    // #155 · Q4 A — what a transport booking is (flight · ferry · shuttle ·
+    // train · car). Null = the hop's mode decides (see `transportKind` above).
+    transportKind: transportKind("transport_kind"),
   },
   (t) => [
-    index("reservations_stop_idx").on(t.stopId),
+    index("reservations_destination_idx").on(t.destinationId),
     index("reservations_segment_idx").on(t.segmentId),
-    check("reservations_one_parent", sql`num_nonnulls(${t.stopId}, ${t.segmentId}) = 1`),
+    check("reservations_one_parent", sql`num_nonnulls(${t.destinationId}, ${t.segmentId}) = 1`),
   ],
 );
 
 /**
- * A DESTINATION — a locality-grain Google place ("Guanacaste") a household
+ * An AREA — a locality-grain Google place ("Guanacaste") a household
  * plans toward (#110 §5). Table only in W0; W1 (#111) fills it and pulls saves
  * within N miles into a trip's ideas. One row per (household, place).
  */
-export const destinations = pgTable(
-  "destinations",
+export const areas = pgTable(
+  "areas",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     ownerId: text("owner_id").notNull(),
@@ -308,7 +319,7 @@ export const destinations = pgTable(
     lng: doublePrecision("lng"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [unique("destinations_owner_place_uq").on(t.ownerId, t.googlePlaceId)],
+  (t) => [unique("areas_owner_place_uq").on(t.ownerId, t.googlePlaceId)],
 );
 
 /**
@@ -334,7 +345,7 @@ export const saves = pgTable(
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
     googlePlaceId: text("google_place_id"),
-    destinationId: uuid("destination_id").references(() => destinations.id, {
+    areaId: uuid("area_id").references(() => areas.id, {
       onDelete: "set null",
     }),
     type: reservationType("type").notNull().default("other"),
@@ -465,7 +476,7 @@ export const routes = pgTable(
  * eventual cron is a follow-up rather than a migration.
  *
  * NOT owner-scoped — a real-world place is not anybody's, the same reason a
- * route between two coordinates isn't. The `google_place_id` columns on `stops`,
+ * route between two coordinates isn't. The `google_place_id` columns on `destinations`,
  * `ideas` and `saves` are the join key, with NO foreign key in either
  * direction, because a place row is a CACHE: a missing one must degrade to "no
  * G-line", never to a broken read.
@@ -613,7 +624,7 @@ export const householdInvites = pgTable("household_invites", {
  * every-write firehose: the four `update*Fields` mutations in mutations.ts are
  * the only writers, and they log only when a value actually moves.
  */
-export const changeEntity = pgEnum("change_entity", ["stop", "idea", "reservation", "save"]);
+export const changeEntity = pgEnum("change_entity", ["destination", "idea", "reservation", "save"]);
 
 /**
  * The shared-voice fields, as the LOG names them. `again` joined in #113.
@@ -642,7 +653,7 @@ export const changeField = pgEnum("change_field", ["rating", "notes", "status", 
  *
  * `from`/`to` are plain `text` and nullable: one pair of columns carries a
  * smallint rating, a free-text note and an enum status, so the widest of the
- * three is the storage, and NULL is a genuinely absent value (an unrated stop,
+ * three is the storage, and NULL is a genuinely absent value (an unrated destination,
  * a cleared note). A rating is written as its decimal digits ("4") and parsed
  * back by the reader that renders stars.
  */
@@ -681,19 +692,19 @@ export const householdInvitesRelations = relations(householdInvites, ({ one }) =
 }));
 
 export const tripsRelations = relations(trips, ({ one, many }) => ({
-  // #126 · the "Where to?" locality, joined onto `Trip.destination`.
-  destination: one(destinations, { fields: [trips.destinationId], references: [destinations.id] }),
-  legs: many(legs),
+  // #126 · the "Where to?" locality, joined onto `Trip.area`.
+  area: one(areas, { fields: [trips.areaId], references: [areas.id] }),
+  chapters: many(chapters),
   segments: many(travelSegments),
   saves: many(saves),
   // The shelf (#80). Every idea is here, attached or not; the read path filters
-  // to `stop_id IS NULL` so the tree carries each row exactly once.
+  // to `destination_id IS NULL` so the tree carries each row exactly once.
   ideas: many(ideas),
 }));
 
 export const savesRelations = relations(saves, ({ one }) => ({
   trip: one(trips, { fields: [saves.tripId], references: [trips.id] }),
-  destination: one(destinations, { fields: [saves.destinationId], references: [destinations.id] }),
+  area: one(areas, { fields: [saves.areaId], references: [areas.id] }),
 }));
 
 export const travelSegmentsRelations = relations(travelSegments, ({ one, many }) => ({
@@ -701,24 +712,24 @@ export const travelSegmentsRelations = relations(travelSegments, ({ one, many })
   reservations: many(reservations),
 }));
 
-export const legsRelations = relations(legs, ({ one, many }) => ({
-  trip: one(trips, { fields: [legs.tripId], references: [trips.id] }),
-  stops: many(stops),
+export const chaptersRelations = relations(chapters, ({ one, many }) => ({
+  trip: one(trips, { fields: [chapters.tripId], references: [trips.id] }),
+  destinations: many(destinations),
 }));
 
-export const stopsRelations = relations(stops, ({ one, many }) => ({
-  leg: one(legs, { fields: [stops.legId], references: [legs.id] }),
+export const destinationsRelations = relations(destinations, ({ one, many }) => ({
+  chapter: one(chapters, { fields: [destinations.chapterId], references: [chapters.id] }),
   ideas: many(ideas),
   reservations: many(reservations),
 }));
 
 export const ideasRelations = relations(ideas, ({ one }) => ({
   trip: one(trips, { fields: [ideas.tripId], references: [trips.id] }),
-  stop: one(stops, { fields: [ideas.stopId], references: [stops.id] }),
+  destination: one(destinations, { fields: [ideas.destinationId], references: [destinations.id] }),
 }));
 
 export const reservationsRelations = relations(reservations, ({ one }) => ({
-  stop: one(stops, { fields: [reservations.stopId], references: [stops.id] }),
+  destination: one(destinations, { fields: [reservations.destinationId], references: [destinations.id] }),
   segment: one(travelSegments, {
     fields: [reservations.segmentId],
     references: [travelSegments.id],

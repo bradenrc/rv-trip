@@ -6,7 +6,7 @@ import {
   householdMembers,
   households,
   ideas,
-  legs,
+  chapters,
   places,
   reservations,
   rigs,
@@ -14,8 +14,8 @@ import {
   saves,
   tripDismissedSaves,
   travelSegments,
+  areas,
   destinations,
-  stops,
   trips,
   userPrefs,
 } from "../schema";
@@ -38,6 +38,6 @@ import {
  */
 export async function truncateAll(): Promise<void> {
   await db.execute(
-    sql`truncate table ${trips}, ${legs}, ${stops}, ${ideas}, ${reservations}, ${saves}, ${tripDismissedSaves}, ${travelSegments}, ${destinations}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${changeLog}, ${households}, ${householdMembers}, ${householdInvites} restart identity cascade`,
+    sql`truncate table ${trips}, ${chapters}, ${destinations}, ${ideas}, ${reservations}, ${saves}, ${tripDismissedSaves}, ${travelSegments}, ${areas}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${changeLog}, ${households}, ${householdMembers}, ${householdInvites} restart identity cascade`,
   );
 }

@@ -6,7 +6,7 @@ import {
   routeCacheKey,
   type RouteMap,
   type RouteResult,
-  type Stop,
+  type Destination,
   type Trip,
 } from "@rv-trip/core";
 import { buildMapModel, layerCounts, locateRowOf, type IdeaPin, type UnmappedRow } from "./pins";
@@ -16,7 +16,7 @@ import { buildMapModel, layerCounts, locateRowOf, type IdeaPin, type UnmappedRow
  *
  * What this guards is the seam the corridor needs: one arc per
  * `orderedPairs()` pair — the SAME pair set the Route rail and the dashboard
- * card key on, floating stops included — each carrying the `source` the Mapbox
+ * card key on, floating destinations included — each carrying the `source` the Mapbox
  * layer paints by, and its decoded geometry. A trip you have already taken
  * still draws nothing.
  */
@@ -26,10 +26,10 @@ const HASH = "test-routing-hash";
 /** HERE's published flexible-polyline test vector — four vertices. */
 const HERE_CORRIDOR = "BFoz5xJ67i1B1B7PzIhaxL7Y";
 
-function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
+function mkDestination(partial: Partial<Destination> & { id: string; chapterId: string }): Destination {
   return {
     id: partial.id,
-    legId: partial.legId,
+    chapterId: partial.chapterId,
     place: partial.place ?? { name: partial.id, lat: 45, lng: -122, googlePlaceId: null },
     arriveDate: partial.arriveDate ?? null,
     departDate: partial.departDate ?? null,
@@ -43,7 +43,7 @@ function mkStop(partial: Partial<Stop> & { id: string; legId: string }): Stop {
   };
 }
 
-/** The seed fixture's shape: two legs, three dated stops, one floating. */
+/** The seed fixture's shape: two chapters, three dated destinations, one floating. */
 function seedTrip(status: Trip["status"] = "planning"): Trip {
   return {
     id: "t1",
@@ -58,24 +58,24 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
     rating: null,
     note: null,
     ideas: [],
-    legs: [
+    chapters: [
       {
         id: "coast",
         tripId: "t1",
         title: "Oregon Coast",
         sortOrder: 0,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "astoria",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Astoria, OR", lat: 46.1879, lng: -123.8313, googlePlaceId: null },
             arriveDate: "2026-08-02",
             departDate: "2026-08-05",
             sortOrder: 0,
           }),
-          mkStop({
+          mkDestination({
             id: "newport",
-            legId: "coast",
+            chapterId: "coast",
             place: { name: "Newport, OR", lat: 44.6365, lng: -124.053, googlePlaceId: null },
             arriveDate: "2026-08-05",
             departDate: "2026-08-09",
@@ -88,20 +88,20 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
         tripId: "t1",
         title: "Cascades & Home",
         sortOrder: 1,
-        stops: [
-          mkStop({
+        destinations: [
+          mkDestination({
             id: "bend",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Bend, OR", lat: 44.0582, lng: -121.3153, googlePlaceId: null },
             arriveDate: "2026-08-12",
             departDate: "2026-08-16",
             sortOrder: 0,
           }),
-          // Floating — no dates. It sits at the end of ITS leg, so the pair
+          // Floating — no dates. It sits at the end of ITS chapter, so the pair
           // Bend → Crater Lake is the trip's last drive.
-          mkStop({
+          mkDestination({
             id: "crater",
-            legId: "cascades",
+            chapterId: "cascades",
             place: { name: "Crater Lake NP", lat: 42.9446, lng: -122.109, googlePlaceId: null },
             sortOrder: 1,
           }),
@@ -117,9 +117,9 @@ function seedTrip(status: Trip["status"] = "planning"): Trip {
 }
 
 /** A routed answer for one pair, with a four-vertex corridor. */
-function routedPair(trip: Trip, fromStopId: string, primaryRoad: string): RouteMap {
-  const pair = orderedPairs(trip).find((p) => p.fromStopId === fromStopId);
-  expect(pair, `pair leaving ${fromStopId}`).toBeDefined();
+function routedPair(trip: Trip, fromDestinationId: string, primaryRoad: string): RouteMap {
+  const pair = orderedPairs(trip).find((p) => p.fromDestinationId === fromDestinationId);
+  expect(pair, `pair leaving ${fromDestinationId}`).toBeDefined();
   const result: RouteResult = {
     durationSeconds: 3 * 3600,
     distanceMeters: 218_874, // 136 mi
@@ -200,15 +200,15 @@ describe("buildMapModel — drive arcs over the one ordered pair set", () => {
     const trip = seedTrip("complete");
     const { arcs, pins } = buildMapModel([trip], [], routedPair(trip, "astoria", "US-101"), HASH);
     expect(arcs).toEqual([]);
-    // …while every one of its stops is still on the map.
+    // …while every one of its destinations is still on the map.
     expect(pins).toHaveLength(4);
   });
 
   it("skips a pair whose coordinates are missing rather than inventing one", () => {
     const trip = seedTrip();
-    trip.legs[0]!.stops[1]!.place = { name: "Newport, OR", lat: null, lng: null, googlePlaceId: null };
+    trip.chapters[0]!.destinations[1]!.place = { name: "Newport, OR", lat: null, lng: null, googlePlaceId: null };
     const { arcs, unmapped } = buildMapModel([trip], [], {}, HASH);
-    // orderedPairs yields no pair on either side of a coordless stop.
+    // orderedPairs yields no pair on either side of a coordless destination.
     expect(arcs.map((a) => a.id)).toEqual(["bend->crater"]);
     expect(unmapped.map((u) => u.id)).toEqual(["newport"]);
   });
@@ -247,7 +247,7 @@ function mkIdea(over: Partial<Idea> & { id: string }): Idea {
   return {
     id: over.id,
     tripId: over.tripId ?? "t1",
-    stopId: over.stopId ?? "bend",
+    destinationId: over.destinationId ?? "bend",
     title: over.title ?? "Deschutes River float",
     category: over.category ?? "do",
     status: over.status ?? "idea",
@@ -263,12 +263,12 @@ function mkIdea(over: Partial<Idea> & { id: string }): Idea {
 /** The seed trip with ideas hung under Bend. */
 function tripWithIdeas(ideas: Idea[]): Trip {
   const trip = seedTrip();
-  trip.legs[1]!.stops[0]!.ideas = ideas;
+  trip.chapters[1]!.destinations[0]!.ideas = ideas;
   return trip;
 }
 
 describe("buildMapModel — the third pin kind", () => {
-  it("draws a located idea as an IdeaPin carrying its stop, trip and status", () => {
+  it("draws a located idea as an IdeaPin carrying its destination, trip and status", () => {
     const trip = tripWithIdeas([
       mkIdea({
         id: "tumalo",
@@ -292,7 +292,7 @@ describe("buildMapModel — the third pin kind", () => {
       layer: "planning",
       name: "Tumalo Falls trailhead",
       status: "planned",
-      stopName: "Bend, OR",
+      destinationName: "Bend, OR",
       tripId: "t1",
       tripTitle: "Pacific Northwest Loop",
     });
@@ -339,7 +339,7 @@ describe("buildMapModel — the third pin kind", () => {
 
   it("carries `kind` on every unmapped row — the derivation would have lied about an idea", () => {
     const trip = tripWithIdeas([mkIdea({ id: "float" })]);
-    trip.legs[0]!.stops[0]!.place = { name: "Astoria, OR", lat: null, lng: null, googlePlaceId: null };
+    trip.chapters[0]!.destinations[0]!.place = { name: "Astoria, OR", lat: null, lng: null, googlePlaceId: null };
     const { unmapped } = buildMapModel(
       [trip],
       [
@@ -359,7 +359,7 @@ describe("buildMapModel — the third pin kind", () => {
           again: null,
           anchor: "area",
           areaLabel: null,
-          destination: null,
+          area: null,
           suggestedPlace: null,
           createdAt: null,
         },
@@ -368,13 +368,13 @@ describe("buildMapModel — the third pin kind", () => {
       HASH,
     );
     expect(unmapped.map((u) => [u.id, u.kind])).toEqual([
-      ["astoria", "stop"],
+      ["astoria", "destination"],
       ["float", "idea"],
       ["bakery", "place"],
     ]);
     // …and `locateRowOf` is now a passthrough of that field.
     expect(unmapped.map(locateRowOf)).toEqual([
-      { kind: "stop", id: "astoria" },
+      { kind: "destination", id: "astoria" },
       { kind: "idea", id: "float" },
       { kind: "place", id: "bakery" },
     ]);
@@ -389,7 +389,7 @@ describe("buildMapModel — the third pin kind", () => {
       mkIdea({ id: "float" }),
     ]);
     const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
-    // Four stops + one idea pin drawn, one idea still unmapped.
+    // Four destinations + one idea pin drawn, one idea still unmapped.
     expect(layerCounts(pins, unmapped).planning).toBe(6);
   });
 
@@ -402,10 +402,10 @@ describe("buildMapModel — the third pin kind", () => {
 
 /**
  * The SHELF (#80 i4). `trip.ideas[]` is the trip's unattached ideas — the rows
- * with `stop_id IS NULL` that i1 put on the tree. They are drawable points like
+ * with `destination_id IS NULL` that i1 put on the tree. They are drawable points like
  * any other idea, and they are the reason the camera box can now grow a genuine
  * outlier: a shelf idea is parked wherever the reader found it, not beside a
- * stop.
+ * destination.
  */
 function tripWithShelf(ideas: Idea[]): Trip {
   const trip = seedTrip();
@@ -421,9 +421,9 @@ describe("buildMapModel — the trip's idea shelf", () => {
     googlePlaceId: "ChIJarches",
   };
 
-  it("draws a located shelf idea, with no stop name to borrow", () => {
+  it("draws a located shelf idea, with no destination name to borrow", () => {
     const trip = tripWithShelf([
-      mkIdea({ id: "arches", stopId: null, title: "Arches at sunrise", place: moab }),
+      mkIdea({ id: "arches", destinationId: null, title: "Arches at sunrise", place: moab }),
     ]);
     const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
     const idea = pins.find((p) => p.kind === "idea") as IdeaPin;
@@ -434,8 +434,8 @@ describe("buildMapModel — the trip's idea shelf", () => {
       lng: -109.5925,
       layer: "planning",
       name: "Arches at sunrise",
-      // An unattached idea hangs under no stop — the rail prints the trip alone.
-      stopName: null,
+      // An unattached idea hangs under no destination — the rail prints the trip alone.
+      destinationName: null,
       tripId: "t1",
       tripTitle: "Pacific Northwest Loop",
     });
@@ -443,7 +443,7 @@ describe("buildMapModel — the trip's idea shelf", () => {
   });
 
   it("keeps a coordless shelf idea as an unmapped `idea` row, so Locate can reach it", () => {
-    const trip = tripWithShelf([mkIdea({ id: "hot-springs", stopId: null, title: "a hot spring" })]);
+    const trip = tripWithShelf([mkIdea({ id: "hot-springs", destinationId: null, title: "a hot spring" })]);
     const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
     expect(pins.some((p) => p.kind === "idea")).toBe(false);
     expect(unmapped.map((u) => [u.id, u.kind, u.layer])).toEqual([
@@ -454,21 +454,21 @@ describe("buildMapModel — the trip's idea shelf", () => {
 
   it("counts a shelf idea under its trip's layer beside the attached ones", () => {
     const trip = tripWithShelf([
-      mkIdea({ id: "arches", stopId: null, place: moab }),
-      mkIdea({ id: "hot-springs", stopId: null }),
+      mkIdea({ id: "arches", destinationId: null, place: moab }),
+      mkIdea({ id: "hot-springs", destinationId: null }),
     ]);
-    trip.legs[1]!.stops[0]!.ideas = [mkIdea({ id: "float" })];
+    trip.chapters[1]!.destinations[0]!.ideas = [mkIdea({ id: "float" })];
     const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
-    // Four stops + one shelf pin drawn; one shelf row and one attached row unmapped.
+    // Four destinations + one shelf pin drawn; one shelf row and one attached row unmapped.
     expect(layerCounts(pins, unmapped).planning).toBe(7);
     expect(pins.filter((p) => p.kind === "idea").map((p) => p.id)).toEqual(["arches"]);
   });
 
-  it("draws the shelf's ideas once, after the stops they are not attached to", () => {
+  it("draws the shelf's ideas once, after the destinations they are not attached to", () => {
     // Render order is z-order (MapView keys the marker tier off `kind`, but the
     // rail reads this list straight): a shelf idea is neither duplicated under a
-    // stop nor interleaved with one.
-    const trip = tripWithShelf([mkIdea({ id: "arches", stopId: null, place: moab })]);
+    // destination nor interleaved with one.
+    const trip = tripWithShelf([mkIdea({ id: "arches", destinationId: null, place: moab })]);
     const { pins } = buildMapModel([trip], [], {}, HASH);
     expect(pins.map((p) => p.id)).toEqual(["astoria", "newport", "bend", "crater", "arches"]);
   });

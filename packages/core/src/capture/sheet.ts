@@ -47,13 +47,13 @@ export function noteRowTitle(query: string): string {
 
 /**
  * The note row's second line. Online with a resolved locality it names the
- * town — "in San José area · where you are" — from the destination's name
+ * town — "in San José area · where you are" — from the area's name
  * ("San José, Costa Rica") up to its first comma. Otherwise the area is not
  * guessed at.
  */
-export function noteRowSubline(destinationName: string | null): string {
-  if (!destinationName) return "in the area you're in";
-  const town = destinationName.split(",")[0]!.trim();
+export function noteRowSubline(areaName: string | null): string {
+  if (!areaName) return "in the area you're in";
+  const town = areaName.split(",")[0]!.trim();
   return `in ${town} area · where you are`;
 }
 
@@ -190,12 +190,12 @@ export interface DidItAnswers {
   note: string;
 }
 
-/** The queued `POST /api/ideas` body — born done, on today's stop. */
+/** The queued `POST /api/ideas` body — born done, on today's destination. */
 export type DidItBody = IdeaCreateBody & { clientId: string; status: "done" };
 
 /**
  * "Did it" (#113 · Q1 B, docs/design/113 Screen 2): the capture's confirm
- * step writes an idea that is BORN DONE onto today's stop, through the same
+ * step writes an idea that is BORN DONE onto today's destination, through the same
  * queue a save goes through. The idea keeps the capture's own place:
  *
  * - a Google row → its name, point and place id, filed under the kind its
@@ -205,7 +205,7 @@ export type DidItBody = IdeaCreateBody & { clientId: string; status: "done" };
  *   so its Been save is anchored to the AREA.
  */
 export function didItBody(
-  where: { clientId: string; tripId: string; stopId: string },
+  where: { clientId: string; tripId: string; destinationId: string },
   target:
     | { kind: "place"; hit: PlaceSummary }
     | { kind: "note"; text: string; at: { lat: number; lng: number } | null; areaLabel: string | null },
@@ -214,7 +214,7 @@ export function didItBody(
   const common = {
     clientId: where.clientId,
     tripId: where.tripId,
-    stopId: where.stopId,
+    destinationId: where.destinationId,
     status: "done" as const,
     rating: a.rating,
     again: a.again,
@@ -253,8 +253,8 @@ export interface ToastCopy {
 const statusWords: Record<SavedPlaceStatus, string> = { want: "Want to go", been: "Been there" };
 
 /** Green, with Undo: "Saved El Chandelier" · "→ San José, Costa Rica · Want to go". */
-export function savedToast(saved: Pick<SavedPlace, "place" | "destination" | "status">): ToastCopy {
-  const dest = saved.destination ? `→ ${saved.destination.name} · ` : "";
+export function savedToast(saved: Pick<SavedPlace, "place" | "area" | "status">): ToastCopy {
+  const dest = saved.area ? `→ ${saved.area.name} · ` : "";
   return { title: `Saved ${saved.place.name}`, sub: `${dest}${statusWords[saved.status]}` };
 }
 
@@ -267,12 +267,12 @@ export function queuedToast(waiting: number): ToastCopy {
  * Green, after a flush on the way back online: "Synced 2 saves" ·
  * "great BLM camp spot → Bandon, OR" — the first synced save that resolved.
  */
-export function syncedToast(sent: Pick<SavedPlace, "place" | "destination">[]): ToastCopy {
+export function syncedToast(sent: Pick<SavedPlace, "place" | "area">[]): ToastCopy {
   const n = sent.length;
-  const anchored = sent.find((s) => s.destination);
+  const anchored = sent.find((s) => s.area);
   return {
     title: `Synced ${n} ${n === 1 ? "save" : "saves"}`,
-    sub: anchored ? `${anchored.place.name} → ${anchored.destination!.name}` : null,
+    sub: anchored ? `${anchored.place.name} → ${anchored.area!.name}` : null,
   };
 }
 

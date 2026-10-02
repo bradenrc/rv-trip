@@ -7,7 +7,7 @@ import { describePeople } from "@/lib/members";
 import { getOwner } from "@/lib/owner";
 
 /**
- * `GET /api/history?entity=stop&id=<uuid>` — the audit behind an opened byline
+ * `GET /api/history?entity=destination&id=<uuid>` — the audit behind an opened byline
  * (#78 · docs/design/81 §6). At most five rows, newest first, each
  * `{ field, from, to, memberName, at }`.
  *

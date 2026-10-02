@@ -33,10 +33,10 @@ export type PlacesDegradedReason = "no_provider" | "upstream_error" | "rate_limi
  * for details.
  *
  * `sessionToken` is declared because §3 draws it, but is NEVER populated today:
- * a session token is a Google Autocomplete↔Details pairing, and the search leg
+ * a session token is a Google Autocomplete↔Details pairing, and the search chapter
  * is `places:searchText` (billed per request, no token accepted). Issue #41's
  * i1 flagged this and it is still undecided — either the picker drops the token
- * or the search leg moves to Autocomplete (a different result shape). Echoing a
+ * or the search chapter moves to Autocomplete (a different result shape). Echoing a
  * token that buys nothing would be a lie in a payload.
  */
 export interface PlacesEnvelope<T extends PlaceSummary = PlaceSummary> {
@@ -129,11 +129,11 @@ export const placesSearchQuerySchema = z.object({
 export type PlacesSearchQuery = z.infer<typeof placesSearchQuerySchema>;
 
 /**
- * GET /api/destinations/resolve?near=lat,lng (#111) — the capture sheet's
+ * GET /api/areas/resolve?near=lat,lng (#111) — the capture sheet's
  * "in San José area" line. `near` is required: there is nothing to resolve
  * without a point.
  */
-export const destinationResolveQuerySchema = z.object({ near: nearSchema });
+export const areaResolveQuerySchema = z.object({ near: nearSchema });
 
 /** The `[id]` segment of the details route. */
 export const googlePlaceIdSchema = z.string().trim().min(1);

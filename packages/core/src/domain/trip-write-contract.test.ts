@@ -54,7 +54,7 @@ describe("tripCreateInput", () => {
   });
 
   /** The #60 vet's HIGH: `.pick()` is a closed list, so a key that is not named
-   * is a key `safeParse` DROPS. If this ever stops passing, the home-base
+   * is a key `safeParse` DROPS. If this ever destinations passing, the home-base
    * migration is a no-op on the wire. */
   it("carries the home-base ANCHOR, not just the name", () => {
     const place = { name: "Boise, ID", lat: 43.615, lng: -116.2023, googlePlaceId: "ChIJnbRH" };
@@ -83,7 +83,7 @@ describe("tripPatchInput", () => {
   });
 
   it("passes through only what was sent, and strips unknown keys", () => {
-    expect(tripPatchInput.parse({ title: "Renamed", legs: [], ownerId: "someone-else" })).toEqual({
+    expect(tripPatchInput.parse({ title: "Renamed", chapters: [], ownerId: "someone-else" })).toEqual({
       title: "Renamed",
     });
   });
@@ -101,13 +101,13 @@ describe("tripPatchInput", () => {
     expect(tripPatchInput.safeParse({ status: "traveling" }).success).toBe(false);
   });
 
-  /** #143 · Q8 A — phone Trip settings edits the destination. Without the key
+  /** #143 · Q8 A — phone Trip settings edits the area. Without the key
    * `.pick()` would drop it and the PATCH would silently change nothing. */
-  it("carries a destination, and null clears it", () => {
-    const destination = { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 };
-    expect(tripPatchInput.parse({ destination })).toEqual({ destination });
-    expect(tripPatchInput.parse({ destination: null })).toEqual({ destination: null });
-    expect(tripPatchInput.parse({})).not.toHaveProperty("destination");
-    expect(tripPatchInput.safeParse({ destination: { name: "", googlePlaceId: "x" } }).success).toBe(false);
+  it("carries an area, and null clears it", () => {
+    const area = { name: "Bellingham, WA", googlePlaceId: "ChIJbli", lat: 48.75, lng: -122.48 };
+    expect(tripPatchInput.parse({ area })).toEqual({ area });
+    expect(tripPatchInput.parse({ area: null })).toEqual({ area: null });
+    expect(tripPatchInput.parse({})).not.toHaveProperty("area");
+    expect(tripPatchInput.safeParse({ area: { name: "", googlePlaceId: "x" } }).success).toBe(false);
   });
 });

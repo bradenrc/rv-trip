@@ -108,10 +108,10 @@ export interface DrillInput {
   name: string;
   /**
    * The town this thing is in. ONE resolution with three fallbacks, decided by
-   * the caller: an idea attached to a stop → that stop's `placeName` (NOT NULL);
+   * the caller: an idea attached to a destination → that destination's `placeName` (NOT NULL);
    * a saved place → `savedPlace.region` (nullable); anything else — a shelf
    * idea, a region-less saved place → none, and every template degrades to the
-   * name alone. The shelf's `nearestStopName` is deliberately NOT a source: it
+   * name alone. The shelf's `nearestDestinationName` is deliberately NOT a source: it
    * is a proximity fact, not this place's town, and a wrong city in the query is
    * worse than no city.
    */
