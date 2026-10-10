@@ -89,8 +89,9 @@ mutation's message — never a thrown 500.
 - **Logging:** one JSON line per tool call to stdout → Vercel runtime logs:
   `{ at, keyId, householdId, tool, ok, ms, error? }`. Arguments are NOT
   logged (they can carry notes and URLs the user considers private).
-- **Vercel:** `functions["src/app/api/mcp/route.ts"].maxDuration = 60` in
-  `apps/web/vercel.json` (Hobby cap).
+- **Vercel:** `export const maxDuration = 60` as route segment config in the
+  route file (Next's supported form for app-router handlers; a `functions`
+  pattern in `vercel.json` errors when it matches no file) — Hobby cap.
 - **Docs:** `docs/mcp.md` — exact setup for Claude Code (`.mcp.json` with an
   `Authorization` header), the Claude API `mcp_servers` block, a claude.ai
   custom connector, plus one smoke-test prompt per client. ChatGPT waits for
