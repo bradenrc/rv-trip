@@ -15,6 +15,12 @@ vi.mock("@/lib/places", () => ({
   placesProvider: () => ({ configured: false, provider: null }),
 }));
 
+/** The key's minter must be a member of the household. */
+async function household(id: string, userId: string) {
+  await db.insert(schema.households).values({ id }).onConflictDoNothing();
+  await db.insert(schema.householdMembers).values({ householdId: id, userId, role: "owner" }).onConflictDoNothing();
+}
+
 async function connect(bearer?: string) {
   const transport = new StreamableHTTPClientTransport(new URL("http://test.local/api/mcp"), {
     fetch: (url, init) => POST(new Request(url, init)),
@@ -66,7 +72,8 @@ describeDb("MCP endpoint (#161 substrate)", () => {
 
   it("scopes get_trip to the key's household", async () => {
     clerkOn();
-    await db.insert(schema.households).values([{ id: DEV_OWNER }, { id: OTHER_OWNER }]).onConflictDoNothing();
+    await household(DEV_OWNER, "user_braden");
+    await household(OTHER_OWNER, "user_other");
     const mine = await fx.trip({ owner: DEV_OWNER, title: "Mine" });
     const theirs = await fx.trip({ owner: OTHER_OWNER, title: "Theirs" });
     const { key } = await createApiKey(DEV_OWNER, { name: "k", createdBy: "user_braden" });
@@ -80,7 +87,7 @@ describeDb("MCP endpoint (#161 substrate)", () => {
 
   it("add_idea writes through createIdea: attributed to the key's minter, source link in the notes", async () => {
     clerkOn();
-    await db.insert(schema.households).values({ id: DEV_OWNER }).onConflictDoNothing();
+    await household(DEV_OWNER, "user_braden");
     const trip = await fx.trip({ owner: DEV_OWNER });
     const { key } = await createApiKey(DEV_OWNER, { name: "k", createdBy: "user_braden" });
     const client = await connect(key);
@@ -115,6 +122,18 @@ describeDb("MCP endpoint (#161 substrate)", () => {
     expect((await db.select().from(schema.ideas)).length).toBe(2);
   });
 
+  it("rejects a sourceUrl that is not http(s) — a model can be fed one by a page it researched", async () => {
+    const trip = await fx.trip({ owner: DEV_OWNER });
+    const client = await connect();
+    const r = await client.callTool({
+      name: "add_idea",
+      arguments: { tripId: trip.id, title: "x", category: "do", sourceUrl: "javascript:alert(1)" },
+    });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/http/);
+    expect(await db.select().from(schema.ideas)).toEqual([]);
+  });
+
   it("rejects a non-uuid tripId with zod's message and inserts nothing", async () => {
     const client = await connect();
     const r = await client.callTool({ name: "add_idea", arguments: { tripId: "nope", title: "x", category: "do" } });
@@ -125,7 +144,7 @@ describeDb("MCP endpoint (#161 substrate)", () => {
 
   it("rate limits a key at 60 calls per minute, and never limits keyless", async () => {
     clerkOn();
-    await db.insert(schema.households).values({ id: DEV_OWNER }).onConflictDoNothing();
+    await household(DEV_OWNER, "u");
     const { key, row } = await createApiKey(DEV_OWNER, { name: "k", createdBy: "u" });
     for (let i = 0; i < API_KEY_RATE_LIMIT; i++) await consumeApiKeyCall(row.id); // pre-fill this minute
     const client = await connect(key);

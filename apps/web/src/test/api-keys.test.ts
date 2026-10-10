@@ -15,9 +15,10 @@ import {
 import { DEV_OWNER } from "@rv-trip/db/testing";
 import { describeDb } from "@/test/db";
 
-/** The household row the FK needs. Fixtures never insert one (trips have no FK). */
-async function household(id = DEV_OWNER) {
+/** A household with `userId` as a member — a key can only be minted BY a member. */
+async function household(id = DEV_OWNER, userId = "u") {
   await db.insert(schema.households).values({ id }).onConflictDoNothing();
+  await db.insert(schema.householdMembers).values({ householdId: id, userId, role: "owner" }).onConflictDoNothing();
   return id;
 }
 
@@ -31,7 +32,7 @@ describeDb("api keys (#161 substrate)", () => {
   });
 
   it("creates a key, returns the plaintext once, stores only the hash + prefix", async () => {
-    const hh = await household();
+    const hh = await household(DEV_OWNER, "user_braden");
     const { key, row } = await createApiKey(hh, { name: "Claude Code", createdBy: "user_braden" });
     expect(row.keyHash).toBe(hashApiKey(key));
     expect(row.prefix).toBe(key.slice(0, 12));
@@ -76,5 +77,19 @@ describeDb("api keys (#161 substrate)", () => {
     // A new minute is a fresh bucket.
     const next = await consumeApiKeyCall(row.id, { now: new Date("2026-08-15T12:01:00Z") });
     expect(next).toMatchObject({ allowed: true, count: 1 });
+  });
+
+  it("refuses to mint for someone who is not a member of the household", async () => {
+    const hh = await household();
+    await expect(createApiKey(hh, { name: "k", createdBy: "stranger" })).rejects.toThrow(/not a member/);
+    expect(await listApiKeys(hh)).toEqual([]);
+  });
+
+  it("a key whose minter has left the household is no longer live", async () => {
+    const hh = await household(DEV_OWNER, "user_braden");
+    const { key } = await createApiKey(hh, { name: "k", createdBy: "user_braden" });
+    expect(await findLiveApiKey(key)).not.toBeNull();
+    await db.delete(schema.householdMembers); // the only member in this test
+    expect(await findLiveApiKey(key)).toBeNull();
   });
 });

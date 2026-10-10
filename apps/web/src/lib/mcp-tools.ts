@@ -2,7 +2,6 @@ import type { McpServer, ToolCallback } from "@modelcontextprotocol/sdk/server/m
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { CallToolResult, ServerNotification, ServerRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { ZodRawShape } from "zod";
-import { ZodError } from "zod";
 import { API_KEY_RATE_LIMIT, consumeApiKeyCall } from "@rv-trip/db";
 import { principalOf, type McpPrincipal } from "@/lib/mcp-auth";
 
@@ -34,9 +33,11 @@ export function defineTool<Shape extends ZodRawShape>(
     extra: RequestHandlerExtra<ServerRequest, ServerNotification>,
   ): Promise<CallToolResult> => {
     const started = Date.now();
-    const principal = principalOf(extra.authInfo);
-    const base = { at: new Date().toISOString(), keyId: principal.keyId, householdId: principal.householdId, tool: name };
+    let base: Record<string, unknown> = { at: new Date().toISOString(), tool: name };
     try {
+      // Inside the try so a mis-wired route (no principal) still logs a line.
+      const principal = principalOf(extra.authInfo);
+      base = { ...base, keyId: principal.keyId, householdId: principal.householdId };
       if (principal.keyId) {
         const gate = await consumeApiKeyCall(principal.keyId);
         if (!gate.allowed) {
@@ -49,12 +50,9 @@ export function defineTool<Shape extends ZodRawShape>(
       console.log(JSON.stringify({ ...base, ok: true, ms: Date.now() - started }));
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }] };
     } catch (e) {
-      const error =
-        e instanceof ZodError
-          ? e.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
-          : e instanceof Error
-            ? e.message
-            : String(e);
+      // Input validation never reaches here (the SDK parses `inputSchema`
+      // before the body runs); what lands is a mutation's own refusal.
+      const error = e instanceof Error ? e.message : String(e);
       console.log(JSON.stringify({ ...base, ok: false, ms: Date.now() - started, error }));
       return { isError: true, content: [{ type: "text" as const, text: error }] };
     }

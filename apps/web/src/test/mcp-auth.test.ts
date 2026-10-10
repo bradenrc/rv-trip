@@ -4,6 +4,12 @@ import { DEV_OWNER } from "@rv-trip/db/testing";
 import { principalOf, verifyMcpBearer } from "@/lib/mcp-auth";
 import { describeDb } from "@/test/db";
 
+/** The key's minter must be a member of the household. */
+async function household(id: string, userId: string) {
+  await db.insert(schema.households).values({ id }).onConflictDoNothing();
+  await db.insert(schema.householdMembers).values({ householdId: id, userId, role: "owner" }).onConflictDoNothing();
+}
+
 const req = (auth?: string) =>
   new Request("http://test.local/api/mcp", { method: "POST", headers: auth ? { authorization: auth } : {} });
 
@@ -32,7 +38,7 @@ describeDb("mcp auth seam (#161 substrate)", () => {
 
   it("resolves a live key to its household + minting member, and touches it", async () => {
     clerkOn();
-    await db.insert(schema.households).values({ id: DEV_OWNER }).onConflictDoNothing();
+    await household(DEV_OWNER, "user_braden");
     const { key, row } = await createApiKey(DEV_OWNER, { name: "k", createdBy: "user_braden" });
     const info = await verifyMcpBearer(req(`Bearer ${key}`), key);
     expect(info?.clientId).toBe(row.id);
@@ -44,19 +50,28 @@ describeDb("mcp auth seam (#161 substrate)", () => {
 
   it("rejects a revoked key", async () => {
     clerkOn();
-    await db.insert(schema.households).values({ id: DEV_OWNER }).onConflictDoNothing();
+    await household(DEV_OWNER, "u");
     const { key, row } = await createApiKey(DEV_OWNER, { name: "k", createdBy: "u" });
     await revokeApiKey(row.id);
     expect(await verifyMcpBearer(req(`Bearer ${key}`), key)).toBeUndefined();
   });
 
   it("a key still works when Clerk is off (keyless mode is a fallback, not a lock-out)", async () => {
-    await db.insert(schema.households).values({ id: "hh_other" }).onConflictDoNothing();
+    await household("hh_other", "u2");
     const { key } = await createApiKey("hh_other", { name: "k", createdBy: "u2" });
     expect(principalOf(await verifyMcpBearer(req(`Bearer ${key}`), key)).householdId).toBe("hh_other");
   });
 
   it("principalOf throws on a missing AuthInfo (a wiring error, never a tenant guess)", () => {
     expect(() => principalOf(undefined)).toThrow(/no auth/);
+  });
+
+  it("rejects a key whose minter is no longer a member of the household", async () => {
+    clerkOn();
+    await household(DEV_OWNER, "user_left");
+    const { key } = await createApiKey(DEV_OWNER, { name: "k", createdBy: "user_left" });
+    expect(await verifyMcpBearer(req(`Bearer ${key}`), key)).toBeDefined();
+    await db.delete(schema.householdMembers); // the only member in this test
+    expect(await verifyMcpBearer(req(`Bearer ${key}`), key)).toBeUndefined();
   });
 });

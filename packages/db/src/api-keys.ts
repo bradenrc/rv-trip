@@ -1,7 +1,7 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "./index";
-import { apiKeyCalls, apiKeys } from "./schema";
+import { apiKeyCalls, apiKeys, householdMembers } from "./schema";
 
 /**
  * MCP API keys (#161 substrate): mint, verify, revoke, and the per-minute
@@ -26,10 +26,26 @@ export function mintApiKey(): string {
   return PREFIX + randomBytes(32).toString("base64url");
 }
 
+async function isMember(householdId: string, userId: string): Promise<boolean> {
+  const [m] = await db
+    .select({ userId: householdMembers.userId })
+    .from(householdMembers)
+    .where(and(eq(householdMembers.householdId, householdId), eq(householdMembers.userId, userId)));
+  return Boolean(m);
+}
+
+/**
+ * Mint a key for `householdId` acting as `createdBy`, who must be a current
+ * member: a key is that member's standing, and `findLiveApiKey` keeps
+ * re-checking the membership, so leaving the household ends the key.
+ */
 export async function createApiKey(
   householdId: string,
   input: { name: string; createdBy: string },
 ): Promise<{ key: string; row: ApiKeyRow }> {
+  if (!(await isMember(householdId, input.createdBy))) {
+    throw new Error(`createApiKey: ${input.createdBy} is not a member of household ${householdId}`);
+  }
   const key = mintApiKey();
   const [row] = await db
     .insert(apiKeys)
@@ -45,21 +61,25 @@ export async function createApiKey(
 }
 
 /**
- * The live row for a plaintext key, or null. Lookup is by hash (indexed); the
- * constant-time compare afterwards is belt and braces against a hash-prefix
- * oracle, not the primary defence.
+ * The live row for a plaintext key, or null. "Live" = not revoked AND its
+ * minter is still a member of the household — removing a co-pilot ends the
+ * access their keys carried, without anyone having to find and revoke them.
+ *
+ * Lookup is by sha256 (unique index). No constant-time compare: the row is
+ * selected BY the hash, so there is nothing left to compare, and the 256-bit
+ * key space makes a timing oracle on the index lookup useless.
  */
 export async function findLiveApiKey(key: string): Promise<ApiKeyRow | null> {
   if (!key.startsWith(PREFIX)) return null;
-  const hash = hashApiKey(key);
-  const [row] = await db
-    .select()
+  const [hit] = await db
+    .select({ row: apiKeys })
     .from(apiKeys)
-    .where(and(eq(apiKeys.keyHash, hash), isNull(apiKeys.revokedAt)));
-  if (!row) return null;
-  const a = Buffer.from(row.keyHash, "hex");
-  const b = Buffer.from(hash, "hex");
-  return a.length === b.length && timingSafeEqual(a, b) ? row : null;
+    .innerJoin(
+      householdMembers,
+      and(eq(householdMembers.householdId, apiKeys.householdId), eq(householdMembers.userId, apiKeys.createdBy)),
+    )
+    .where(and(eq(apiKeys.keyHash, hashApiKey(key)), isNull(apiKeys.revokedAt)));
+  return hit?.row ?? null;
 }
 
 export async function touchApiKey(id: string): Promise<void> {

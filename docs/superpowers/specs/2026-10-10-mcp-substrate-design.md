@@ -106,7 +106,10 @@ From a Claude Code session with `.mcp.json` pointing at
 `https://roadvalet.com/api/mcp` and a minted key:
 1. "what trips do I have" → the seeded trips, scoped to the key's household.
 2. "add an idea to <trip>: eat at X, note Y, source <url>" → the idea appears
-   in the app within seconds, attributed to the minting member in history.
+   in the app within seconds. (Attribution of CREATES in History is not
+   something the app does today — change_log records field updates only —
+   so "added by <member>" is handed to #162; the key's actor already reaches
+   the mutation.)
 3. A revoked key gets 401 on the next call; a key over 60/min gets a rate
    limit error; a key from another household cannot see this one's trips.
 4. `pnpm turbo run lint typecheck test` green, including the keyless endpoint

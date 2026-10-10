@@ -17,7 +17,10 @@ import {
   areas,
   destinations,
   trips,
-  userPrefs, apiKeys, apiKeyCalls } from "../schema";
+  userPrefs,
+  apiKeys,
+  apiKeyCalls,
+} from "../schema";
 
 /**
  * The reset between tests: every table, ONE statement, identity reset.

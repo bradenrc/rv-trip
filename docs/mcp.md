@@ -3,14 +3,16 @@
 The app's trip grammar as MCP tools at `https://roadvalet.com/api/mcp`
 (streamable HTTP). An AI session pulls your trips, researches, and pushes
 ideas back through the same owner-scoped mutations the app uses — every
-write is validated and household-scoped, and the key's minting member is the
-actor on every write it makes.
+write is validated and household-scoped. The key carries its minting member
+as the actor; the app does not yet record who *created* a thing (History
+logs field changes only), so "added by …" for MCP writes lands with #162.
 
 ## 1. Mint a key
 
-Keys are per household; the member who mints one is the `actor` on every
-write it makes. Until the Settings card ships (#162), mint from a checkout
-with production's `DATABASE_URL` in the environment:
+Keys are per household and minted BY a member; a key stops working the
+moment its minter leaves the household. Until the Settings card ships
+(#162), mint from a checkout with production's `DATABASE_URL` in the
+environment:
 
 ```bash
 pnpm mcp:key mint --household <householdId> --by <yourClerkUserId> --name "Claude Code"
@@ -22,7 +24,17 @@ key fails on its next call.
 
 ## 2. Connect a client
 
-**Claude Code** — `.mcp.json` in any project (or `~/.claude.json` for all):
+**Claude Code** — add it at USER scope so the key lives in your home
+config, never in a repo (a project `.mcp.json` is meant to be committed —
+never put a key in one):
+
+```bash
+claude mcp add --transport http --scope user tripcaddie https://roadvalet.com/api/mcp \
+  --header "Authorization: Bearer rvk_…"
+```
+
+If you do want a project-level `.mcp.json`, reference the key through the
+environment instead of pasting it:
 
 ```json
 {
@@ -30,13 +42,14 @@ key fails on its next call.
     "tripcaddie": {
       "type": "http",
       "url": "https://roadvalet.com/api/mcp",
-      "headers": { "Authorization": "Bearer rvk_…" }
+      "headers": { "Authorization": "Bearer ${TRIPCADDIE_MCP_KEY}" }
     }
   }
 }
 ```
 
-**Claude API** — the MCP connector in a Messages request:
+**Claude API** — the MCP connector in a Messages request (the connector is
+a beta: send the beta header the current Claude API docs name for it):
 
 ```json
 "mcp_servers": [
@@ -44,13 +57,8 @@ key fails on its next call.
 ]
 ```
 
-**claude.ai custom connector** — Settings → Connectors → Add custom
-connector → URL `https://roadvalet.com/api/mcp`. Where the dialog offers an
-OAuth client id/secret, leave them blank; paste the key as a bearer if the
-field is offered. If your plan's connector dialog only accepts OAuth, that
-is #164.
-
-**ChatGPT** — waits for OAuth (#164).
+**claude.ai custom connectors and ChatGPT** — both expect OAuth, not a
+pasted bearer. That is #164; until then use Claude Code or the Claude API.
 
 ## 3. Smoke test
 
@@ -63,7 +71,8 @@ In the connected session:
 > Add an idea to <trip title>: eat at Drayton Harbor Oyster Co., note "best
 > oysters near Blaine", source https://example.com/oysters
 
-→ the idea appears on the trip in the app within seconds.
+→ the idea appears on the trip in the app within seconds (History will not
+show who added it until #162 records creates).
 
 ## Tools (v1)
 
@@ -89,5 +98,7 @@ curl -s localhost:3000/api/mcp -H 'content-type: application/json' \
 ```
 
 With Clerk keys set locally (`apps/web/.env.development.local`), the dev
-server requires a bearer like production does — mint one against the local
-DB with `pnpm mcp:key`.
+server requires a bearer like production does. Mint one with `pnpm mcp:key`
+— and check both point at the SAME database: the CLI reads the repo-root
+`.env`, while `next dev` prefers `apps/web/.env.development.local`. A key
+minted into one database is unknown to a server reading the other.

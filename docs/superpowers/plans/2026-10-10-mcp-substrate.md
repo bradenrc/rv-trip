@@ -1180,4 +1180,4 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 4: PR + production smoke (after merge)**
 
-Open the PR against `main` (title `feat(161): MCP substrate — api keys, auth seam, /api/mcp, ops`). Once merged and deployed, mint a production key (`vercel env pull` for the URL, as the reset procedure did), put it in a local `.mcp.json`, and run the two smoke prompts from `docs/mcp.md` from a Claude Code session. Confirm the idea shows in History on roadvalet.com under the minting member's name.
+Open the PR against `main` (title `feat(161): MCP substrate — api keys, auth seam, /api/mcp, ops`). Once merged and deployed, mint a production key (`vercel env pull` for the URL, as the reset procedure did), put it in a local `.mcp.json`, and run the two smoke prompts from `docs/mcp.md` from a Claude Code session. Confirm the idea shows on the trip on roadvalet.com. (History attribution of creates is #162's: the app logs field changes only — see the ledger's Task 4 ruling.)

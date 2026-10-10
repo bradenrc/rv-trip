@@ -52,7 +52,13 @@ export function registerTools(server: McpServer): void {
         title: z.string().min(1).max(200),
         category: ideaCategory,
         notes: z.string().max(4000).optional(),
-        sourceUrl: z.string().url().optional(),
+        // http(s) only: the model may have read this URL off a page it was
+        // researching, and notes must never carry a javascript:/data: link.
+        sourceUrl: z
+          .string()
+          .url()
+          .refine((u) => /^https?:\/\//i.test(u), { message: "sourceUrl must be an http(s) URL" })
+          .optional(),
         clientId: z.string().min(1).max(64).optional(),
       },
     },
