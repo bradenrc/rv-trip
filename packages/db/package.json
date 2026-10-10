@@ -19,6 +19,7 @@
     "studio": "drizzle-kit studio",
     "seed": "tsx src/seed.ts",
     "reown": "tsx src/reown.ts",
+    "keys": "tsx src/api-keys-cli.ts",
     "backfill:places": "tsx src/backfill-places.ts",
     "typecheck": "tsc --noEmit"
   },

@@ -36,7 +36,8 @@ pnpm dev                     # http://localhost:3000
 ```
 
 Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
-(Drizzle Studio), `pnpm db:down`, `pnpm marks:drill` (re-fetch the research
+(Drizzle Studio), `pnpm db:down`, `pnpm mcp:key` (mint/list/revoke MCP API keys —
+see docs/mcp.md), `pnpm marks:drill` (re-fetch the research
 pad's ten brand favicons into `apps/web/public/drill/` — build time, committed
 output, never a runtime hotlink), `pnpm backfill:places` (geocode every
 coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
