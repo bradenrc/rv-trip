@@ -86,6 +86,8 @@ gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).
   `dev-user` stub. Keep local keys in `apps/web/.env.development.local` so the
   pipeline's walk worktrees (which copy `.env.local`) stay key-free. To see the
   seed data as your real account: `pnpm db:reown <your Clerk user id>`.
+- **MCP:** `/api/mcp` exposes the trip grammar as tools for an AI session;
+  keyless locally, `rvk_` keys in production — see `docs/mcp.md`.
 - **Maps:** Mapbox GL display · HERE RV-safe routing · Google Maps handoff are
   live with keys in `.env` (see `.env.example`); without keys every map
   degrades to a placeholder and every drive to a labelled estimate. Google
