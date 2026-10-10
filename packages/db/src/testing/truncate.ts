@@ -17,8 +17,7 @@ import {
   areas,
   destinations,
   trips,
-  userPrefs,
-} from "../schema";
+  userPrefs, apiKeys, apiKeyCalls } from "../schema";
 
 /**
  * The reset between tests: every table, ONE statement, identity reset.
@@ -38,6 +37,6 @@ import {
  */
 export async function truncateAll(): Promise<void> {
   await db.execute(
-    sql`truncate table ${trips}, ${chapters}, ${destinations}, ${ideas}, ${reservations}, ${saves}, ${tripDismissedSaves}, ${travelSegments}, ${areas}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${changeLog}, ${households}, ${householdMembers}, ${householdInvites} restart identity cascade`,
+    sql`truncate table ${trips}, ${chapters}, ${destinations}, ${ideas}, ${reservations}, ${saves}, ${tripDismissedSaves}, ${travelSegments}, ${areas}, ${rigs}, ${routes}, ${places}, ${userPrefs}, ${changeLog}, ${households}, ${householdMembers}, ${householdInvites}, ${apiKeys}, ${apiKeyCalls} restart identity cascade`,
   );
 }
