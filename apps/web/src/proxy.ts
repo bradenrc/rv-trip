@@ -12,7 +12,11 @@ import { clerkEnabled } from "@/lib/owner";
  * Next 16: this file is `proxy.ts`, not `middleware.ts`, and always runs on
  * the Node runtime.
  */
+/** The MCP endpoint does its own bearer auth (`lib/mcp-auth.ts`); a `rvk_` key must never reach Clerk, which would 401 it. */
+const isMcp = (req: NextRequest) => req.nextUrl.pathname === "/api/mcp";
+
 const withClerk = clerkMiddleware(async (auth, req) => {
+  if (isMcp(req)) return;
   const { isAuthenticated } = await auth();
   if (isAuthenticated) return;
   if (req.nextUrl.pathname.startsWith("/api/")) {
