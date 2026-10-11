@@ -678,6 +678,48 @@ export const changeLog = pgTable(
   ],
 );
 
+/**
+ * MCP API keys (#161 substrate). One key = one household's tenant (`owner`)
+ * plus the member who minted it (`created_by` = the `actor` on every write it
+ * makes, so change_log reads "edited by Braden" for a key Braden minted). The
+ * key itself is never stored: `key_hash` is sha256 of the full `rvk_…` string,
+ * `prefix` its first 12 chars for display. `revoked_at` set = dead.
+ */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    householdId: text("household_id")
+      .notNull()
+      .references(() => households.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    keyHash: text("key_hash").notNull(),
+    prefix: text("prefix").notNull(),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("api_keys_hash_idx").on(t.keyHash), index("api_keys_household_idx").on(t.householdId)],
+);
+
+/**
+ * Per-key, per-minute call counter for the MCP rate limit. Postgres rather
+ * than function memory because Vercel functions do not share or keep state.
+ * `bucket` is the minute (truncated) the calls fall in.
+ */
+export const apiKeyCalls = pgTable(
+  "api_key_calls",
+  {
+    keyId: uuid("key_id")
+      .notNull()
+      .references(() => apiKeys.id, { onDelete: "cascade" }),
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.keyId, t.bucket] })],
+);
+
 export const householdsRelations = relations(households, ({ many }) => ({
   members: many(householdMembers),
   invites: many(householdInvites),

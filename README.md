@@ -36,7 +36,8 @@ pnpm dev                     # http://localhost:3000
 ```
 
 Other scripts: `pnpm test` (core logic), `pnpm typecheck`, `pnpm db:studio`
-(Drizzle Studio), `pnpm db:down`, `pnpm marks:drill` (re-fetch the research
+(Drizzle Studio), `pnpm db:down`, `pnpm mcp:key` (mint/list/revoke MCP API keys —
+see docs/mcp.md), `pnpm marks:drill` (re-fetch the research
 pad's ten brand favicons into `apps/web/public/drill/` — build time, committed
 output, never a runtime hotlink), `pnpm backfill:places` (geocode every
 coordless stop and saved place — needs `GOOGLE_API_KEY`; the in-app equivalent
@@ -85,6 +86,8 @@ gaps, the roadmap on [the board](https://github.com/users/bradenrc/projects/6)).
   `dev-user` stub. Keep local keys in `apps/web/.env.development.local` so the
   pipeline's walk worktrees (which copy `.env.local`) stay key-free. To see the
   seed data as your real account: `pnpm db:reown <your Clerk user id>`.
+- **MCP:** `/api/mcp` exposes the trip grammar as tools for an AI session;
+  keyless locally, `rvk_` keys in production — see `docs/mcp.md`.
 - **Maps:** Mapbox GL display · HERE RV-safe routing · Google Maps handoff are
   live with keys in `.env` (see `.env.example`); without keys every map
   degrades to a placeholder and every drive to a labelled estimate. Google
