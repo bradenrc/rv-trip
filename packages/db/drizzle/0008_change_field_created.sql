@@ -1,0 +1,1 @@
+ALTER TYPE "public"."change_field" ADD VALUE 'created';

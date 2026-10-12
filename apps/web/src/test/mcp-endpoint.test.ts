@@ -1,35 +1,17 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { API_KEY_RATE_LIMIT, consumeApiKeyCall, createApiKey, db, schema } from "@rv-trip/db";
 import { DEV_OWNER, OTHER_OWNER, fx } from "@rv-trip/db/testing";
 import { POST } from "@/app/api/mcp/route";
 import { describeDb } from "@/test/db";
+import { connect, household, json, text } from "@/test/mcp";
 
 /**
- * The endpoint through the REAL SDK client, in-process: the transport's
- * `fetch` is the route handler, so there is no server and no port.
+ * The endpoint through the REAL SDK client, in-process (`connect`, test/mcp.ts).
  */
 vi.mock("@/lib/places", () => ({
   areaResolver: () => async () => null,
   placesProvider: () => ({ configured: false, provider: null }),
 }));
-
-/** The key's minter must be a member of the household. */
-async function household(id: string, userId: string) {
-  await db.insert(schema.households).values({ id }).onConflictDoNothing();
-  await db.insert(schema.householdMembers).values({ householdId: id, userId, role: "owner" }).onConflictDoNothing();
-}
-
-async function connect(bearer?: string) {
-  const transport = new StreamableHTTPClientTransport(new URL("http://test.local/api/mcp"), {
-    fetch: (url, init) => POST(new Request(url, init)),
-    requestInit: bearer ? { headers: { authorization: `Bearer ${bearer}` } } : undefined,
-  });
-  const client = new Client({ name: "test", version: "0" });
-  await client.connect(transport);
-  return client;
-}
 
 function clerkOn() {
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = "pk_test_dummy";
@@ -40,16 +22,23 @@ afterEach(() => {
   delete process.env.CLERK_SECRET_KEY;
 });
 
-const text = (r: Awaited<ReturnType<Client["callTool"]>>) =>
-  (r.content as { type: string; text: string }[]).map((c) => c.text).join("");
-const json = (r: Awaited<ReturnType<Client["callTool"]>>) => JSON.parse(text(r));
-
 describeDb("MCP endpoint (#161 substrate)", () => {
-  it("keyless: lists the three tools and reads the dev household's trips", async () => {
+  it("keyless: lists the grammar's tools and reads the dev household's trips", async () => {
     const { trip } = await fx.pacificNorthwestLoop();
     const client = await connect();
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(tools).toEqual(["add_idea", "get_trip", "list_trips"]);
+    expect(tools).toEqual([
+      "add_destination",
+      "add_idea",
+      "add_reservation",
+      "add_save",
+      "add_segment",
+      "create_trip",
+      "get_context",
+      "get_trip",
+      "journal_entry",
+      "list_trips",
+    ]);
     const list = json(await client.callTool({ name: "list_trips", arguments: {} }));
     expect(list.map((t: { id: string }) => t.id)).toEqual([trip.id]);
     const full = json(await client.callTool({ name: "get_trip", arguments: { tripId: trip.id } }));

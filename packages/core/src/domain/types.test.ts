@@ -351,12 +351,25 @@ describe("lastChange — the one joined row the byline reads", () => {
     });
   });
 
-  it("speaks only the three shared-voice fields", () => {
+  it("reads a field it does not know as no byline, never a failed parse (#162 vet HIGH)", () => {
+    // A phone build ships on its own cadence: a server that has learned a new
+    // field (as `created` was) must not throw the whole trip away on it.
     const bogus = {
       ...PRE_78_TRIP.chapters[0]!.destinations[0]!,
       lastChange: { field: "cost", memberName: "Jess", at: "2026-09-12T18:04:11Z" },
     };
-    expect(destination.safeParse(bogus).success).toBe(false);
+    const parsed = destination.safeParse(bogus);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.lastChange).toBeNull();
+    expect(trip.safeParse({ ...PRE_78_TRIP, chapters: [{ ...PRE_78_TRIP.chapters[0]!, destinations: [bogus] }] }).success).toBe(true);
+  });
+
+  it("carries a `created` row (#162 · Q2 A — 'added by Braden')", () => {
+    const added = {
+      ...PRE_78_TRIP.chapters[0]!.destinations[0]!,
+      lastChange: { field: "created", memberName: "Braden", at: "2026-10-11T18:04:11Z" },
+    };
+    expect(destination.parse(added).lastChange?.field).toBe("created");
   });
 
   it("defaults on a saved place too — the /places card's byline", () => {

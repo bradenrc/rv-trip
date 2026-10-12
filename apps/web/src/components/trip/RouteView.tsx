@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import {
   Pin,
@@ -77,6 +77,7 @@ import {
   MENU_SURFACE,
 } from "./row-menu";
 import { HopCard, HopModeSwitch, type HopCardActions } from "./HopCard";
+import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { Logistics } from "./Logistics";
 
 /**
@@ -504,13 +505,31 @@ export function RouteView({
                     {row.reservations.length > 0 && (
                       <div className="flex flex-col gap-1.5">
                         {row.reservations.map((r) => (
-                          <ReservationLineItem
-                            key={r.id}
-                            type={r.type}
-                            name={r.name}
-                            cost={costs ? r.cost : null}
-                            label={r.lodgingKind ? LODGING_KIND_LABEL[r.lodgingKind] : null}
-                          />
+                          <Fragment key={r.id}>
+                            <ReservationLineItem
+                              type={r.type}
+                              name={r.name}
+                              cost={costs ? r.cost : null}
+                              label={r.lodgingKind ? LODGING_KIND_LABEL[r.lodgingKind] : null}
+                            />
+                            {/* #162 · Q3 A — a stay's check-in / check-out, in its own zone.
+                                Beside the DS row, never inside it. */}
+                            {r.clock && (
+                              <p className="m-0 -mt-1 pl-10 font-mono text-[11.5px] text-rv-ink-faded">{r.clock}</p>
+                            )}
+                            {/* #162 · Q2 A — "added by Braden · Oct 11": the reservation byline
+                                (none was mounted before). An island, like the row's others. */}
+                            {r.lastChange && (
+                              <div className="pointer-events-auto pl-10">
+                                <ChangeBylinePopover
+                                  last={r.lastChange}
+                                  entity="reservation"
+                                  entityId={r.id}
+                                  name={r.name}
+                                />
+                              </div>
+                            )}
+                          </Fragment>
                         ))}
                       </div>
                     )}

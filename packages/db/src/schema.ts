@@ -628,13 +628,15 @@ export const changeEntity = pgEnum("change_entity", ["destination", "idea", "res
 
 /**
  * The shared-voice fields, as the LOG names them. `again` joined in #113.
+ * `created` (#162 · Q2 A) is the one row a create writes — `from` null, `to`
+ * the thing's title or name — so History can say "added by …".
  *
  * `notes` is canonical even though `saves` spells its column `note` — one
  * vocabulary on the wire, or the /places byline could never match
  * the set it renders from. The mapping happens at the one write site
  * (`updateSavedPlaceFields`), never here.
  */
-export const changeField = pgEnum("change_field", ["rating", "notes", "status", "again"]);
+export const changeField = pgEnum("change_field", ["rating", "notes", "status", "again", "created"]);
 
 /**
  * One row per changed field. Two reads consume it (§6): the newest row per

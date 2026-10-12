@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { savedPlaceCreate } from "@rv-trip/core";
 import { createSave, listSavedPlacesForOwner } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 import { placesProvider } from "@/lib/places";
 
 /** The Places library, both shelves — `SavedPlace[]`. */
@@ -29,6 +29,7 @@ export async function POST(req: Request) {
     const { saved, replayed } = await createSave(await getOwner(), parsed.data, {
       resolveArea: (lat, lng) => provider.resolveArea(lat, lng),
       searchPlaces: (query, near) => provider.search(query, near),
+      actor: await getActor(),
     });
     // A replayed `clientId` is the phone re-sending a capture that already
     // landed: 200 with the row that exists, never a second row.

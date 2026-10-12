@@ -822,6 +822,52 @@ export function mapIdea(i: MapIdeaRow, last: LastChangeIndex = NO_CHANGES): Idea
   };
 }
 
+/**
+ * #162 · Q7 B — ONE idea, destination or reservation by id, owner-scoped and
+ * with its byline joined: what the MCP `journal_entry` hands back after it
+ * patches a thing. A reservation is owned through its destination OR its hop.
+ * Null when the id is not this household's.
+ */
+export async function getJournalThing(
+  ownerId: string,
+  target: { kind: "idea" | "destination" | "reservation"; id: string },
+): Promise<Idea | Destination | Reservation | null> {
+  const last = () => lastChangesFor(ownerId, [target.id]);
+  if (target.kind === "idea") {
+    const [hit] = await db
+      .select({ row: ideas })
+      .from(ideas)
+      .innerJoin(trips, eq(ideas.tripId, trips.id))
+      .where(and(eq(ideas.id, target.id), eq(trips.ownerId, ownerId)));
+    return hit ? mapIdea(hit.row, await last()) : null;
+  }
+  if (target.kind === "destination") {
+    const [hit] = await db
+      .select({ row: destinations })
+      .from(destinations)
+      .innerJoin(chapters, eq(destinations.chapterId, chapters.id))
+      .innerJoin(trips, eq(chapters.tripId, trips.id))
+      .where(and(eq(destinations.id, target.id), eq(trips.ownerId, ownerId)));
+    return hit ? mapDestination({ ...hit.row, reservations: [], ideas: [] }, await last()) : null;
+  }
+  const [viaDestination] = await db
+    .select({ row: reservations })
+    .from(reservations)
+    .innerJoin(destinations, eq(reservations.destinationId, destinations.id))
+    .innerJoin(chapters, eq(destinations.chapterId, chapters.id))
+    .innerJoin(trips, eq(chapters.tripId, trips.id))
+    .where(and(eq(reservations.id, target.id), eq(trips.ownerId, ownerId)));
+  const [viaHop] = viaDestination
+    ? [viaDestination]
+    : await db
+        .select({ row: reservations })
+        .from(reservations)
+        .innerJoin(travelSegments, eq(reservations.segmentId, travelSegments.id))
+        .innerJoin(trips, eq(travelSegments.tripId, trips.id))
+        .where(and(eq(reservations.id, target.id), eq(trips.ownerId, ownerId)));
+  return viaHop ? mapReservation(viaHop.row, await last()) : null;
+}
+
 // ── the rig ────────────────────────────────────────────────────────────────
 /**
  * The account's single rig, or null on a brand-new account. `null` is a real,

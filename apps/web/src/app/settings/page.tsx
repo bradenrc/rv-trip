@@ -1,10 +1,11 @@
 import { headers } from "next/headers";
-import { getHouseholdOverview, getPrefsByOwner } from "@rv-trip/db";
+import { getHouseholdOverview, getPrefsByOwner, listApiKeys } from "@rv-trip/db";
 import { clerkEnabled, getActor, getOwner } from "@/lib/owner";
 import { describePeople } from "@/lib/members";
 import { PageShell } from "@/components/nav/PageShell";
 import { SettingsForm } from "@/components/settings/SettingsForm";
 import { inviteView, memberView } from "@/components/settings/household-view";
+import { apiKeyView } from "@/components/settings/api-keys-view";
 
 // Reads the account's preference row on every request; don't prerender.
 export const dynamic = "force-dynamic";
@@ -28,17 +29,24 @@ export default async function SettingsPage() {
   // `getOwner()` is memoized per request (lib/owner.ts), so asking twice costs
   // one household lookup, not two — and each read still says out loud what it
   // is scoped by.
-  const [prefs, household] = await Promise.all([
+  const [prefs, household, keys] = await Promise.all([
     // null on an account that has never chosen anything — every column is
     // nullable on purpose, so the product defaults still win.
     getPrefsByOwner(await getOwner()),
     getHouseholdOverview(await getOwner()),
+    // #162 · Q8 A — every member sees every key in the household.
+    listApiKeys(await getOwner()),
   ]);
 
   const actor = await getActor();
-  // One call for everyone in the household; keyless it is a no-op and the card
-  // falls back to the user ids (lib/members.ts).
-  const people = await describePeople(household.members.map((m) => m.userId));
+  // One call for everyone in the household — and every key's minter, who may
+  // have left it since; keyless it is a no-op and the cards fall back to the
+  // user ids (lib/members.ts).
+  const people = await describePeople([
+    ...new Set([...household.members.map((m) => m.userId), ...keys.map((k) => k.createdBy)]),
+  ]);
+  const origin = await requestOrigin();
+  const now = new Date();
 
   return (
     <PageShell>
@@ -53,13 +61,16 @@ export default async function SettingsPage() {
               email: people[m.userId]?.email ?? "",
             }),
           ),
-          invite: household.invite
-            ? inviteView(household.invite, await requestOrigin())
-            : null,
+          invite: household.invite ? inviteView(household.invite, origin) : null,
           // No Clerk, no identity provider, so there is nobody to invite: the
           // button renders and goes dead, the way Account.tsx's DevAccount stub
           // renders and does nothing.
           canInvite: clerkEnabled(),
+        }}
+        apiKeys={{
+          // Finished strings only — never the hash (vet MED).
+          keys: keys.map((k) => apiKeyView(k, people[k.createdBy]?.name?.trim() || k.createdBy, now)),
+          mcpUrl: `${origin}/api/mcp`,
         }}
       />
     </PageShell>
