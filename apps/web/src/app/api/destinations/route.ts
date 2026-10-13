@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { destinationCreateInput } from "@rv-trip/core";
 import { createDestination } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 
 /**
  * "Add destination". Appended to the end of its chapter — the client never picks a
@@ -18,7 +18,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const destination = await createDestination(await getOwner(), parsed.data);
+    const destination = await createDestination(await getOwner(), parsed.data, await getActor());
     return NextResponse.json(destination, { status: 201 });
   } catch {
     return NextResponse.json({ error: "chapter not found" }, { status: 404 });

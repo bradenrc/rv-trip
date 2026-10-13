@@ -40,6 +40,8 @@ const VERBS: Record<ChangeField, string> = {
   // Again OR Once was enough, so the verb names the act, not the answer; the
   // popover's value column says which ("again" / "once was enough").
   again: "marked",
+  // #162 · Q2 A — the one row a create writes. "added by Braden".
+  created: "added",
 };
 
 export function changeVerb(field: ChangeField): string {
@@ -89,6 +91,7 @@ export function bylineLabel(last: LastChange | null): string | null {
  * that difference is visible, and it is a LABEL, not a key.
  */
 export function changeFieldLabel(field: ChangeField): string {
+  if (field === "created") return "added";
   return field === "notes" ? "note" : field;
 }
 

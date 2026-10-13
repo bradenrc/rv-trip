@@ -7,6 +7,10 @@ import { PATCH as PATCH_IDEA } from "@/app/api/ideas/[id]/route";
 import { PATCH as PATCH_PLACE } from "@/app/api/places/[id]/route";
 import { PATCH as PATCH_RES } from "@/app/api/reservations/[id]/route";
 import { PATCH as PATCH_DESTINATION } from "@/app/api/destinations/[id]/route";
+import { POST as POST_DESTINATION } from "@/app/api/destinations/route";
+import { POST as POST_IDEA } from "@/app/api/ideas/route";
+import { POST as POST_PLACE } from "@/app/api/places/route";
+import { POST as POST_RES } from "@/app/api/reservations/route";
 import { ctx, describeDb, req } from "@/test/db";
 
 /**
@@ -90,7 +94,9 @@ describeDb("change_log · destinations", () => {
     const res = await PATCH_DESTINATION(req({ rating: 4, notes: "windy" }, "PATCH"), ctx(destination.id));
 
     expect(res.status).toBe(204);
-    expect(await logged()).toEqual([]);
+    // The destination's own log only: naming a journal field still runs the
+    // Been write-through, whose NEW save writes its `created` row (#162 · Q2 A).
+    expect(await logged(destination.id)).toEqual([]);
   });
 
   it("writes nothing for a field outside the three", async () => {
@@ -244,6 +250,38 @@ describeDb("change_log · saved places", () => {
     const res = await PATCH_PLACE(req({ note: "hijacked" }, "PATCH"), ctx(theirs.id));
 
     expect(res.status).toBe(404);
+    expect(await logged()).toEqual([]);
+  });
+});
+
+describeDb("change_log · creates (#162 · Q2 A)", () => {
+  it("each REST create writes ONE `created` row, from null to the name, by getActor()", async () => {
+    const loop = await fx.pacificNorthwestLoop();
+    const dest = await (
+      await POST_DESTINATION(req({ chapterId: loop.chapterCoast.id, place: { name: "Cannon Beach, OR" } }))
+    ).json();
+    const res = await (
+      await POST_RES(req({ destinationId: loop.astoria.id, type: "dining", name: "Bridgewater Bistro" }))
+    ).json();
+    const idea = await (await POST_IDEA(req({ tripId: loop.trip.id, title: "Fort Clatsop", category: "do" }))).json();
+    const save = await (await POST_PLACE(req({ name: "Haystack Rock", type: "activity" }))).json();
+
+    for (const [id, entity, name] of [
+      [dest.id, "destination", "Cannon Beach, OR"],
+      [res.id, "reservation", "Bridgewater Bistro"],
+      [idea.id, "idea", "Fort Clatsop"],
+      [save.id, "save", "Haystack Rock"],
+    ]) {
+      expect(await logged(id)).toMatchObject([
+        { householdId: DEV_OWNER, entity, field: "created", from: null, to: name, memberId: "dev-user" },
+      ]);
+    }
+  });
+
+  it("a create the owner scope refuses logs nothing", async () => {
+    const foreign = await fx.trip({ owner: OTHER_OWNER });
+    const r = await POST_IDEA(req({ tripId: foreign.id, title: "x", category: "do" }));
+    expect(r.status).toBe(404);
     expect(await logged()).toEqual([]);
   });
 });

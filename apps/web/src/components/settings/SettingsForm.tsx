@@ -10,6 +10,7 @@ import { tripApi } from "@/lib/trip-api";
 import { SegmentedControl, type SegmentOption } from "@rv-trip/ui";
 import { Account } from "@/components/nav/Account";
 import { HouseholdCard, type HouseholdCardProps } from "@/components/settings/HouseholdCard";
+import { ApiKeysCard, type ApiKeysCardProps } from "@/components/settings/ApiKeysCard";
 import { STYLE_PREF_KEY, STYLE_SEGMENTS } from "@/components/map/MapMount";
 import { DEFAULT_STYLE_MODE, isStyleMode, type StyleMode } from "@/components/map/palette";
 import { PrefSwitch } from "@/components/ui/pref-switch";
@@ -39,11 +40,14 @@ import { DEFAULT_UNITS, UNITS_PREF_KEY, isUnits, unitsFromPrefs, type Units } fr
 export function SettingsForm({
   prefs,
   household,
+  apiKeys,
 }: {
   prefs: UserPrefs | null;
   /** #77 · docs/design/81 §3. Read on the SERVER alongside `prefs`, on the same
    * seam — the card itself fetches nothing. */
   household: HouseholdCardProps;
+  /** #162 · Q8 A — the household's MCP keys, as finished strings. */
+  apiKeys: ApiKeysCardProps;
 }) {
   const router = useRouter();
   const [theme, setTheme] = useTheme();
@@ -133,6 +137,8 @@ export function SettingsForm({
             same question one step out: Account is who YOU are, Household is who
             else is in here with you. */}
         <HouseholdCard {...household} />
+        {/* #162 — the second Household card, under the first; no second kicker. */}
+        <ApiKeysCard {...apiKeys} />
       </div>
     </>
   );

@@ -29,6 +29,21 @@ describe("changeVerb — the verb comes from last.field", () => {
   it("status → moved", () => expect(changeVerb("status")).toBe("moved"));
   it("again → marked (#113 — the act, since the answer may be either)", () =>
     expect(changeVerb("again")).toBe("marked"));
+  it("created → added (#162 · Q2 A)", () => expect(changeVerb("created")).toBe("added"));
+});
+
+describe("the created row (#162 · Q2 A)", () => {
+  it("closes as 'added by Braden · Oct 11'", () => {
+    expect(bylineLabel({ field: "created", memberName: "Braden", at: "2026-10-11T17:00:00Z" })).toBe(
+      "added by Braden · Oct 11",
+    );
+  });
+  it("labels its popover row 'added'", () => expect(changeFieldLabel("created")).toBe("added"));
+  it("prints the title whole — never cut like a note preview", () => {
+    const title = "Hyatt Place Seattle/Downtown and a long tail of words";
+    expect(changeValueLabel("created", title)).toBe(title);
+    expect(changeValueLabel("created", null)).toBe("—");
+  });
 });
 
 describe("bylineLabel", () => {

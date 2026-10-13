@@ -35,6 +35,7 @@ import {
   type NavigationVerdict,
 } from "../providers/navigation";
 import { dateRange, monthAbbr, weekdayLetter, weekdayMonthDay, addDays } from "./dates";
+import { stayClockLine } from "./stay-clock";
 
 /**
  * The planner's view-models and pure mutations — ONE model for the Timeline
@@ -61,6 +62,10 @@ export * from "./nearby-saves";
 export * from "./journal";
 /** "Last time here" — the saves a past trip left near this one (#113 · #107). */
 export * from "./for-next-time";
+/** A stay's check-in / check-out clock line (#162 · Q3 A). */
+export * from "./stay-clock";
+/** `get_context`'s digest — the MCP session's first read (#162 · Q1 B). */
+export * from "./context-digest";
 
 export function allDestinations(trip: Trip): Destination[] {
   return trip.chapters.flatMap((l) => l.destinations);
@@ -293,6 +298,11 @@ export interface RouteReservation {
   dates: string | null;
   /** #105 · a stay's kind — the route row prints its label ("Friends"). */
   lodgingKind: Reservation["lodgingKind"];
+  /** #162 · Q3 A — "in after 4:00 PM · out by 11:00 AM" on a stay with times;
+   * null for anything that is not a stay, and for a stay with none. */
+  clock: string | null;
+  /** #162 · Q2 A — the byline under the row ("added by Braden · Oct 11"). */
+  lastChange: Reservation["lastChange"];
 }
 export interface RouteIdea {
   id: string;
@@ -626,6 +636,8 @@ export function routeModel(
         cost: r.cost,
         dates: resDates(r),
         lodgingKind: r.lodgingKind,
+        clock: r.type === "campground" || r.type === "lodging" ? stayClockLine(r) : null,
+        lastChange: r.lastChange,
       })),
       // #131 · Itinerary lists KNOWNS only: an idea still at status `idea` is a
       // maybe, and maybes live on the Ideas tab (grouped under their destination).

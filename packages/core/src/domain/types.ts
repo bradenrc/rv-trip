@@ -58,8 +58,12 @@ const again = z.boolean().nullable().default(null);
  * even though `saved_places` names its column `note`: one vocabulary on the
  * wire, or the /places byline could never match the set it renders from (the
  * mapping happens once, at the write site in packages/db).
+ *
+ * #162 · Q2 A — `created` is the fifth: the one row a create writes ("added by
+ * Braden"), `from` null and `to` the thing's title or name. Not a shared-voice
+ * field — nothing PATCHes it — but the byline reads the newest row, whatever it is.
  */
-export const changeField = z.enum(["rating", "notes", "status", "again"]);
+export const changeField = z.enum(["rating", "notes", "status", "again", "created"]);
 export type ChangeField = z.infer<typeof changeField>;
 
 /** The four things a change is logged against. `save` was `savedPlace` before
@@ -105,8 +109,12 @@ export type ChangeHistoryRow = z.infer<typeof changeHistoryRow>;
  * with a `null` default, so a payload written before #78 — a cached bundle, a
  * phone build on its own release cadence — still parses, and "nothing has ever
  * been changed here" and "this server does not send it" are one state.
+ *
+ * #162 (vet HIGH) — and TOLERANT: a row this build cannot read (a `field` added
+ * after it shipped, as `created` was) parses to null — no byline — instead of
+ * throwing the whole trip payload away on a phone that has not updated yet.
  */
-const lastChangeField = lastChange.nullable().default(null);
+const lastChangeField = lastChange.nullable().default(null).catch(null);
 
 /** A place reference. Coords optional (a floating idea may just be a name);
  * googlePlaceId links to Google Places for details/reviews when available. */

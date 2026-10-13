@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { reservationCreateInput } from "@rv-trip/core";
 import { SegmentDateMismatch, createReservation } from "@rv-trip/db";
-import { getOwner } from "@/lib/owner";
+import { getActor, getOwner } from "@/lib/owner";
 
 /**
  * "Add reservation", a hop's Add flight / Add ferry (#104: a SEGMENT parent,
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   try {
-    const row = await createReservation(await getOwner(), parsed.data);
+    const row = await createReservation(await getOwner(), parsed.data, await getActor());
     return NextResponse.json(row, { status: 201 });
   } catch (err) {
     // #104 · destination dates win (Q3 A): a flight whose date disagrees with the

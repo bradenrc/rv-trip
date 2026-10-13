@@ -96,6 +96,13 @@ export async function revokeApiKey(id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+/** One key row by id, revoked or not — the Settings revoke route proves it is
+ * the caller's household before calling `revokeApiKey` (#162 · Q8 A). */
+export async function findApiKeyById(id: string): Promise<ApiKeyRow | null> {
+  const [row] = await db.select().from(apiKeys).where(eq(apiKeys.id, id));
+  return row ?? null;
+}
+
 export async function listApiKeys(householdId: string): Promise<ApiKeyRow[]> {
   return db.select().from(apiKeys).where(eq(apiKeys.householdId, householdId)).orderBy(desc(apiKeys.createdAt));
 }
