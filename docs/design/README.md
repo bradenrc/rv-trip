@@ -6,19 +6,49 @@ The product's screen-flow design lives on the **Travel Log Pivot canvas**
 https://claude.ai/artifact/3jWLLPUQgwcbV8QJeesMRC
 
 It is the foundation design for the travel-log-anchored product (2026-11-15
-repositioning) and is KEPT IN SYNC as we build:
+repositioning) and is KEPT IN SYNC as we build. The canvas was rebuilt on
+2026-11-15 against the shipped app (routes, tabs, capture sheet, journal), so
+it describes changes to what exists rather than a parallel app.
 
-- **One dynamic Home** (no Today tab): the app always opens to Home; content
-  follows the trip phase — PRE (countdown + get-ready), MID (today's agenda +
-  log), POST/none (last recap + Places near you).
-- Tab bar: Home · Places · + (capture) · Trips · Agenda.
-- Capture is the hero act (place / pin / note, want-or-been with rating inline,
-  < 10 seconds). Agenda is supporting. RV corridor routing is future-state —
-  navigation is per-hop deep links (Google / Apple / Waze).
-- Web = larger-format planning + richer recap (journal + map side-by-side).
+## What the canvas decides
 
-Pipeline stage agents: the canvas outranks older stage artifacts under
-docs/design/<issue>/ where they conflict; issue specs cite the relevant
-artboards by name (e.g. "Main.dc.html — Capture"). When a shipped change
-alters a designed screen, the canvas gets updated in the same breath — flag
-in dev-notes if it wasn't.
+- **Stable tabs, the same on phone and web**: Trips · Places · + (capture) ·
+  Map · You. Shipped today: mobile `Trips · + · Saves`, web
+  `Trips · Saves · Map · Rig · Settings`. So: Saves is renamed Places, Map is
+  promoted to a mobile tab, Rig and Settings fold under You.
+- **A landing rule, not a Home tab.** The tabs never change; what changes is
+  which one opens. A trip covering today opens that trip's Journal. Otherwise
+  the app opens on Places. Places carries one trip card for a week before a
+  trip starts (countdown) and a week after it ends (finish the journal). A
+  finished trip is never the default landing.
+- **Trip tabs, log first**: Journal · Agenda · Ideas (shipped:
+  Itinerary · Ideas · Journal). Agenda is today's Itinerary renamed and keeps
+  its Route · Timeline · Map lenses. Journal mid-trip shows up next, today's
+  entries and "Log something"; after the trip it is the map plus the list
+  grouped by destination.
+- **Capture is the existing sheet, tuned**, not a new one. Mid-trip it
+  defaults to Been here with stars up front and attaches to the active trip
+  even when no destination covers the day. One entry appears in the trip
+  Journal and on the Been there shelf. Outside a trip it defaults to Want to
+  go.
+- **Places**: want to go / been there, near-you first, stay / eat / do
+  filters.
+- **RV corridor routing steps back**: still wired for rig-on trips, no longer
+  featured. Navigate on every hop is a plain deep link to Google, Apple or
+  Waze.
+- **Web** = the same tabs with more room: journal and map side by side on the
+  trip page, places grid with a map panel.
+
+## Not yet confirmed
+
+The two renames (Saves → Places, Itinerary → Agenda) and the tab set are
+design-Claude's proposal from the 2026-11-15 rebuild. Treat them as the
+direction, not as approved copy, until an issue spec cites them.
+
+## How stage agents use it
+
+The canvas outranks older stage artifacts under docs/design/<issue>/ where
+they conflict; issue specs cite the relevant artboards by name (e.g.
+"Capture.dc.html — Capture sheet"; "Main.dc.html" is the app map). When a
+shipped change alters a designed screen, the canvas gets updated in the same
+breath — flag in dev-notes if it wasn't.
