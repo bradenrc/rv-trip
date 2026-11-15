@@ -39,11 +39,17 @@ it describes changes to what exists rather than a parallel app.
 - **Web** = the same tabs with more room: journal and map side by side on the
   trip page, places grid with a map panel.
 
-## Not yet confirmed
+## Status and work
 
-The two renames (Saves → Places, Itinerary → Agenda) and the tab set are
-design-Claude's proposal from the 2026-11-15 rebuild. Treat them as the
-direction, not as approved copy, until an issue spec cites them.
+Braden confirmed the renames (Saves → Places, Itinerary → Agenda) and the tab
+set on 2026-11-15. The boards are filed as four epics, in order:
+
+- #173 TL1 Shell — tabs, renames, landing rule (`Main.dc.html`)
+- #176 TL2 Capture — mid-trip defaults, web capture (`Capture.dc.html`)
+- #181 TL3 Trip screen — Journal first, Agenda, Navigate links
+  (`Today`, `Recap`, `Agenda`, `WebTrip`)
+- #186 TL4 Places and Map — near you first, trip card, Map tab
+  (`Places`, `MapTab`, `WebPlaces`)
 
 ## How stage agents use it
 
