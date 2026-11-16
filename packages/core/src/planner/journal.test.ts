@@ -5,6 +5,7 @@ import {
   JOURNAL_EMPTY_COPY,
   activeTrip,
   isoDateInZone,
+  isRootLaunchUrl,
   againBadge,
   checkOffStatus,
   didntGetToLabel,
@@ -295,5 +296,21 @@ describe("isoDateInZone (#173 · the web's today from a tz cookie)", () => {
 
   it("is null for an invalid zone", () => {
     expect(isoDateInZone(now, "Not/AZone")).toBeNull();
+  });
+});
+
+describe("isRootLaunchUrl (#173 i5 · a plain cold start vs a deep link)", () => {
+  // Inputs are expo-linking's `parse(url)` shape: { scheme, hostname, path }.
+  it("is root for the bare custom scheme and for Expo Go / Metro hosts", () => {
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: null, path: null })).toBe(true);
+    expect(isRootLaunchUrl({ scheme: "exp", hostname: "192.168.1.5", path: null })).toBe(true);
+    expect(isRootLaunchUrl({ scheme: "http", hostname: "localhost", path: "/" })).toBe(true);
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "expo-development-client", path: null })).toBe(true);
+  });
+
+  it("is not root when a path or a custom-scheme host names a screen", () => {
+    expect(isRootLaunchUrl({ scheme: "exp", hostname: null, path: "trips/abc" })).toBe(false);
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "trips", path: "abc" })).toBe(false);
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "saves", path: null })).toBe(false);
   });
 });

@@ -153,6 +153,13 @@ export function hydrateInProgress(): Promise<void> {
   return hydrated;
 }
 
+/** Every trip the phone holds a bundle for — loaded this session or persisted
+ * from the last. Offline, after `hydrateInProgress()`, that is the in-progress
+ * trips: the landing rule's fallback (#173 i5). */
+export function heldTrips(): Trip[] {
+  return Object.values(state.bundles).map((b) => b.trip);
+}
+
 /**
  * Today's destination (#113 · "Did it"): the destination the chip files onto, from every
  * bundle the phone holds — loaded this session or persisted from the last.

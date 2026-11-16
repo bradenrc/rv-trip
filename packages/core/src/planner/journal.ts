@@ -339,6 +339,26 @@ export function activeTrip<T extends Pick<Trip, "id" | "startDate" | "endDate">>
   return best;
 }
 
+/** Schemes whose URL host is the dev server, never a screen (Expo Go, Metro). */
+const HOST_SCHEMES = new Set(["exp", "exps", "http", "https"]);
+
+/**
+ * Whether the phone's launch URL — expo-linking's `parse(url)` — is the app
+ * root, a plain cold start (#173 i5). Expo Go and dev clients hand a non-null
+ * URL even at the root (`exp://host:8081`, `scheme://expo-development-client`),
+ * so the test is the parsed path, not nullness (vet FLAG). Under the app's own
+ * scheme the host is the first path segment (`tripcaddie://trips/abc`).
+ */
+export function isRootLaunchUrl(parsed: {
+  scheme: string | null;
+  hostname: string | null;
+  path: string | null;
+}): boolean {
+  if ((parsed.path ?? "").replace(/^\/+|\/+$/g, "") !== "") return false;
+  if (!parsed.hostname || HOST_SCHEMES.has(parsed.scheme ?? "")) return true;
+  return parsed.hostname === "expo-development-client";
+}
+
 /** The local calendar date on this device, as a plain `YYYY-MM-DD`. */
 export function localIsoDate(now: Date = new Date()): IsoDate {
   const y = now.getFullYear();

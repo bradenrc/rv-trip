@@ -234,3 +234,47 @@ Scope: plan item **i4** only (#172 · Q3 C).
 - The 332 skipped are the Postgres route-handler suite ("API integration tests SKIPPED — no Postgres on …localhost:5433"). This item touches no handler.
 - After a final cosmetic edit to landing.test.ts, I re-ran `npx vitest run src/app/landing.test.ts` (`11 passed`) and `pnpm lint` in apps/web (clean).
 - I did not run a browser walk.
+
+---
+
+# #173 · dev notes — item i5 of 5 (Phone landing: a cold start opens the active trip, or Places)
+
+Scope: plan item **i5** only (#172 · Q4 A).
+
+## What changed
+
+- `apps/mobile/app/(tabs)/_layout.tsx`
+  - `:16` `let landed = false;` is a module-level flag, so the rule runs once per JS launch. A tab switch, a remount or closing the capture sheet never fires it again.
+  - `:26-79` `useLandingRule()`, called from `TabsLayout` at `:97`:
+    - Effect 1 (`:34`) calls `Linking.getInitialURL()` (expo-linking, already a dependency). If the URL is non-null and `isRootLaunchUrl(Linking.parse(url))` is false, a deep link or notification opened the app: it sets `landed` and does nothing else. Otherwise the opener is `"root"`.
+    - Effect 2 runs only when the opener is root and `landed` is still false.
+      - If `useTrips()` has the list, it calls `activeTrip(list, localIsoDate())`, then `router.push(\`/trips/${active.id}\`)` (`:53`) into the (trips) stack, so Back returns to the Trips list. With no active trip it calls `router.navigate("/saves")` (`:54`), the Places tab.
+      - If the trips load errored (offline), it runs `await hydrateInProgress()` (`:63`), then lands over `heldTrips()`. With no held bundle it sets `landed` and stays on Trips, the default tab.
+      - While the list is still loading (no list, no error), it waits.
+  - The tabs doc comment notes the rule.
+- `apps/mobile/src/store.ts:159` `heldTrips()` is new. It returns the trip of every bundle in the store. After `hydrateInProgress()` offline, that is the persisted in-progress trips. The store had no read of its bundles outside a hook, and the rule needs one after an `await`.
+- `packages/core/src/planner/journal.ts:343-361` `isRootLaunchUrl({ scheme, hostname, path })` is new, beside `activeTrip`. It takes expo-linking's `parse()` shape. It returns false if there is any non-slash path. It returns true if there is no host, or the scheme is exp/exps/http/https (there the host is the Metro or dev server). Under the app's own scheme, a host other than `expo-development-client` names a screen (`tripcaddie://trips/abc` parses as host `trips`).
+
+## Decision, for qa
+
+- **The root test compares the parsed URL, not nullness** (vet FLAG). Expo Go and dev clients hand a non-null initial URL even on a plain cold start (`exp://host:8081`, `tripcaddie://expo-development-client/?url=…`). If the check were "URL non-null means a deep link", the rule would never fire in dev. The plan's acceptance names only the getInitialURL check, so `isRootLaunchUrl` is the smallest pure helper that makes it correct. It lives in core so it can be unit tested.
+- `useTrips()` is now mounted in the tabs layout as well as on the Trips list. Both mount in the same commit with `trips === null`, so the first launch can fire `loadTrips()` twice. The store is shared and the second response just overwrites the first. I left that alone rather than change `useTrips`.
+
+## Tests
+
+- `packages/core/src/mobile-landing.test.ts` (new, source-reading, 5 tests). It checks that `activeTrip(<list>, localIsoDate())` and `useTrips()` are used, and that `import * as Linking from "expo-linking"`, `Linking.getInitialURL()` and `isRootLaunchUrl(Linking.parse(` all appear, with getInitialURL coming before `activeTrip(`. It also checks the module-level `let landed = false;` and its guard, `await hydrateInProgress()` plus `heldTrips()` (and its export in store.ts), the `/trips/${active.id}` push, and `router.navigate("/saves")`.
+- `packages/core/src/planner/journal.test.ts:302` `isRootLaunchUrl` has 2 tests. Root cases: the bare scheme, an Expo Go host, an http `/` path, and expo-development-client. Deep-link cases: an Expo Go path, a custom-scheme `trips/abc`, and a custom-scheme `saves`.
+- Red evidence: both files ran first with 7 failing out of 29 (the export did not exist yet and the layout had no rule). After the implementation they ran with 29 passed.
+
+## Checks run
+
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. Counts: core `1423 passed`, ui `55 passed`, web `164 passed | 332 skipped`. The 332 skipped are the Postgres route-handler suite ("API integration tests SKIPPED — no Postgres on …localhost:5433"), and this item touches no handler.
+- `npx tsc --noEmit` in apps/mobile exited 0. I ran it directly as well, because the mobile typecheck is the one that covers the new layout code.
+- No simulator or device run.
+
+## Render-required at walk
+
+- A cold start on Nov 15 (seeded Bellingham) should open Bellingham's trip screen, and Back should go to Trips. A cold start with nothing covering today should open Places. A tab switch to Trips mid-trip should show the list, with no re-land.
+- Offline cold start (airplane mode after a launch that persisted an in-progress bundle) should land on that trip. Offline with nothing persisted should stay on Trips.
+- A deep link (`tripcaddie://trips/<id>`, or `exp://…/--/trips/<id>` in Expo Go) should land on its target, not the active trip. Check `Linking.parse` on the walk build too: whether a dev-client cold start reports `expo-development-client` as its host is from expo-linking's source, not observed.
+- `router.push` fires inside the tabs layout's effect after an async step (getInitialURL), so the navigator is mounted. The walk should confirm there is no "navigate before mounting" warning.

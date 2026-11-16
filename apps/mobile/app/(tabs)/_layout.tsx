@@ -1,9 +1,76 @@
+import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
+import * as Linking from "expo-linking";
 import { Tabs, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { activeTrip, isRootLaunchUrl, localIsoDate } from "@rv-trip/core";
 import { dismissToast, undoSave, useCaptureState, type ToastTone } from "../../src/capture";
+import { heldTrips, hydrateInProgress, useTrips } from "../../src/store";
 import { C, F, R } from "../../src/theme";
 import { Toast } from "../../src/ui";
+
+/**
+ * The landing rule has run this JS launch (#173 i5). Module-level, so a tab
+ * switch, a remount or a return from the capture sheet never fires it again.
+ */
+let landed = false;
+
+/**
+ * The phone's landing rule (#172 · Q4 A): a cold start opens the trip whose
+ * dates cover today — pushed in the Trips stack, so Back is the Trips list —
+ * or, with none, the Places tab. A deep link or notification that opened the
+ * app wins: its URL is not the root, so the rule stands down. Offline (the
+ * trips load errors) it runs over the persisted in-progress bundles; with
+ * neither, it stays on Trips, the default tab.
+ */
+function useLandingRule() {
+  const router = useRouter();
+  const { trips, error } = useTrips();
+  const [opener, setOpener] = useState<"pending" | "root" | "link">("pending");
+
+  useEffect(() => {
+    if (landed) return;
+    let live = true;
+    Linking.getInitialURL()
+      .then((url) => {
+        if (!live) return;
+        if (url && !isRootLaunchUrl(Linking.parse(url))) {
+          landed = true; // a deep link or notification opened the app
+          setOpener("link");
+        } else setOpener("root");
+      })
+      .catch(() => live && setOpener("root"));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (landed || opener !== "root") return;
+    const land = (list: Parameters<typeof activeTrip>[0]) => {
+      landed = true;
+      const active = activeTrip(list, localIsoDate());
+      if (active) router.push(`/trips/${active.id}`);
+      else router.navigate("/saves");
+    };
+    if (trips) {
+      land(trips);
+      return;
+    }
+    if (!error) return; // the list is still loading
+    let live = true;
+    void (async () => {
+      await hydrateInProgress();
+      if (!live || landed) return;
+      const held = heldTrips();
+      if (held.length > 0) land(held);
+      else landed = true; // neither the list nor a bundle: stay on Trips
+    })();
+    return () => {
+      live = false;
+    };
+  }, [opener, trips, error, router]);
+}
 
 /**
  * The bottom tabs (#111 · Q1 A; #173 i2 · #171): Trips · Places · + · You.
@@ -20,11 +87,14 @@ import { Toast } from "../../src/ui";
  *
  * The kit ships no icon set (its marks are glyphs — see `CategoryTile`), so the
  * side tabs wear glyphs too.
+ *
+ * The landing rule (#173 i5, `useLandingRule` above) runs here, once per launch.
  */
 export default function TabsLayout() {
   const router = useRouter();
   const { queue, toast } = useCaptureState();
   const insets = useSafeAreaInsets();
+  useLandingRule();
 
   return (
     <View style={{ flex: 1, backgroundColor: C.surfaceAlt }}>
