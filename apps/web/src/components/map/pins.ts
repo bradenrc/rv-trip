@@ -29,7 +29,7 @@ import { dateRange } from "@/lib/trip-ui";
  */
 
 /** The four layers, in the order their chips read — labelled verbatim from the
- * dashboard's own section heads (apps/web/src/app/page.tsx). */
+ * dashboard's own section heads (apps/web/src/app/trips/page.tsx). */
 export type MapLayer = "planning" | "upcoming" | "been" | "saved";
 
 export const LAYER_LABEL: Record<MapLayer, string> = {

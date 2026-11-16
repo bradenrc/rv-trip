@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { hydrate } from "@/lib/pref";
 import { THEME_PREF_KEY, isTheme } from "@/lib/theme";
+import { TZ_COOKIE, readCookie, tzCookie } from "@/lib/tz";
 
 /**
  * Adopt the account's saved preferences once, after first paint (issue #38).
@@ -27,6 +28,16 @@ import { THEME_PREF_KEY, isTheme } from "@/lib/theme";
  * Renders nothing. Mounted once, in the layout.
  */
 export function PrefSync() {
+  useEffect(() => {
+    // The browser's zone, for `/`'s server-side landing (#173 · Q3 C): written
+    // when missing or stale (a traveler who crossed a zone line).
+    try {
+      const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (zone && readCookie(document.cookie, TZ_COOKIE) !== zone) document.cookie = tzCookie(zone);
+    } catch {
+      // Cookies blocked: `/` falls back to LandingStep's client answer.
+    }
+  }, []);
   useEffect(() => {
     let cancelled = false;
     void (async () => {

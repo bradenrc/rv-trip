@@ -91,7 +91,7 @@ export function TripCard({
   feature = false,
 }: {
   trip: TripSummary;
-  /** The account's display units, resolved on the server (app/page.tsx). The
+  /** The account's display units, resolved on the server (app/trips/page.tsx). The
    * card is itself a server component, so this is a plain prop, never a hook. */
   units: Units;
   feature?: boolean;

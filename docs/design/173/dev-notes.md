@@ -166,3 +166,71 @@ Scope: plan item **i3** only (#171 · Q1 C · Q2 B). The /trips list page, the `
   - the `useUser()` initial renders and is non-empty once loaded. It renders an empty circle for the instant before `user` loads.
   - below md the masthead is the mark only, and the bottom bar shows five tabs with Capture green.
   - You is lit on /rig and /settings.
+
+---
+
+# #173 · dev notes — item i4 of 5 (Web landing: the list moves to /trips, `/` redirects by the browser's date)
+
+Scope: plan item **i4** only (#172 · Q3 C).
+
+## What changed
+
+- `apps/web/src/app/trips/page.tsx`: this is the old `app/page.tsx`, moved with `git mv` and otherwise unchanged. The trips list now lives at /trips, which fills the gap that i3 note 6 left.
+- `apps/web/src/app/page.tsx` (new, server, `force-dynamic`):
+  - `:23` reads `listTripsForOwner(owner)` and `cookies()` together, then takes `.get(TZ_COOKIE)`.
+  - `:25` computes `isoDateInZone(new Date(), tz)`.
+  - `:28` when that is non-null, it calls `redirect(active ? \`/trips/${active.id}\` : "/places")` with `activeTrip(trips, today)`.
+  - `:30` otherwise it renders `<LandingStep>` and passes only `{ id, startDate, endDate }` for each trip. There is no PageShell, so the fallback renders nothing visible.
+- `apps/web/src/components/nav/LandingStep.tsx` (new, `"use client"`):
+  - `:20` writes `tzCookie(<browser zone>)` on mount, inside a try.
+  - `:24-25` runs `activeTrip(trips, localIsoDate())`, then `router.replace(...)` to the same target. It returns `null`.
+- `apps/web/src/lib/tz.ts` (new):
+  - `TZ_COOKIE = "tz"`.
+  - `tzCookie(zone)` returns `tz=<zone>; path=/; max-age=31536000; SameSite=Lax`.
+  - `readCookie(cookieString, name)`.
+- `apps/web/src/components/nav/PrefSync.tsx:31-40`: a new first effect. It writes the cookie when it is missing or differs from `Intl.DateTimeFormat().resolvedOptions().timeZone`, inside a try. The prefs-hydrate effect is unchanged.
+- Callers that mean the trips list now go to /trips:
+  - `app/trips/new/page.tsx:99` (Cancel).
+  - `components/trip/TripPlanner.tsx:1198` (after delete). The comment at `:1192` is updated too.
+  - `components/join/JoinAccept.tsx:81` (Not now).
+  - These keep `/`, because they are entries: `JoinAccept.tsx:50` (`router.replace("/")` after a join) and the Nav logo.
+- Comment-only repoints: `components/dashboard/TripCard.tsx:94` and `components/map/pins.ts:32` now name `app/trips/page.tsx`.
+- Repointed tests, all now at `apps/web/src/app/trips/page.tsx`:
+  - `packages/core/src/web-shell.test.ts:69`
+  - `settings-page.test.ts:185` and `:201`
+  - `responsive-sweep.test.ts:22`, `:54` and `:96`
+
+## Decisions, for qa / the walk
+
+1. **The zone is written raw, not URI-encoded.** `/` and `+` are valid cookie-octets, and Next's `cookies()` decode leaves a raw zone name unchanged. `isoDateInZone` is the only validator: a bad value gives `null`, which falls back to the client step.
+2. **The redirect is not wrapped in a try.** `redirect()` throws `NEXT_REDIRECT` by design.
+3. **The client fallback depends on the trips' dates only.** The status pin is never read, as `activeTrip` already guarantees.
+4. **Render-required at walk** (not provable as source):
+   - a first visit with no cookie should flash nothing, then land on the active trip or /places.
+   - a second visit should redirect on the server, with no client step.
+   - a cookie hand-edited to `tz=Not/AZone` should still land, via the client.
+   - Vercel's Node ICU must resolve America/* zones. That is the wireframe FLAG carried from i1.
+5. **A loop guard is not needed.** Neither target is `/`.
+
+## Tests
+
+- `apps/web/src/lib/tz.test.ts` (3 tests): the cookie name, the exact cookie string, and `readCookie` (hit, only cookie, prefix non-match, empty).
+- `apps/web/src/app/landing.test.ts` (11 tests, source-reading like `nav.test.ts`, because there is no request scope or DOM):
+  - the list lives at /trips.
+  - `/` is a dynamic server page that reads the cookie and calls `isoDateInZone`, then `activeTrip`, then the redirect.
+  - `/` hands LandingStep only the id and dates.
+  - LandingStep's cookie write, local date and replace.
+  - PrefSync's compare-and-write.
+  - the three callers push `/trips`, and JoinAccept's replace stays `/`.
+- The date logic itself was already covered in core (`journal.test.ts`, i1).
+- Red evidence: both new files failed first. tz.test.ts could not load `./tz`, and landing.test.ts failed on reading the not-yet-written `app/page.tsx`, before any implementation existed.
+
+## Checks run
+
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`.
+  - core: `1416 passed`
+  - ui: `55 passed`
+  - web: `164 passed | 332 skipped`
+- The 332 skipped are the Postgres route-handler suite ("API integration tests SKIPPED — no Postgres on …localhost:5433"). This item touches no handler.
+- After a final cosmetic edit to landing.test.ts, I re-ran `npx vitest run src/app/landing.test.ts` (`11 passed`) and `pnpm lint` in apps/web (clean).
+- I did not run a browser walk.

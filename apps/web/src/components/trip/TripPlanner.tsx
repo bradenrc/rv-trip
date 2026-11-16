@@ -1189,13 +1189,13 @@ export function TripPlanner({
   /**
    * Delete is the one write with nothing to be optimistic about: the surface it
    * would roll back to is the page itself, so it waits for the server and then
-   * leaves for the dashboard.
+   * leaves for the trips list (/trips).
    */
   const deleteTrip = async () => {
     setDeleteOpen(false);
     try {
       await tripApi.deleteTrip(trip.id);
-      router.push("/");
+      router.push("/trips");
       router.refresh();
     } catch {
       toast.error(`Couldn't delete ${trip.title} — nothing was removed.`);

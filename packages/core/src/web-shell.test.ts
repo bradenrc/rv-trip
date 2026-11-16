@@ -66,7 +66,7 @@ function navElement(needle: string): string {
 
 /** The six page-gutter call sites the item replaces. */
 const GUTTER_SITES = [
-  "apps/web/src/app/page.tsx",
+  "apps/web/src/app/trips/page.tsx",
   "apps/web/src/app/places/page.tsx",
   "apps/web/src/app/map/page.tsx",
   "apps/web/src/app/trips/new/page.tsx",

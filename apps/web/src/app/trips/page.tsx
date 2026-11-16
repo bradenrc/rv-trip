@@ -1,0 +1,111 @@
+import Link from "next/link";
+import { Plus, PlusCircle } from "lucide-react";
+import { getPrefsByOwner, listTripsForOwner } from "@rv-trip/db";
+import { getOwner } from "@/lib/owner";
+import { TripCard } from "@/components/dashboard/TripCard";
+import { PageShell } from "@/components/nav/PageShell";
+import { unitsFromPrefs } from "@/lib/units";
+
+export const dynamic = "force-dynamic";
+
+function SectionHead({ kicker, title, count }: { kicker: string; title: string; count?: number }) {
+  return (
+    <div className="mb-4 flex items-baseline gap-3">
+      <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-rv-ink-faded">{kicker}</div>
+      <h2 className="m-0 text-[22px] font-extrabold text-rv-ink">{title}</h2>
+      {count != null && <span className="font-mono text-[13px] text-rv-ink-faded">{count}</span>}
+    </div>
+  );
+}
+
+function NewTripTile({ label = "Start a new trip" }: { label?: string }) {
+  return (
+    <Link
+      href="/trips/new"
+      className="flex min-h-[280px] cursor-pointer flex-col items-center justify-center gap-2.5 rounded-rv-card border border-dashed border-rv-border-hi bg-transparent text-rv-ink-faded transition-colors hover:border-rv-green hover:text-rv-ink"
+    >
+      <PlusCircle className="size-[30px] text-rv-green" />
+      <span className="text-[14px] font-semibold">{label}</span>
+    </Link>
+  );
+}
+
+export default async function Home() {
+  const owner = await getOwner();
+  // The account's display units, read beside the owner the trips are already
+  // scoped by — `TripCard` is a server component, so this is a prop, not a
+  // hook (lib/units.ts).
+  const [trips, prefs] = await Promise.all([listTripsForOwner(owner), getPrefsByOwner(owner)]);
+  const units = unitsFromPrefs(prefs);
+  const planning = trips.filter((t) => t.status === "planning");
+  const upcoming = trips.filter((t) => t.status === "upcoming");
+  const traveled = trips.filter((t) => t.status === "complete");
+  const empty = trips.length === 0;
+
+  return (
+    <PageShell>
+      {/* Header */}
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-5">
+        <div>
+          <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
+            Your trips
+          </div>
+          <h1 className="m-0 text-[40px] font-extrabold leading-none tracking-[-0.02em] text-rv-ink">
+            Where to next?
+          </h1>
+        </div>
+        <Link
+          href="/trips/new"
+          className="inline-flex cursor-pointer items-center gap-[7px] rounded-rv-md border-none bg-rv-accent-deep px-[18px] py-[11px] text-[14px] font-bold text-rv-accent-ink"
+        >
+          <Plus className="size-[15px]" fill="currentColor" strokeWidth={2.5} />
+          New trip
+        </Link>
+      </div>
+
+      {empty ? (
+        <div className="mx-auto max-w-[440px] pt-6">
+          <NewTripTile label="Start your first trip" />
+        </div>
+      ) : (
+        <>
+          {planning.length > 0 && (
+            <section className="mb-10">
+              <SectionHead kicker="In progress" title="Planning now" />
+              <div className="grid grid-cols-1 gap-4">
+                {planning.map((t) => (
+                  <TripCard key={t.id} trip={t} units={units} feature />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="mb-10">
+            <SectionHead kicker="Ahead" title="Upcoming" count={upcoming.length} />
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(320px,1fr))]">
+              {upcoming.map((t) => (
+                <TripCard key={t.id} trip={t} units={units} />
+              ))}
+              <NewTripTile />
+            </div>
+          </section>
+
+          {traveled.length > 0 && (
+            <section>
+              <SectionHead kicker="Been there" title="Traveled" count={traveled.length} />
+              <p className="m-0 mb-4 mt-[-6px] max-w-[64ch] text-[14px] text-rv-ink-muted">
+                What you loved and the notes worth keeping — the seed for the next trip. Reopen any to
+                revisit.
+              </p>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
+                {traveled.map((t) => (
+                  <TripCard key={t.id} trip={t} units={units} />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+    </PageShell>
+  );
+}

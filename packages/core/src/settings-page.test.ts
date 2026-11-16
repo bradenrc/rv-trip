@@ -182,7 +182,7 @@ describe("one switch, imported by both screens", () => {
 
 describe("units is resolved on the server and passed down", () => {
   const SERVER_PAGES = [
-    "apps/web/src/app/page.tsx",
+    "apps/web/src/app/trips/page.tsx",
     "apps/web/src/app/trips/[id]/page.tsx",
     "apps/web/src/app/map/page.tsx",
     "apps/web/src/app/rig/page.tsx",
@@ -198,7 +198,7 @@ describe("units is resolved on the server and passed down", () => {
   });
 
   it("hands it down as a plain prop, so no display component becomes a client one", () => {
-    expect(flat(code(read("apps/web/src/app/page.tsx")))).toContain("units={units}");
+    expect(flat(code(read("apps/web/src/app/trips/page.tsx")))).toContain("units={units}");
     expect(flat(code(read("apps/web/src/app/trips/[id]/page.tsx")))).toContain("units={units}");
     expect(flat(code(read("apps/web/src/app/map/page.tsx")))).toContain("units={units}");
     expect(flat(code(read("apps/web/src/app/rig/page.tsx")))).toContain(

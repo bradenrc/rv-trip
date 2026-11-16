@@ -96,7 +96,7 @@ export default function NewTripPage() {
       </button>
       <button
         type="button"
-        onClick={() => router.push("/")}
+        onClick={() => router.push("/trips")}
         className="cursor-pointer rounded-rv-md border border-rv-border-hi bg-transparent px-3.5 py-[7px] text-[12.5px] font-semibold text-rv-ink"
       >
         Cancel
