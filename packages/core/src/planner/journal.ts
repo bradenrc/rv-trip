@@ -316,12 +316,53 @@ export function todaysDestination<T extends Pick<Trip, "id" | "title" | "startDa
   return best;
 }
 
+// ── #173 · the landing rule: the trip in progress ────────────────────────────
+
+/**
+ * The trip whose `startDate..endDate` covers today, inclusive at both ends (#172 ·
+ * Q4 A). Only dates count — a trip pinned "complete" whose dates still cover today
+ * is active, and `status` / `statusAuto` are never read. An undated trip never
+ * counts (a guard: the DB columns are NOT NULL). When two trips cover today the
+ * later `startDate` wins; an equal start keeps the first in input order. No trip
+ * covering today is null.
+ */
+export function activeTrip<T extends Pick<Trip, "id" | "startDate" | "endDate">>(
+  trips: readonly T[],
+  today: IsoDate,
+): T | null {
+  let best: T | null = null;
+  for (const trip of trips) {
+    if (!trip.startDate || !trip.endDate) continue; // undated never counts
+    if (trip.startDate > today || trip.endDate < today) continue; // inclusive both ends
+    if (!best || trip.startDate > best.startDate) best = trip; // later start wins
+  }
+  return best;
+}
+
 /** The local calendar date on this device, as a plain `YYYY-MM-DD`. */
 export function localIsoDate(now: Date = new Date()): IsoDate {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
   const d = String(now.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+/**
+ * The calendar date in `timeZone` at `now`, as a plain `YYYY-MM-DD` — the
+ * browser's date, computed on the server from its `tz` cookie (#173 · Q3 C). An
+ * invalid zone is null (no cookie is trusted).
+ */
+export function isoDateInZone(now: Date, timeZone: string): IsoDate | null {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(now) as IsoDate;
+  } catch {
+    return null; // RangeError: not a zone
+  }
 }
 
 /** "Costa Rica Fly & Stay · Westin Reserva Conchal · today". */
