@@ -289,6 +289,6 @@ export const JOURNAL_QUEUED_TOAST: ToastCopy = {
 
 /** The offline strip inside the sheet. */
 export const OFFLINE_NOTICE: ToastCopy = {
-  title: "Offline. Saves wait on this phone.",
+  title: "Offline. Saved places wait on this phone.",
   sub: "Place search comes back with signal",
 };

@@ -6,19 +6,20 @@ import { C, F, R } from "../../src/theme";
 import { Toast } from "../../src/ui";
 
 /**
- * The bottom tabs (#111 · Q1 A): Trips · + · Saves.
+ * The bottom tabs (#111 · Q1 A; #173 i2 · #171): Trips · Places · + · You.
  *
- * The center + is not a screen anyone lands on. Its `tabPress` is intercepted
- * and opens `app/capture.tsx` — a root formSheet — from whichever tab is
- * showing, so the + sits in the same spot on every tab screen, the trip screen
- * included, and closing the sheet leaves you exactly where you were.
+ * The + (titled Capture) is not a screen anyone lands on. Its `tabPress` is
+ * intercepted and opens `app/capture.tsx` — a root formSheet — from whichever
+ * tab is showing, so the + sits in the same spot on every tab screen, the trip
+ * screen included, and closing the sheet leaves you exactly where you were.
  *
- * The Saves tab carries the capture queue's count (amber: attention) until the
- * queue drains. The toast is drawn here, over every tab, because a capture
- * returns to whatever screen it was opened from.
+ * The Places tab (route `saves`, a file name kept as an identifier) carries the
+ * capture queue's count (amber: attention) until the queue drains. The You tab
+ * is the old rig screen (Q5 A). The toast is drawn here, over every tab,
+ * because a capture returns to whatever screen it was opened from.
  *
  * The kit ships no icon set (its marks are glyphs — see `CategoryTile`), so the
- * two side tabs wear glyphs too.
+ * side tabs wear glyphs too.
  */
 export default function TabsLayout() {
   const router = useRouter();
@@ -44,9 +45,18 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
+          name="saves"
+          options={{
+            title: "Places",
+            tabBarIcon: ({ color }) => <Text style={[styles.glyph, { color }]}>▤</Text>,
+            tabBarBadge: queue.length > 0 ? queue.length : undefined,
+            tabBarBadgeStyle: styles.badge,
+          }}
+        />
+        <Tabs.Screen
           name="add"
           options={{
-            title: "Save",
+            title: "Capture",
             tabBarAccessibilityLabel: "Save a place, a note or a pin",
             tabBarIcon: () => (
               <View style={styles.plus}>
@@ -62,12 +72,10 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="saves"
+          name="you"
           options={{
-            title: "Saves",
-            tabBarIcon: ({ color }) => <Text style={[styles.glyph, { color }]}>▤</Text>,
-            tabBarBadge: queue.length > 0 ? queue.length : undefined,
-            tabBarBadgeStyle: styles.badge,
+            title: "You",
+            tabBarIcon: ({ color }) => <Text style={[styles.glyph, { color }]}>◉</Text>,
           }}
         />
       </Tabs>
@@ -88,7 +96,7 @@ export default function TabsLayout() {
   );
 }
 
-/** The toast's lead glyph per tone. #113's journal pair: the Saves tab's
+/** The toast's lead glyph per tone. #113's journal pair: the Places tab's
  * book (▤, docs/design/113 i-book) when it landed, the capture sheet's
  * offline mark (⊘) when it waits for signal. */
 const TOAST_GLYPH: Record<ToastTone, string> = {

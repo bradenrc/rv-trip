@@ -30,9 +30,10 @@ import { describe, it, expect } from "vitest";
  *   4. `app/_layout.tsx` returns `<Shell />` bare when keyless (no provider
  *      mounted), and the one `<Stack>` in the file lives inside `Shell`, so
  *      `<Show when="signed-out">` cannot reach it.
- *   5. `app/rig.tsx` renders an Account card ABOVE the rig card in both states —
+ *   5. The You tab, `app/(tabs)/you.tsx` (#173 i2 · Q5 A — rig.tsx's body,
+ *      promoted), renders an Account card ABOVE the rig card in both states —
  *      a Sign out when there is a session, the web's dashed `dev-user` stub when
- *      there is not.
+ *      there is not. `app/rig.tsx` is left as a redirect to `/you`.
  *   6. `README.md` documents the env var and the keyless behaviour, and carries
  *      no real key.
  *
@@ -53,7 +54,8 @@ const auth = read("src/auth.ts");
 const apiTs = read("src/api.ts");
 const layout = read("app/_layout.tsx");
 const signIn = read("app/sign-in.tsx");
-const rig = read("app/rig.tsx");
+const you = read("app/(tabs)/you.tsx");
+const rigRedirect = read("app/rig.tsx");
 const readme = read("README.md");
 
 /** Every source file the item touches, for the cross-cutting sweeps. */
@@ -62,7 +64,8 @@ const sources: [string, string][] = [
   ["src/api.ts", apiTs],
   ["app/_layout.tsx", layout],
   ["app/sign-in.tsx", signIn],
-  ["app/rig.tsx", rig],
+  ["app/(tabs)/you.tsx", you],
+  ["app/rig.tsx", rigRedirect],
 ];
 
 const NATIVE_PEERS = ["expo-web-browser", "expo-auth-session"];
@@ -156,19 +159,20 @@ describe("mobile auth · app/_layout.tsx is the hard gate", () => {
     expect(layout).toMatch(/function Shell\(/);
   });
 
-  // #111 (Q1 A): the root Stack now holds the tabs, the capture sheet and the
-  // rig; the trips screens moved one level down into the Trips tab's own stack
-  // at the same URLs. The gate still wraps ALL of it — everything mounts
-  // through Shell's one Stack.
+  // #111 (Q1 A): the root Stack now holds the tabs and the capture sheet; the
+  // trips screens moved one level down into the Trips tab's own stack at the
+  // same URLs. #173 i2: the rig left the root Stack for the You tab. The gate
+  // still wraps ALL of it — everything mounts through Shell's one Stack.
   it("still registers the app's screens only inside Shell", () => {
     const stacks = layout.match(/<Stack[\s>]/g) ?? [];
     expect(stacks).toHaveLength(1);
     const shellAt = layout.indexOf("function Shell(");
     expect(shellAt).toBeGreaterThan(-1);
     expect(layout.indexOf("<Stack")).toBeGreaterThan(shellAt);
-    for (const name of ["(tabs)", "capture", "rig"]) {
+    for (const name of ["(tabs)", "capture"]) {
       expect(layout).toContain(`name="${name}"`);
     }
+    expect(layout).not.toContain('name="rig"');
     const trips = read("app/(tabs)/(trips)/_layout.tsx");
     for (const name of ["index", "trips/[id]/index", "trips/[id]/destinations/[destinationId]"]) {
       expect(trips).toContain(`name="${name}"`);
@@ -227,42 +231,67 @@ describe("mobile auth · one SDK, no shim (#147)", () => {
       expect(src, `${name} must not import @clerk/clerk-expo`).not.toMatch(/@clerk\/clerk-expo/);
       expect(src, `${name} must not import the /legacy shim`).not.toMatch(/@clerk\/expo\/legacy/);
     }
-    for (const name of ["app/_layout.tsx", "app/sign-in.tsx", "app/rig.tsx"]) {
+    for (const name of ["app/_layout.tsx", "app/sign-in.tsx", "app/(tabs)/you.tsx"]) {
       const src = sources.find(([n]) => n === name)![1];
       expect(src, `${name} imports from @clerk/expo`).toMatch(/from "@clerk\/expo"/);
     }
   });
 });
 
-describe("mobile auth · app/rig.tsx gains an Account card", () => {
+describe("mobile auth · the You tab carries the Account card (#173 i2 · Q5 A)", () => {
+  it("is titled You in its own nav block, with no kicker", () => {
+    expect(you).toMatch(/<View style=\{styles\.nav\}>\s*<Text style=\{styles\.title\}>You<\/Text>\s*<\/View>/);
+  });
+
+  it("renders the Account card above No rig yet when there is no rig", () => {
+    const noRig = you.indexOf("if (rig === null)");
+    expect(noRig).toBeGreaterThan(-1);
+    const branch = you.slice(noRig);
+    expect(branch.indexOf("<AccountCard />")).toBeGreaterThan(-1);
+    expect(branch.indexOf("<AccountCard />")).toBeLessThan(branch.indexOf("No rig yet"));
+    expect(branch.indexOf("<HomeBaseRow />")).toBeLessThan(branch.indexOf("No rig yet"));
+  });
+
   it("renders the Account card above the rig card's Routing input kicker", () => {
-    expect(rig).toContain("<Kicker>Account</Kicker>");
-    const account = rig.indexOf("<AccountCard />");
-    const routing = rig.indexOf("<Kicker color={C.accent}>Routing input</Kicker>");
+    expect(you).toContain("<Kicker>Account</Kicker>");
+    const account = you.lastIndexOf("<AccountCard />");
+    const routing = you.indexOf("<Kicker color={C.accent}>Routing input</Kicker>");
     expect(account).toBeGreaterThan(-1);
     expect(routing).toBeGreaterThan(-1);
     expect(account).toBeLessThan(routing);
   });
 
   it("offers Sign out with a session and the dashed dev-user stub without one", () => {
-    expect(rig).toContain("Sign out");
-    expect(rig).toContain("dev-user");
-    expect(rig).toContain("No Clerk keys in this build — running as the seeded dev-user. No");
-    expect(rig).toMatch(/borderStyle: "dashed"/);
+    expect(you).toContain("Sign out");
+    expect(you).toContain("dev-user");
+    expect(you).toContain("No Clerk keys in this build — running as the seeded dev-user. No");
+    expect(you).toMatch(/borderStyle: "dashed"/);
   });
 
   it("never composes the display name itself — it is Clerk's fullName or the primary email", () => {
-    expect(rig).toMatch(/user\?\.fullName \?\? user\?\.primaryEmailAddress\?\.emailAddress/);
-    expect(rig).not.toMatch(/firstName/);
+    expect(you).toMatch(/user\?\.fullName \?\? user\?\.primaryEmailAddress\?\.emailAddress/);
+    expect(you).not.toMatch(/firstName/);
   });
 
   it("branches on the module constant, so the hook order never changes", () => {
-    expect(rig).toMatch(/if \(!clerkEnabled\) return <DevAccountCard \/>;/);
+    expect(you).toMatch(/if \(!clerkEnabled\) return <DevAccountCard \/>;/);
   });
 
   it("leaves the rig rows untouched", () => {
-    expect(rig).toContain('["Gross weight", formatPounds(rig.grossWeightKg)]');
-    expect(rig).toContain("Edit the rig on the web — this screen is read-only in v1.");
+    expect(you).toContain('["Gross weight", formatPounds(rig.grossWeightKg)]');
+    expect(you).toContain("Edit the rig on the web — this screen is read-only in v1.");
+  });
+});
+
+describe("mobile auth · /rig is a redirect to the You tab (#173 i2)", () => {
+  it("app/rig.tsx renders only <Redirect href=\"/you\" />", () => {
+    expect(rigRedirect).toMatch(/import \{ Redirect \} from "expo-router";/);
+    expect(rigRedirect).toContain('<Redirect href="/you" />');
+    expect(rigRedirect).not.toContain("AccountCard");
+  });
+
+  it("the Trips list no longer links to /rig from its header", () => {
+    expect(read("app/(tabs)/(trips)/index.tsx")).not.toContain('href="/rig"');
   });
 });
 

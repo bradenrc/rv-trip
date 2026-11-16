@@ -60,7 +60,7 @@ import { onQueueSent } from "./capture";
  */
 interface State {
   trips: TripSummary[] | null;
-  /** The Saves tab's library, both shelves (#111 i2). */
+  /** The Places tab's library, both shelves (#111 i2; retitled by #173 i2). */
   saves: SavedPlace[] | null;
   bundles: Record<string, TripBundle>;
   /** Each trip's nearby saves (#111 i3) — the banner and the review sheet. */

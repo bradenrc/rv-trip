@@ -120,7 +120,7 @@ Use the same instance as the web app (the same `pk_test_…`) or you will be a
 different tenant on the phone than in the browser and see no trips. It is a
 *publishable* key: it belongs in `.env.local`, never the secret one.
 
-`app/rig.tsx` shows which half you are in — the Account card above the rig is
+The You tab (`app/(tabs)/you.tsx`) shows which half you are in — the Account card above the rig is
 your name plus **Sign out** with a session, and the web's dashed `dev-user` pill
 without one.
 
@@ -170,19 +170,20 @@ Two things to know about what you see:
 
 ## What's here (v1)
 
-- `app/(tabs)/_layout.tsx` — the bottom tabs, **Trips · + · Saves** (#111). The
-  center + opens the capture sheet from any tab; Saves carries the capture
-  queue's count until it drains
+- `app/(tabs)/_layout.tsx` — the bottom tabs, **Trips · Places · + · You** (#111,
+  #173). The center + (Capture) opens the capture sheet from any tab; Places
+  carries the capture queue's count until it drains
 - `app/(tabs)/(trips)/index.tsx` — Trips (planning / upcoming / traveled), at `/`
 - `app/(tabs)/(trips)/trips/[id]/index.tsx` — the trip, under a **Route ⇄ Map** lens: the day
   strip + route list with drives and Navigate, or the same drives as corridors
 - `app/(tabs)/(trips)/trips/[id]/destinations/[destinationId].tsx` — destination detail: the mini-map, reservations, ideas (tap to cycle), rating + notes (persist)
-- `app/(tabs)/saves.tsx` — Saves (a placeholder until #111 i2's shelves)
+- `app/(tabs)/saves.tsx` — Places: the Want to go / Been there shelves
 - `app/capture.tsx` — the capture sheet (a root formSheet): one smart field →
   a Google place, a note in the area you're in, or a dropped pin. Works offline:
   every capture is queued on the phone (`src/capture.ts`, AsyncStorage
   `rv.captureQueue.v1`) and sent when there is signal
-- `app/rig.tsx` — you (the Account card) and the rig, read-only
+- `app/(tabs)/you.tsx` — You: the Account card, the home base and the rig, read-only
+  (`app/rig.tsx` redirects here)
 - `app/sign-in.tsx` — email → 6-digit code, rendered only when Clerk is keyed
 - `src/api.ts` · `src/auth.ts` · `src/capture.ts` · `src/map.tsx` · `src/nav.ts` · `src/store.ts` · `src/theme.ts` · `src/ui.tsx`
 

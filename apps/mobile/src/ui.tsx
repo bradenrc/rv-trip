@@ -191,7 +191,7 @@ export function Segmented<T extends string>({
 /**
  * A chip — docs/design/111's `.chip`: mono 10/600 on a pill. `on` is the
  * chosen one (rv-green on green-soft: "verified / chosen"); `warn` is amber
- * ("attention" — the Saves tab's queue count).
+ * ("attention" — the Places tab's queue count).
  */
 export function Chip({
   children,

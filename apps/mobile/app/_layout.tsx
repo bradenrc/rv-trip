@@ -13,10 +13,11 @@ import SignInScreen from "./sign-in";
  * one place — bare when there is no Clerk key, and behind
  * `<Show when="signed-in">` when there is.
  *
- * #111 (Q1 A): the root Stack holds the bottom tabs — Trips · + · Saves, whose
- * Trips tab nests the stack that used to live here, so `/` and `/trips/[id]`
- * keep their URLs — plus the two screens that sit ABOVE the tabs: the capture
- * sheet, opened by the center + from any tab as a formSheet, and the rig.
+ * #111 (Q1 A): the root Stack holds the bottom tabs — Trips · Places · + · You
+ * (#173 i2), whose Trips tab nests the stack that used to live here, so `/` and
+ * `/trips/[id]` keep their URLs — plus the one screen that sits ABOVE the tabs:
+ * the capture sheet, opened by the center + from any tab as a formSheet. The
+ * rig is the You tab now; `app/rig.tsx` only redirects there.
  */
 function Shell() {
   // The capture queue's flush needs the session token, so it runs in here.
@@ -36,7 +37,6 @@ function Shell() {
             contentStyle: { backgroundColor: C.surface },
           }}
         />
-        <Stack.Screen name="rig" options={{ title: "Your rig" }} />
       </Stack>
     </>
   );
