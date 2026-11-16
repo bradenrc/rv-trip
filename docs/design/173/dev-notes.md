@@ -89,3 +89,80 @@ Scope: plan item **i2** only (#171 · Q5 A · Q6 A). The Map tab is not added he
   - the Trips header with no Rig link.
 - `typedRoutes` is on (`app.json:59`). `/you` typechecked clean here, but a stale `.expo/types` on the walk machine regenerates on `expo start`.
 - I did not run the new tests against the old code first, so I have no red-run evidence. They do assert strings ("Places", "Capture", `name="you"`, the Redirect) that did not exist before this change.
+
+---
+
+# #173 · dev notes — item i3 of 5 (Web shell: Trips · Places · Map, + Capture, avatar → /you, the phone-width five)
+
+Scope: plan item **i3** only (#171 · Q1 C · Q2 B). The /trips list page, the `/` redirect and the `tz` cookie are i4.
+
+## What changed
+
+- `apps/web/src/components/nav/Nav.tsx`
+  - `:30-34` `LINKS` (the desktop row) is now Trips (`/trips`, lit on `startsWith("/trips")`) · Places (`/places`) · Map (`/map`). Rig and Settings are gone. The `Caravan` and `Settings` lucide imports are dropped, and `PlusCircle` and `CircleUser` are added.
+  - `:40-47` `TABS` is a new list for the bottom bar: Trips · Places · Capture (`/places`, `PlusCircle`, `match: () => false`, `action: true`) · Map · You (`/you`, `CircleUser`, lit on `/you`, `/rig` and `/settings`).
+  - `:121` the bottom bar maps `TABS`, with `key={label}` because two entries share `/places`. `:136` the icon is green when `action || active`, so Capture is always green.
+  - `:90` the right cluster (theme toggle · + Capture · `<Account/>`) is wrapped in a single `hidden items-center gap-2.5 md:inline-flex` div. Below md the masthead is the mark alone. The toggle button's own markup is byte-for-byte unchanged.
+  - `:107-109` + Capture is a `<Link href="/places">`: `rounded-rv-md bg-rv-green px-[13px] py-[7px] text-[13.5px] font-bold text-rv-navy`. Padding and size come from the wireframe's `.btn-cta`.
+- `apps/web/src/components/nav/Account.tsx`
+  - Clerk's `UserButton` is gone.
+  - `:45` signed in: `YouAvatar` is a `<Link href="/you">` wearing the 30px initial avatar (`border-2 border-rv-border-hi bg-rv-green text-rv-navy`). The initial comes from `useUser()`: first name, then username, then email (`initialOf`, `:39`).
+  - `:60` keyless: the shipped dashed `DevAccount` pill. The outer `<span>` became the `<Link href="/you">`, and it keeps the same classes, title and children.
+  - Signed out: `SignInButton` is unchanged.
+- `apps/web/src/app/you/page.tsx` (new, server, `force-dynamic`, `PageShell`)
+  - It reads `getPrefsByOwner(owner)`, `getHouseholdOverview(owner)` and `getActor()`.
+  - The h1 is `describePeople([actor, ...members])[actor].name`, and falls back to the id, which is "dev-user" keyless.
+  - The kicker "You" is in `text-rv-ink-faded`.
+  - In the `max-w-[680px]` column:
+    - card 1 holds Household → /settings (value `homeBaseRowValue(prefs)`), Rig → /rig and Settings → /settings.
+    - card 2 is `<YouAccount clerk={clerkEnabled()} />`.
+- `apps/web/src/components/you/rows.tsx` (new, no directive): `YouCard` (Settings' card language, plus an optional `border-dashed`), the `ROW` class string, `Chevron` and `YouLinkRow`.
+- `apps/web/src/components/you/YouAccount.tsx` (new, `"use client"`):
+  - Clerk: a "Manage account" button (`useClerk().openUserProfile()`) and a "Sign out" button inside `<SignOutButton>`.
+  - Keyless: the dashed card, "dev-user" over "Local dev — no Clerk keys, running as the seeded dev-user".
+- `apps/web/src/app/places/page.tsx:38`: the kicker is "Your places", and the comment above it is updated.
+
+## Decisions and deviations, for qa to check
+
+1. **+ Capture uses `bg-rv-green`, not the wireframe's `bg-rv-green-cta`** (vet MED). Two existing sweeps in `packages/core/src/theme/nightfall-tokens.test.ts` reject `bg-rv-green-cta` with navy ink:
+   - sweep 1 (`:283`) allows `text-rv-navy` only beside `bg-rv-green`/`green-on-dark`.
+   - sweep 2 (`:307`) says "no rv-green-cta call site is left carrying CTA duty".
+
+   I first widened sweep 1. Sweep 2 then failed, so I reverted that edit and took the vet's other option. The masthead is a literal `dark` island, where both tokens are `#34d399` (`entry.css:149-150`), so it should be the same pixel. **The walk should confirm the + Capture fill.**
+2. **The chevron on the Rig, Settings and Manage account rows is lucide `ChevronRight` (`size-4 text-rv-ink-subtle`), not a "›" text glyph.** The design puts the chevron in rv-ink-subtle, and the sweep at `nightfall-tokens.test.ts:336` allows ink-subtle only on sized icons. On the Household row the "›" comes from `homeBaseRowValue` and is in ink-faded, so no second chevron is drawn (vet MED). The two rows' chevrons therefore differ slightly in shape and shade. That is a walk call.
+3. **The h1 is 40px, the shipped Settings and Places h1 size, not the frame's 34px `.ph`.** The /trips frame draws the shipped, unchanged page h1 at 34px too, so I read `.ph` as a stand-in.
+4. **`getHouseholdOverview` is read and only feeds the people lookup** (member ids, as settings/page.tsx does). The plan's acceptance names it, but nothing on /you draws a household field directly. The Household row's value is the prefs' home base, per the row table.
+5. **Account in Settings' Account card** (`SettingsForm.tsx:131`) is the same `<Account/>`, so on /settings it is now the avatar link to /you, not Clerk's menu. Settings itself is unchanged, and the vetted design does not mention this spot. Walk it.
+6. **Trips points at `/trips` before that page exists.** `app/trips/page.tsx` lands in i4. Between this item and i4 the desktop Trips link and the Trips tab 404, and `/` (the old list) no longer lights Trips. The epic ships as one branch with one walk (Q7 A), so this gap never reaches a user.
+7. **The trigger for Capture and You is `match: () => false` and an inline `["/you", "/rig", "/settings"].some(…)`**, as the bar spec table says.
+
+## Tests
+
+- `apps/web/src/components/nav/nav.test.ts` (rewritten, source-reading, 21 tests):
+  - the desktop labels `[Trips, Places, Map]` with Trips at `/trips` and the `startsWith("/trips")` match.
+  - the bottom-bar labels `[Trips, Places, Capture, Map, You]`. Capture goes to /places with PlusCircle, is never lit and is always green. You uses CircleUser and is lit on /you, /rig and /settings.
+  - each list is mapped once, and no label is "Rig", "Settings" or "Saves".
+  - the toggle → + Capture → Account order inside the `hidden … md:inline-flex` cluster, and the + Capture Link classes.
+  - Account.tsx: there is no UserButton, `useUser()` is used, both the signed-in and keyless branches have `<Link href="/you"`, and SignInButton is kept.
+  - /you is a server page (no directive in code) that reads `getHouseholdOverview(` and `getPrefsByOwner(`. It checks the `describePeople` fallback, the PageShell, the 680 column, the "You" kicker and the three `YouLinkRow`s, including `value={homeBaseRowValue(prefs)}`. YouAccount must be `"use client"` with `openUserProfile()`, `<SignOutButton>` and the dev-user copy.
+  - the places kicker is "Your places".
+- `packages/core/src/web-shell.test.ts` is repointed to the new contract (vet MED):
+  - `:91-112` LINKS hrefs are `[/trips, /places, /map]` and TABS hrefs are `[/trips, /places, /places, /map, /you]`. /settings and /rig are reached through You. Each list is declared once and mapped once.
+  - `:204` the toggle, + Capture and `<Account/>` sit in the `hidden … md:inline-flex` cluster. This replaces the old "no responsive wrapper" test, which Q2 B reverses.
+  - The header comment items 1 and 4 are updated.
+- Red evidence: nav.test.ts failed first (ENOENT on `app/you/page.tsx`, before the page existed). After the first implementation pass it went to 3 failing / 18 passing. Those three were assertion-shape fixes in the test, not behavior.
+
+## Checks run
+
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total` (exit 0). Counts: core `1416 passed`, ui `55 passed`, web `150 passed | 332 skipped`.
+- The 332 skipped web tests are the Postgres route-handler integration suite. The log says "API integration tests SKIPPED — no Postgres on …localhost:5433". This item touches no route handler, schema or query, but that suite did not execute here.
+
+## Not done here (operator-owned / flagged)
+
+- **Canvas sync** (wireframe dev note: update `WebTrip.dc.html`'s header to avatar → /you, and add a /you node to `Main.dc.html`'s app map). This is a published canvas artifact outside the repo and outside a dev worktree's contract, so it is **not done**. Whoever owns the canvas should do it per docs/design/README.md's Canvas rule.
+- **Render-required at walk** (vet FLAG):
+  - `openUserProfile()` opens Clerk's modal.
+  - `SignOutButton` signs out.
+  - the `useUser()` initial renders and is non-empty once loaded. It renders an empty circle for the instant before `user` loads.
+  - below md the masthead is the mark only, and the bottom bar shows five tabs with Capture green.
+  - You is lit on /rig and /settings.
