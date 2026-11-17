@@ -21,6 +21,7 @@ import {
   type OverlayPalette,
   type StyleMode,
 } from "./palette";
+import type { CategoryLabel } from "@rv-trip/ui";
 import type { DriveArc, MapPin } from "./pins";
 
 /**
@@ -66,6 +67,10 @@ export interface MapViewProps {
    * straight-line estimate where it was not. Overview only; the mini-map and
    * the lens draw none. */
   arcs?: DriveArc[];
+  /** #179 · the Journal map's join: `[lng, lat]` destinations in date order.
+   * ONE straight dashed line at the estimate's paint — never routed, never
+   * labelled. The drive arcs above are untouched by it. */
+  join?: [number, number][];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   /** Name labels under each pin. Off for the mini-map, where the sheet already
@@ -82,6 +87,7 @@ export interface MapViewProps {
 export function MapView({
   pins,
   arcs = [],
+  join = [],
   selectedId = null,
   onSelect,
   showLabels = true,
@@ -201,6 +207,15 @@ export function MapView({
     [arcs],
   );
 
+  const joinGeoJson = useMemo(
+    () => ({
+      type: "Feature" as const,
+      properties: {},
+      geometry: { type: "LineString" as const, coordinates: join },
+    }),
+    [join],
+  );
+
   return (
     <MapGL
       ref={ref}
@@ -259,6 +274,24 @@ export function MapView({
         </Source>
       )}
 
+      {join.length > 1 && (
+        <Source id="rv-journal-join" type="geojson" data={joinGeoJson}>
+          {/* #179 · the Journal's join: one dashed line, the estimate's paint,
+              no casing and no label. */}
+          <Layer
+            id="rv-journal-join-dash"
+            type="line"
+            layout={{ "line-cap": "round" }}
+            paint={{
+              "line-color": palette.arcLine,
+              "line-width": palette.arcWidth,
+              "line-opacity": palette.arcOpacity,
+              "line-dasharray": [2.2, 1.8],
+            }}
+          />
+        </Source>
+      )}
+
       {arcs.map((a) => {
         const [lng, lat] = labelAt(a);
         return (
@@ -304,7 +337,7 @@ export function MapView({
               ) : pin.kind === "place" ? (
                 <PlaceDrop pin={pin} selected={selected} palette={palette} />
               ) : (
-                <IdeaRing selected={selected} palette={palette} />
+                <IdeaRing selected={selected} palette={palette} category={pin.category} />
               )}
               {showLabels && (
                 <span
@@ -496,13 +529,24 @@ function PlaceDrop({
  *   the canvas while a destination and a saved place both repaint. Same two selection
  *   keys `DestinationDisc` takes, same 11px, still no number.
  */
-function IdeaRing({ selected, palette }: { selected: boolean; palette: OverlayPalette }) {
+function IdeaRing({
+  selected,
+  palette,
+  category,
+}: {
+  selected: boolean;
+  palette: OverlayPalette;
+  /** #179 · a Journal entry: a small disc FILLED in its category colour on the
+   * hollow ground's ring (docs/design/181 frame 5). Absent: the Do ring. */
+  category?: CategoryLabel;
+}) {
+  const fill = category ? palette.category[category] : null;
   return (
     <div
       className="size-[11px] rounded-full border-2"
       style={{
-        borderColor: selected ? palette.selStroke : palette.category.Do,
-        background: selected ? palette.selFill : palette.hollowGround,
+        borderColor: selected ? palette.selStroke : fill ? palette.hollowGround : palette.category.Do,
+        background: selected ? palette.selFill : (fill ?? palette.hollowGround),
         boxShadow: markerShadow(selected ? "lg" : "sm", palette, selected),
       }}
     />

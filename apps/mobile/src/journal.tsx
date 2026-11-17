@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type {
   ForNextTime,
   HowWasIt,
@@ -17,6 +18,7 @@ import {
   JOURNAL_EMPTY_COPY,
   activeTrip,
   againBadge,
+  journalMap,
   journalToday,
   reservationEntry,
   upNext,
@@ -33,9 +35,10 @@ import {
   tripJournal,
 } from "@rv-trip/core";
 import { Sheet } from "./hops";
+import { MapFrame, TripMap, useStyleMode, type TripMapEntry, type TripMapPin } from "./map";
 import { NavigateLinks } from "./navigate";
 import { C, F, R } from "./theme";
-import { Card, CategoryTile, Stars } from "./ui";
+import { Card, CategoryTile, Segmented, Stars, type SegmentedOption } from "./ui";
 
 /**
  * W3 Journal on the phone (#113 · docs/design/113 Screens 1–4): the "How was
@@ -237,6 +240,7 @@ export function JournalView({
   ) : (
     <WholeTripJournal
       trip={trip}
+      today={today}
       onRateTrip={onRateTrip}
       onNoteTrip={onNoteTrip}
       onOpen={onOpen}
@@ -334,15 +338,113 @@ function EarlierGroup({ group: g, onOpen }: { group: JournalEarlierGroup; onOpen
   );
 }
 
-/** The shipped whole-trip Journal; mid-trip it opens with "‹ Today". */
+// ── #179 · the whole-trip Journal's map ─────────────────────────────────────
+
+/** Map · List only, remembered on the device — the STYLE_PREF_KEY pattern
+ * (src/map.tsx). */
+export const JOURNAL_MAP_PREF_KEY = "rv-journal-map";
+
+type JournalMapChoice = "map" | "list";
+
+const JOURNAL_MAP_SEGMENTS: SegmentedOption<JournalMapChoice>[] = [
+  { value: "map", label: "Map" },
+  { value: "list", label: "List only" },
+];
+
+/** docs/design/181 frame 4. */
+const JOURNAL_MAP_HEIGHT = 196;
+
+/**
+ * The persisted Map · List only choice. `null` until AsyncStorage answers (the
+ * loading frame covers that one render); anything but "list" reads as Map, so
+ * the first visit opens on the map (q7 A).
+ */
+function useJournalMapChoice(): [JournalMapChoice | null, (c: JournalMapChoice) => void] {
+  const [choice, setChoice] = useState<JournalMapChoice | null>(null);
+  useEffect(() => {
+    let live = true;
+    const settle = (raw: string | null) => {
+      if (live) setChoice(raw === "list" ? "list" : "map");
+    };
+    AsyncStorage.getItem(JOURNAL_MAP_PREF_KEY)
+      .then(settle)
+      .catch(() => settle(null));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const choose = useCallback((next: JournalMapChoice) => {
+    setChoice(next);
+    void AsyncStorage.setItem(JOURNAL_MAP_PREF_KEY, next).catch(() => {
+      // A failed write costs next launch's preference, never this tap.
+    });
+  }, []);
+  return [choice, choose];
+}
+
+/**
+ * The map above the whole-trip Journal (q5 A · q7 A): core's `journalMap`
+ * through the shipped TripMap — hollow discs for been, small category discs for
+ * logged places, the dashed join — with the mono Map · List only pill over it.
+ * No request is made. List only is the pill alone above the list.
+ */
+function JournalMapBlock({
+  trip,
+  today,
+  selectedId,
+  setSelectedId,
+}: {
+  trip: Trip;
+  today: IsoDate;
+  selectedId: string | null;
+  setSelectedId: (id: string) => void;
+}) {
+  const [choice, setChoice] = useJournalMapChoice();
+  const [mode] = useStyleMode();
+  const m = useMemo(() => journalMap(trip, today), [trip, today]);
+  const pins = useMemo<TripMapPin[]>(
+    () =>
+      m.points
+        .filter((p) => p.kind === "destination")
+        .map((p) => ({ id: p.id, name: p.name, lat: p.lat, lng: p.lng, ordinal: p.ordinal, floating: p.ordinal === null, been: p.been })),
+    [m],
+  );
+  const entries = useMemo<TripMapEntry[]>(
+    () => m.points.filter((p) => p.kind === "entry").map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, category: p.category })),
+    [m],
+  );
+
+  if (choice === "list") {
+    return <Segmented mono value={choice} options={JOURNAL_MAP_SEGMENTS} onChange={setChoice} />;
+  }
+  return (
+    <View style={styles.mapBox}>
+      {choice === null || mode === null ? (
+        <MapFrame state="loading" height={JOURNAL_MAP_HEIGHT} />
+      ) : (
+        <TripMap pins={pins} entries={entries} join={m.join} mode={mode} showLabels={false} height={JOURNAL_MAP_HEIGHT} selectedId={selectedId} onSelect={setSelectedId} />
+      )}
+      {choice !== null && (
+        <View style={styles.mapSeg}>
+          <Segmented mono value={choice} options={JOURNAL_MAP_SEGMENTS} onChange={setChoice} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** The shipped whole-trip Journal; mid-trip it opens with "‹ Today". Above
+ * it, the Journal map (#179). */
 function WholeTripJournal({
   trip,
+  today,
   onRateTrip,
   onNoteTrip,
   onOpen,
   onToday,
 }: {
   trip: Trip;
+  today: IsoDate;
   onRateTrip: (n: number) => void;
   onNoteTrip: (note: string) => void;
   onOpen: (entry: JournalEntry) => void;
@@ -352,6 +454,8 @@ function WholeTripJournal({
   const j = tripJournal(trip);
   const [note, setNote] = useState(trip.note ?? "");
   const [open, setOpen] = useState({ skipped: false, travel: false });
+  // #179 · a pin lights its row or heading; a row or heading lights its pin.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => setNote(trip.note ?? ""), [trip.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -360,6 +464,9 @@ function WholeTripJournal({
         <Pressable onPress={onToday} accessibilityRole="button" hitSlop={6} style={{ alignSelf: "flex-start" }}>
           <Text style={[styles.jump, styles.jumpLeft]}>‹ Today</Text>
         </Pressable>
+      )}
+      {!journalIsEmpty(j) && (
+        <JournalMapBlock trip={trip} today={today} selectedId={selectedId} setSelectedId={setSelectedId} />
       )}
       <Card style={{ paddingVertical: 10, paddingHorizontal: 11, gap: 4 }}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -392,7 +499,12 @@ function WholeTripJournal({
       )}
       {j.destinations.map((g) => (
         <View key={g.destination.id} style={{ gap: 8 }}>
-          <View style={styles.dayhd}>
+          <Pressable
+            onPress={() => setSelectedId(g.destination.id)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: g.destination.id === selectedId }}
+            style={[styles.dayhd, g.destination.id === selectedId && styles.sel]}
+          >
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1, flexWrap: "wrap" }}>
               <Text style={styles.dayName}>{g.destination.place.name}</Text>
               {g.rating !== null && <Stars value={g.rating} size={10} />}
@@ -401,8 +513,10 @@ function WholeTripJournal({
             {g.destination.arriveDate && g.destination.departDate ? (
               <Text style={styles.dayDates}>{dateRange(g.destination.arriveDate, g.destination.departDate)}</Text>
             ) : null}
-          </View>
-          {g.entries.length > 0 && <EntryRows entries={g.entries} onOpen={onOpen} />}
+          </Pressable>
+          {g.entries.length > 0 && (
+            <EntryRows entries={g.entries} onOpen={onOpen} selectedId={selectedId} onSelect={setSelectedId} />
+          )}
         </View>
       ))}
       {j.around.length > 0 && (
@@ -410,7 +524,7 @@ function WholeTripJournal({
           <View style={styles.dayhd}>
             <Text style={styles.dayName}>{JOURNAL_AROUND_HEADING}</Text>
           </View>
-          <EntryRows entries={j.around} onOpen={onOpen} />
+          <EntryRows entries={j.around} onOpen={onOpen} selectedId={selectedId} onSelect={setSelectedId} />
         </View>
       )}
       {j.didntGetTo.length > 0 && (
@@ -437,11 +551,16 @@ function EntryRows({
   entries,
   toRate = [],
   onOpen,
+  selectedId = null,
+  onSelect,
 }: {
   entries: JournalEntry[];
   /** #178 · rows still waiting on a rating — each carries a "How was it?" pill. */
   toRate?: Reservation[];
   onOpen: (e: JournalEntry) => void;
+  /** #179 · the whole-trip map's selection: a tapped row lights its pin. */
+  selectedId?: string | null;
+  onSelect?: (id: string) => void;
 }) {
   return (
     <View style={styles.rows}>
@@ -459,9 +578,17 @@ function EntryRows({
       {entries.map((e, i) => (
         <Pressable
           key={`${e.kind}:${e.id}`}
-          onPress={() => onOpen(e)}
+          onPress={() => {
+            onSelect?.(e.id);
+            onOpen(e);
+          }}
           accessibilityRole="button"
-          style={({ pressed }) => [styles.row, (i > 0 || toRate.length > 0) && styles.rowRule, pressed && { opacity: 0.85 }]}
+          style={({ pressed }) => [
+            styles.row,
+            (i > 0 || toRate.length > 0) && styles.rowRule,
+            e.id === selectedId && styles.sel,
+            pressed && { opacity: 0.85 },
+          ]}
         >
           <CategoryTile type={e.type} size={26} />
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -720,4 +847,8 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   howText: { fontSize: 10.5, fontWeight: "700", color: C.greenInk },
+  // #179 · docs/design/181 frame 4: `.mapbox`, `.mapbox .seg`, `.row.sel`.
+  mapBox: { position: "relative", borderWidth: 1, borderColor: C.border, borderRadius: R.card, overflow: "hidden" },
+  mapSeg: { position: "absolute", left: 8, top: 8 },
+  sel: { backgroundColor: C.navySoft, borderLeftWidth: 3, borderLeftColor: C.ink },
 });

@@ -52,6 +52,9 @@ export const STYLE_SEGMENTS: SegmentOption<StyleMode>[] = [
 export interface MapMountProps {
   pins: MapPin[];
   arcs?: DriveArc[];
+  /** #179 · the Journal map's join: `[lng, lat]` destinations in date order,
+   * drawn as one dashed line. Never routed, never labelled. */
+  join?: [number, number][];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   showLabels?: boolean;
@@ -68,6 +71,7 @@ export interface MapMountProps {
 export function MapMount({
   pins,
   arcs,
+  join,
   selectedId,
   onSelect,
   showLabels,
@@ -94,6 +98,7 @@ export function MapMount({
           <LazyMapView
             pins={pins}
             arcs={arcs}
+            join={join}
             selectedId={selectedId}
             onSelect={onSelect}
             showLabels={showLabels}

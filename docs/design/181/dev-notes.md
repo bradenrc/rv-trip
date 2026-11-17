@@ -243,3 +243,109 @@ This dispatch covers epic item **i4 only**. i1–i3 are already on the branch. i
 - **Log something.** On the phone it opens `/capture`. On the web it opens Nav's CaptureSheet, and the logged row should appear under Today: through `rv:captured` on the web, and through the store on the phone.
 - **Swap.** "Whole trip and map →" swaps in place, and "‹ Today" swaps back. Switching tabs resets it, because the swap lasts for the visit only.
 - **No Mapbox map yet.** The map is i5.
+
+---
+
+# #181 · dev notes · i5: the Journal map (#179 · q5 A · q6 A · q7 A)
+
+This dispatch covers epic item **i5 only**. i1–i4 are already on the branch. With it, "Whole trip and map →" now opens a whole-trip Journal that has its map.
+
+## What changed
+
+**Core**
+- `packages/core/src/planner/journal-map.ts` (new): `JournalMapPoint` (`:30`) and `journalMap(trip, today)` (`:50`). It returns `{ points, join, unmapped }` and makes no fetch or routing call.
+  - **Destination points:** `tripDestinationPins`, filtered to the destinations `tripJournal` lists.
+    - Mid-trip (`activeTrip` covers `today`), only destinations with `arriveDate ≤ today` are kept. Today's destination (`todaysDestination`) is kept even if nothing has been logged there yet.
+    - `ordinal` is `scheduledOrder`'s.
+    - `been = today === null || departDate < today`.
+  - **Entry points:** the listed **idea** entries (each listed destination's ideas plus Around the trip) whose `idea.place` has coordinates, with `category = categoryOf(saveTypeOfIdeaCategory(idea.category)).cat`. Reservation entries get no pin.
+  - **`join`:** scheduled destination points in ordinal order (which is arrival order), as `[lng, lat]`.
+  - **`unmapped`:** the shown destinations plus the shown idea entries that have no coordinates.
+- `packages/core/src/planner/index.ts:74`: `export * from "./journal-map"`.
+
+**Web**
+- `apps/web/src/components/map/pins.ts:126`: `IdeaPin.category?: CategoryLabel`.
+- `apps/web/src/components/map/MapMount.tsx:57`: `join?` is passed through to MapView.
+- `apps/web/src/components/map/MapView.tsx`:
+  - `:73` adds the `join?` prop.
+  - `:278` draws it as a `<Source id="rv-journal-join">` with one dashed line layer: `palette.arcLine` / `arcWidth` / `arcOpacity`, dash `[2.2, 1.8]`, no casing, no label, and only when `join.length > 1`.
+  - `:532` `IdeaRing` takes `category`. When it is present the 11px disc is filled with `palette.category[category]` on a `hollowGround` ring, as in wireframe frame 5. When it is absent the shipped Do ring is unchanged.
+- `apps/web/src/components/trip/JournalMap.tsx` (new):
+  - maps `journalMap` points onto `DestinationPin` (layer `"been"` when been, else the trip's layer) and `IdeaPin` (with `category`);
+  - renders the shipped `MapMount` with `join`, `unmappedCount`, `selectedId`/`onSelect` and `showLabels={false}`, under a mono kicker;
+  - is `order-first … md:order-none`, so it sits above the list below md, at `h-[200px]`. From md it is `md:min-h-[440px] md:flex-1`.
+- `apps/web/src/components/trip/JournalLens.tsx`:
+  - `:74`: one `grid grid-cols-1 gap-4 md:grid-cols-[minmax(300px,420px)_1fr]` now wraps **both** forms. The list is in the left column and `<JournalMap>` (`:96`) is in the right. The map is omitted when `journalIsEmpty(tripJournal(trip))`.
+  - The kicker reads "The trip so far" mid-trip and "Everything logged on this trip" otherwise, as in the wireframe.
+  - The Today form's own inner grid and the whole-trip form's old `md:grid-cols-[320px_1fr]` are removed. The whole-trip left column is now trip card, tally, groups and folds, as in frame 5.
+  - **Selection:** `:68` `selectedId` state.
+    - A destination heading is a `GroupHead` button (`:349`) that selects its disc. This covers Today's heading when today has a destination, Earlier headings and whole-trip headings.
+    - An idea row selects its pin (`JournalRows`, `:369`).
+    - A selected pin lights its row or heading with `SELECTED` (`:115`), the wireframe's `.row.sel`: `bg-rv-navy-soft shadow-[inset_3px_0_0_var(--color-rv-ink)]`.
+    - Reservation rows have no pin, so they are not selectable.
+
+**Phone**
+- `apps/mobile/src/map.tsx`:
+  - `TripMapPin = TripDestinationPin & { been? }` (`:337`) and `TripMapEntry` (`:341`).
+  - `TripMapProps` gains `join?`, `entries?`, `selectedId?` and `onSelect?` (`:376`).
+  - Drawing:
+    - The join is a second `ShapeSource id={JOIN_ID}` (`"rv-journal-join"`, `:461`) with one `joinDash` LineLayer (`:267`). It uses the estimate's paint, with no casing.
+    - Entries are 11pt category discs: `palette.category[cat]` on a `hollowGround` ring, 15pt with `selStroke` when selected.
+    - Discs and entries are wrapped in `Pressable` when `onSelect` is given.
+    - `DestinationDisc` (`:606`) now draws `been` hollow and selected with `selStroke`/`selFill`/`selInk`, matching the web.
+  - The camera fits to entries too.
+  - The map is empty only when there are neither pins nor entries (`:425`).
+- `apps/mobile/src/journal.tsx`:
+  - `JOURNAL_MAP_PREF_KEY = "rv-journal-map"` (`:345`).
+  - `useJournalMapChoice` (`:362`) follows the `useStyleMode` pattern. It is null until AsyncStorage answers. Anything except `"list"` means Map, so Map is the default (q7 A). Each change is written back.
+  - `JournalMapBlock` (`:391`):
+    - It is a 196pt `TripMap` with no labels and no style pill, following the stored style preference.
+    - A mono `Segmented` "Map · List only" sits absolutely at left 8 / top 8 over the map.
+    - With List only, the Segmented renders alone above the list.
+    - While the pref or the style is unread, it shows `MapFrame state="loading"`. TripMap's own frames cover "unavailable" and "empty".
+  - `WholeTripJournal` gets `today` and renders the block at `:469` under "‹ Today" and above the trip card, only when the journal is not empty.
+  - Selection:
+    - Destination headings are now `Pressable`s that select the disc.
+    - An entry row selects and then opens the shipped sheet, as before.
+    - Both light with `sel` (`:853`): `C.navySoft` with a 3pt `C.ink` left border, the RN reading of `.row.sel`.
+
+## Decisions and defaults (qa, please check)
+- **Reading of "limited to … (and, mid-trip, today's and earlier)":** mid-trip, the drawn set is the journal-listed destinations that have arrived by today, plus today's destination. The acceptance requires Bend to be absent on Aug 7 even when Bend has logged entries, which rules out reading it as a union. Today's destination is added so that the wireframe's filled "you are here" disc exists even before anything is logged there.
+- **`category` is `RvCategory`**, core's own copy of ui's `CategoryLabel`, which has the same five strings. Core cannot import `@rv-trip/ui`. A destination point is `"Other"`.
+- **The shipped map guards were rewritten with the change, not deleted** (`packages/core/src/mobile-map.test.ts`):
+  - The "ONE ShapeSource" guard now asserts exactly one `<ShapeSource id={SOURCE_ID}`, so drives still live in one source. It allows exactly one more source, `JOIN_ID`, which is never a drive.
+  - The LineLayer count is now 3 for drives plus 1 overall for the join.
+  - The `line-cap: round` count goes from 3 to 4 on both clients.
+- **Web selection affordance for headings** reuses `.row.sel` (navy-soft plus ink bar). The wireframe's `.sect.sel` only switches the text to ink, and shipped headings are already ink, so that would be invisible.
+- **Web map height from md:** I followed the wireframe literally (`min-height: 440px; flex: 1` in a stretched grid cell). On a long Journal the map grows as tall as the list. I added no sticky behaviour, which would be a design call.
+- **Phone row tap:** a row both selects its pin and opens the shipped "How was it?" sheet, as it did before. Pin-to-row selection lights the row but does not scroll to it.
+- **Phone empty frame** has no count. The plan gives TripMap no `unmappedCount` prop. The web's frame shows `journalMap`'s `unmapped`.
+- No Bellingham `journalMap` case. The design's "Done when" names it, but this item's acceptance lists only the Loop.
+
+## Tests
+- `packages/core/src/planner/journal-map.test.ts` (new, 7 tests). Written first and watched red (module missing). The Loop fixture has Fort George (Eat, pinned), the aquarium (Do, pinned, done ★4) and the Deschutes float (done, no place). It covers:
+  - Aug 29: points 1·2·3, all been, joined Astoria → Newport → Bend. Entry points are only fortgeorge/Eat and aquarium/Do (not the unlogged Cape Kiwanda). `unmapped` = 1.
+  - Aug 7: Bend absent, Newport `been=false`, a two-point join, `unmapped` = 0.
+  - `today` null: everything is been.
+  - A coordless Bend: counted in unmapped (2) and dropped from the join.
+  - An empty journal gives `{ points: [], join: [], unmapped: 0 }`.
+  - A source check that `journal-map.ts` has no routeTrip, fetch or providers/routing import.
+- `apps/web/src/components/trip/journal-map.test.ts` (new, 9 tests, source-reading) checks:
+  - JournalMap reads `journalMap(trip, today)` with no request, does the pin mapping (been layer and category), and passes the MapMount props;
+  - JournalLens has one `md:grid-cols` split wrapping both forms, the map after the form switch, the map omitted when empty, the stacking classes, and the selection state and style;
+  - MapMount and MapView pass `join` through and draw the dashed layer at the arc paint;
+  - `IdeaPin.category?` and `palette.category[category]`.
+  - These were written before the code but not run red first.
+- `packages/core/src/mobile-journal-map.test.ts` (new, 8 tests, source-reading). Written first and watched red (7/8). It checks:
+  - TripMap's new props, the join ShapeSource and `joinDash` paint, category entry discs, and the empty rule;
+  - journal.tsx reads and writes `"rv-journal-map"` with a `"map"` default, the "Map · List only" mono Segmented, the `TripMap` call at 196 with `showLabels={false}` and selection, the loading frame, the `journalIsEmpty` gate, and no fetch or routeTrip.
+- `packages/core/src/mobile-map.test.ts`: two guards rewritten, as described above.
+
+## For the walk
+- **Render-required (vet FLAG):**
+  - The phone map is 196pt inside the trip ScrollView. Check pan versus scroll.
+  - Check that the Map · List only pill persists across relaunch under `rv-journal-map`.
+  - On the web, check the md split and, below md, the 200px stack above the list.
+  - Check the dashed join on both clients, and selection both ways.
+- **Phone:** Pacific NW Loop after Aug 28 should open on Journal with the map. Mid-trip, "Whole trip and map →" shows the map with today's disc filled and earlier discs hollow. List only should be remembered.
+- **Web:** both forms put the map on the right. Clicking an idea row or a destination heading rings its pin, and clicking a pin lights its row or heading.

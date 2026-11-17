@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CircleMinus, RefreshCw } from "lucide-react";
 import {
   JOURNAL_AROUND_HEADING,
@@ -22,6 +22,7 @@ import {
 } from "@rv-trip/core";
 import { CategoryTile, Stars } from "@rv-trip/ui";
 import { dateRange } from "@/lib/trip-logic";
+import { JournalMap } from "./JournalMap";
 import { NavigateLinks, RvRouteLine } from "./NavigateLinks";
 
 /**
@@ -62,18 +63,56 @@ export function JournalLens({
   // #178 · q5 A — the whole-trip form, swapped in place for this visit only.
   const [whole, setWhole] = useState(false);
   const midTrip = today !== null && activeTrip([trip], today) !== null;
+  // #179 · two-way selection: a row or a group heading lights its pin, and a
+  // pin lights its row or heading.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const sel = { selectedId, onSelect: setSelectedId };
 
-  return midTrip && !whole ? (
-    <JournalTodayLens trip={trip} today={today} clock={clock} drives={drives} onWhole={() => setWhole(true)} />
-  ) : (
-    <WholeTripLens
-      trip={trip}
-      onRateTrip={onRateTrip}
-      onNoteTrip={onNoteTrip}
-      onToday={midTrip ? () => setWhole(false) : null}
-    />
+  // #179 · q6 A — one layout for both forms: the list on the left, the map
+  // always beside it (stacked above it below md). No map for an empty journal.
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(300px,420px)_1fr]">
+      <div className="flex min-w-0 flex-col gap-2">
+        {midTrip && !whole ? (
+          <JournalTodayLens
+            trip={trip}
+            today={today}
+            clock={clock}
+            drives={drives}
+            onWhole={() => setWhole(true)}
+            {...sel}
+          />
+        ) : (
+          <WholeTripLens
+            trip={trip}
+            onRateTrip={onRateTrip}
+            onNoteTrip={onNoteTrip}
+            onToday={midTrip ? () => setWhole(false) : null}
+            {...sel}
+          />
+        )}
+      </div>
+      {!journalIsEmpty(tripJournal(trip)) && (
+        <JournalMap
+          trip={trip}
+          today={today}
+          label={midTrip ? "The trip so far" : "Everything logged on this trip"}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+        />
+      )}
+    </div>
   );
 }
+
+/** The selection both forms share with the map. */
+interface Selection {
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}
+
+/** The wireframe's `.row.sel` / `.sect.sel`: navy-soft with an ink bar. */
+const SELECTED = "bg-rv-navy-soft shadow-[inset_3px_0_0_var(--color-rv-ink)]";
 
 /**
  * #178 · #181 i4 (q3 B · q4 B · q8 A, docs/design/181 frame 5) — the mid-trip
@@ -87,13 +126,15 @@ function JournalTodayLens({
   clock,
   drives,
   onWhole,
+  selectedId,
+  onSelect,
 }: {
   trip: Trip;
   today: IsoDate;
   clock: string;
   drives: ReadonlyMap<string, RouteDrive>;
   onWhole: () => void;
-}) {
+} & Selection) {
   const up = upNext(trip, new Date(clock), today);
   const j = journalToday(trip, today);
   const names = new Map(trip.chapters.flatMap((c) => c.destinations).map((d) => [d.id, d.place.name] as const));
@@ -104,78 +145,88 @@ function JournalTodayLens({
   const sect = "px-0.5 pt-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-rv-ink-faded";
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(300px,420px)_1fr]">
-      <div className="flex min-w-0 flex-col gap-2">
-        {up && (
-          <>
-            <div className={sect}>Up next</div>
-            <div className="flex flex-col gap-2 rounded-rv-card border border-rv-border-hi bg-rv-surface px-3 py-2.5 shadow-rv-sm">
-              <div className="flex items-baseline gap-2">
-                <b className="flex-1 text-[15px] leading-[1.3] text-rv-ink">{up.next.title}</b>
-                <span className="whitespace-nowrap font-mono text-[11px] uppercase text-rv-ink-muted">{up.next.when}</span>
+    <>
+      {up && (
+        <>
+          <div className={sect}>Up next</div>
+          <div className="flex flex-col gap-2 rounded-rv-card border border-rv-border-hi bg-rv-surface px-3 py-2.5 shadow-rv-sm">
+            <div className="flex items-baseline gap-2">
+              <b className="flex-1 text-[15px] leading-[1.3] text-rv-ink">{up.next.title}</b>
+              <span className="whitespace-nowrap font-mono text-[11px] uppercase text-rv-ink-muted">{up.next.when}</span>
+            </div>
+            {nextDrive && (
+              <div>
+                <NavigateLinks drive={nextDrive} toName={names.get(nextDrive.toDestinationId) ?? ""} />
+                <RvRouteLine drive={nextDrive} rigOn={trip.rigOn} fromName={names.get(nextDrive.fromDestinationId) ?? ""} />
               </div>
-              {nextDrive && (
-                <div>
-                  <NavigateLinks drive={nextDrive} toName={names.get(nextDrive.toDestinationId) ?? ""} />
-                  <RvRouteLine drive={nextDrive} rigOn={trip.rigOn} fromName={names.get(nextDrive.fromDestinationId) ?? ""} />
-                </div>
-              )}
-              {up.then && (
-                <div className="border-t border-rv-border-soft pt-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-rv-ink-faded">
-                  {upNextThenLine(up.then)}
-                </div>
-              )}
-              {thenDrive && (
-                <div>
-                  <NavigateLinks drive={thenDrive} toName={names.get(thenDrive.toDestinationId) ?? ""} />
-                  <RvRouteLine drive={thenDrive} rigOn={trip.rigOn} fromName={names.get(thenDrive.fromDestinationId) ?? ""} />
-                </div>
-              )}
-            </div>
-          </>
-        )}
-        <div className={`${sect} font-bold text-rv-ink`}>{j.today.heading}</div>
-        {j.today.entries.length > 0 ? (
-          <JournalRows entries={j.today.entries} />
-        ) : (
-          <div className="rounded-rv-card border border-rv-border bg-rv-surface px-2.5 py-2 text-[13px] text-rv-ink-faded">
-            Nothing logged here yet.
+            )}
+            {up.then && (
+              <div className="border-t border-rv-border-soft pt-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-rv-ink-faded">
+                {upNextThenLine(up.then)}
+              </div>
+            )}
+            {thenDrive && (
+              <div>
+                <NavigateLinks drive={thenDrive} toName={names.get(thenDrive.toDestinationId) ?? ""} />
+                <RvRouteLine drive={thenDrive} rigOn={trip.rigOn} fromName={names.get(thenDrive.fromDestinationId) ?? ""} />
+              </div>
+            )}
           </div>
-        )}
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new CustomEvent("rv:capture"))}
-          className="flex cursor-pointer items-center justify-center gap-1.5 rounded-rv-card border-none bg-rv-green p-3 text-[15px] font-extrabold text-rv-navy"
-        >
-          ＋ Log something
-        </button>
-        {earlier.length > 0 && <div className={sect}>Earlier</div>}
-        {earlier.map((g) => (
-          <div key={g.destination?.id ?? "around"} className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between gap-2 px-0.5 pt-1">
-              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <b className="text-[15px] text-rv-ink">{g.heading}</b>
-                {g.rating !== null && <Stars value={g.rating} size={13} />}
-                <AgainBadge again={g.again} />
+        </>
+      )}
+      <GroupHead
+        id={j.today.destination?.id ?? null}
+        className={`${sect} rounded-rv-sm font-bold text-rv-ink`}
+        selectedId={selectedId}
+        onSelect={onSelect}
+      >
+        {j.today.heading}
+      </GroupHead>
+      {j.today.entries.length > 0 ? (
+        <JournalRows entries={j.today.entries} selectedId={selectedId} onSelect={onSelect} />
+      ) : (
+        <div className="rounded-rv-card border border-rv-border bg-rv-surface px-2.5 py-2 text-[13px] text-rv-ink-faded">
+          Nothing logged here yet.
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new CustomEvent("rv:capture"))}
+        className="flex cursor-pointer items-center justify-center gap-1.5 rounded-rv-card border-none bg-rv-green p-3 text-[15px] font-extrabold text-rv-navy"
+      >
+        ＋ Log something
+      </button>
+      {earlier.length > 0 && <div className={sect}>Earlier</div>}
+      {earlier.map((g) => (
+        <div key={g.destination?.id ?? "around"} className="flex flex-col gap-2">
+          <GroupHead
+            id={g.destination?.id ?? null}
+            className="flex items-baseline justify-between gap-2 rounded-rv-sm px-0.5 pt-1"
+            selectedId={selectedId}
+            onSelect={onSelect}
+          >
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <b className="text-[15px] text-rv-ink">{g.heading}</b>
+              {g.rating !== null && <Stars value={g.rating} size={13} />}
+              <AgainBadge again={g.again} />
+            </span>
+            {g.destination?.arriveDate && g.destination.departDate && (
+              <span className="flex-none font-mono text-[11px] text-rv-ink-faded">
+                {dateRange(g.destination.arriveDate, g.destination.departDate)}
               </span>
-              {g.destination?.arriveDate && g.destination.departDate && (
-                <span className="flex-none font-mono text-[11px] text-rv-ink-faded">
-                  {dateRange(g.destination.arriveDate, g.destination.departDate)}
-                </span>
-              )}
-            </div>
-            {g.entries.length > 0 && <JournalRows entries={g.entries} />}
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={onWhole}
-          className="cursor-pointer border-none bg-transparent p-1.5 text-center text-[13px] font-bold text-rv-green-ink underline"
-        >
-          Whole trip and map →
-        </button>
-      </div>
-    </div>
+            )}
+          </GroupHead>
+          {g.entries.length > 0 && <JournalRows entries={g.entries} selectedId={selectedId} onSelect={onSelect} />}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={onWhole}
+        className="cursor-pointer border-none bg-transparent p-1.5 text-center text-[13px] font-bold text-rv-green-ink underline"
+      >
+        Whole trip and map →
+      </button>
+    </>
   );
 }
 
@@ -185,18 +236,20 @@ function WholeTripLens({
   onRateTrip,
   onNoteTrip,
   onToday,
+  selectedId,
+  onSelect,
 }: {
   trip: Trip;
   onRateTrip: (n: number) => void;
   onNoteTrip: (note: string) => void;
   onToday: (() => void) | null;
-}) {
+} & Selection) {
   const j = tripJournal(trip);
   const [note, setNote] = useState(trip.note ?? "");
   const [open, setOpen] = useState<{ skipped: boolean; travel: boolean }>({ skipped: false, travel: false });
 
   return (
-    <div className="grid grid-cols-1 gap-3.5 md:grid-cols-[320px_1fr]">
+    <>
       <div className="flex flex-col gap-2.5">
         {onToday && (
           <button
@@ -239,7 +292,12 @@ function WholeTripLens({
         {journalIsEmpty(j) && <p className="m-0 text-[13px] text-rv-ink-faded">{JOURNAL_EMPTY_COPY}</p>}
         {j.destinations.map((g) => (
           <div key={g.destination.id} className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between gap-2 px-0.5 pt-1">
+            <GroupHead
+              id={g.destination.id}
+              className="flex items-baseline justify-between gap-2 rounded-rv-sm px-0.5 pt-1"
+              selectedId={selectedId}
+              onSelect={onSelect}
+            >
               <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <b className="text-[15px] text-rv-ink">{g.destination.place.name}</b>
                 {g.rating !== null && <Stars value={g.rating} size={13} />}
@@ -250,8 +308,8 @@ function WholeTripLens({
                   {dateRange(g.destination.arriveDate, g.destination.departDate)}
                 </span>
               )}
-            </div>
-            {g.entries.length > 0 && <JournalRows entries={g.entries} />}
+            </GroupHead>
+            {g.entries.length > 0 && <JournalRows entries={g.entries} selectedId={selectedId} onSelect={onSelect} />}
           </div>
         ))}
         {j.around.length > 0 && (
@@ -259,7 +317,7 @@ function WholeTripLens({
             <div className="px-0.5 pt-1">
               <b className="text-[15px] text-rv-ink">{JOURNAL_AROUND_HEADING}</b>
             </div>
-            <JournalRows entries={j.around} />
+            <JournalRows entries={j.around} selectedId={selectedId} onSelect={onSelect} />
           </div>
         )}
         {j.didntGetTo.length > 0 && (
@@ -279,17 +337,46 @@ function WholeTripLens({
           />
         )}
       </div>
-    </div>
+    </>
   );
 }
 
-function JournalRows({ entries }: { entries: JournalEntry[] }) {
+/**
+ * A group heading. A destination's is a button that selects its disc on the
+ * map (and lights when the disc is picked); "Around the trip" has no disc and
+ * stays a plain heading.
+ */
+function GroupHead({
+  id,
+  className,
+  selectedId,
+  onSelect,
+  children,
+}: { id: string | null; className: string; children: ReactNode } & Selection) {
+  if (id === null) return <div className={className}>{children}</div>;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(id)}
+      aria-pressed={id === selectedId}
+      className={`${className} w-full cursor-pointer border-none bg-transparent text-left ${id === selectedId ? SELECTED : ""}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function JournalRows({ entries, selectedId, onSelect }: { entries: JournalEntry[] } & Selection) {
   return (
     <div className="flex flex-col overflow-hidden rounded-rv-card border border-rv-border bg-rv-surface">
       {entries.map((e) => (
         <div
           key={`${e.kind}:${e.id}`}
-          className="flex items-start gap-[9px] border-t border-rv-border-soft px-2.5 py-2 first:border-t-0"
+          // An idea row selects its pin; a reservation has no pin of its own.
+          onClick={e.kind === "idea" ? () => onSelect(e.id) : undefined}
+          className={`flex items-start gap-[9px] border-t border-rv-border-soft px-2.5 py-2 first:border-t-0 ${
+            e.kind === "idea" ? "cursor-pointer" : ""
+          } ${e.id === selectedId ? SELECTED : ""}`}
         >
           <CategoryTile type={e.type} size="sm" />
           <div className="min-w-0 flex-1">

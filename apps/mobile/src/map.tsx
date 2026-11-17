@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { LineLayerStyle } from "@rnmapbox/maps";
-import type { Bounds, OverlayPalette, StyleMode, TripArc, TripDestinationPin } from "@rv-trip/core";
+import type {
+  Bounds,
+  OverlayPalette,
+  RvCategory,
+  StyleMode,
+  TripArc,
+  TripDestinationPin,
+} from "@rv-trip/core";
 import {
   ARC_CASING_WIDTH,
   DEFAULT_STYLE_MODE,
@@ -254,8 +261,18 @@ export function arcLayerStyles(palette: OverlayPalette): {
   casing: LineLayerStyle;
   corridor: LineLayerStyle;
   dash: LineLayerStyle;
+  joinDash: LineLayerStyle;
 } {
+  // #179 · the Journal's join: the estimate's dash and paint, with no casing.
+  const joinDash: LineLayerStyle = {
+    lineCap: "round",
+    lineColor: palette.arcLine,
+    lineWidth: palette.arcWidth,
+    lineOpacity: palette.arcOpacity,
+    lineDasharray: ESTIMATE_DASH,
+  };
   return {
+    joinDash,
     casing: {
       lineCap: "round",
       lineColor: palette.corridorCasing,
@@ -309,9 +326,27 @@ function cameraBounds(b: Bounds) {
 }
 
 const NO_ARCS: TripArc[] = [];
+const NO_JOIN: [number, number][] = [];
+const NO_ENTRIES: TripMapEntry[] = [];
+
+/** #179 · the Journal join's shape source. */
+const JOIN_ID = "rv-journal-join";
+
+/** A destination disc. `been` (#179 · the Journal) draws it hollow — the web's
+ * DestinationDisc grammar; absent, it is the planning layer's filled disc. */
+export type TripMapPin = TripDestinationPin & { been?: boolean };
+
+/** #179 · a logged place on the Journal map: a small disc in its five-category
+ * colour (core's `journalMap` entry points). */
+export interface TripMapEntry {
+  id: string;
+  lat: number;
+  lng: number;
+  category: RvCategory;
+}
 
 export interface TripMapProps {
-  pins: TripDestinationPin[];
+  pins: TripMapPin[];
   /** Drive corridors from core's `tripArcs`. OMIT for a mini-map: no arcs. */
   arcs?: TripArc[];
   mode: StyleMode;
@@ -336,6 +371,15 @@ export interface TripMapProps {
   showLabels: boolean;
   /** Fixed height in points. Omit to fill the cell (`flex: 1`). */
   height?: number;
+  /** #179 · the Journal's join: `[lng, lat]` destinations in date order, ONE
+   * straight dashed line at the estimate's paint. Never routed, never labelled. */
+  join?: [number, number][];
+  /** #179 · the Journal's logged places, as small category discs. */
+  entries?: TripMapEntry[];
+  /** #179 · the lit disc or entry (the web's selection paint). */
+  selectedId?: string | null;
+  /** #179 · present ⇒ discs and entries are tappable. */
+  onSelect?: (id: string) => void;
 }
 
 /**
@@ -352,17 +396,33 @@ export function TripMap({
   onModeChange,
   showLabels,
   height,
+  join = NO_JOIN,
+  entries = NO_ENTRIES,
+  selectedId = null,
+  onSelect,
 }: TripMapProps) {
   const palette = MAP_PALETTE[mode];
   const shape = useMemo(() => arcFeatureCollection(arcs), [arcs]);
   const layers = useMemo(() => arcLayerStyles(palette), [palette]);
+  const joinShape = useMemo(
+    () => ({
+      type: "Feature" as const,
+      properties: {},
+      geometry: { type: "LineString" as const, coordinates: join },
+    }),
+    [join],
+  );
   // The camera holds the CORRIDOR, not only the pins: US-101 runs west of both
   // Astoria and Newport, so a routed drive's box is wider than its endpoints'.
-  const bounds = useMemo(() => mapBounds(arcs, pins), [arcs, pins]);
+  // A Journal map's logged places are in the box too.
+  const bounds = useMemo(
+    () => (entries.length > 0 ? mapBounds(arcs, [...pins, ...entries]) : mapBounds(arcs, pins)),
+    [arcs, pins, entries],
+  );
 
   const mapbox = mapAvailable() ? loadMapbox() : null;
   if (!mapbox) return <MapFrame state="unavailable" height={height} />;
-  if (pins.length === 0) return <MapFrame state="empty" height={height} />;
+  if (pins.length === 0 && entries.length === 0) return <MapFrame state="empty" height={height} />;
 
   const { Camera, LineLayer, MapView, MarkerView, ShapeSource } = mapbox;
   const fit = bounds ? cameraBounds(bounds) : undefined;
@@ -397,6 +457,12 @@ export function TripMap({
           </ShapeSource>
         )}
 
+        {join.length > 1 && (
+          <ShapeSource id={JOIN_ID} shape={joinShape}>
+            <LineLayer id={`${JOIN_ID}-dash`} style={layers.joinDash} />
+          </ShapeSource>
+        )}
+
         {showLabels &&
           arcs.map((arc) => (
             <MarkerView key={`label-${arc.id}`} coordinate={labelAt(arc)} allowOverlap>
@@ -413,16 +479,37 @@ export function TripMap({
             </MarkerView>
           ))}
 
+        {entries.map((e) => (
+          <MarkerView key={e.id} coordinate={[e.lng, e.lat]} allowOverlap>
+            <Pressable
+              onPress={onSelect ? () => onSelect(e.id) : undefined}
+              disabled={!onSelect}
+              hitSlop={8}
+              accessibilityRole="button"
+              style={[
+                styles.entry,
+                { backgroundColor: palette.category[e.category], borderColor: palette.hollowGround },
+                e.id === selectedId && [styles.entrySel, { borderColor: palette.selStroke }],
+              ]}
+            />
+          </MarkerView>
+        ))}
+
         {pins.map((pin) => (
           <MarkerView key={pin.id} coordinate={[pin.lng, pin.lat]} allowOverlap>
-            <View style={styles.pin}>
-              <DestinationDisc pin={pin} palette={palette} />
+            <Pressable
+              onPress={onSelect ? () => onSelect(pin.id) : undefined}
+              disabled={!onSelect}
+              accessibilityRole="button"
+              style={styles.pin}
+            >
+              <DestinationDisc pin={pin} palette={palette} selected={pin.id === selectedId} />
               {showLabels && (
                 <Text style={[styles.pinLabel, { backgroundColor: palette.labelScrim, color: palette.labelInk }]}>
                   {pin.name}
                 </Text>
               )}
-            </View>
+            </Pressable>
           </MarkerView>
         ))}
       </MapView>
@@ -516,23 +603,42 @@ const GRID_LINES = Array.from({ length: 16 }, (_, i) => i + 1);
  * grammar as MapView.tsx's `DestinationDisc` (:336-394) minus selection, which the
  * phone has no map interaction to express yet.
  */
-function DestinationDisc({ pin, palette }: { pin: TripDestinationPin; palette: OverlayPalette }) {
+function DestinationDisc({
+  pin,
+  palette,
+  selected = false,
+}: {
+  pin: TripMapPin;
+  palette: OverlayPalette;
+  selected?: boolean;
+}) {
   const floating = pin.floating;
+  // #179 · been = hollow, and the selection paint — MapView.tsx's DestinationDisc.
+  const been = pin.been === true;
+  const ink = selected
+    ? palette.selInk
+    : floating
+      ? palette.floatingStroke
+      : been
+        ? palette.discStroke
+        : palette.discInk;
   return (
     <View
       style={[
         styles.disc,
-        floating
-          ? {
-              borderColor: palette.floatingStroke,
-              borderStyle: "dashed",
-              backgroundColor: palette.hollowGround,
-            }
-          : { borderColor: palette.discStroke, backgroundColor: palette.discFill },
+        selected
+          ? { borderColor: palette.selStroke, backgroundColor: palette.selFill }
+          : floating
+            ? {
+                borderColor: palette.floatingStroke,
+                borderStyle: "dashed",
+                backgroundColor: palette.hollowGround,
+              }
+            : { borderColor: palette.discStroke, backgroundColor: been ? palette.hollowGround : palette.discFill },
       ]}
     >
       <Text
-        style={[styles.discInk, { color: floating ? palette.floatingStroke : palette.discInk }]}
+        style={[styles.discInk, { color: ink }]}
       >
         {floating ? "◇" : pin.ordinal}
       </Text>
@@ -556,6 +662,9 @@ const styles = StyleSheet.create({
   },
   discInk: { fontFamily: F.mono, fontSize: 12, fontWeight: "700" },
   pin: { alignItems: "center" },
+  // #179 · a Journal entry: the web IdeaRing's 11px, filled in its category.
+  entry: { width: 11, height: 11, borderRadius: R.pill, borderWidth: 2 },
+  entrySel: { width: 15, height: 15 },
   pinLabel: {
     marginTop: 4,
     fontFamily: F.mono,

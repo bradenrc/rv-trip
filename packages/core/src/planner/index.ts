@@ -70,6 +70,8 @@ export * from "./context-digest";
 export * from "./trip-tab";
 /** Up next — the Journal's Today block (#178 · #181 i3). */
 export * from "./up-next";
+/** The Journal map — what the Journal lists, as points and a dashed join (#179 · #181 i5). */
+export * from "./journal-map";
 
 export function allDestinations(trip: Trip): Destination[] {
   return trip.chapters.flatMap((l) => l.destinations);
