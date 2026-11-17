@@ -237,3 +237,93 @@ Scope: epic item **i5 of 9 only** (#184 core seam · q6 A · q7 A · q8 A). No U
 - Green: same command after → `Tests 15 passed (15)`.
 - Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1568 passed (1568)`, web `Tests 566 passed (566)`, ui `Tests 55 passed (55)`. The stack-trace lines in the web log come from expected-failure suites, and the web suite passed.
 - No render surface changed, so there is nothing to walk for this item.
+
+---
+
+# i6 · The phone Map tab, and the four filters on web /map
+
+Scope: epic item **i6 of 9 only** (#184 renders · q6 A · q7 A · q8 A · q11 A). No schema, no route handler, no DS change.
+
+Provenance: when this dispatch started, the worktree already held **uncommitted** i6 work from an earlier attempt that did not finish: the web side, `_layout.tsx`, `src/map.tsx`, and both source-reading test files. There was no `app/(tabs)/map.tsx`. I reviewed that work and kept it. I then wrote the missing phone screen, added one fallback rule on both clients, updated a stale guard test, and ran the gate.
+
+## What changed
+
+### Phone
+- `apps/mobile/app/(tabs)/_layout.tsx:145-151`: `<Tabs.Screen name="map">` titled "Map" with the `◎` Text glyph, between `add` (Capture) and `you`.
+- **New** `apps/mobile/app/(tabs)/map.tsx`:
+  - `MapTab` :40 is a full-bleed `TripMap` fed by `libraryMap(trees ?? [], saves ?? [], today, filter)` :69 (`useTripTrees()`, `useSaves()`, `localIsoDate()`). Destinations become `TripMapPin` with `been`. Saves become `TripMapEntry` with `category` and `been`. It draws **no arcs**, and the file imports no routing module.
+  - `MapFrame state="loading"` shows until the trees, the saves and the style preference have all loaded. "Unavailable" and "empty" are `TripMap`'s own shipped frames.
+  - Four chips over the canvas (`MapChip` :198, the design's `.mchip`): All · Been there · Want to go · One trip. Active is `C.navy` with `C.ink` text and a transparent border. Idle is `C.surfaceAlt` / `C.borderHi` / `C.inkMuted`.
+  - One trip opens a `<Modal>` bottom sheet :165, "Show one trip". It lists `libraryTrips` as the title plus a mono line `{t.dates} · {destinationsLabel(t.destinations)}`. Once a trip is picked, the chip reads `title + " ▾"`.
+  - Tapping a pin selects it. Tapping the same pin again, or the map (`onPressMap`), clears it. Changing the filter also clears it.
+  - A save's card shows `CategoryTile` (26), the name, "Been there"/"Want to go" + `tripName`, and `Stars` (10) when rated. It has no arrow.
+  - A destination's card shows the name and `destLine` :19 ("<trip> · stop <n>" + " · been"), and "Trip →". Tapping the card pushes `/trips/<tripId>`.
+  - With nothing selected, the design's `.mhint` "N pins · tap one" sits bottom-left.
+- `apps/mobile/src/map.tsx`:
+  - `TripMapEntry.been?: boolean` :348. Its render :499: been draws a ring in the category colour on `palette.hollowGround`. Otherwise it draws the shipped filled disc.
+  - New optional `onPressMap` :388 / :444 so the tab can clear its card.
+
+### Web /map
+- `apps/web/src/components/map/pins.ts`:
+  - `DestinationPin.been` comes from core's `destinationBeen` :350.
+  - `PlacePin.tripId` :452 (vet MED).
+  - Place pins are placed at core's `savePoint` :425. This resolves the **vet HIGH** with one point rule for every map surface: area-only saves are pins on /map, on the phone, and in Near you.
+  - `DriveArc.tripId` and `UnmappedRow.been/tripId`.
+  - New `filterFacts` :465, `filterCounts` :473 and `arcKept` :488. Arcs show under All, Want to go and One trip (that trip's only), never under Been there.
+  - `LAYER_ORDER` and `layerCounts` are removed. `MapLayer`/`LAYER_LABEL` stay for the rail's meta and the arc paint.
+- `apps/web/src/components/map/MapOverview.tsx`:
+  - The layer chips are replaced by four single-select `FilterChip`s, defaulting to All. Each chip's count is the number of pins it keeps.
+  - One trip is a `FilterChip` inside the shipped `components/ui/dropdown-menu` :188 listing `libraryTrips` :100. After a pick it reads `title + " ▾"`.
+  - Pins and unmapped rows go through `libraryFilterKeeps`. The category row and the legend are unchanged.
+  - The empty-rail copy is now "Nothing on the map under this filter." The old copy ("Every layer is switched off.") described the removed toggles.
+- `apps/web/src/components/map/MapView.tsx:424`: `DestinationDisc` reads `pin.been`. `PlaceDrop` is unchanged: filled = want.
+- `apps/web/src/app/map/page.tsx:35,75` reads the `tz` cookie (`isoDateInZone`) and passes `today`. With no cookie, only a complete trip's stops are been.
+- `DestinationMiniMap.tsx` and `trip/JournalMap.tsx` set the now-required `been` on the `DestinationPin`s they build. Behaviour is unchanged.
+
+### Tests
+- **New** `packages/core/src/mobile-library-map.test.ts` (10, source-reading, comments stripped):
+  - The tab order is `(trips) · saves · add · map · you`, with the Map title and glyph.
+  - map.tsx calls `libraryMap(...)`/`libraryTrips(`, renders `<TripMap`/`<MapFrame`, has no `arcs=`/`tripArcs`, and contains no `routing|routeTrip|api.routes|fetch(`.
+  - The chip colour roles, the sheet and the card copy.
+  - `TripMapEntry.been` and its ring on hollowGround.
+- **New** `apps/web/src/components/map/map-filters.test.ts` (9, source-reading):
+  - No `LAYER_ORDER`, `libraryFilterKeeps(`/`arcKept(`/`filterCounts(`, and the dropdown-menu import.
+  - The category row and the legend are kept.
+  - `DestinationDisc` reads `pin.been`. `PlaceDrop` is still filled for want.
+  - page.tsx reads `TZ_COOKIE`.
+- `apps/web/src/components/map/pins.test.ts`: new "the four filters (#186 i6)" describe (7 tests). It covers:
+  - a trip in progress (Aug 7: Astoria been, the rest not), complete versus no today;
+  - tripId and the savePoint area fallback, with a save that has no point going to unmapped;
+  - arc tripId, `filterFacts` per pin kind, `filterCounts`, and `arcKept`.
+  - Two old `layerCounts` assertions were rewritten as plain counts.
+- `packages/core/src/mobile-capture.test.ts:41-58`: the #173 guard `not.toContain('name="map"')` ("Map is TL4's (#186)") was a placeholder for this item. It now asserts Trips · Places · Capture · **Map** · You and the Map title.
+
+## Decisions / flags (for qa and the walk)
+
+- **Vet HIGH resolved by the area-fallback rule.** `buildMapModel` place pins use `savePoint`, as `libraryMap` does, so web /map and the phone show the same pin count for the same library. i7's panel inherits this rule automatically if it calls `buildMapModel`.
+- **Stale One trip falls back to All** on both clients. This applies when the picked trip leaves `libraryTrips` (deleted, or its last mapped destination removed). Without the fallback, no chip would read active and nothing would be kept.
+- **Floating destination card.** It reads "<trip> · floating" because there is no stop number. The design only shows a scheduled stop, so I picked this wording, following the web rail's "floating" grammar.
+- **No style pill on the Map tab.** The wireframe shows none, and it would collide with the chip row. The tab follows the stored Night/Day/Sat preference.
+- **Phone chips show no counts.** The wireframe's `.mchip` has none, unlike web's FilterChip, which shows counts as the task specifies.
+- **Render-required at walk (dev-client build only; Expo Go shows MapFrame "unavailable"):**
+  - The ring versus filled rendering of entries.
+  - Hollow destination discs.
+  - Pin tap, plus re-tap or map tap to clear. This assumes Mapbox's `MapView.onPress` does not also fire on a `MarkerView` press. If it does, a pin tap would select and then clear at once, so check this first.
+  - The One trip sheet and the "Trip →" push.
+- **Render-required at walk (web):**
+  - The dropdown opening from the One trip chip (a span trigger wrapping FilterChip's button).
+  - Arc visibility per filter.
+  - With the tz cookie set, a trip in progress draws past stops hollow.
+
+## Checks run
+
+- **TDD red:** I did not run red myself. The two new source-reading test files came from the earlier unfinished attempt, and `app/(tabs)/map.tsx` did not exist then, so `mobile-library-map.test.ts` could not have passed. My first gate run showed the stale guard red: `× capture · the tabs … draws Trips · Places · Capture · You` (`expected … not to contain 'name="map"'`).
+- **Targeted green:**
+  - `npx vitest run src/mobile-library-map.test.ts src/mobile-journal-map.test.ts src/mobile-map.test.ts src/mobile-landing.test.ts` (core) → `Tests 62 passed (62)`.
+  - `npx vitest run src/components/map` (web) → `Tests 36 passed (36)`.
+- **Gate:** `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`.
+  - Core: `Tests 1578 passed (1578)`. This includes the nightfall-tokens sweep.
+  - Web: `Tests 582 passed (582)`. The stack-trace lines in the log come from expected-failure suites.
+  - UI: `Tests 55 passed (55)`.
+  - It also covers `@rv-trip/mobile:typecheck` and `@rv-trip/web:lint`.
+- **No device or browser render was run.** Everything under "Render-required" is the walk's.

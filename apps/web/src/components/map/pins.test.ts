@@ -9,7 +9,17 @@ import {
   type Destination,
   type Trip,
 } from "@rv-trip/core";
-import { buildMapModel, layerCounts, locateRowOf, type IdeaPin, type UnmappedRow } from "./pins";
+import {
+  arcKept,
+  buildMapModel,
+  filterFacts,
+  filterCounts,
+  locateRowOf,
+  type DestinationPin,
+  type IdeaPin,
+  type PlacePin,
+  type UnmappedRow,
+} from "./pins";
 
 /**
  * The map's drive arcs (docs/design/43 §2).
@@ -390,7 +400,8 @@ describe("buildMapModel — the third pin kind", () => {
     ]);
     const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
     // Four destinations + one idea pin drawn, one idea still unmapped.
-    expect(layerCounts(pins, unmapped).planning).toBe(6);
+    expect(pins.length + unmapped.length).toBe(6);
+    expect([...pins, ...unmapped].every((p) => p.layer === "planning")).toBe(true);
   });
 
   it("never lets an idea reach the `saved` layer — only the shelf lives there", () => {
@@ -460,7 +471,8 @@ describe("buildMapModel — the trip's idea shelf", () => {
     trip.chapters[1]!.destinations[0]!.ideas = [mkIdea({ id: "float" })];
     const { pins, unmapped } = buildMapModel([trip], [], {}, HASH);
     // Four destinations + one shelf pin drawn; one shelf row and one attached row unmapped.
-    expect(layerCounts(pins, unmapped).planning).toBe(7);
+    expect(pins.length + unmapped.length).toBe(7);
+    expect([...pins, ...unmapped].every((p) => p.layer === "planning")).toBe(true);
     expect(pins.filter((p) => p.kind === "idea").map((p) => p.id)).toEqual(["arches"]);
   });
 
@@ -471,5 +483,112 @@ describe("buildMapModel — the trip's idea shelf", () => {
     const trip = tripWithShelf([mkIdea({ id: "arches", destinationId: null, place: moab })]);
     const { pins } = buildMapModel([trip], [], {}, HASH);
     expect(pins.map((p) => p.id)).toEqual(["astoria", "newport", "bend", "crater", "arches"]);
+  });
+});
+
+/**
+ * #186 i6 · #184 (q6 A · q7 A · q8 A): /map's four filters. A destination
+ * carries its own `been` (core's `destinationBeen`), a save carries its
+ * `tripId`, and a save with no coordinates of its own is pinned at its area's
+ * point (core's `savePoint`) — the one point rule every map surface shares.
+ */
+function save(partial: { id: string; status: "want" | "been"; tripId?: string | null; lat?: number | null; area?: { lat: number; lng: number } | null }) {
+  return {
+    id: partial.id,
+    ownerId: "dev-user",
+    place: { name: partial.id, lat: partial.lat === undefined ? 45.5 : partial.lat, lng: partial.lat === null ? null : -122.6, googlePlaceId: null },
+    region: null,
+    type: "dining" as const,
+    status: partial.status,
+    note: null,
+    source: null,
+    rating: null,
+    tripId: partial.tripId ?? null,
+    tripName: partial.tripId ? "Pacific Northwest Loop" : null,
+    lastChange: null,
+    again: null,
+    anchor: "area" as const,
+    areaLabel: null,
+    area: partial.area
+      ? { id: `a-${partial.id}`, name: "Idaho City", region: "Idaho", googlePlaceId: "g", ...partial.area }
+      : null,
+    suggestedPlace: null,
+    createdAt: null,
+  };
+}
+
+describe("buildMapModel — the four filters (#186 i6)", () => {
+  it("gives each destination its own been: a trip in progress is both (q7 A)", () => {
+    const { pins } = buildMapModel([seedTrip("planning")], [], {}, HASH, undefined, "2026-08-07");
+    const been = Object.fromEntries(
+      pins.filter((p): p is DestinationPin => p.kind === "destination").map((p) => [p.id, p.been]),
+    );
+    expect(been).toEqual({ astoria: true, newport: false, bend: false, crater: false });
+  });
+
+  it("draws every destination of a complete trip been, and none been with no today", () => {
+    const done = buildMapModel([seedTrip("complete")], [], {}, HASH, undefined, null).pins;
+    expect(done.every((p) => p.kind !== "destination" || p.been)).toBe(true);
+    const unknown = buildMapModel([seedTrip("planning")], [], {}, HASH).pins;
+    expect(unknown.every((p) => p.kind !== "destination" || !p.been)).toBe(true);
+  });
+
+  it("carries the save's tripId and pins an area-only save at its area (savePoint)", () => {
+    const { pins, unmapped } = buildMapModel(
+      [],
+      [
+        save({ id: "koa", status: "been", tripId: "t1" }),
+        save({ id: "springs", status: "want", lat: null, area: { lat: 43.83, lng: -115.83 } }),
+        save({ id: "taco", status: "want", lat: null }),
+      ],
+    );
+    const places = pins.filter((p): p is PlacePin => p.kind === "place");
+    expect(places.map((p) => [p.id, p.tripId])).toEqual([
+      ["koa", "t1"],
+      ["springs", null],
+    ]);
+    expect(places[1]).toMatchObject({ lat: 43.83, lng: -115.83 });
+    expect(unmapped.map((u) => [u.id, u.been, u.tripId])).toEqual([["taco", false, null]]);
+  });
+
+  it("tags each drive arc with its trip", () => {
+    const { arcs } = buildMapModel([seedTrip()], [], {}, HASH);
+    expect(arcs.length).toBeGreaterThan(0);
+    expect(arcs.every((a) => a.tripId === "t1")).toBe(true);
+  });
+
+  it("reads been / tripId off every pin kind", () => {
+    const trip = tripWithIdeas([
+      mkIdea({ id: "tumalo", place: { name: "Tumalo", lat: 44.03, lng: -121.56, googlePlaceId: null } }),
+    ]);
+    const { pins } = buildMapModel([trip], [save({ id: "koa", status: "been", tripId: "t1" })], {}, HASH, undefined, "2026-08-07");
+    const facts = Object.fromEntries(pins.map((p) => [p.id, filterFacts(p)]));
+    expect(facts.astoria).toEqual({ been: true, tripId: "t1" });
+    expect(facts.newport).toEqual({ been: false, tripId: "t1" });
+    expect(facts.tumalo).toEqual({ been: false, tripId: "t1" });
+    expect(facts.koa).toEqual({ been: true, tripId: "t1" });
+  });
+
+  it("counts the pins each filter keeps — drawable pins only", () => {
+    const { pins } = buildMapModel(
+      [seedTrip("planning")],
+      [save({ id: "koa", status: "been", tripId: "t1" }), save({ id: "bakery", status: "want" }), save({ id: "taco", status: "want", lat: null })],
+      {},
+      HASH,
+      undefined,
+      "2026-08-07",
+    );
+    // 4 destinations (astoria been) + koa (been) + bakery (want); taco is unmapped.
+    expect(filterCounts(pins, "t1")).toEqual({ all: 6, been: 2, want: 4, trip: 5 });
+    expect(filterCounts(pins, null).trip).toBe(0);
+  });
+
+  it("keeps arcs under All, Want to go and that trip's One trip — never under Been there", () => {
+    const arc = { tripId: "t1" };
+    expect(arcKept({ kind: "all" }, arc)).toBe(true);
+    expect(arcKept({ kind: "want" }, arc)).toBe(true);
+    expect(arcKept({ kind: "been" }, arc)).toBe(false);
+    expect(arcKept({ kind: "trip", tripId: "t1" }, arc)).toBe(true);
+    expect(arcKept({ kind: "trip", tripId: "t2" }, arc)).toBe(false);
   });
 });

@@ -73,7 +73,8 @@ function useLandingRule() {
 }
 
 /**
- * The bottom tabs (#111 · Q1 A; #173 i2 · #171): Trips · Places · + · You.
+ * The bottom tabs (#111 · Q1 A; #173 i2 · #171): Trips · Places · + · You,
+ * and since #186 i6 · #184 (q6 A) Map between + and You — the library pinned.
  *
  * The + (titled Capture) is not a screen anyone lands on. Its `tabPress` is
  * intercepted and opens `app/capture.tsx` — a root formSheet — from whichever
@@ -139,6 +140,13 @@ export default function TabsLayout() {
               e.preventDefault();
               router.push("/capture");
             },
+          }}
+        />
+        <Tabs.Screen
+          name="map"
+          options={{
+            title: "Map",
+            tabBarIcon: ({ color }) => <Text style={[styles.glyph, { color }]}>◎</Text>,
           }}
         />
         <Tabs.Screen

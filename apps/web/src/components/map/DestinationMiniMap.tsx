@@ -46,6 +46,7 @@ export function DestinationMiniMap({
             lat,
             lng,
             layer: "planning",
+            been: false,
             name: destination.place.name,
             ordinal,
             floating: !isScheduled(destination),

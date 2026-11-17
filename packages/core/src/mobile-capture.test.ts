@@ -40,21 +40,22 @@ describe("capture · the two new native dependencies", () => {
 
 describe("capture · the tabs (#111 Q1 A · #173 i2)", () => {
   // #173 i2 (#171 · Q5 A · Q6 A): Trips · Places · Capture · You. `saves`
-  // keeps its route name; only its title becomes "Places".
-  it("draws Trips · Places · Capture · You, in that order", () => {
+  // keeps its route name; only its title becomes "Places". #186 i6 (#184 ·
+  // q6 A) puts Map between Capture and You (mobile-library-map.test.ts).
+  it("draws Trips · Places · Capture · Map · You, in that order", () => {
     const at = (name: string) => tabs.indexOf(`name="${name}"`);
     expect(at("(trips)")).toBeGreaterThan(-1);
     expect(at("(trips)")).toBeLessThan(at("saves"));
     expect(at("saves")).toBeLessThan(at("add"));
-    expect(at("add")).toBeLessThan(at("you"));
+    expect(at("add")).toBeLessThan(at("map"));
+    expect(at("map")).toBeLessThan(at("you"));
     const title = (name: string) => /title: "([^"]+)"/.exec(tabs.slice(at(name)))?.[1];
     expect(title("(trips)")).toBe("Trips");
     expect(title("saves")).toBe("Places");
     expect(title("add")).toBe("Capture");
+    expect(title("map")).toBe("Map");
     expect(title("you")).toBe("You");
     expect(tabs).not.toContain('title: "Saves"');
-    // Map is TL4's (#186), not this epic's.
-    expect(tabs).not.toContain('name="map"');
   });
 
   it("keeps the + tab's accessibility label and draws You with the ◉ glyph", () => {
