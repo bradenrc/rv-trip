@@ -119,3 +119,124 @@ These are wiring assertions, not behaviour. The matching and body rules themselv
   - After the implementation: `Tests  29 passed (29)`.
 - `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total`. The web suite reported 496 passed.
 - `npx tsc --noEmit` (apps/mobile): exit 0.
+
+---
+
+# #176 · dev notes — item i3 of 3 (web)
+
+Scope: **[i3] Web: + Capture opens the PlaceSheet in capture mode over any page** (#175 · Q7 B · Q1 A · Q2 A · Q3 B · Q4 A · Q5 A · Q6 A). This builds on i1's core functions and leaves the phone (i2) untouched.
+
+## What changed
+
+`packages/core/src/capture/sheet.ts`
+- `:274` `pickedDidItBody(where, picked, answers)`: the web's Been here `POST /api/ideas` body, built from a `PickedPlace`.
+  - title is `placeOf(picked).name`.
+  - category is `ideaCategoryOfSaveType(reservationTypeOfGoogle(primaryType))`; a typed name has no type, so it files as a Do.
+  - `place` is `placeOf(picked)`.
+  - `destinationId` may be null (the shelf).
+  - There is no `clientId`. The plan described this as "didItBody-shaped fields"; I put it in core so it is unit-tested.
+- `:294` `checkOffUndo(idea)`: the before-state `{ status, rating, again, notes }` that the check-off's Undo PATCHes back.
+
+`apps/web/src/lib/trip-api.ts:59,66`: adds `listTrips(): TripSummary[]` and `getTrip(id): { trip, routes, rigHash, hasRig }` (**vet MED**: the client contract was missing). Note that `GET /api/trips/:id` runs `routeTrip` (cache-backed) on every sheet open.
+
+`apps/web/src/lib/captured.ts` (new): the `CapturedDetail` union. It carries one more kind than the plan named:
+- `idea`
+- `idea-patch`
+- **`idea-removed`** `{ tripId, id, destinationId }`, added for the vet MED about Undo (see below)
+- `place`
+
+`apps/web/src/components/places/SheetShell.tsx:13`: the `SUBMIT_TONE` map, with `accent` (`bg-rv-accent-deep text-rv-accent-ink`) and `green` (`bg-rv-green text-rv-navy`).
+- Each fill and its ink sit on one source line, because the nightfall sweeps are line-based (**vet MED**).
+- `:36`: `submitTone = "accent"` is the default, so the /places sheets are unchanged.
+
+`apps/web/src/components/places/PlaceSheet.tsx`
+- `:23` `CaptureContext`, and `:64` `capture?: CaptureContext | null`, plus `logging`, `answers`, `onLogging` and `onAnswers`. Absent `capture` means the /places sheet, byte-for-byte as before, with no switch.
+- `:89` the status switch, the DS `SegmentedControl`, under Place:
+  - Mid-trip it is Been here · Want to go. Choosing Want to go also resets `form.status` to want.
+  - With `capture === null` it is Want to go · Been there, bound to `form.status`, so the footer hint follows it.
+- `:117` the Been here body:
+  - Place, then the switch.
+  - The mono `didItContext(trip.title, destination?.name ?? null)` line, at `-mt-2`, as the frame's `margin-top:-8px`.
+  - "How was it": `<Stars size={26} onSet>`. 0 maps to null.
+  - "Do it again?" with `AgainPair`.
+  - Note, with the placeholder "For next time…".
+- The Been here copy comes from the §3 frames (**vet MED**): kicker = trip title, title "Capture", hint "saves to · journal", submit `logCtaLabel(trip.title)` with no ✓, `submitTone="green"`.
+- `:163` the library body: kicker is the trip title and the title is "Capture" mid-trip. With no trip it is "Your saves" and "Save a place", per the Sep 3 frame. The submit is "Save to library", accent.
+- `:245` `AgainPair`: two buttons through `toggleAgain`. Off is `border-rv-border-hi bg-rv-surface text-rv-ink-muted`. Again on is `border-rv-ink bg-rv-navy-soft text-rv-ink`. Once was enough on is `border-rv-warning bg-rv-warning-soft text-rv-warning`. The labels are the wireframe's: "↻ Again", "⊖ Once was enough".
+
+`apps/web/src/components/places/CaptureSheet.tsx` (new, `"use client"`)
+- `:63` on open:
+  - `activeTrip(await listTrips(), localIsoDate())`.
+  - Then `captureTarget([bundle.trip], localIsoDate())` over `getTrip`.
+  - When a target arrives it switches to Been here, unless the switch was already touched (the phone's i2 rule).
+  - A failed fetch leaves the no-trip library form.
+- `:91` `submitLog`:
+  - It runs `matchingOpenIdea(destination ? destination.ideas : trip.ideas, placeOf(picked))`.
+  - **On a match:** `PATCH checkOffBody`. Undo PATCHes `checkOffUndo(match)` back.
+  - **No match:** `POST pickedDidItBody({ destinationId: destination?.id ?? null })`. Undo DELETEs the created idea.
+  - Both paths show `toast.success(journalToast.title, { description: trip.title, action: Undo })`.
+- `:141` `submitLibrary`:
+  - It sends `savePlaceBody(form, areaLabel)`.
+  - The area-label logic is **duplicated** from PlacesWorkspace: asked once, on a free-text pick.
+  - Then it emits `place` and shows a `savedToast(place)` toast.
+- Every write and every Undo then dispatches `rv:captured`. The sheet closes on success, and nothing navigates.
+
+`apps/web/src/components/nav/Nav.tsx`
+- `:112` + Capture is now a `<button type="button">` with the same classes, plus `cursor-pointer border-none`.
+- `:46` the TABS Capture entry is `href: null`, rendered as a `<button>` (`:142`). `LINKS` is typed `href: string` (`:33`).
+- `:156` `<CaptureSheet>` is mounted as a **sibling after both `dark` `<nav>`s**, never inside one (**vet MED**).
+
+`apps/web/src/components/trip/TripPlanner.tsx:~285-304`: a listener that applies changes only when `d.tripId === t.id`:
+- `idea` → `appendIdea` / `appendShelfIdea`
+- `idea-patch` → `setIdeaFields`
+- `idea-removed` → `removeIdea` / `removeShelfIdea`
+
+`apps/web/src/components/places/PlacesWorkspace.tsx:~84-95`: a listener that **appends** the place (**vet MED**: shipped is append, not the wireframe's "prepend") and de-dupes by id.
+
+## Decisions on the vet findings
+- **Undo stale page (MED):** fixed. Undo dispatches `idea-removed` for a create, or `idea-patch` with the before-state for a check-off.
+- **Library save toast (MED):** I chose to show a `savedToast` copy toast ("Saved X" · "→ area · Want to go"), with **no Undo**. The capture sheet closes over a page that may not show the library, so it needs a confirmation; the /places island's own sheet still shows none. The save logic is duplicated in CaptureSheet, not extracted, so PlacesWorkspace is left as it was.
+- **Copy (MED):** threaded through `capture`, as listed above.
+- **logCtaLabel ✓ (MED):** the web footer renders no ✓, as the frame shows.
+- **Sweep-safe tone (MED):** each pair is on one line, and the nightfall-tokens suite passes.
+
+## Flags for qa / the walk (render-required)
+- The sheet over /trips/:id, /map and /places, in both themes.
+  - The sheet is mounted outside the dark islands. The SheetShell header is still the shipped `bg-rv-navy text-rv-ink`, which this item does not change.
+- sonner's Undo action on both paths, and the planner's Journal row appearing, then disappearing on Undo.
+- **Loading flip:** until the two GETs answer, the sheet draws the no-trip form ("Your saves" / "Save a place"). It then switches to Been here and the trip kicker. A brief flip is expected.
+- **Edge:** if Been there is picked before the trip resolves, the mid-trip switch then shows "Want to go" while `form.status` is still `been`, so the hint reads "saves to · been".
+- A check-off's Undo does not remove the Been there write-through that the PATCH route made. This matches the phone.
+- A Been here capture of a typed name (free-text pick) is a coordless Do with no `areaLabel`.
+
+## Tests
+- `packages/core/src/capture/sheet.test.ts:242`: `pickedDidItBody` (Google pick on a destination; typed name on the shelf; both parse through `ideaCreateInput`) and `checkOffUndo` (parses through `ideaPatchInput`). Red first: 3 failed before the implementation.
+- `apps/web/src/components/nav/nav.test.ts:74,83,132,142`:
+  - Capture is `href: null` and renders as a `<button>` calling `setCapturing(true)`.
+  - + Capture is a `<button>` (not a `Link` to /places) carrying `bg-rv-green` and `text-rv-navy`.
+  - `CaptureSheet` is mounted once, after the last `</nav>`.
+  - The two old assertions failed before they were updated.
+- `packages/core/src/web-shell.test.ts:96`: the TABS hrefs are now 4 and Capture is `href: null`.
+- `apps/web/src/components/places/capture-sheet.test.ts` (new, 24 source-reading tests). It covers:
+  - `activeTrip(list, localIsoDate())` and `captureTarget([bundle.trip], localIsoDate())`.
+  - `matchingOpenIdea` before PATCH vs POST.
+  - `destinationId: destination?.id ?? null`.
+  - Both Undos, and `rv:captured` for every write and Undo.
+  - The two `SegmentedControl` option sets, and the Been here body and copy.
+  - SheetShell's default accent and the one-line pairs.
+  - The TripPlanner and PlacesWorkspace listeners, and the trip-api reads.
+  - I mutation-checked one: changing `?? null` turns it red.
+- These are wiring assertions; nothing renders. Behaviour is proven by core's unit tests plus the walk.
+
+## Checks run (i3)
+- `npx vitest run src/capture/sheet.test.ts` (packages/core):
+  - Before the implementation: `3 failed | 23 passed`.
+  - After the implementation: `26 passed (26)`.
+- `npx vitest run src/components/nav/nav.test.ts` (apps/web): the 2 old Capture assertions failed after the Nav change. After the update: `23 passed (23)`.
+- `npx vitest run src/components/places/capture-sheet.test.ts` (apps/web): `24 passed (24)`. With `?? null` mutated it gives `1 failed`; the mutation was reverted.
+- `npx tsc --noEmit` (apps/web and packages/core): clean.
+- `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total`.
+  - core: 1448 passed.
+  - web: 522 passed.
+  - ui: 55 passed.
+- Not run: any render or browser walk. The walk flags above cover it.

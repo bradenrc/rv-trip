@@ -28,6 +28,7 @@ import type {
   DestinationCreateInput,
   DestinationPatchInput,
   Trip,
+  TripSummary,
   TripCreateInput,
   TripPatchInput,
 } from "@rv-trip/core";
@@ -50,6 +51,27 @@ export const tripApi = {
    */
   createTrip: (input: TripCreateInput): Promise<Trip> =>
     req(`/api/trips`, "POST", input) as Promise<Trip>,
+
+  /**
+   * #176 i3 · the dashboard rows (`GET /api/trips`, owner-scoped). The capture
+   * sheet reads them on open to find the trip that covers today.
+   */
+  listTrips: (): Promise<TripSummary[]> => req(`/api/trips`, "GET") as Promise<TripSummary[]>,
+
+  /**
+   * #176 i3 · the trip bundle (`GET /api/trips/:id`), the payload the planner
+   * page renders. The capture sheet uses only `trip`; note the handler also
+   * runs `routeTrip` (cache-backed) on every read.
+   */
+  getTrip: (
+    id: string,
+  ): Promise<{ trip: Trip; routes: RouteMap; rigHash: string; hasRig: boolean }> =>
+    req(`/api/trips/${id}`, "GET") as Promise<{
+      trip: Trip;
+      routes: RouteMap;
+      rigHash: string;
+      hasRig: boolean;
+    }>,
 
   /** The settings dialog. Send only what changed: an omitted key is left alone. */
   updateTrip: (id: string, patch: TripPatchInput) => req(`/api/trips/${id}`, "PATCH", patch),

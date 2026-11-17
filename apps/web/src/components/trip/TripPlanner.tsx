@@ -123,6 +123,7 @@ import {
   removeIdea,
   removeShelfIdea,
   setShelfIdeaFields,
+  setIdeaFields,
   removeChapter,
   removeReservation,
   removeDestination,
@@ -156,6 +157,7 @@ import {
 } from "@/lib/trip-logic";
 import type { LatLng, Units } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
+import type { CapturedDetail } from "@/lib/captured";
 import { fullRange, monthDay } from "@/lib/trip-ui";
 import { useBooleanPref } from "@/lib/pref";
 import { PrefSwitch } from "@/components/ui/pref-switch";
@@ -276,6 +278,30 @@ export function TripPlanner({
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
   const [routes, setRoutes] = useState(initialRoutes);
+
+  /**
+   * #176 i3 · the web capture sheet (Nav's + Capture) writes over this page,
+   * and `trip` is a copy of the prop, so `router.refresh()` would not re-render
+   * it: splice its writes in here, for this trip only. A created idea lands on
+   * its destination or, with none, on the shelf; a check-off (or its Undo) is
+   * a field patch; an undone create is removed again.
+   */
+  useEffect(() => {
+    const onCaptured = (e: Event) => {
+      const d = (e as CustomEvent<CapturedDetail>).detail;
+      if (d.kind === "place") return;
+      setTrip((t) => {
+        if (d.tripId !== t.id) return t;
+        if (d.kind === "idea") {
+          return d.idea.destinationId ? appendIdea(t, d.idea.destinationId, d.idea) : appendShelfIdea(t, d.idea);
+        }
+        if (d.kind === "idea-patch") return setIdeaFields(t, d.id, d.patch);
+        return d.destinationId ? removeIdea(t, d.destinationId, d.id) : removeShelfIdea(t, d.id);
+      });
+    };
+    window.addEventListener("rv:captured", onCaptured);
+    return () => window.removeEventListener("rv:captured", onCaptured);
+  }, []);
   // Klunk row 8 · Q4 A: the lens follows the mode — a drive trip opens on
   // Route, a fly trip on Timeline. #113 · Q4 B: a traveled trip (status
   // `complete`, the dashboard's "Traveled") opens on its Journal. Derived,

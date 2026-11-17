@@ -71,12 +71,21 @@ describe("the bottom bar: the phone's five", () => {
     expect(labels(TABS)).toEqual(["Trips", "Places", "Capture", "Map", "You"]);
   });
 
-  it("sends Capture to /places with a PlusCircle that is never lit", () => {
+  it("makes Capture an action (no href) with a PlusCircle that is never lit (#176 i3)", () => {
     const capture = entry(TABS, "Capture");
-    expect(capture).toContain('href: "/places"');
+    expect(capture).toContain("href: null");
+    expect(capture).not.toContain('href: "/places"');
     expect(capture).toContain("Icon: PlusCircle");
     expect(capture).toContain("match: () => false");
     expect(capture).toContain("action: true");
+  });
+
+  it("renders the href-less Capture tab as a <button> that opens the capture sheet (#176 i3)", () => {
+    const bar = navFlat.slice(navFlat.indexOf("TABS.map("), navFlat.lastIndexOf("</nav>"));
+    expect(bar).toMatch(
+      /href === null \? \( <button key=\{label\} type="button" onClick=\{\(\) => setCapturing\(true\)\}/,
+    );
+    expect(bar).toContain("<Link key={label} href={href}");
   });
 
   it("paints the action's icon green whether or not it is lit", () => {
@@ -120,12 +129,22 @@ describe("the masthead's right side", () => {
     expect(avatar).toBeGreaterThan(capture);
   });
 
-  it("makes + Capture a Link to /places in the CTA green (bg-rv-green: green-cta's dark-island value)", () => {
+  it("makes + Capture a <button> (not a Link to /places) in the CTA green (#176 i3)", () => {
     expect(right).toMatch(
-      /<Link href="\/places" className="[^"]*\bbg-rv-green\b[^"]*\btext-rv-navy\b[^"]*"> \+ Capture <\/Link>/,
+      /<button type="button" onClick=\{\(\) => setCapturing\(true\)\} className="[^"]*\bbg-rv-green\b[^"]*\btext-rv-navy\b[^"]*"> \+ Capture <\/button>/,
     );
-    const cls = right.match(/<Link href="\/places" className="([^"]*)"> \+ Capture/)![1]!;
-    for (const c of ["rounded-rv-md", "font-bold"]) expect(cls).toContain(c);
+    expect(right).not.toMatch(/<Link href="\/places"[^>]*> \+ Capture/);
+    const cls = right.match(/className="([^"]*)"> \+ Capture <\/button>/)![1]!;
+    for (const c of ["rounded-rv-md", "font-bold", "bg-rv-green", "text-rv-navy"]) expect(cls).toContain(c);
+  });
+});
+
+describe("the capture sheet's mount (#176 i3 · vet MED)", () => {
+  it("renders CaptureSheet once, as a sibling after both <nav> islands", () => {
+    expect(navFlat.match(/<CaptureSheet /g)).toHaveLength(1);
+    const at = navFlat.indexOf("<CaptureSheet ");
+    expect(at).toBeGreaterThan(navFlat.lastIndexOf("</nav>"));
+    expect(navFlat).toContain("{capturing ? <CaptureSheet onClose={() => setCapturing(false)} /> : null}");
   });
 });
 
