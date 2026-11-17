@@ -139,3 +139,62 @@ Scope: epic item **i3 of 9 only** (#183 core seam · q5 A). Core only. No UI, no
 - TDD red: `npx vitest run src/planner/trip-card.test.ts` (packages/core) before the module existed → `Test Files 1 failed (1)` (import unresolved).
 - Green: same command after → `Tests 14 passed (14)`.
 - Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1547 passed (1547)`, web `Tests 554 passed (554)`, ui `Tests 55 passed (55)`. A first gate run hung in the web vitest worker (0 CPU for over 20 min, no output). I killed only that run's own PIDs, re-ran, and it went green.
+
+---
+
+# i4 · The trip card on both Places screens, and full trips for the phone
+
+Scope: epic item **i4 of 9 only** (#183 renders · q5 A). No schema or migration. No Map tab: that is a later item, so "reloaded on Map focus" has nowhere to land yet. `tripsNear` (#160) is i8/i9.
+
+## What changed
+
+- **Route** `apps/web/src/app/api/trips/route.ts:11-17`. `GET(req)` checks `?tree=1` and, when set, returns `listTripsWithDestinationsForOwner(owner)` (`Trip[]`, status already derived). Without it, the route returns the `TripSummary[]` as before. It stays owner-scoped through `getOwner()`.
+- **api-client** `packages/core/src/api-client/index.ts:149,275`. Adds `trips.trees(): Promise<Trip[]>`, which calls GET `/api/trips?tree=1` and parses the result with `tripSchema.array()`.
+- **Phone store** `apps/mobile/src/store.ts`:
+  - `State.trees` at :64.
+  - `loadTripTrees` at :292. On failure it keeps the last list, so offline the card draws from what was already loaded.
+  - `useTripTrees()` at :303 loads once when the cache is empty and returns `{ trees, error, reload }`.
+- **Phone Places** `apps/mobile/app/(tabs)/saves.tsx`:
+  - :73-74 computes `card = tripCard(trees ?? [], localIsoDate())`.
+  - The focus effect at :110 also runs `reloadTrees()`.
+  - `{card && <TripCardRow …/>}` at :153 sits after the queue toast and above `ShelfSwitch`.
+  - `TripCardRow` at :168 is a `Pressable` that calls `router.push(`/trips/${card.tripId}`)`. It shows a bold title, then ` · ` and the mono `when`. The line under it is `C.warning` when amber, otherwise `C.inkMuted`. The cta is `C.greenInk`.
+  - The styles at :512 follow the wireframe's `.tcard` values: `C.surface`, `C.borderHi`, `R.card`, padding 9/11, gap 10, and the shadow-rv-sm values copied from ui.tsx's `segmentOn`.
+- **Web page** `apps/web/src/app/places/page.tsx`:
+  - :7,23 swaps `listTripsForOwner` for `listTripsWithDestinationsForOwner`. `visitedOn` is unchanged: complete trips only, `{id,title}`.
+  - :10,38-40 reads `TZ_COOKIE` the way `app/page.tsx` does, then computes `isoDateInZone` → `card = today ? tripCard(trips, today) : null`.
+  - :54 passes `card` to the island. Only the card crosses into it; the tree does not.
+- **Web island** `apps/web/src/components/places/PlacesWorkspace.tsx`:
+  - New `card` prop at :58.
+  - `<PlacesTripCard card={card} />` at :273 sits right under the header row, above the SuggestionBar and PlacesLibrary. That matches the wireframe, where `.tcard` follows `.wtop` directly.
+  - `PlacesTripCard` at :337 is exported. It is a `next/link` to `/trips/<id>` with `rounded-rv-card border border-rv-border-hi bg-rv-surface shadow-rv-sm` and `max-w-[520px]`, plus the wireframe's padding and type sizes. The title is `text-rv-ink`, followed by the mono `when` in `text-rv-ink-muted`. The line is `text-rv-warning` when amber, otherwise `text-rv-ink-muted`. The cta is `text-rv-green-ink`. With a null card it renders nothing and takes no space.
+  - Core's `TripCard` type is imported as `TripCardModel`, so it can't be confused with the dashboard's `TripCard` component (i3's flag).
+- **Tests**:
+  - `apps/web/src/app/api/trips/route.test.ts`:
+    - A new `describeDb("GET /api/trips?tree=1 …")` checks that `?tree=1` parses as `tripSchema[]` with chapters → destinations and derived `complete`, and that a plain GET still parses as summaries (where `chapters` is a number).
+    - The two existing `GET()` calls now pass `list()`, a GET `Request`.
+  - `packages/core/src/api-client/api-client.test.ts:46`: `trees()` hits `/api/trips?tree=1`, and a summary row in its place throws `ZodError`.
+  - New `apps/web/src/components/places/trip-card.test.ts`:
+    - Source reads of page.tsx: it reads TZ_COOKIE, has no `listTripsForOwner`, calls `today ? tripCard(trips, today) : null`, and passes `card={card}`.
+    - Source reads of the workspace: `tripCardLines(` is present and `<PlacesTripCard` comes before `<PlacesLibrary`.
+    - `PlacesTripCard` rendered with renderToStaticMarkup: the href, the surface classes, the amber line on `text-rv-warning`, the non-amber line on `text-rv-ink-muted`, the starting kind with no line, and null rendering `""`.
+  - `packages/core/src/mobile-places.test.ts:111+`: a describe that reads the store and saves.tsx as source. It checks `api.trips.trees()`, `useTripTrees`, `tripCard(trees ?? [], localIsoDate())`, `tripCardLines(`, `reloadTrees()` in the focus effect, the card placed before `<ShelfSwitch value`, the `/trips/${card.tripId}` push, the `C.warning`/`C.inkMuted`/`C.greenInk` roles and the card surface style.
+
+## Decisions / flags (for qa and the walk)
+
+- **Where the phone card sits.** It goes after the amber queue toast and before ShelfSwitch. The wireframe shows no toast, and the toast is the shipped "always on top" line.
+- **Web `GET(req)` is now required.** Existing callers in tests were updated. Other test files import only `POST` from this route.
+- **Status on the card's CTA.** Both server paths hand `tripCard` rows with derived status (`mapTripRow(r, todayIso())`). That covers i3's flag that a pinned non-complete trip reads "Agenda →". For the PNW seed (pinned "planning") an ended card will say "Agenda →". That is per the spec.
+- **Server "today" vs the trees' derived status.** The card's today comes from the tz cookie. Status is derived from the server's `todayIso()` (UTC), so a trip that ended "yesterday" near midnight could differ by one day on the CTA. This is the landing rule's existing precedent, and I made no change for it.
+- **Render-required (walk):**
+  - Web: with the tz cookie set and a trip within the 7-day window, the card shows above the shelf and clicking it opens the trip. On the first load with no cookie there is no card.
+  - Phone: the card shows above the switch, tapping it pushes the trip, and it refreshes on refocus after a trip edit.
+
+## Checks run
+
+- **TDD red:**
+  - `npx vitest run src/api-client/api-client.test.ts` (core) → `Tests 1 failed | 31 passed (32)`. Green after: `32 passed`.
+  - `npx vitest run src/components/places/trip-card.test.ts` (web) → 9 failed before page/workspace changes. Green after: `Tests 10 passed (10)`.
+  - `npx vitest run src/mobile-places.test.ts` (core) → `Tests 4 failed | 12 passed (16)`. The store assertion already passed because the store was written first. Green after: `16 passed`.
+- **Route test:** written before the handler change but **not run red first**. After the change: `npx vitest run src/app/api/trips/route.test.ts` → `Tests 9 passed (9)`. The first run failed on my own test using `d.placeName`; I fixed it to `d.place.name`.
+- **Gate:** `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1553 passed`, web `Tests 566 passed`, ui `Tests 55 passed`. This includes `@rv-trip/mobile:typecheck` and `@rv-trip/web:lint`.

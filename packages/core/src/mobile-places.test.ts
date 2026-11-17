@@ -106,3 +106,41 @@ describe("phone Places · the location chip never prompts on its own", () => {
     expect(saves).toContain('"Near you"');
   });
 });
+
+/**
+ * #186 i4 · #183 on the phone — the trip card above the shelf switch, fed by
+ * the full trips list (`useTripTrees`, GET /api/trips?tree=1). Which trip and
+ * every word is core's `tripCard` + `tripCardLines` (planner/trip-card.test.ts);
+ * pinned here is that the screen routes through them and links to the trip.
+ */
+describe("phone Places · the trip card (#183)", () => {
+  const store = read("src/store.ts");
+
+  it("loads the trip trees through the api client and caches them in the store", () => {
+    expect(store).toContain("api.trips.trees()");
+    expect(store).toMatch(/export function useTripTrees\(\)/);
+  });
+
+  it("calls tripCard with today's local date, and renders tripCardLines", () => {
+    expect(saves).toContain("useTripTrees()");
+    expect(saves).toMatch(/tripCard\(trees \?\? \[\], localIsoDate\(\)\)/);
+    expect(saves).toContain("tripCardLines(");
+  });
+
+  it("reloads the trees on focus, beside the saves", () => {
+    const focus = /useFocusEffect\(\s*useCallback\(\(\) => \{[\s\S]*?\}, \[[^\]]*\]\),\s*\);/.exec(saves)?.[0] ?? "";
+    expect(focus).toContain("reloadTrees()");
+  });
+
+  it("sits above the shelf switch and pushes /trips/<id>", () => {
+    expect(saves.indexOf("<TripCardRow")).toBeGreaterThan(-1);
+    expect(saves.indexOf("<TripCardRow")).toBeLessThan(saves.indexOf("<ShelfSwitch value"));
+    expect(saves).toMatch(/router\.push\(`\/trips\/\$\{card\.tripId\}`\)/);
+  });
+
+  it("draws the amber line on C.warning, else C.inkMuted, and the cta on C.greenInk", () => {
+    expect(saves).toMatch(/color: amber \? C\.warning : C\.inkMuted/);
+    expect(saves).toMatch(/cardGo: \{[^}]*color: C\.greenInk/);
+    expect(saves).toMatch(/card: \{[^}]*backgroundColor: C\.surface[^}]*borderColor: C\.borderHi[^}]*borderRadius: R\.card/);
+  });
+});

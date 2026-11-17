@@ -143,6 +143,10 @@ export type CreateReservationInput = ReservationCreateBody;
 export interface ApiClient {
   trips: {
     list(): Promise<TripSummary[]>;
+    /** GET /api/trips?tree=1 → every trip as its full tree (#186 i4): the
+     * phone's Places trip card and Map tab need destinations + reservations,
+     * which the summary drops. */
+    trees(): Promise<Trip[]>;
     get(id: string): Promise<TripBundle>;
     /** POST /api/trips → 201 Trip — the setup screen (#103). */
     create(input: TripCreateInput): Promise<Trip>;
@@ -268,6 +272,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
   return {
     trips: {
       list: () => parsed(tripSummaryListSchema, request("GET", "/api/trips")),
+      trees: () => parsed(tripSchema.array(), request("GET", "/api/trips?tree=1")),
       get: (id) => parsed(tripBundleSchema, request("GET", `/api/trips/${encodeURIComponent(id)}`)),
       create: (input) => parsed(tripSchema, request("POST", "/api/trips", input)),
       patch: (id, patch) => voidResult(request("PATCH", `/api/trips/${encodeURIComponent(id)}`, patch)),

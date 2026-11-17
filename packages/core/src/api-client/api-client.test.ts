@@ -43,6 +43,28 @@ describe("createApiClient", () => {
     expect(f.calls[0]!.init.method).toBe("GET");
   });
 
+  it("GETs /api/trips?tree=1 and validates full trips (#186 i4)", async () => {
+    const tree = {
+      id: "t1",
+      ownerId: "o",
+      title: "Loop",
+      startDate: "2026-08-01",
+      endDate: "2026-08-10",
+      rating: null,
+      chapters: [],
+    };
+    const f = fakeFetch(200, [tree]);
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const trips = await api.trips.trees();
+    expect(trips).toHaveLength(1);
+    expect(trips[0]).toMatchObject({ id: "t1", title: "Loop", chapters: [] });
+    expect(f.calls[0]!.url).toBe("http://x/api/trips?tree=1");
+    expect(f.calls[0]!.init.method).toBe("GET");
+    // A summary row is not a tree: drift throws.
+    const g = fakeFetch(200, [summary]);
+    await expect(createApiClient({ baseUrl: "http://x", fetch: g.fn }).trips.trees()).rejects.toBeInstanceOf(ZodError);
+  });
+
   it("throws a ZodError when the server drifts from the contract", async () => {
     const f = fakeFetch(200, [{ ...summary, days: "ten" }]);
     const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });

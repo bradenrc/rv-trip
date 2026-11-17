@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -9,6 +10,7 @@ import type {
   SavedPlace,
   SavedPlacePatch,
   SavePlaceForm,
+  TripCard as TripCardModel,
   Units,
 } from "@rv-trip/core";
 import {
@@ -24,6 +26,7 @@ import {
   savePlaceFormFromSaved,
   savedPlaceToCreate,
   suggestionToCreate,
+  tripCardLines,
 } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { browserAreaLabel } from "@/lib/area-label";
@@ -52,6 +55,7 @@ import { SuggestedPlaceCard, SuggestionBar } from "./Suggestions";
 export function PlacesWorkspace({
   places: initialPlaces,
   trips,
+  card = null,
   suggestions = [],
   units,
   children,
@@ -59,6 +63,9 @@ export function PlacesWorkspace({
   places: SavedPlace[];
   /** Complete trips only — the graduate sheet's "Visited on" list. */
   trips: { id: string; title: string }[];
+  /** The trip card (#186 i4 · #183), computed on the server by core's
+   * `tripCard`; null draws no card and holds no space. */
+  card?: TripCardModel | null;
   /** "Been there?" candidates — every destination and reservation rated ★4+ on a
    * complete trip (§7). De-duplication against the library happens here, not in
    * the query, so accepting one drops it on the next render. */
@@ -263,6 +270,8 @@ export function PlacesWorkspace({
         </button>
       </div>
 
+      <PlacesTripCard card={card} />
+
       {shelf && (
         <SuggestionBar
           shelf={shelf}
@@ -316,5 +325,32 @@ export function PlacesWorkspace({
         />
       ) : null}
     </>
+  );
+}
+
+/**
+ * The trip card above the library (#186 i4 · #183 · docs/design/186 §4
+ * `.tcard`): the trip in the week before, during or after it, linking to the
+ * trip, which opens on its own default tab. Every word is core's
+ * `tripCardLines`, so the phone says the same thing.
+ */
+export function PlacesTripCard({ card }: { card: TripCardModel | null }) {
+  if (!card) return null;
+  const { title, when, line, amber, cta } = tripCardLines(card);
+  return (
+    <Link
+      href={`/trips/${card.tripId}`}
+      className="mb-5 flex max-w-[520px] items-center gap-[10px] rounded-rv-card border border-rv-border-hi bg-rv-surface px-[11px] py-[9px] no-underline shadow-rv-sm"
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-px">
+        <b className="text-[13px] leading-[1.3] text-rv-ink">
+          {title} · <span className="font-mono text-[11.5px] font-semibold text-rv-ink-muted">{when}</span>
+        </b>
+        {line !== null && (
+          <span className={`text-[11px] ${amber ? "text-rv-warning" : "text-rv-ink-muted"}`}>{line}</span>
+        )}
+      </div>
+      <span className="whitespace-nowrap text-[11px] font-bold text-rv-green-ink">{cta}</span>
+    </Link>
   );
 }

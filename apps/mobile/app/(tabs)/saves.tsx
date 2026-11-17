@@ -1,13 +1,22 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import type { LatLng, PlacesCategory, ReservationType, SavedPlace, SavedPlaceStatus, SavesShelves } from "@rv-trip/core";
+import type {
+  LatLng,
+  PlacesCategory,
+  ReservationType,
+  SavedPlace,
+  SavedPlaceStatus,
+  SavesShelves,
+  TripCard,
+} from "@rv-trip/core";
 import {
   PLACES_CATEGORIES,
   isPlacesCategory,
+  localIsoDate,
   nearYou,
   nearYouName,
   nearYouNothing,
@@ -17,10 +26,12 @@ import {
   saveRowLine,
   shelfCounts,
   suggestionStrip,
+  tripCard,
+  tripCardLines,
 } from "@rv-trip/core";
 import { API_URL, api } from "../../src/api";
 import { useCaptureState } from "../../src/capture";
-import { patchSave, useSaves } from "../../src/store";
+import { patchSave, useSaves, useTripTrees } from "../../src/store";
 import { C, F, R } from "../../src/theme";
 import { Button, CategoryTile, Centered, FilterChip, Kicker, Muted, Stars, Toast } from "../../src/ui";
 
@@ -51,10 +62,16 @@ const CAT_TYPE: Record<Exclude<PlacesCategory, "All">, ReservationType> = {
  * within NEAR_RADIUS_MI) above "Everywhere else", the shipped groups. The tab
  * never asks for location on its own: it reads the permission on focus and
  * asks only when the "Set location" chip is tapped.
+ *
+ * #186 i4 · #183 (q5 A): above the shelf switch, the trip card — core's
+ * `tripCard` over the full trips list (`useTripTrees`) — for a trip in the week
+ * before, during or after it. Tapping it opens the trip.
  */
 export default function SavesTab() {
   const { queue } = useCaptureState();
   const { saves, error, reload } = useSaves();
+  const { trees, reload: reloadTrees } = useTripTrees();
+  const card = tripCard(trees ?? [], localIsoDate());
   const [status, setStatus] = useState<SavedPlaceStatus>("want");
   const [cat, setCat] = useState<PlacesCategory>("All");
   const [refreshing, setRefreshing] = useState(false);
@@ -86,10 +103,12 @@ export default function SavesTab() {
   const name = here ? nearYouName(nearAll, resolved) : null;
 
   // Fresh on every visit: a capture made from another tab lands here.
+  // The trip trees too: a trip edited on the Trips tab changes the card.
   useFocusEffect(
     useCallback(() => {
       void reload();
-    }, [reload]),
+      void reloadTrees();
+    }, [reload, reloadTrees]),
   );
   // …and whenever the queue drains, since a flush is new rows on the server.
   const waitingBefore = useRef(queue.length);
@@ -131,12 +150,43 @@ export default function SavesTab() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.green} />}
         >
           {queue.length > 0 && <Toast tone="amber" glyph="◷" title={waiting.title} sub={waiting.sub} />}
+          {card && <TripCardRow card={card} />}
           <ShelfSwitch value={status} onChange={changeShelf} saves={library} />
           {library.length > 0 && <CategoryChips saves={library} status={status} value={cat} onChange={pickCat} />}
           <Shelf saves={library} status={status} cat={cat} here={library.length > 0 ? here : null} name={name} />
         </ScrollView>
       )}
     </SafeAreaView>
+  );
+}
+
+/**
+ * The trip card (docs/design/186 phone `.tcard`): bold title · mono when, the
+ * ended trip's line under it (amber while stays wait for "How was it?"), and
+ * the tab it opens on. The trip screen picks that tab itself.
+ */
+function TripCardRow({ card }: { card: TripCard }) {
+  const router = useRouter();
+  const { title, when, line, amber, cta } = tripCardLines(card);
+  return (
+    <Pressable
+      onPress={() => router.push(`/trips/${card.tripId}`)}
+      accessibilityRole="link"
+      accessibilityLabel={`${title}, ${when}. ${cta}`}
+      style={styles.card}
+    >
+      <View style={styles.cardText}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {title} · <Text style={styles.cardWhen}>{when}</Text>
+        </Text>
+        {line !== null && (
+          <Text style={[styles.cardLine, { color: amber ? C.warning : C.inkMuted }]} numberOfLines={1}>
+            {line}
+          </Text>
+        )}
+      </View>
+      <Text style={styles.cardGo}>{cta}</Text>
+    </Pressable>
   );
 }
 
@@ -458,6 +508,29 @@ const styles = StyleSheet.create({
   locOff: { borderStyle: "dashed" },
   locGlyph: { fontSize: 12 },
   locText: { fontSize: 11, fontWeight: "700" },
+  // .tcard (+ .tt b / .tt b .mono / .tt span / .go)
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.borderHi,
+    borderRadius: R.card,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    // shadow-rv-sm: 0 1px 2px rgba(0,0,0,.28) (packages/ui/styles/entry.css)
+    shadowColor: "#000000",
+    shadowOpacity: 0.28,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  cardText: { flex: 1, minWidth: 0, gap: 1 },
+  cardTitle: { fontSize: 13, lineHeight: 17, fontWeight: "700", color: C.ink },
+  cardWhen: { fontFamily: F.mono, fontSize: 11.5, fontWeight: "600", color: C.inkMuted },
+  cardLine: { fontSize: 11 },
+  cardGo: { fontSize: 11, fontWeight: "700", color: C.greenInk },
   // .chips
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 5 },
   // .ghead / .ghead.near / .ghead .sub
