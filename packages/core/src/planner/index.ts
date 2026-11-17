@@ -74,6 +74,8 @@ export * from "./up-next";
 export * from "./journal-map";
 /** The trip card at the top of Places — starting, now, or just ended (#183 · #186 i3). */
 export * from "./trip-card";
+/** The library map — every trip's destinations and every save, under All / Been / Want / One trip (#184 · #186 i5). */
+export * from "./library-map";
 
 export function allDestinations(trip: Trip): Destination[] {
   return trip.chapters.flatMap((l) => l.destinations);

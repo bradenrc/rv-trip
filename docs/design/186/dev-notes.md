@@ -198,3 +198,42 @@ Scope: epic item **i4 of 9 only** (#183 renders · q5 A). No schema or migration
   - `npx vitest run src/mobile-places.test.ts` (core) → `Tests 4 failed | 12 passed (16)`. The store assertion already passed because the store was written first. Green after: `16 passed`.
 - **Route test:** written before the handler change but **not run red first**. After the change: `npx vitest run src/app/api/trips/route.test.ts` → `Tests 9 passed (9)`. The first run failed on my own test using `d.placeName`; I fixed it to `d.place.name`.
 - **Gate:** `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1553 passed`, web `Tests 566 passed`, ui `Tests 55 passed`. This includes `@rv-trip/mobile:typecheck` and `@rv-trip/web:lint`.
+
+---
+
+# i5 · Core: the library map and its filter
+
+Scope: epic item **i5 of 9 only** (#184 core seam · q6 A · q7 A · q8 A). No UI, no schema, no route. Nothing renders it yet; i6 (phone Map tab, web /map filters) and i7 (web Places map panel) consume it.
+
+## What changed
+
+- **New** `packages/core/src/planner/library-map.ts`:
+  - `LibraryFilter` :20 — `all | been | want | trip(tripId)`.
+  - `destinationBeen(trip, destination, today)` :27 — `trip.status === "complete"`, or `today !== null && departDate !== null && departDate < today`. Departing today is not been yet. Takes `Pick<Trip,"status">` / `Pick<Destination,"departDate">`, per the wireframe's signature.
+  - `libraryFilterKeeps(f, { been, tripId })` :38 — all → true, been → been, want → !been, trip → tripId === f.tripId.
+  - `libraryMap(trips, saves, today, f)` :79 — destinations come from `tripDestinationPins` (map-pins.ts:68), so `ordinal` = the trip's `scheduledOrder` and coordless destinations are dropped. Each carries `tripId` = its trip's id and `been` = `destinationBeen`. Saves are pinned at `savePoint` (i1). `been` = `status === "been"`, `tripId` = `SavedPlace.tripId`, `category` = `categoryOf(type).cat`. Both lists go through `libraryFilterKeeps`. `unmapped` counts the saves the filter keeps that have no point.
+  - `libraryTrips(trips)` :142 — trips with at least one mapped destination, newest `startDate` first, as `{ id, title, dates: "08/01 – 08/28", destinations: <mapped count> }`. The date line follows the wireframe's phone chooser sheet ("11/11 – 11/15 · 1 destination"). The " · N destinations" suffix is left to the renderer.
+- `packages/core/src/planner/index.ts:77-78` re-exports it, so it is available as `@rv-trip/core/planner` and from the root.
+- **New** `packages/core/src/planner/library-map.test.ts` (15 tests) covers the §1 #184 table:
+  - On Nov 17 every Loop and Bellingham destination is been.
+  - On Aug 7 Astoria (departs Aug 5) is been and Newport (departs Aug 9) is not. Edge rows check null today, null departDate, and departing today.
+  - Been keeps the KOA save and drops Deschutes. Want does the reverse.
+  - trip(Loop) keeps the Loop's three destinations and its three visited saves (KOA, Fort George, Aquarium). Aslan, a Bellingham save, is dropped.
+  - The taco truck (no point) is only ever counted in `unmapped`.
+  - `libraryTrips` lists Bellingham before the Loop and leaves out an unmapped trip.
+  - A source-reading test checks that library-map.ts has no `routeTrip`, `fetch(`, `providers/`, `routing` or `api-client`.
+  - The fixture is `pnwTrip()` without Crater Lake. That gives the wireframe's "3 destinations", and Crater is floating and undated anyway.
+
+## Decisions (vet findings resolved here)
+
+- **Vet HIGH (one point rule for every map surface):** I chose the **area fallback**. `libraryMap` pins a save at `savePoint`, the same point Near you measures from. So an area-only save such as The Springs or the Deschutes fixture is a pin, not unmapped. To keep web /map and the Places panel consistent with this, i6/i7 need to make `buildMapModel`'s place pins (apps/web/src/components/map/pins.ts:377-380) use `savePoint` as well, or read `libraryMap`. That is outside i5's scope. Flagged for those items.
+- **Vet MED (type home):** `category` is core's `RvCategory` (theme/tokens.ts:68), not ui's `CategoryLabel`. Core cannot import ui. This matches the phone's `TripMapEntry.category`.
+- **Vet MED (web PlacePin has no tripId):** `libraryMap`'s save pins carry `tripId`. The web `PlacePin` change belongs to i6.
+- Under **Want to go**, a complete trip shows no destinations, because all of its stops are been. This follows directly from q7 A.
+
+## Checks run
+
+- TDD red: `npx vitest run src/planner/library-map.test.ts` (packages/core) before the module existed → `Test Files 1 failed (1)` (import failure, no tests collected).
+- Green: same command after → `Tests 15 passed (15)`.
+- Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1568 passed (1568)`, web `Tests 566 passed (566)`, ui `Tests 55 passed (55)`. The stack-trace lines in the web log come from expected-failure suites, and the web suite passed.
+- No render surface changed, so there is nothing to walk for this item.
