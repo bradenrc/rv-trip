@@ -68,6 +68,8 @@ export * from "./stay-clock";
 export * from "./context-digest";
 /** The trip screen's tabs and the tab it opens on (#177 · #181 i1). */
 export * from "./trip-tab";
+/** Up next — the Journal's Today block (#178 · #181 i3). */
+export * from "./up-next";
 
 export function allDestinations(trip: Trip): Destination[] {
   return trip.chapters.flatMap((l) => l.destinations);

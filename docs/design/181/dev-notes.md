@@ -109,3 +109,56 @@ Fly and ferry hops render through `HopCard`/`HopRow`, never `Drive`, so they get
 - **RN dashed single-side border:** the phone RV line uses `borderTopWidth: 1` with `borderStyle: "dashed"`. iOS has historically drawn single-side dashed borders solid or not at all. Check the rule on the iOS simulator. A solid hairline would be an acceptable fallback, but it is the walk's call.
 - **Web, rig on, with a cached check:** the Astoria → Newport drive should show "Google ✓" and the green "within N m" caption. Rig off (Bellingham) should show only the three pills: no RV line, no WeGo, no caption.
 - **Phone, rig on:** expect the amber caption and no ✓ on every drive, as decided in the vet HIGH.
+
+---
+
+# #181 · dev notes · i3 — Core: upNext and journalToday (#178 · q3 B · q4 B)
+
+This dispatch covers epic item **i3 only**. It is core only: no client renders these yet (i4/i5 wire them). i1 and i2 are already on the branch.
+
+## What changed
+
+- `packages/core/src/planner/up-next.ts` (new) exports `UpNextKind`, `UpNextItem` and `upNext(trip, now, today)`, with the exact shapes the plan gives.
+  - `stayItems` (`:87`): each Stay-category reservation (`categoryOf(type).cat === "Stay"`, so campground and lodging) on a scheduled destination gives a check-in and a check-out. Each is timed from `startsAt`/`endsAt` in its own zone when set, and untimed on `checkIn`/`checkOut` otherwise.
+  - Other destination reservations become a "booking" only when they have a `startsAt`. Its `when` is "<day> · <clock>" with no zone.
+  - `hopItem` (`:112`) handles a segment. It is timed by `departAt`/`departTz`, else by its first reservation with a `startsAt`. Untimed, it takes the first date from `segmentDates`. A hop with no date is skipped (for example, into a floating destination).
+  - `upNextItems` (`:138`) orders the items. It sorts by date first, then a slot: untimed check-out, then timed items by instant, then untimed check-in. Untimed hops are then spliced in right after their date's last check-out, or the last untimed hop already placed on that date. A date with neither gets the hop at the start of the date.
+  - `upNext` (`:189`): an item has passed when it is timed with instant ≤ now, or its date is before today. `next` is the item after the last passed one. `then` is the following item, but only when it is a hop on `next`'s date.
+- `packages/core/src/planner/stay-clock.ts:28`: `wallClock12` is now exported (doc comment notes why).
+- `packages/core/src/planner/index.ts:72`: `export * from "./up-next"`.
+- `packages/core/src/planner/journal.ts`:
+  - `:413`: new `JournalEarlierGroup` and `JournalToday` types.
+  - `:430`: `unratedOf`, the `toRate` rule (`isRateableReservation` true, and `rating` and `again` both null).
+  - `:451`: `journalToday(trip, today)`, as specified. It imports `weekdayMonthDay` from `./dates` for "Fri Aug 7".
+
+## Decisions and defaults (qa, please check)
+
+- **Vet MED addressed:** Earlier includes a past scheduled destination when `tripJournal` has a group for it **or** its `toRate` is non-empty. Such a destination's `entries` is `[]`, and its own `rating`/`again` are still passed through.
+- **Earlier is ordered by `destinationsInDateOrder` reversed**, so the latest arrival comes first. On a changeover day, today's destination is the one being arrived at (the `captureTarget` rule). The one being left appears in Earlier because its arriveDate is earlier.
+- **Around the trip in Earlier** only appears when today has a destination. When it has none, the shelf entries are Today's `entries`, so they are not shown twice.
+- **Defaults the plan didn't spell out:**
+  - An untimed stay with a null `checkIn`/`checkOut` falls back to the destination's `arriveDate`/`departDate`.
+  - A drive or untimed hop going home is titled "Drive to <trip.homeBase>", or "Drive to home" when there is no home base. It has `navTo` null because home has no coordinates on the trip's segments.
+  - A fly or ferry hop with no reservation is titled "Fly to"/"Ferry to" + the arriving destination's name, or the home base.
+- **`sameDay`** means `date === today`. The plan names the field but not its rule, and this is the reading that makes "TODAY" and `sameDay` agree.
+- **Zone abbreviation:** `Intl.DateTimeFormat("en-US", { timeZoneName: "short" })`. America/Los_Angeles gives "PST"/"PDT". Zones without a common US abbreviation print as "GMT+N", which is ICU's behavior.
+- **`date`** comes from `isoDateInZone(instant, tz ?? "UTC")`, with a UTC slice fallback for an invalid zone.
+
+## Tests
+
+- `packages/core/src/planner/up-next.test.ts` (new, 8 tests) covers all six rows of the wireframe's #178 table on the two fixtures from the plan. The Loop fixture is `pnwTrip()` with KOA out at 11:00 AM and South Beach in at 4:00 PM / out at 11:00 AM in LA. The Bellingham fixture is built by hand, with the Blaine Airbnb out at 11:00 AM and a SEA → BOI booking at 6:10 PM on the home segment. Extra cases:
+  - the untimed seed (check-out opens the day, and the drive follows);
+  - "Fly to Boise, ID" with no booking;
+  - a timed tour as a "booking".
+  - Drive kinds are asserted as `expect(x?.kind).toBe("drive")`, not inside an object literal. `src/w0-reset.test.ts` regex-bans the literal pairing repo-wide as a DayKind guard, and it caught my first draft.
+- `packages/core/src/planner/journal.test.ts`, new `journalToday` describe (5 tests):
+  - Aug 7: heading "Today · Fri Aug 7 · Newport, OR", earlier [Astoria].
+  - Aug 10: heading "Today · Mon Aug 10 · Around the trip", earlier [Newport, Astoria].
+  - An unrated KOA is in Astoria's `toRate`; a rated one is not.
+  - The vet-MED case: Astoria with no rating and only an unrated KOA is absent from `tripJournal` but present in Earlier with `toRate` [KOA].
+  - Around the trip closes Earlier only when today has a destination.
+- Honesty note: I wrote the implementation before the tests in this item, so they were not watched failing first.
+
+## For the walk
+
+Nothing renders yet. This item is pure core, and nothing in either client calls `upNext` or `journalToday` until i4/i5.

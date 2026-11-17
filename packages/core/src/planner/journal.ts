@@ -12,6 +12,7 @@ import type {
 } from "../domain/types";
 import { isAlreadySaved, type MatchCandidate } from "../domain/places";
 import { categoryOf } from "../theme/tokens";
+import { weekdayMonthDay } from "./dates";
 
 /**
  * The Journal lens (#113 · #106, Q1 B · Q4 B): a READ over the trip, not a
@@ -404,6 +405,91 @@ export function captureTarget<T extends Pick<Trip, "id" | "title" | "startDate" 
   const trip = activeTrip(trips, today);
   if (!trip) return null;
   return { trip, destination: todaysDestination([trip], today)?.destination ?? null };
+}
+
+// ── #178 · #181 i3 · the Journal's Today block and what came before it ──────
+
+/** One group under Today: a past destination (or "Around the trip"). */
+export interface JournalEarlierGroup {
+  /** Null for the "Around the trip" group. */
+  destination: Destination | null;
+  heading: string;
+  rating: number | null;
+  again: boolean | null;
+  entries: JournalEntry[];
+  /** The rows still waiting on "How was it?". */
+  toRate: Reservation[];
+}
+
+export interface JournalToday {
+  today: { heading: string; destination: Destination | null; entries: JournalEntry[]; toRate: Reservation[] };
+  earlier: JournalEarlierGroup[];
+}
+
+/** A destination's stays, meals and things to do that carry neither ★ nor Again. */
+function unratedOf(destination: Destination | null): Reservation[] {
+  if (!destination) return [];
+  return destination.reservations.filter((r) => isRateableReservation(r) && r.rating === null && r.again === null);
+}
+
+/**
+ * The Journal on a trip day (#178 · q3 B · q4 B): Today first, then the
+ * destinations already behind you, most recent first.
+ *
+ * - Today's destination is `captureTarget` — where "Did it" files. A travel
+ *   day, or a gap between destinations, has none: Today then reads "Around the
+ *   trip" and lists the shelf's entries.
+ * - Earlier is every SCHEDULED destination that arrived before today's (or,
+ *   with no destination today, that departed before today). A past
+ *   destination appears when it has journal entries or its own ★/Again (the
+ *   `tripJournal` rule) OR when something on it still waits for "How was it?"
+ *   — otherwise an unrated stay, the very row `toRate` exists for, would never
+ *   show its pill (vet MED).
+ * - When today has a destination, "Around the trip" closes Earlier if the
+ *   shelf has entries.
+ */
+export function journalToday(trip: Trip, today: IsoDate): JournalToday {
+  const journal = tripJournal(trip);
+  const groups = new Map(journal.destinations.map((g) => [g.destination.id, g]));
+  const destination = captureTarget([trip], today)?.destination ?? null;
+
+  const heading = `Today · ${weekdayMonthDay(today)} · ${destination?.place.name ?? JOURNAL_AROUND_HEADING}`;
+  const todayEntries = destination ? (groups.get(destination.id)?.entries ?? []) : journal.around;
+
+  const isEarlier = (d: Destination) =>
+    d.arriveDate !== null &&
+    d.departDate !== null &&
+    d.id !== destination?.id &&
+    (destination ? d.arriveDate < destination.arriveDate! : d.departDate < today);
+
+  const earlier: JournalEarlierGroup[] = destinationsInDateOrder(trip)
+    .filter(isEarlier)
+    .map((d) => {
+      const g = groups.get(d.id);
+      return {
+        destination: d,
+        heading: d.place.name,
+        rating: d.rating,
+        again: d.again,
+        entries: g?.entries ?? [],
+        toRate: unratedOf(d),
+      };
+    })
+    .filter((g) => groups.has(g.destination.id) || g.toRate.length > 0)
+    .reverse();
+
+  if (destination && journal.around.length > 0) {
+    earlier.push({
+      destination: null,
+      heading: JOURNAL_AROUND_HEADING,
+      rating: null,
+      again: null,
+      entries: journal.around,
+      toRate: [],
+    });
+  }
+
+  return { today: { heading, destination, entries: todayEntries, toRate: unratedOf(destination) }, earlier };
 }
 
 /** An idea as the match rule sees it: its own place, else its title, coordless. */
