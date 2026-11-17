@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import {
   getTripById,
@@ -6,12 +7,13 @@ import {
   listDismissedSaveIds,
   listSavedPlacesForOwner,
 } from "@rv-trip/db";
-import { nearbySaves, tripRig } from "@rv-trip/core";
+import { isoDateInZone, nearbySaves, tripRig } from "@rv-trip/core";
 import { TripPlanner } from "@/components/trip/TripPlanner";
 import { getOwner } from "@/lib/owner";
 import { nextTimeFor } from "@/lib/next-time";
 import { unitsFromPrefs } from "@/lib/units";
 import { routeTrip } from "@/lib/routing";
+import { TZ_COOKIE } from "@/lib/tz";
 
 // Hits the DB on every request; don't statically prerender.
 export const dynamic = "force-dynamic";
@@ -58,6 +60,13 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
     trip.surfaceRadiusMi,
     nextTime.saveIds,
   );
+  // #177 · the browser's date, read from the `tz` cookie the way the landing
+  // rule does (app/page.tsx) — null with no cookie, or one that is not a zone.
+  // It picks the tab the trip opens on (`defaultTripTab`); `now` is the
+  // request's instant for the Journal's Today.
+  const tz = (await cookies()).get(TZ_COOKIE)?.value;
+  const today = tz ? isoDateInZone(new Date(), tz) : null;
+  const now = new Date().toISOString();
 
   return (
     <TripPlanner
@@ -74,6 +83,8 @@ export default async function TripPage({ params }: { params: Promise<{ id: strin
       // (getTripById: trip override → household); the household's own is
       // handed down for Trip settings' "Use household default".
       householdHome={prefs?.homeBasePlace ?? null}
+      today={today}
+      now={now}
     />
   );
 }

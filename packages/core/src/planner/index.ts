@@ -66,6 +66,8 @@ export * from "./for-next-time";
 export * from "./stay-clock";
 /** `get_context`'s digest — the MCP session's first read (#162 · Q1 B). */
 export * from "./context-digest";
+/** The trip screen's tabs and the tab it opens on (#177 · #181 i1). */
+export * from "./trip-tab";
 
 export function allDestinations(trip: Trip): Destination[] {
   return trip.chapters.flatMap((l) => l.destinations);

@@ -36,6 +36,11 @@ import {
   timelineModel,
   tripArcs,
   tripDestinationPins,
+  defaultTripTab,
+  localIsoDate,
+  TRIP_TABS,
+  TRIP_TAB_LABEL,
+  type TripTab,
 } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
 import { NearbyBanner, NearbySheet } from "../../../../../src/nearby";
@@ -91,8 +96,11 @@ import {
  * sit inside Route; Map still renders OUTSIDE the ScrollView — a map's pan
  * gesture and a vertical scroll cannot share a box. A traveled trip (status
  * `complete`) opens on its Journal; otherwise Itinerary ▸ Route.
+ *
+ * #177 · #181 i1 — reordered and renamed Journal · Agenda · Ideas (core's
+ * `TRIP_TABS`), and the tab is core's `defaultTripTab`: a trip whose dates
+ * cover today, or a traveled one, opens on Journal; otherwise Agenda ▸ Route.
  */
-type Tab = "itinerary" | "ideas" | "journal";
 type Sub = "route" | "timeline" | "map";
 
 const SUBS: SegmentedOption<Sub>[] = [
@@ -106,7 +114,7 @@ export default function TripScreen() {
   const { bundle, error, reload } = useBundle(id);
   const [refreshing, setRefreshing] = useState(false);
   // Null until picked: the tab is DERIVED until then (below).
-  const [picked, setTab] = useState<Tab | null>(null);
+  const [picked, setTab] = useState<TripTab | null>(null);
   const [sub, setSub] = useState<Sub>("route");
   // #131 · the trip's + Add and the sheets it opens.
   const [addOpen, setAddOpen] = useState(false);
@@ -175,9 +183,10 @@ export default function TripScreen() {
   }
 
   const { trip } = bundle;
-  // The tab is derived until it is picked: a traveled trip opens on Journal.
-  const tab: Tab = picked ?? (trip.status === "complete" ? "journal" : "itinerary");
-  const lens = tab === "itinerary" ? sub : tab;
+  // The tab is derived until it is picked (#177 · `defaultTripTab`): a trip in
+  // progress today, or a traveled one, opens on Journal.
+  const tab: TripTab = picked ?? defaultTripTab(trip, localIsoDate());
+  const lens = tab === "agenda" ? sub : tab;
   const modeLabel =
     TRIP_MODE_CHOICES.find((c) => c.value === tripModeChoice(trip.defaultMode))?.label ?? "";
   const ideaCount =
@@ -302,7 +311,7 @@ export default function TripScreen() {
           )}
           {/* #131 · the mindset tabs, an underline row; the trip's + Add at its end. */}
           <View style={styles.tabs}>
-            {(["itinerary", "ideas", "journal"] as const).map((t) => (
+            {TRIP_TABS.map((t) => (
               <Pressable
                 key={t}
                 onPress={() => setTab(t)}
@@ -311,7 +320,7 @@ export default function TripScreen() {
                 style={[styles.tab, tab === t && styles.tabOn]}
               >
                 <Text style={[styles.tabText, tab === t && { color: C.ink }]}>
-                  {t === "itinerary" ? "Itinerary" : t === "ideas" ? "Ideas" : "Journal"}
+                  {TRIP_TAB_LABEL[t]}
                   {t === "ideas" && <Text style={styles.tabCount}> {ideaCount}</Text>}
                 </Text>
               </Pressable>
@@ -322,7 +331,7 @@ export default function TripScreen() {
               </Pressable>
             )}
           </View>
-          {tab === "itinerary" && <Segmented value={sub} options={SUBS} onChange={setSub} />}
+          {tab === "agenda" && <Segmented value={sub} options={SUBS} onChange={setSub} />}
         </View>
 
         {lens === "map" ? (
