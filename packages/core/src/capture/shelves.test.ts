@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { savedPlace, type SavedPlace, type SaveArea } from "../domain/types";
 import type { PlaceSummary } from "../providers/index";
 import {
+  PLACES_CATEGORIES,
+  nearYou,
   saveRowLine,
   savesShelves,
   shelfCounts,
@@ -209,5 +211,176 @@ describe("the offline upgrade suggestion (Q3 A)", () => {
         subline: "Restaurant · Coos Bay, OR",
       }),
     ).toEqual({ title: "Did you mean El Chandelier?", sub: "Restaurant · Coos Bay, OR", dismiss: "Dismiss" });
+  });
+});
+
+/**
+ * #186 i1 · #182 Near you — docs/design/186 §1 "nearYou · from Boise". The
+ * fixture is the wireframe's Boise library: Want to go 10 (Stay 2, Eat 3,
+ * Do 5) and Been there 7 (Stay 2, Eat 3, Do 2). Coordinates are chosen so
+ * each distance from (43.615, −116.202) lands on the §1 table's figure.
+ */
+describe("nearYou — the wireframe's Boise library (#182)", () => {
+  const HERE = { lat: 43.615, lng: -116.202 };
+  const area = (name: string, region: string | null, lat: number | null, lng: number | null): SaveArea => ({
+    id: `a_${name}`,
+    name,
+    region,
+    googlePlaceId: `g_${name}`,
+    lat,
+    lng,
+  });
+  const BOISE = area("Boise", "Idaho", 43.615, -116.2023);
+  const IDAHO_CITY = area("Idaho City", "Idaho", 43.8285, -115.8345);
+  const MOUNTAIN_HOME = area("Mountain Home", "Idaho", 43.1329, -115.6912);
+  const MCCALL = area("McCall", "Idaho", 44.9113, -116.0987);
+  const BEND_OR = area("Bend", "Oregon", 44.0582, -121.3153);
+  const CRATER = area("Crater Lake NP", "Oregon", 42.9446, -122.109);
+  const NEWPORT_OR = area("Newport", "Oregon", 44.6368, -124.0535);
+  const ASTORIA = area("Astoria", "Oregon", 46.1879, -123.8313);
+  const TRUCKEE = area("Truckee", "California", 39.328, -120.1833);
+  const VEGAS = area("Las Vegas", "Nevada", 36.1716, -115.1391);
+  const BELLINGHAM = area("Bellingham", "Washington", 48.7519, -122.4787);
+
+  let k = 0;
+  function at(
+    name: string,
+    a: SaveArea | null,
+    own: { lat: number; lng: number } | null,
+    extra: Partial<SavedPlace> = {},
+  ): SavedPlace {
+    k += 1;
+    return savedPlace.parse({
+      id: `b${k}`,
+      ownerId: "dev-household",
+      place: { name, lat: own?.lat ?? null, lng: own?.lng ?? null, googlePlaceId: null },
+      type: "activity",
+      rating: null,
+      lastChange: null,
+      again: null,
+      area: a,
+      anchor: own ? "place" : "area",
+      createdAt: `2026-10-${String(k).padStart(2, "0")}T00:00:00Z`,
+      ...extra,
+    });
+  }
+
+  const LIBRARY: SavedPlace[] = [
+    // Want to go — 10
+    at("Ponderosa State Park", MCCALL, { lat: 44.9278, lng: -116.0838 }, { type: "campground" }),
+    at("Table Rock sunrise hike", BOISE, { lat: 43.6031, lng: -116.1631 }),
+    at("that taco truck", null, null, { type: "dining" }),
+    at("Bogus Basin", BOISE, { lat: 43.764, lng: -116.1029 }, { source: "Jane & Rick" }),
+    at("The Springs, Idaho City", IDAHO_CITY, null, { areaLabel: "Idaho City, ID" }),
+    at("Deschutes River float", BEND_OR, null),
+    at("Rim Drive scenic loop", CRATER, null),
+    at("Rogue Ales brewery lunch", NEWPORT_OR, null, { type: "dining" }),
+    at("Village Camp Truckee", TRUCKEE, null, { type: "campground" }),
+    at("The Chandelier, Cosmopolitan", VEGAS, null, { type: "dining", source: "a friend" }),
+    // Been there — 7
+    at("Mountain Home KOA", MOUNTAIN_HOME, { lat: 43.133, lng: -115.688 }, { type: "campground", status: "been", rating: 3 }),
+    at("Barbacoa", BOISE, { lat: 43.6011, lng: -116.1797 }, { type: "dining", status: "been", rating: 4 }),
+    at("Astoria/Warrenton KOA", ASTORIA, null, { type: "campground", status: "been", rating: 5 }),
+    at("Fort George Brewery", ASTORIA, null, { type: "dining", status: "been", rating: 4 }),
+    at("Oregon Coast Aquarium", NEWPORT_OR, null, { status: "been", rating: 4 }),
+    at("Aslan Brewing Co.", BELLINGHAM, null, { type: "dining", status: "been", rating: 4 }),
+    at("Chuckanut Drive", BELLINGHAM, null, { status: "been", rating: 5 }),
+  ];
+  const restNames = (r: ReturnType<typeof nearYou>["rest"]) => [
+    ...r.regions.flatMap((g) => g.areas.flatMap((a) => a.saves.map((s) => s.place.name))),
+    ...r.unanchored.map((s) => s.place.name),
+  ];
+
+  it("names the four chips in the frame's order", () => {
+    expect(PLACES_CATEGORIES).toEqual(["All", "Stay", "Eat", "Do"]);
+  });
+
+  it("Want/All from Boise: Table Rock, Bogus Basin, then The Springs measured from its Idaho City area", () => {
+    const r = nearYou(LIBRARY, "want", HERE, "All");
+    expect(r.near.map((n) => n.save.place.name)).toEqual([
+      "Table Rock sunrise hike",
+      "Bogus Basin",
+      "The Springs, Idaho City",
+    ]);
+    const [table, bogus, springs] = r.near;
+    expect(table!.mi).toBeCloseTo(2.1, 1);
+    expect(bogus!.mi).toBeCloseTo(11.4, 1);
+    expect(springs!.mi).toBeCloseTo(23.5, 1);
+    expect(springs!.save.place.lat).toBeNull(); // no pin of its own: the area's point measured it
+    expect(r.total).toBe(10);
+  });
+
+  it("Want/All: Ponderosa (≈90.9 mi) is in the rest under Idaho ▸ McCall; the taco truck is unanchored", () => {
+    const r = nearYou(LIBRARY, "want", HERE, "All");
+    const idaho = r.rest.regions.find((g) => g.region === "Idaho")!;
+    expect(idaho.areas.map((a) => [a.area.name, a.saves.map((s) => s.place.name)])).toEqual([
+      ["McCall", ["Ponderosa State Park"]],
+    ]);
+    expect(r.rest.unanchored.map((s) => s.place.name)).toEqual(["that taco truck"]);
+    expect(restNames(r.rest)).toHaveLength(7);
+    for (const n of r.near) expect(restNames(r.rest)).not.toContain(n.save.place.name);
+  });
+
+  it("Been/All from Boise: Barbacoa (≈1.5 mi) then Mountain Home KOA (≈42.1 mi)", () => {
+    const r = nearYou(LIBRARY, "been", HERE, "All");
+    expect(r.near.map((n) => [n.save.place.name, Math.round(n.mi * 10) / 10])).toEqual([
+      ["Barbacoa", 1.5],
+      ["Mountain Home KOA", 42.1],
+    ]);
+    expect(r.total).toBe(7);
+    expect(restNames(r.rest)).toHaveLength(5);
+  });
+
+  it("cat Stay drops every non-Stay save from both near and rest", () => {
+    const want = nearYou(LIBRARY, "want", HERE, "Stay");
+    expect(want.near).toEqual([]);
+    expect(restNames(want.rest).sort()).toEqual(["Ponderosa State Park", "Village Camp Truckee"]);
+    expect(want.total).toBe(2);
+
+    const been = nearYou(LIBRARY, "been", HERE, "Stay");
+    expect(been.near.map((n) => n.save.place.name)).toEqual(["Mountain Home KOA"]);
+    expect(restNames(been.rest)).toEqual(["Astoria/Warrenton KOA"]);
+    expect(been.total).toBe(2);
+  });
+
+  it("counts match the chips: Want Stay 2 · Eat 3 · Do 5, Been Stay 2 · Eat 3 · Do 2", () => {
+    const totals = (status: "want" | "been") =>
+      PLACES_CATEGORIES.map((c) => nearYou(LIBRARY, status, null, c).total);
+    expect(totals("want")).toEqual([10, 2, 3, 5]);
+    expect(totals("been")).toEqual([7, 2, 3, 2]);
+  });
+
+  it("Travel and Other saves show under All only", () => {
+    const extra = [
+      ...LIBRARY,
+      at("Bonneville ferry", BOISE, { lat: 43.62, lng: -116.2 }, { type: "transport" }),
+      at("a spot Dana mentioned", BOISE, null, { type: "other" }),
+    ];
+    const all = nearYou(extra, "want", HERE, "All");
+    expect(all.near.map((n) => n.save.place.name)).toEqual(
+      expect.arrayContaining(["Bonneville ferry", "a spot Dana mentioned"]),
+    );
+    expect(all.total).toBe(12);
+    for (const c of ["Stay", "Eat", "Do"] as const) {
+      const r = nearYou(extra, "want", HERE, c);
+      const names = [...r.near.map((n) => n.save.place.name), ...restNames(r.rest)];
+      expect(names).not.toContain("Bonneville ferry");
+      expect(names).not.toContain("a spot Dana mentioned");
+    }
+  });
+
+  it("here null: no Near you — rest is exactly savesShelves of the filtered list", () => {
+    for (const status of ["want", "been"] as const) {
+      const r = nearYou(LIBRARY, status, null, "All");
+      expect(r.near).toEqual([]);
+      expect(r.rest).toEqual(savesShelves(LIBRARY, status));
+    }
+    const stay = nearYou(LIBRARY, "want", null, "Stay");
+    expect(stay.rest).toEqual(
+      savesShelves(
+        LIBRARY.filter((s) => s.type === "campground" || s.type === "lodging"),
+        "want",
+      ),
+    );
   });
 });

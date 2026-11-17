@@ -12,7 +12,7 @@ import type {
   Trip,
 } from "../domain/types";
 import { SURFACE_RADII } from "../domain/types";
-import { haversineMeters } from "../providers/index";
+import { haversineMeters, type LatLng } from "../providers/index";
 import { categoryOf } from "../theme/tokens";
 import { METERS_PER_MILE, NEAR_RADIUS_MI, locatedDestinations, shelfMiles, type DestinationAnchor } from "./shelf";
 
@@ -41,8 +41,12 @@ interface Measured {
  * for distance ONLY; the match against the trip's ideas (`isAlreadySaved`)
  * sees the save's own coordinates (rule 4 in domain/places.ts: borrowed
  * coordinates never enter a comparison).
+ *
+ * Exported (#186 i1) as the ONE rule every "how far is this save" surface
+ * measures by — trip surfacing here, the Places tab's Near you (`nearYou`,
+ * capture/shelves.ts) — so the two never disagree about a save's point.
  */
-function pointOf(s: SavedPlace): { lat: number; lng: number } | null {
+export function savePoint(s: SavedPlace): LatLng | null {
   if (hasCoords(s.place)) return { lat: s.place.lat, lng: s.place.lng };
   const d = s.area;
   if (d && d.lat !== null && d.lng !== null) return { lat: d.lat, lng: d.lng };
@@ -110,7 +114,7 @@ export function nearbySaves(
   const measured: Measured[] = [];
   for (const save of saves) {
     if (dismissed.has(save.id)) continue;
-    const point = pointOf(save);
+    const point = savePoint(save);
     if (!point) continue;
     if (isAlreadySaved(save.place, onTrip)) continue;
     const { destination, mi } = nearest(point, anchors);
