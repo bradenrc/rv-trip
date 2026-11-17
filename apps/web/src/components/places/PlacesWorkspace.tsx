@@ -9,6 +9,7 @@ import type {
   SavedPlace,
   SavedPlacePatch,
   SavePlaceForm,
+  Units,
 } from "@rv-trip/core";
 import {
   applySavedPlacePatch,
@@ -52,6 +53,7 @@ export function PlacesWorkspace({
   places: initialPlaces,
   trips,
   suggestions = [],
+  units,
   children,
 }: {
   places: SavedPlace[];
@@ -61,6 +63,8 @@ export function PlacesWorkspace({
    * complete trip (§7). De-duplication against the library happens here, not in
    * the query, so accepting one drops it on the next render. */
   suggestions?: PlaceSuggestion[];
+  /** The account's display units — Near you's distances (#186 i2). */
+  units?: Units;
   children: ReactNode;
 }) {
   const [places, setPlaces] = useState(initialPlaces);
@@ -268,6 +272,7 @@ export function PlacesWorkspace({
 
       <PlacesLibrary
         places={places}
+        units={units}
         onPatch={patchPlace}
         leading={shelf?.suggestions.map((s) => (
           <SuggestedPlaceCard

@@ -87,3 +87,21 @@ export const Travel = () => (
     />
   </div>
 );
+
+export const NearYou = () => (
+  <div style={{ maxWidth: 380 }}>
+    <PlaceCard
+      savedPlace={{
+        ...base,
+        id: "p5",
+        place: { name: "Bogus Basin", lat: 43.764, lng: -116.1029, googlePlaceId: null },
+        region: "Boise, ID",
+        type: "activity",
+        status: "want",
+        source: "Jane & Rick",
+      }}
+      distance="11 mi"
+      onAddToTrip={noop}
+    />
+  </div>
+);

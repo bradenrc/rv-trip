@@ -3,7 +3,12 @@ import { savedPlace, type SavedPlace, type SaveArea } from "../domain/types";
 import type { PlaceSummary } from "../providers/index";
 import {
   PLACES_CATEGORIES,
+  isPlacesCategory,
   nearYou,
+  nearYouName,
+  nearYouNothing,
+  nearYouWithin,
+  placesCategoryEmpty,
   saveRowLine,
   savesShelves,
   shelfCounts,
@@ -382,5 +387,39 @@ describe("nearYou — the wireframe's Boise library (#182)", () => {
         "want",
       ),
     );
+  });
+
+  // #186 i2 — the copy and the chip name both clients read.
+  it("names the location chip by the nearest near save's area (Boise on both shelves)", () => {
+    expect(nearYouName(nearYou(LIBRARY, "want", HERE, "All").near, "Garden City")).toBe("Boise");
+    expect(nearYouName(nearYou(LIBRARY, "been", HERE, "All").near, null)).toBe("Boise");
+  });
+
+  it("falls back to the resolved locality, then to null (the chip reads \"Near you\")", () => {
+    const far = { lat: 47.6, lng: -122.3 };
+    expect(nearYou(LIBRARY, "want", far, "All").near).toEqual([]);
+    expect(nearYouName([], "Seattle")).toBe("Seattle");
+    expect(nearYouName([], null)).toBeNull();
+    // A near save with no area is skipped for the name, not taken as "no name".
+    const truck = at("cart by the river", null, { lat: 43.616, lng: -116.2 }, { type: "dining" });
+    const near = nearYou([truck, ...LIBRARY], "want", HERE, "All").near;
+    expect(near[0]!.save.place.name).toBe("cart by the river");
+    expect(nearYouName(near, "Garden City")).toBe("Boise");
+  });
+
+  it("writes the two dashed lines the wireframe draws", () => {
+    expect(placesCategoryEmpty("Eat", "want")).toBe("No eat places on Want to go yet.");
+    expect(placesCategoryEmpty("Stay", "been")).toBe("No stay places on Been there yet.");
+    expect(nearYouNothing("Boise")).toBe("Nothing on this shelf within 50 mi of Boise.");
+    expect(nearYouNothing(null)).toBe("Nothing on this shelf within 50 mi.");
+    expect(nearYouWithin(null)).toBe("within 50 mi");
+    expect(nearYouWithin("Boise")).toBe("within 50 mi of Boise");
+  });
+
+  it("narrows a stored chip value to the four the build draws", () => {
+    for (const c of PLACES_CATEGORIES) expect(isPlacesCategory(c)).toBe(true);
+    expect(isPlacesCategory("Travel")).toBe(false);
+    expect(isPlacesCategory(null)).toBe(false);
+    expect(isPlacesCategory("stay")).toBe(false);
   });
 });

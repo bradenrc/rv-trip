@@ -1,61 +1,94 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   BookmarkCheck,
   CircleCheckBig,
   LayoutGrid,
   Map as MapIcon,
+  MapPin,
+  MapPinOff,
   MapPinned,
 } from "lucide-react";
 import type {
+  LatLng,
+  PlacesCategory,
   ReservationType,
   SavedPlace,
   SavedPlacePatch,
   SavedPlaceStatus,
+  Units,
 } from "@rv-trip/core";
 import {
-  categoryMeta,
+  categoryOf,
+  convertMiles,
+  DEFAULT_UNITS,
+  distanceUnitLabel,
+  isPlacesCategory,
+  nearYou,
+  nearYouName,
+  nearYouNothing,
+  nearYouWithin,
+  placesCategoryEmpty,
+} from "@rv-trip/core";
+import {
   DrillRow,
   PlaceCard,
   SegmentedControl,
   ViewSwitch,
   FilterChip,
   EmptyShelf,
-  type CategoryLabel,
 } from "@rv-trip/ui";
 import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { GoogleLine } from "@/components/places/GoogleLine";
 import { MapMount } from "@/components/map/MapMount";
 import { buildMapModel } from "@/components/map/pins";
+import { browserPosition, resolveAreaNear } from "@/lib/area-label";
 import { SavesGroups } from "./SavesGroups";
 
 type View = "grid" | "map";
-type CatFilter = "All" | CategoryLabel;
 
-/** The filterable categories, in the order the chips read. One representative
- * ReservationType per category so the chip pulls its icon/color from
- * categoryMeta rather than defining its own map. */
-const CAT_CHIPS: { cat: CategoryLabel; type: ReservationType }[] = [
+/** The chosen chip, remembered in this browser (#186 i2 · q4 A) — the phone's key too. */
+const CAT_KEY = "rv-places-cat";
+
+/** The filterable categories, in the order the chips read (#186 i2 · q3 A:
+ * All · Stay · Eat · Do — Travel saves show under All only). One
+ * representative ReservationType per category so the chip pulls its
+ * icon/color from categoryMeta rather than defining its own map. */
+const CAT_CHIPS: { cat: Exclude<PlacesCategory, "All">; type: ReservationType }[] = [
   { cat: "Stay", type: "campground" },
   { cat: "Eat", type: "dining" },
   { cat: "Do", type: "activity" },
-  { cat: "Travel", type: "transport" },
 ];
+
+/** The library's grid — SavesGroups' own, for the Near you block. */
+const GRID = "grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]";
+/** A group header — SavesGroups' region header type, so the two read as one list. */
+const GROUP_HEAD =
+  "flex items-baseline gap-1.5 px-0.5 pt-0.5 font-mono text-[9.5px] uppercase tracking-[0.1em]";
 
 /**
  * The Saves library (#111 i4 renamed it from Places; the URL is still
  * /places). Two shelves off one status field, a category filter scoped to the
  * active shelf, and a grid/map lens over the same filtered list — the grid
  * grouped by area under region headers (`SavesGroups`).
+ *
+ * #186 i2 · #182 (docs/design/186 §4): a location chip beside the shelf
+ * switch, and — once the browser has a fix — a "Near you" block (core's
+ * `nearYou`, within NEAR_RADIUS_MI, distances in the account's units) ahead of
+ * "Everywhere else", the shipped groups. The browser is asked only on a tap;
+ * if the permission is already granted, the fix is read on load.
  */
 export function PlacesLibrary({
   places,
   leading,
   cardMenu,
   onPatch,
+  units = DEFAULT_UNITS,
 }: {
   places: SavedPlace[];
+  /** The account's display units (`unitsFromPrefs`, read by places/page.tsx). */
+  units?: Units;
   /** Cards that go before the library's own — the "Been there?" suggestions of
    * §5, drawn in the same grid row the frame draws them in. They are not
    * library rows: the shelf switch, the category chips and their counts all
@@ -73,29 +106,98 @@ export function PlacesLibrary({
   onPatch?: (place: SavedPlace, patch: SavedPlacePatch) => void;
 }) {
   const [status, setStatus] = useState<SavedPlaceStatus>("want");
-  const [cat, setCat] = useState<CatFilter>("All");
+  const [cat, setCat] = useState<PlacesCategory>("All");
   const [view, setView] = useState<View>("grid");
   /** Which card has its research pad open — one at a time, the library's own
    * state. The card renders the pad; it never knows about the shelf. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  /** Where the browser is — null until it says (and for good, if refused). */
+  const [here, setHere] = useState<LatLng | null>(null);
+  const [resolved, setResolved] = useState<string | null>(null);
+
+  // The remembered chip, read once after mount: the server render has no
+  // storage, so reading it during render would mismatch hydration. One
+  // set, on mount only — not the cascading-render case the rule guards.
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(CAT_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (isPlacesCategory(v)) setCat(v);
+    } catch {
+      // Storage blocked: the chips start on All.
+    }
+  }, []);
+  const pickCat = (c: PlacesCategory) => {
+    setCat(c);
+    try {
+      localStorage.setItem(CAT_KEY, c);
+    } catch {
+      // Not remembered this time; the choice still applies.
+    }
+  };
+
+  const locate = useCallback(async () => {
+    const at = await browserPosition();
+    if (at) setHere(at);
+  }, []);
+  // Never a prompt on load: only an already-granted permission reads the fix.
+  useEffect(() => {
+    let live = true;
+    navigator.permissions
+      ?.query({ name: "geolocation" })
+      .then((p) => {
+        if (live && p.state === "granted") void locate();
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [locate]);
+
   const shelf = useMemo(() => places.filter((p) => p.status === status), [places, status]);
 
   // Category counts are scoped to the active shelf — the chips describe what's
   // in front of you, not the whole library.
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { All: shelf.length };
-    for (const p of shelf) {
-      const k = categoryMeta(p.type).cat;
-      c[k] = (c[k] ?? 0) + 1;
-    }
-    return c;
-  }, [shelf]);
+  const counts = useMemo(
+    () =>
+      Object.fromEntries(
+        (["All", ...CAT_CHIPS.map((c) => c.cat)] as PlacesCategory[]).map((c) => [
+          c,
+          nearYou(places, status, null, c).total,
+        ]),
+      ) as Record<PlacesCategory, number>,
+    [places, status],
+  );
 
+  /** Near you, then the rest grouped as shipped — one core call, both clients. */
+  const split = useMemo(() => nearYou(places, status, here, cat), [places, status, here, cat]);
   const list = useMemo(
-    () => (cat === "All" ? shelf : shelf.filter((p) => categoryMeta(p.type).cat === cat)),
+    () => (cat === "All" ? shelf : shelf.filter((p) => categoryOf(p.type).cat === cat)),
     [shelf, cat],
   );
+
+  // The chip's name: the nearest near save's area, else the locality the
+  // resolver names, else "Near you". Read off the All list so it holds still
+  // while chips change.
+  const areaName = useMemo(
+    () => (here ? nearYouName(nearYou(places, status, here, "All").near, null) : null),
+    [places, status, here],
+  );
+  useEffect(() => {
+    if (!here || areaName !== null) return;
+    let live = true;
+    resolveAreaNear(here)
+      .then((a) => {
+        if (live) setResolved(a?.name ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [here, areaName]);
+  const name = here ? (areaName ?? resolved) : null;
+  const miles = (mi: number) => `${Math.round(convertMiles(mi, units))} ${distanceUnitLabel(units)}`;
 
   // The map lens draws exactly `list` — the array the grid renders. It never
   // filters again; the pins ARE the list.
@@ -109,7 +211,7 @@ export function PlacesLibrary({
   // may have nothing on the other, and a silent empty result reads as a bug.
   const changeStatus = (s: SavedPlaceStatus) => {
     setStatus(s);
-    setCat("All");
+    pickCat("All");
   };
 
   // The wrapper is the grid item, so the card still stretches to the row's
@@ -117,10 +219,11 @@ export function PlacesLibrary({
   // the card's own box. `onAddToTrip` stays unpassed: the add-a-destination path it
   // needs is issue #22, in epic #40 — until then the DS button is inert by
   // design, not by omission.
-  const renderCard = (p: SavedPlace) => (
+  const cardFor = (p: SavedPlace, distance?: string) => (
     <div key={p.id} className="relative grid">
       <PlaceCard
         savedPlace={p}
+        distance={distance}
         expanded={expandedId === p.id}
         onToggleExpand={() => setExpandedId((id) => (id === p.id ? null : p.id))}
         onPatch={onPatch ? (patch) => onPatch(p, patch) : undefined}
@@ -142,6 +245,8 @@ export function PlacesLibrary({
       {cardMenu?.(p)}
     </div>
   );
+  /** Every card but a Near you one: no distance. */
+  const renderCard = (p: SavedPlace) => cardFor(p);
   // The map lens's side list stays the flat list it shipped as — the pins ARE
   // the list, and the grouping is the grid's (#111 i4).
   const cards = list.map(renderCard);
@@ -149,14 +254,31 @@ export function PlacesLibrary({
   return (
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
-        <SegmentedControl
-          value={status}
-          onChange={changeStatus}
-          options={[
-            { value: "want", label: "Want to go", Icon: BookmarkCheck, count: wantCount },
-            { value: "been", label: "Been there", Icon: CircleCheckBig, count: beenCount },
-          ]}
-        />
+        <div className="flex flex-wrap items-center gap-3">
+          <SegmentedControl
+            value={status}
+            onChange={changeStatus}
+            options={[
+              { value: "want", label: "Want to go", Icon: BookmarkCheck, count: wantCount },
+              { value: "been", label: "Been there", Icon: CircleCheckBig, count: beenCount },
+            ]}
+          />
+          {here ? (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-rv-pill border border-rv-border-hi px-2.5 py-1 text-[11px] font-bold text-rv-ink">
+              <MapPin className="size-3 text-rv-green" />
+              {name ? `Near ${name}` : "Near you"}
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void locate()}
+              className="inline-flex cursor-pointer items-center gap-1 whitespace-nowrap rounded-rv-pill border border-dashed border-rv-border-hi bg-transparent px-2.5 py-1 text-[11px] font-bold text-rv-ink-faded"
+            >
+              <MapPinOff className="size-3" />
+              Set location
+            </button>
+          )}
+        </div>
         <ViewSwitch
           value={view}
           onChange={setView}
@@ -173,7 +295,7 @@ export function PlacesLibrary({
           label="All"
           count={counts.All ?? 0}
           active={cat === "All"}
-          onClick={() => setCat("All")}
+          onClick={() => pickCat("All")}
         />
         {CAT_CHIPS.map((c) => (
           <FilterChip
@@ -182,7 +304,7 @@ export function PlacesLibrary({
             type={c.type}
             count={counts[c.cat] ?? 0}
             active={cat === c.cat}
-            onClick={() => setCat(c.cat)}
+            onClick={() => pickCat(c.cat)}
           />
         ))}
       </div>
@@ -215,10 +337,36 @@ export function PlacesLibrary({
               </div>
             </div>
           )}
+          {/* #186 i2 · q1 A: with a fix, Near you leads, nearest first. */}
+          {here && list.length > 0 && (
+            <div className="mb-4 flex flex-col gap-2.5">
+              <div className={`${GROUP_HEAD} font-bold text-rv-ink`}>
+                Near you
+                <span className="ml-auto font-medium normal-case tracking-normal text-rv-ink-faded">
+                  {nearYouWithin(name)}
+                </span>
+              </div>
+              {split.near.length > 0 ? (
+                <div className={GRID}>{split.near.map((n) => cardFor(n.save, miles(n.mi)))}</div>
+              ) : (
+                <div className="rounded-rv-card border border-dashed border-rv-border-hi p-2.5 text-center text-[11.5px] text-rv-ink-muted">
+                  {nearYouNothing(name)}
+                </div>
+              )}
+              {split.total > split.near.length && (
+                <div className={`${GROUP_HEAD} mt-1 text-rv-ink-faded`}>Everywhere else</div>
+              )}
+            </div>
+          )}
           {/* #111 i4 · Q4 B: the grid is grouped by area under region
-              headers — core's savesShelves, the phone's Saves tab order. */}
-          <SavesGroups places={list} status={status} renderCard={renderCard} />
+              headers — core's savesShelves, the phone's Saves tab order.
+              #186 i2: it draws nearYou's `rest` (all of it, with no fix). */}
+          <SavesGroups places={list} status={status} shelves={split.rest} renderCard={renderCard} />
         </>
+      ) : shelf.length > 0 && cat !== "All" ? (
+        <div className="rounded-rv-card border border-dashed border-rv-border-hi p-2.5 text-center text-[11.5px] text-rv-ink-muted">
+          {placesCategoryEmpty(cat, status)}
+        </div>
       ) : status === "want" ? (
         <EmptyShelf
           Icon={BookmarkCheck}

@@ -230,6 +230,51 @@ export function Chip({
 }
 
 /**
+ * The RN mirror of @rv-trip/ui's `FilterChip` (packages/ui/src/Places.tsx:305)
+ * for the Places tab's All · Stay · Eat · Do row (#186 i2 · q3 A · q11 A),
+ * at docs/design/186's phone `.fchip` metrics. Active fills `C.navy` with
+ * `C.ink` text; idle is `C.surface` / `C.border` / `C.inkMuted`, and a `type`
+ * puts its category's glyph in front in that category's colour. This kit ships
+ * no icon set (see `CategoryTile`), so the glyph is a dot. The count is mono.
+ */
+export function FilterChip({
+  label,
+  count,
+  active,
+  type,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  /** When set, the chip carries that category's glyph in its colour. */
+  type?: ReservationType;
+  onPress: () => void;
+}) {
+  const ink = active ? C.ink : C.inkMuted;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      hitSlop={4}
+      style={[
+        styles.fchip,
+        active
+          ? { backgroundColor: C.navy, borderColor: "transparent" }
+          : { backgroundColor: C.surface, borderColor: C.border },
+      ]}
+    >
+      {type && (
+        <Text style={[styles.fchipGlyph, { color: active ? ink : categoryOf(type).color }]}>●</Text>
+      )}
+      <Text style={[styles.fchipText, { color: ink }]}>{label}</Text>
+      <Text style={[styles.fchipCount, { color: ink }]}>{count}</Text>
+    </Pressable>
+  );
+}
+
+/**
  * The capture toast (docs/design/111 `.toast`). Green = verified — "Saved
  * El Chandelier", "Synced 2 saves". Amber = attention — "Saved on this phone",
  * and the sheet's offline strip. A native-local pattern: `packages/ui` is
@@ -482,6 +527,19 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   chipText: { fontFamily: F.mono, fontSize: 10, fontWeight: "600" },
+  // docs/design/186 phone `.fchip`
+  fchip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderRadius: R.pill,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+  },
+  fchipGlyph: { fontSize: 9 },
+  fchipText: { fontSize: 11, fontWeight: "600" },
+  fchipCount: { fontFamily: F.mono, fontSize: 9.5, opacity: 0.65 },
   toast: {
     flexDirection: "row",
     alignItems: "center",

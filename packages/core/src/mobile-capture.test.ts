@@ -123,7 +123,9 @@ const store = read("src/store.ts");
 
 describe("saves · the tab renders core's shelves", () => {
   it("groups through savesShelves and draws each row's line through saveRowLine", () => {
-    expect(saves).toContain("savesShelves(saves, status)");
+    // #186 i2: the shelf now goes through core's nearYou, whose `rest` IS
+    // savesShelves of the filtered list (exactly it, when there is no fix).
+    expect(saves).toContain("nearYou(saves, status, here, cat)");
     expect(saves).toContain("saveRowLine(s)");
     expect(saves).toContain("shelfCounts(saves)");
   });

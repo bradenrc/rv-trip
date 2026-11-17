@@ -40,3 +40,62 @@ Scope: epic item **i1 of 9 only** (#182 core seam · q1 A · q2 A · q3 A). No U
 - Green: same command after → `Tests  23 passed (23)`.
 - Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1518 passed (1518)`,
   web `Tests 543 passed (543)` (the JSON error lines in the web log are the MCP suite's expected-failure call logs).
+
+---
+
+# i2 · Near you, the location chip and the category chips on both Places screens
+
+Scope: epic item **i2 of 9 only** (#182 renders · q1 A · q3 A · q4 A · q11 A). No schema, no route, no trip card (i4), no map panel (i7).
+
+## What changed
+
+- **Core copy helpers** in `packages/core/src/capture/shelves.ts:142-174`, so both clients say the same thing: `isPlacesCategory` (narrows the stored `rv-places-cat`; a stale "Travel" is ignored), `nearYouName(near, resolved)` (the area of the nearest near save, else the resolved locality, else null, in which case the chip reads "Near you"), `placesCategoryEmpty` ("No eat places on Want to go yet."), `nearYouWithin` ("within 50 mi[ of Boise]") and `nearYouNothing` ("Nothing on this shelf within 50 mi of Boise."). Tests are in `shelves.test.ts` (the last 4 `it`s of the Boise describe).
+- **DS** `packages/ui/src/Places.tsx:56-62,117-120`: `PlaceCard` gains optional `distance?: string`. The mono meta line now renders when **region or distance** is present (vet MED) and prints `region · distance`. With no `distance` the card is unchanged. `.design-sync/previews/PlaceCard.tsx` gains a `NearYou` story.
+- **Phone** `apps/mobile/src/ui.tsx:240`: a new `FilterChip` mirrors the DS one. Active is `C.navy` with `C.ink`; idle is `C.surface`/`C.border`/`C.inkMuted`; the category glyph is in `categoryOf(type).color` and the count is mono, at the wireframe's `.fchip` metrics.
+- **Phone** `apps/mobile/app/(tabs)/saves.tsx`:
+  - `CAT_KEY "rv-places-cat"` :28. Read from AsyncStorage on mount; `pickCat` writes it.
+  - `changeShelf` :76 resets the chip to All and writes All.
+  - `LocationChip` :185 sits right of the title (`titleRow`). It shows "Near <name>" with a `C.green` ⌖, or a dashed `C.borderHi` "Set location". Only the unfixed chip has an `onPress`.
+  - `CategoryChips` :203 is the All · Stay · Eat · Do row under ShelfSwitch. Counts are `nearYou(..., null, c).total` and the row is hidden when the library is empty.
+  - `Shelf` :234 renders `nearYou`. With a fix it shows the "Near you" heading plus "within 50 mi", then the rows with mono `<n> mi` (or the dashed nothing-near line), then "Everywhere else" and the shipped groups (`Groups` :275) of `rest`. With no fix it shows exactly today's list. An empty filtered shelf shows the dashed per-chip line.
+  - `useHere` :342 calls `getForegroundPermissionsAsync` on focus, then `getLastKnownPositionAsync` only if granted. `requestForegroundPermissionsAsync` is called only in `ask`, which only the chip's onPress receives.
+  - `useResolvedName` :382 calls `api.areas.resolve`, and only when no near save names an area.
+- **Web** `apps/web/src/components/places/PlacesLibrary.tsx`:
+  - `CAT_KEY` :52. `CAT_CHIPS` :58 is Stay/Eat/Do (Travel dropped).
+  - `pickCat` :131 writes localStorage in try/catch, and the stored value is read in a mount effect in try/catch.
+  - `locate` :140 calls `browserPosition` on the chip's tap. `navigator.permissions.query({name:"geolocation"})` :147 reads the fix on mount only when the state is "granted".
+  - `split = nearYou(...)` :174. `changeStatus` :212 resets via `pickCat("All")`.
+  - `cardFor(p, distance?)` :222. Only `split.near.map((n) => cardFor(n.save, miles(n.mi)))` passes a distance.
+  - The location chip :262-280 sits in the SegmentedControl row.
+  - The "Near you · within 50 mi of <name>" block comes before `SavesGroups`, which now draws `split.rest`. The dashed per-chip empty box is at :368, and EmptyShelf is unchanged for an empty shelf.
+  - Distances use `convertMiles` + `distanceUnitLabel` with a `units` prop.
+- **Web plumbing:**
+  - `SavesGroups.tsx:24-32` takes an optional `shelves`. Without it, behaviour is unchanged.
+  - `PlacesWorkspace` passes `units` through.
+  - `app/places/page.tsx:2,10,25-27,41` reads `getPrefsByOwner` → `unitsFromPrefs`, as map/page.tsx does. `listTripsForOwner` is left alone; the swap is i4's.
+- **Tests:**
+  - New `packages/core/src/mobile-places.test.ts` reads saves.tsx and ui.tsx as source, per the acceptance criteria.
+  - New `apps/web/src/components/places/near-you.test.ts`: PlaceCard `distance` checked through renderToStaticMarkup (with region, without region, absent); SavesGroups `shelves`; and source reads of PlacesLibrary, page and workspace.
+  - Updated `mobile-capture.test.ts:126`: the old `savesShelves(saves, status)` assertion now expects `nearYou(saves, status, here, cat)`, because the shelf is grouped through nearYou and its `rest` is savesShelves.
+
+## Decisions / defaults (flag for the walk)
+
+- **Phone glyphs.** The mobile kit has no icon set, so the chip's pin is `⌖` (already used in capture.tsx and map.tsx) and the FilterChip category glyph is a coloured `●`. The wireframe draws SVG icons.
+- **Tap fallback.** On the tap path only, if `getLastKnownPositionAsync` returns null (a fresh simulator), `getCurrentPositionAsync` is tried. The tap is consent, and without this the chip would do nothing after a grant. The focus path never does this.
+- **Chip name.** It reads the active shelf's **All** near list, so it doesn't change when a category chip is picked.
+- **"Everywhere else"** is drawn only when something remains in `rest`, so no heading is left with nothing under it.
+- **Web distance units.** Distances follow the account's units (`11 mi` / `18 km`). The radius copy is always "50 mi" (from core `nearYouWithin`), and that keeps settings-page.test's "no hard-coded mi in apps/web" sweep green. The phone prints `mi` (DEFAULT_UNITS, per design §8).
+- **Lint exception.** One `eslint-disable-next-line react-hooks/set-state-in-effect` at the mount-time localStorage read in PlacesLibrary. The design requires an after-mount read (hydration-safe), and it is a single set.
+- **Out of scope.** Below md the map lens's side list stays a flat card list with no Near you split; the md+ panel is i7.
+
+## Render-required (walk)
+
+- **Phone:** with no permission, open the tab: no prompt, the chip reads "Set location". Tap it: the OS prompt appears, and on grant the chip reads "Near <area>". On a fresh simulator this depends on the getCurrent fallback above.
+- **Web:** check the `navigator.permissions` auto-read after a grant, and the browser prompt on the "Set location" tap.
+- **Both:** the stored chip should survive a reload or relaunch, and a shelf switch should reset it to All.
+
+## Checks run
+
+- TDD red (core): `npx vitest run src/capture/shelves.test.ts` with the new tests and no implementation → `Tests 4 failed | 23 passed (27)`. Green afterwards → `27 passed`.
+- The web and mobile source tests were written before the code but were **not** run red first. They were run after implementing: `npx vitest run src/mobile-places.test.ts src/mobile-capture.test.ts` → `40 passed`; `npx vitest run src/components/places/near-you.test.ts` → `11 passed`.
+- Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1533 passed`, web `Tests 554 passed`, ui `Tests 55 passed`. The first run failed on the web lint rule and on the hard-coded "mi" sweep; both are fixed as described above.

@@ -1,4 +1,5 @@
 import {
+  getPrefsByOwner,
   listSavedPlacesForOwner,
   listSuggestionCandidatesForOwner,
   listTripsForOwner,
@@ -6,19 +7,24 @@ import {
 import { getOwner } from "@/lib/owner";
 import { PageShell } from "@/components/nav/PageShell";
 import { PlacesWorkspace } from "@/components/places/PlacesWorkspace";
+import { unitsFromPrefs } from "@/lib/units";
 
 export const dynamic = "force-dynamic";
 
 export default async function PlacesPage() {
   const owner = await getOwner();
-  const [places, trips, suggestions] = await Promise.all([
+  const [places, trips, suggestions, prefs] = await Promise.all([
     listSavedPlacesForOwner(owner),
     listTripsForOwner(owner),
     // The "Been there?" candidates (§7) are fetched here, on the server, and
     // handed to the island whole; the island de-duplicates them against the
     // library it already holds, so accepting one needs no second query.
     listSuggestionCandidatesForOwner(owner),
+    // #186 i2: Near you prints distances in the account's units, read here
+    // beside the owner as map/page.tsx does (lib/units.ts).
+    getPrefsByOwner(owner),
   ]);
+  const units = unitsFromPrefs(prefs);
 
   // The graduate sheet's "Visited on" list (docs/design/41 §5): complete trips
   // only, narrowed here to what the dropdown draws so the whole summary — days,
@@ -32,7 +38,7 @@ export default async function PlacesPage() {
   // (the nav label and this kicker); the URL stays /places.
   return (
     <PageShell>
-      <PlacesWorkspace places={places} trips={visitedOn} suggestions={suggestions}>
+      <PlacesWorkspace places={places} trips={visitedOn} suggestions={suggestions} units={units}>
         <div>
           <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
             Your places

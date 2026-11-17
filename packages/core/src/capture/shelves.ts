@@ -137,6 +137,42 @@ export function nearYou(
   return { near, rest: savesShelves(rest, status), total: filtered.length };
 }
 
+/** A stored chip value (`rv-places-cat`, #186 i2 · q4 A) narrowed to the four
+ * chips this build draws — a stale "Travel" from before q3 A reads as absent. */
+export function isPlacesCategory(v: unknown): v is PlacesCategory {
+  return typeof v === "string" && (PLACES_CATEGORIES as readonly string[]).includes(v);
+}
+
+/**
+ * The location chip's place name (#186 i2): the area of the nearest near save
+ * that has one, else the resolved locality, else null — the chip then reads
+ * "Near you". Pass the active shelf's All-category `near`, so the name does
+ * not change with the chip you pick.
+ */
+export function nearYouName(near: NearYouSave[], resolved: string | null): string | null {
+  for (const n of near) if (n.save.area) return n.save.area.name;
+  return resolved;
+}
+
+const SHELF_WORDS: Record<SavedPlaceStatus, string> = { want: "Want to go", been: "Been there" };
+
+/** The dashed line under a chip with nothing on this shelf: "No eat places on Want to go yet." */
+export function placesCategoryEmpty(cat: Exclude<PlacesCategory, "All">, status: SavedPlaceStatus): string {
+  return `No ${cat.toLowerCase()} places on ${SHELF_WORDS[status]} yet.`;
+}
+
+/** The "Near you" heading's right-hand note: "within 50 mi" (phone) or
+ * "within 50 mi of Boise" (web). The radius is always miles (docs/design/186
+ * "Units"): it is a fixed rule, not a measured distance. */
+export function nearYouWithin(name: string | null): string {
+  return `within ${NEAR_RADIUS_MI} mi${name ? ` of ${name}` : ""}`;
+}
+
+/** The dashed line under "Near you" when a fix is known and nothing is within the radius. */
+export function nearYouNothing(name: string | null): string {
+  return `Nothing on this shelf within ${NEAR_RADIUS_MI} mi${name ? ` of ${name}` : ""}.`;
+}
+
 /** The Want to go / Been there segment's counts. */
 export function shelfCounts(saves: Pick<SavedPlace, "status">[]): Record<SavedPlaceStatus, number> {
   const counts: Record<SavedPlaceStatus, number> = { want: 0, been: 0 };

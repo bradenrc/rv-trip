@@ -1,5 +1,5 @@
 import { Fragment, type ReactNode } from "react";
-import { savesShelves, type SavedPlace, type SavedPlaceStatus } from "@rv-trip/core";
+import { savesShelves, type SavedPlace, type SavedPlaceStatus, type SavesShelves } from "@rv-trip/core";
 
 /** The library's card grid — the shipped PlacesLibrary grid, one per group. */
 const GRID = "grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]";
@@ -14,17 +14,22 @@ const GRID = "grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px
  * Presentational only: the library still owns the shelf, the category filter
  * and the map lens, and hands this the filtered list plus how to draw a card.
  * A region the resolver named no region for gets no header, as on the phone.
+ *
+ * #186 i2: `shelves`, when given, is drawn as-is — the "Everywhere else" half
+ * of core's `nearYou` — instead of grouping `places` again.
  */
 export function SavesGroups({
   places,
   status,
+  shelves,
   renderCard,
 }: {
   places: SavedPlace[];
   status: SavedPlaceStatus;
+  shelves?: SavesShelves;
   renderCard: (place: SavedPlace) => ReactNode;
 }) {
-  const { regions, unanchored } = savesShelves(places, status);
+  const { regions, unanchored } = shelves ?? savesShelves(places, status);
   return (
     <div className="flex flex-col gap-2.5">
       {regions.map((r) => (
