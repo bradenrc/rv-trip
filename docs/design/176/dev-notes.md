@@ -50,3 +50,72 @@ Items i2 (phone) and i3 (web) are later dispatches. This change touches only `pa
   - core: 1436 tests passed.
   - web: 496 tests passed.
   - ui: 55 tests passed.
+
+---
+
+# #176 · dev notes — item i2 of 3 (phone)
+
+Scope: **[i2] Phone: the capture sheet opens on Been here for the whole trip, logs travel days to the shelf, and checks off a matching idea** (#174 · Q1 A · Q2 A · Q3 B · Q4 A · Q5 A · Q6 A). This builds on the i1 core functions and does not change them. Web (i3) is a later dispatch.
+
+## What changed
+
+`apps/mobile/src/store.ts`
+- `:170` `useTodaysDestination` is now `useCaptureTarget()`. The hydrate/load effects are unchanged, and it returns core's `captureTarget(heldTrips, localIsoDate())`. The `todaysDestination` import is now `captureTarget`.
+- `:186` `addProvisionalIdea(tripId, destinationId: string | null, idea)`: a null destination calls `appendShelfIdea`, so the row shows under "Around the trip" with no signal.
+- `:214` `replaceIdea` (**vet HIGH**): one `swap` now maps or filters `t.ideas` (the shelf) as well as every destination's `ideas`. A travel-day capture's `cap_` row is replaced when the POST lands, and removed on Undo, instead of leaving a ghost.
+
+`apps/mobile/src/ui.tsx:196` `Chip` gains `neutral?: boolean`. When `on`, it draws AgainPair's `seg2On` tone (`C.ink` border, `C.navySoft` fill, `C.ink` text). Every other Chip is unchanged.
+
+`apps/mobile/src/journal.tsx:166` `LogCta` gains `label = "Log it"` and renders `✓ {label}`. The ✓ is the phone's own (**vet MED**: core's `logCtaLabel` carries no ✓, and the web footer draws none). The How-was-it sheet at `:149` passes no label, so it still reads "✓ Log it".
+
+`apps/mobile/app/capture.tsx` (Confirm):
+- The `target` prop is renamed `subject` (`:188`), because `target` is now the capture target, as the plan names it.
+- `:206` `const target = useCaptureTarget()`. Status starts as `"did"` when the target is non-null, else `"want"`.
+- `:211` an effect re-evaluates the status when the target resolves (the bundles may hydrate after the sheet opens), until a chip is touched (`pick` sets `touched`).
+- `:311` the chip row:
+  - Mid-trip: Been here (`"did"`) · Want to go, both `neutral`.
+  - Outside a trip: Want to go · Been there, as shipped.
+  - The old "Did it" chip is gone.
+- Under Been here:
+  - `didItContext(trip.title, destination?.place.name ?? null)`.
+  - Stars at size 28, "Do it again?" and AgainPair.
+  - The note ("For next time…").
+  - `<LogCta label={logCtaLabel(trip.title)}>`.
+  - `logHelperLine(writesThrough)` below the CTA. `writesThrough` is true for a place hit or a note with a fix, so a note with no fix gets the short line.
+  - The style is the wireframe's `.helper`: 11, `C.inkMuted`, centred (`:686`).
+- `submit()` (`:235`):
+  - The match candidate is either the place hit (name, location, googlePlaceId) or the note (trimmed text, fix, no gid).
+  - It is matched against `destination ? destination.ideas : trip.ideas` with `matchingOpenIdea`.
+  - **On a match:** `updateTrip(setIdeaFields(t, match.id, checkOffBody(answers)))`, then `queuePatch("idea", match.id, patch, { tripTitle, undo })`. Undo restores `{ status, rating, again, notes }` as they were, both locally and through `queuePatch`, following the destination screen's `log` precedent.
+  - **No match:** today's `didItBody` with `destinationId: target.destination?.id ?? null`, plus `addProvisionalIdea(tripId, destination?.id ?? null, …)`.
+- Want to go mid-trip is still today's library save (`placeCaptureBody` / `noteCaptureBody`), unchanged.
+
+## Tests
+`packages/core/src/mobile-capture.test.ts:148` (source-reading precedent: `apps/mobile` has no runner). It pins:
+- `useCaptureTarget` is used and `useTodaysDestination` is gone.
+- The initial `"did"`/`"want"` state and the untouched re-evaluation.
+- The neutral Been here · Want to go pair mid-trip, and Been there only in the no-trip branch.
+- `logCtaLabel` → LogCta, `logHelperLine` and `didItContext(…, destination?.place.name ?? null)`.
+- On a match: `matchingOpenIdea` over destination-or-shelf ideas, `checkOffBody` → `queuePatch("idea", match.id, patch, …)`, and the Undo before-state.
+- `destination?.id ?? null` passed to both `didItBody` and `addProvisionalIdea`.
+- `addProvisionalIdea` accepts null and calls `appendShelfIdea`.
+- `replaceIdea` swaps both `t.ideas` and `s.ideas` (the vet HIGH).
+- LogCta's default is "Log it" with the ✓ inside.
+- Chip's neutral tone.
+
+These are wiring assertions, not behaviour. The matching and body rules themselves are i1's unit tests.
+
+## Flags for qa / the walk
+- **Render-required:**
+  - Neutral chip tone on device.
+  - Offline Aug-10 capture: the shelf row appears under "Around the trip", then is replaced on reconnect, and Undo removes it.
+  - Match check-off: there is no second row, and Undo restores the idea.
+- The check-off's Undo sends a full before-state PATCH, including a `notes: null` / `rating: null` the idea already held. That matches the destination screen's `log`.
+- The `capture.tsx` prop rename `target` → `subject` is internal only.
+
+## Checks run (i2)
+- `npx vitest run src/mobile-capture.test.ts` (packages/core):
+  - Before the implementation: 9 failed, 20 passed. The new assertions were red first.
+  - After the implementation: `Tests  29 passed (29)`.
+- `pnpm turbo run lint typecheck test`: `Tasks: 10 successful, 10 total`. The web suite reported 496 passed.
+- `npx tsc --noEmit` (apps/mobile): exit 0.

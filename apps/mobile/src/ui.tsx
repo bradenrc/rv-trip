@@ -191,21 +191,27 @@ export function Segmented<T extends string>({
 /**
  * A chip — docs/design/111's `.chip`: mono 10/600 on a pill. `on` is the
  * chosen one (rv-green on green-soft: "verified / chosen"); `warn` is amber
- * ("attention" — the Places tab's queue count).
+ * ("attention" — the Places tab's queue count). `neutral` (#176 · Q6 A) draws
+ * `on` in AgainPair's selected tone instead — ink on navy-soft — for the
+ * capture sheet's mid-trip Been here · Want to go pair.
  */
 export function Chip({
   children,
   on = false,
   warn = false,
+  neutral = false,
   onPress,
 }: {
   children: ReactNode;
   on?: boolean;
   warn?: boolean;
+  neutral?: boolean;
   onPress?: () => void;
 }) {
   const tone = on
-    ? { borderColor: C.green, backgroundColor: C.greenSoft, color: C.greenInk }
+    ? neutral
+      ? { borderColor: C.ink, backgroundColor: C.navySoft, color: C.ink }
+      : { borderColor: C.green, backgroundColor: C.greenSoft, color: C.greenInk }
     : warn
       ? { borderColor: C.warning, backgroundColor: C.warningSoft, color: C.warning }
       : { borderColor: C.borderHi, backgroundColor: C.surface, color: C.inkMuted };

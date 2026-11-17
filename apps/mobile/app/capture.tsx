@@ -6,8 +6,13 @@ import type { CaptureDraft, DidItBody, Idea, PlaceSummary, ReservationType, Save
 import {
   DEFAULT_STYLE_MODE,
   OFFLINE_NOTICE,
+  checkOffBody,
   didItBody,
   didItContext,
+  logCtaLabel,
+  logHelperLine,
+  matchingOpenIdea,
+  setIdeaFields,
   PIN_KINDS,
   captureFieldPlaceholder,
   captureRows,
@@ -23,9 +28,9 @@ import {
   reservationTypeOfGoogle,
 } from "@rv-trip/core";
 import { api } from "../src/api";
-import { capture, loadRecents, queueDidIt, useCaptureState } from "../src/capture";
+import { capture, loadRecents, queueDidIt, queuePatch, useCaptureState } from "../src/capture";
 import { AgainPair, LogCta } from "../src/journal";
-import { addProvisionalIdea, replaceIdea, useTodaysDestination } from "../src/store";
+import { addProvisionalIdea, replaceIdea, updateTrip, useCaptureTarget } from "../src/store";
 import { PinMap, useStyleMode } from "../src/map";
 import { C, F, R } from "../src/theme";
 import { CategoryTile, Chip, Stars, Toast } from "../src/ui";
@@ -76,7 +81,7 @@ export default function CaptureSheet() {
   if (step.kind === "confirm") {
     return (
       <Confirm
-        target={step.target}
+        subject={step.target}
         online={online}
         fix={fix}
         areaName={areaName}
@@ -180,13 +185,13 @@ export default function CaptureSheet() {
 // ── the confirm step ────────────────────────────────────────────────────────
 
 function Confirm({
-  target,
+  subject,
   online,
   fix,
   areaName,
   onSave,
 }: {
-  target: { kind: "place"; hit: PlaceSummary } | { kind: "note"; text: string };
+  subject: { kind: "place"; hit: PlaceSummary } | { kind: "note"; text: string };
   online: boolean;
   fix: Fix | null;
   areaName: string | null;
@@ -194,44 +199,86 @@ function Confirm({
 }) {
   const { recents } = useCaptureState();
   const router = useRouter();
-  // #113 · "Did it" — only while a trip is in progress and one of its destinations
-  // covers today (core's `todaysDestination`, over the bundles the phone holds —
-  // persisted for the trip in progress, so this works with no signal).
-  const today = useTodaysDestination();
-  const [status, setStatus] = useState<SavedPlaceStatus | "did">("want");
+  // #176 (#174 · Q1 A · Q2 A): "Been here" for the whole trip in progress —
+  // core's `captureTarget` over the bundles the phone holds (persisted for the
+  // trip in progress, so this works with no signal). A destination when one
+  // covers today, else null: the capture lands on the trip's shelf.
+  const target = useCaptureTarget();
+  const [status, setStatus] = useState<SavedPlaceStatus | "did">(target ? "did" : "want");
+  const [touched, setTouched] = useState(false);
+  // The bundles may hydrate after the sheet opens: follow the target until the
+  // chips are touched.
+  useEffect(() => {
+    if (!touched) setStatus(target ? "did" : "want");
+  }, [target !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pick = (s: SavedPlaceStatus | "did") => {
+    setTouched(true);
+    setStatus(s);
+  };
   const [rating, setRating] = useState(0);
   const [again, setAgain] = useState<boolean | null>(null);
   const [source, setSource] = useState<string | null>(null);
   const [addingWho, setAddingWho] = useState(false);
   const [who, setWho] = useState("");
   const [note, setNote] = useState("");
-  const placeAt = target.kind === "place" ? target.hit.location : null;
+  const placeAt = subject.kind === "place" ? subject.hit.location : null;
   const placeDest = useResolvedName(online ? placeAt : null);
 
-  const name = target.kind === "place" ? target.hit.name : target.text.trim();
-  const type: ReservationType = target.kind === "place" ? reservationTypeOfGoogle(target.hit.primaryType) : "other";
-  const dest = target.kind === "place" ? placeDest : online ? areaName : null;
+  const name = subject.kind === "place" ? subject.hit.name : subject.text.trim();
+  const type: ReservationType = subject.kind === "place" ? reservationTypeOfGoogle(subject.hit.primaryType) : "other";
+  const dest = subject.kind === "place" ? placeDest : online ? areaName : null;
   const chosenSource = addingWho ? who : source;
 
-  const didIt = status === "did" && today !== null;
+  const didIt = status === "did" && target !== null;
+  // A note with no fix has no point, so it does not reach the Been there shelf.
+  const writesThrough = subject.kind === "place" || fix !== null;
   const submit = () => {
     if (status === "did") {
-      if (!today) return;
+      if (!target) return;
+      const tripId = target.trip.id;
+      const answers = { rating: rating === 0 ? null : rating, again, note };
+      // #174 · Q3 B: an open idea that already names this place is checked off
+      // instead of getting a twin.
+      const candidate =
+        subject.kind === "place"
+          ? {
+              name: subject.hit.name,
+              lat: subject.hit.location?.lat ?? null,
+              lng: subject.hit.location?.lng ?? null,
+              googlePlaceId: subject.hit.googlePlaceId,
+            }
+          : { name: subject.text.trim(), lat: fix?.lat ?? null, lng: fix?.lng ?? null, googlePlaceId: null };
+      const match = matchingOpenIdea(target.destination ? target.destination.ideas : target.trip.ideas, candidate);
+      if (match) {
+        const patch = checkOffBody(answers);
+        const before = { status: match.status, rating: match.rating, again: match.again, notes: match.notes };
+        updateTrip(tripId, (t) => setIdeaFields(t, match.id, patch));
+        router.back();
+        void queuePatch("idea", match.id, patch, {
+          tripTitle: target.trip.title,
+          // The destination screen's `log` precedent: Undo puts back what it held.
+          undo: () => {
+            updateTrip(tripId, (t) => setIdeaFields(t, match.id, before));
+            void queuePatch("idea", match.id, before);
+          },
+        });
+        return;
+      }
       const clientId = newClientId();
       const body = didItBody(
-        { clientId, tripId: today.trip.id, destinationId: today.destination.id },
-        target.kind === "place"
-          ? { kind: "place", hit: target.hit }
-          : { kind: "note", text: target.text, at: fix, areaLabel: online ? areaName : null },
-        { rating: rating === 0 ? null : rating, again, note },
+        { clientId, tripId, destinationId: target.destination?.id ?? null },
+        subject.kind === "place"
+          ? { kind: "place", hit: subject.hit }
+          : { kind: "note", text: subject.text, at: fix, areaLabel: online ? areaName : null },
+        answers,
       );
-      const tripId = today.trip.id;
-      // The idea is on today's destination at once (provisional id = its clientId);
-      // the created row replaces it when the POST lands.
-      addProvisionalIdea(tripId, today.destination.id, provisionalIdea(body));
+      // The idea is on today's destination — or the trip's shelf — at once
+      // (provisional id = its clientId); the created row replaces it when the
+      // POST lands.
+      addProvisionalIdea(tripId, target.destination?.id ?? null, provisionalIdea(body));
       router.back();
       void queueDidIt(body, {
-        tripTitle: today.trip.title,
+        tripTitle: target.trip.title,
         undo: (created) => {
           replaceIdea(tripId, created?.id ?? clientId, null);
           if (created) void api.ideas.remove(created.id).catch(() => undefined);
@@ -241,9 +288,9 @@ function Confirm({
     }
     const c = { status, source: chosenSource, note };
     onSave(
-      target.kind === "place"
-        ? placeCaptureBody(target.hit, c)
-        : noteCaptureBody(target.text, fix, online ? areaName : null, online, c),
+      subject.kind === "place"
+        ? placeCaptureBody(subject.hit, c)
+        : noteCaptureBody(subject.text, fix, online ? areaName : null, online, c),
     );
   };
 
@@ -259,23 +306,31 @@ function Confirm({
         </View>
       </View>
 
-      <View style={styles.chips}>
-        <Chip on={status === "want"} onPress={() => setStatus("want")}>
-          Want to go
-        </Chip>
-        <Chip on={status === "been"} onPress={() => setStatus("been")}>
-          Been there
-        </Chip>
-        {today && (
-          <Chip on={status === "did"} onPress={() => setStatus("did")}>
-            Did it
+      {/* Mid-trip (#174 · Q4 A · Q6 A): Been here · Want to go, in the neutral
+          selected tone. Outside a trip: Want to go · Been there, as shipped. */}
+      {target ? (
+        <View style={styles.chips}>
+          <Chip neutral on={status === "did"} onPress={() => pick("did")}>
+            Been here
           </Chip>
-        )}
-      </View>
+          <Chip neutral on={status === "want"} onPress={() => pick("want")}>
+            Want to go
+          </Chip>
+        </View>
+      ) : (
+        <View style={styles.chips}>
+          <Chip on={status === "want"} onPress={() => pick("want")}>
+            Want to go
+          </Chip>
+          <Chip on={status === "been"} onPress={() => pick("been")}>
+            Been there
+          </Chip>
+        </View>
+      )}
 
       {didIt && (
         <>
-          <Text style={styles.mono}>{didItContext(today.trip.title, today.destination.place.name)}</Text>
+          <Text style={styles.mono}>{didItContext(target.trip.title, target.destination?.place.name ?? null)}</Text>
           <Stars value={rating} size={28} onSet={setRating} />
           <Text style={styles.lbl}>Do it again?</Text>
           <AgainPair value={again} onChange={setAgain} />
@@ -326,7 +381,14 @@ function Confirm({
         selectionColor={C.green}
       />
 
-      {didIt ? <LogCta onPress={submit} /> : <Cta onPress={submit}>Save</Cta>}
+      {didIt ? (
+        <>
+          <LogCta label={logCtaLabel(target.trip.title)} onPress={submit} />
+          <Text style={styles.helper}>{logHelperLine(writesThrough)}</Text>
+        </>
+      ) : (
+        <Cta onPress={submit}>Save</Cta>
+      )}
     </ScrollView>
   );
 }
@@ -620,4 +682,6 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   ctaText: { color: C.navy, fontWeight: "800", fontSize: 14 },
+  // docs/design/176 `.helper`: 11 · ink-muted · centred.
+  helper: { fontSize: 11, color: C.inkMuted, textAlign: "center" },
 });

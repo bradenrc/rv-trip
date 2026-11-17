@@ -33,7 +33,7 @@ import {
   localIsoDate,
   markRowOnShelf,
   nextTimeIdeaBody,
-  todaysDestination,
+  captureTarget,
   applyHopBooking,
   applySavedPlacePatch,
   nearbyIdeaBody,
@@ -161,12 +161,13 @@ export function heldTrips(): Trip[] {
 }
 
 /**
- * Today's destination (#113 · "Did it"): the destination the chip files onto, from every
- * bundle the phone holds — loaded this session or persisted from the last.
- * Online, the trips list is read and each in-progress trip's bundle loaded
- * (and so persisted) if it isn't already.
+ * Where a capture files (#176 · #174 Q1 A · Q2 A): core's `captureTarget` —
+ * the trip in progress, then today's destination on it (null on a travel day:
+ * the trip's shelf) — over every bundle the phone holds, loaded this session
+ * or persisted from the last. Online, the trips list is read and each
+ * in-progress trip's bundle loaded (and so persisted) if it isn't already.
  */
-export function useTodaysDestination() {
+export function useCaptureTarget() {
   const bundles = useSyncExternalStore(subscribe, () => state.bundles);
   const trips = useSyncExternalStore(subscribe, () => state.trips);
   useEffect(() => {
@@ -176,19 +177,24 @@ export function useTodaysDestination() {
   useEffect(() => {
     for (const t of trips ?? []) if (inProgress(t) && !state.bundles[t.id]) void loadBundle(t.id);
   }, [trips]);
-  return useMemo(() => todaysDestination(Object.values(bundles).map((b) => b.trip), localIsoDate()), [bundles]);
+  return useMemo(() => captureTarget(Object.values(bundles).map((b) => b.trip), localIsoDate()), [bundles]);
 }
 
-/** A Did-it's provisional idea (id = its clientId) onto today's destination, so the
- * destination screen shows it before — or without — signal. */
-export function addProvisionalIdea(tripId: string, destinationId: string, idea: Idea): void {
-  updateTrip(tripId, (t) => ({
-    ...t,
-    chapters: t.chapters.map((l) => ({
-      ...l,
-      destinations: l.destinations.map((s) => (s.id === destinationId ? { ...s, ideas: [...s.ideas, idea] } : s)),
-    })),
-  }));
+/** A Did-it's provisional idea (id = its clientId) onto today's destination —
+ * or, with a null destination (a travel day, #176), onto the trip's shelf — so
+ * the trip shows it before, or without, signal. */
+export function addProvisionalIdea(tripId: string, destinationId: string | null, idea: Idea): void {
+  updateTrip(tripId, (t) =>
+    destinationId === null
+      ? appendShelfIdea(t, idea)
+      : {
+          ...t,
+          chapters: t.chapters.map((l) => ({
+            ...l,
+            destinations: l.destinations.map((s) => (s.id === destinationId ? { ...s, ideas: [...s.ideas, idea] } : s)),
+          })),
+        },
+  );
 }
 
 /** A Did-it idea still waiting for its POST: its id is its `cap_…` client id,
@@ -203,18 +209,16 @@ onQueueSent((item, value) => {
   replaceIdea(value.tripId, item.clientId, value as Idea);
 });
 
-/** …swapped for the created row once the POST lands (or removed on Undo). */
+/** …swapped for the created row once the POST lands (or removed on Undo) —
+ * on a destination or on the trip's shelf (#176 · a travel day's capture). */
 export function replaceIdea(tripId: string, oldId: string, next: Idea | null): void {
+  const swap = (ideas: Idea[]) => (next ? ideas.map((i) => (i.id === oldId ? next : i)) : ideas.filter((i) => i.id !== oldId));
   updateTrip(tripId, (t) => ({
     ...t,
+    ideas: swap(t.ideas),
     chapters: t.chapters.map((l) => ({
       ...l,
-      destinations: l.destinations.map((s) => ({
-        ...s,
-        ideas: next
-          ? s.ideas.map((i) => (i.id === oldId ? next : i))
-          : s.ideas.filter((i) => i.id !== oldId),
-      })),
+      destinations: l.destinations.map((s) => ({ ...s, ideas: swap(s.ideas) })),
     })),
   }));
 }
