@@ -19,7 +19,7 @@ import { describe, it, expect } from "vitest";
  *
  * What this guards, criterion for criterion against the item's acceptance:
  *
- *   1. No inline `gridTemplateColumns` survives in app/page.tsx,
+ *   1. No inline `gridTemplateColumns` survives in app/trips/page.tsx,
  *      PlacesLibrary.tsx or MapOverview.tsx, and no `max-[…]` variant survives
  *      ANYWHERE under apps/web/src (a recursive walk, not a spot check).
  *   2. Each converted layout's bare classes are the phone case and the `md:`
@@ -51,7 +51,7 @@ function code(src: string): string {
 /** Collapse whitespace so a JSX attribute that hard-wraps still matches. */
 const flat = (s: string) => s.replace(/\s+/g, " ");
 
-const HOME = "apps/web/src/app/page.tsx";
+const HOME = "apps/web/src/app/trips/page.tsx";
 const PLACES = "apps/web/src/components/places/PlacesLibrary.tsx";
 const MAPOVERVIEW = "apps/web/src/components/map/MapOverview.tsx";
 const PLANNER = "apps/web/src/components/trip/TripPlanner.tsx";
@@ -93,7 +93,7 @@ function sources(dir: string, acc: string[] = []): string[] {
 
 describe("the inline grid styles are gone", () => {
   it.each([
-    ["app/page.tsx", HOME, home],
+    ["app/trips/page.tsx", HOME, home],
     ["PlacesLibrary.tsx", PLACES, places],
     ["MapOverview.tsx", MAPOVERVIEW, mapOverview],
   ])("%s has no inline gridTemplateColumns", (_name, _path, src) => {

@@ -3,6 +3,9 @@ import type { Idea, Destination, Trip } from "../domain/types";
 import { costaRicaTrip, pnwTrip, seedTrips } from "../seeds/index";
 import {
   JOURNAL_EMPTY_COPY,
+  activeTrip,
+  isoDateInZone,
+  isRootLaunchUrl,
   againBadge,
   checkOffStatus,
   didntGetToLabel,
@@ -228,5 +231,86 @@ describe("todaysDestination (#113 · Did it)", () => {
     expect(todaysDestination([trip([destination("f", null, null)])], "2027-05-12")).toBeNull();
     expect(todaysDestination([trip([destination("a", "2027-05-10", "2027-05-14")])], "2027-06-01")).toBeNull();
     expect(todaysDestination([], "2027-05-12")).toBeNull();
+  });
+});
+
+describe("activeTrip (#173 · the landing rule, Q4 A)", () => {
+  // The wireframe's worked table: Loop AUG 01–28 · Crater Lake AUG 21–23 · Bellingham NOV 11–15.
+  const t = (id: string, startDate: string, endDate: string, extra: Partial<Trip> = {}) => ({
+    id,
+    startDate,
+    endDate,
+    ...extra,
+  });
+  const loop = t("loop", "2026-08-01", "2026-08-28");
+  const crater = t("crater", "2026-08-21", "2026-08-23");
+  const bham = t("bham", "2026-11-11", "2026-11-15");
+  const trips = [loop, crater, bham];
+
+  it("is null with no trips", () => {
+    expect(activeTrip([], "2026-08-10")).toBeNull();
+  });
+
+  it("returns the one trip covering today", () => {
+    expect(activeTrip(trips, "2026-08-10")?.id).toBe("loop");
+  });
+
+  it("picks the later start when two trips overlap", () => {
+    expect(activeTrip(trips, "2026-08-22")?.id).toBe("crater");
+    expect(activeTrip([crater, loop], "2026-08-22")?.id).toBe("crater");
+  });
+
+  it("keeps the first in input order on an equal start", () => {
+    const a = t("a", "2026-08-21", "2026-08-25");
+    const b = t("b", "2026-08-21", "2026-08-23");
+    expect(activeTrip([a, b], "2026-08-22")?.id).toBe("a");
+    expect(activeTrip([b, a], "2026-08-22")?.id).toBe("b");
+  });
+
+  it("never counts an undated trip", () => {
+    expect(activeTrip([t("u", "", "")], "2026-08-22")).toBeNull();
+  });
+
+  it("is inclusive at both ends, and null the day before and after", () => {
+    expect(activeTrip(trips, "2026-07-31")).toBeNull();
+    expect(activeTrip(trips, "2026-08-01")?.id).toBe("loop");
+    expect(activeTrip(trips, "2026-08-28")?.id).toBe("loop");
+    expect(activeTrip(trips, "2026-08-29")).toBeNull();
+    expect(activeTrip(trips, "2026-11-15")?.id).toBe("bham");
+    expect(activeTrip(trips, "2026-11-16")).toBeNull();
+  });
+
+  it("reads dates only — a complete trip with statusAuto:false covering today is still active", () => {
+    const pinned = t("done", "2026-11-11", "2026-11-15", { status: "complete", statusAuto: false });
+    expect(activeTrip([pinned], "2026-11-13")?.id).toBe("done");
+  });
+});
+
+describe("isoDateInZone (#173 · the web's today from a tz cookie)", () => {
+  const now = new Date("2026-11-16T01:00:00Z"); // 6 pm Nov 15 in Boise
+
+  it("gives the zone's calendar date, not the server's", () => {
+    expect(isoDateInZone(now, "America/Boise")).toBe("2026-11-15");
+    expect(isoDateInZone(now, "UTC")).toBe("2026-11-16");
+  });
+
+  it("is null for an invalid zone", () => {
+    expect(isoDateInZone(now, "Not/AZone")).toBeNull();
+  });
+});
+
+describe("isRootLaunchUrl (#173 i5 · a plain cold start vs a deep link)", () => {
+  // Inputs are expo-linking's `parse(url)` shape: { scheme, hostname, path }.
+  it("is root for the bare custom scheme and for Expo Go / Metro hosts", () => {
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: null, path: null })).toBe(true);
+    expect(isRootLaunchUrl({ scheme: "exp", hostname: "192.168.1.5", path: null })).toBe(true);
+    expect(isRootLaunchUrl({ scheme: "http", hostname: "localhost", path: "/" })).toBe(true);
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "expo-development-client", path: null })).toBe(true);
+  });
+
+  it("is not root when a path or a custom-scheme host names a screen", () => {
+    expect(isRootLaunchUrl({ scheme: "exp", hostname: null, path: "trips/abc" })).toBe(false);
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "trips", path: "abc" })).toBe(false);
+    expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "saves", path: null })).toBe(false);
   });
 });

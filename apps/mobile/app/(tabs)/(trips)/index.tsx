@@ -1,4 +1,4 @@
-import { Link, Stack, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useState } from "react";
 import type { TripSummary, TripStatus } from "@rv-trip/core";
@@ -33,17 +33,6 @@ export default function TripsScreen() {
 
   return (
     <>
-      <Stack.Screen
-        options={{
-          headerRight: () => (
-            <Link href="/rig" asChild>
-              <Pressable hitSlop={8} accessibilityRole="button">
-                <Text style={{ color: C.green, fontWeight: "700", fontSize: 14 }}>Rig</Text>
-              </Pressable>
-            </Link>
-          ),
-        }}
-      />
       {trips === null && !error ? (
         <Centered>
           <ActivityIndicator color={C.green} />

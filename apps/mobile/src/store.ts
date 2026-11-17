@@ -23,6 +23,7 @@ import type {
   IsoDate,
 } from "@rv-trip/core";
 import {
+  activeTrip,
   appendReservation,
   appendShelfIdea,
   editSegmentBooking,
@@ -59,7 +60,7 @@ import { onQueueSent } from "./capture";
  */
 interface State {
   trips: TripSummary[] | null;
-  /** The Saves tab's library, both shelves (#111 i2). */
+  /** The Places tab's library, both shelves (#111 i2; retitled by #173 i2). */
   saves: SavedPlace[] | null;
   bundles: Record<string, TripBundle>;
   /** Each trip's nearby saves (#111 i3) — the banner and the review sheet. */
@@ -115,8 +116,8 @@ export function updateTrip(id: string, fn: (t: Trip) => Trip): void {
 /** AsyncStorage key for the in-progress bundles. Bump on a shape change. */
 const IN_PROGRESS_KEY = "rv.inProgressTrips.v1";
 
-const inProgress = (t: Pick<Trip, "startDate" | "endDate">, today = localIsoDate()) =>
-  t.startDate <= today && today <= t.endDate;
+const inProgress = (t: Pick<Trip, "id" | "startDate" | "endDate">, today = localIsoDate()) =>
+  activeTrip([t], today) !== null;
 
 /** Write every loaded bundle whose trip covers today. Best effort: a failed
  * write only costs the offline-after-relaunch case. */
@@ -150,6 +151,13 @@ export function hydrateInProgress(): Promise<void> {
       .catch(() => undefined);
   }
   return hydrated;
+}
+
+/** Every trip the phone holds a bundle for — loaded this session or persisted
+ * from the last. Offline, after `hydrateInProgress()`, that is the in-progress
+ * trips: the landing rule's fallback (#173 i5). */
+export function heldTrips(): Trip[] {
+  return Object.values(state.bundles).map((b) => b.trip);
 }
 
 /**

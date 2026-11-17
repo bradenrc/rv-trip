@@ -142,7 +142,7 @@ describe("the toasts", () => {
 
   it("offline strip", () => {
     expect(OFFLINE_NOTICE).toEqual({
-      title: "Offline. Saves wait on this phone.",
+      title: "Offline. Saved places wait on this phone.",
       sub: "Place search comes back with signal",
     });
   });

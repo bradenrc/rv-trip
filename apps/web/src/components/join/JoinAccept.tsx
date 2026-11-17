@@ -78,7 +78,7 @@ export function JoinAccept({ token, title, signedIn }: JoinAcceptProps) {
         <button
           type="button"
           disabled={busy}
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/trips")}
           className="inline-flex cursor-pointer items-center gap-1.5 rounded-rv-md border border-rv-border bg-transparent px-3 py-1.5 text-[12.5px] font-semibold text-rv-ink-muted hover:text-rv-ink disabled:cursor-not-allowed disabled:opacity-50"
         >
           {NOT_NOW_CTA}

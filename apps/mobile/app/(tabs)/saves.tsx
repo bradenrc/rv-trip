@@ -11,7 +11,8 @@ import { C, F, R } from "../../src/theme";
 import { Button, CategoryTile, Centered, Kicker, Muted, Stars, Toast } from "../../src/ui";
 
 /**
- * The Saves tab (#111 i2 · docs/design/111 "The Saves tab", Q4 B · Q5 A).
+ * The Places tab (#111 i2 · docs/design/111 "The Saves tab", Q4 B · Q5 A;
+ * retitled Places by #173 i2 · Q6 A — the route keeps the name `saves`).
  *
  * Want to go / Been there, then the shelf as core's `savesShelves` groups it:
  * region headers by save count, areas alphabetically under each, saves
@@ -50,7 +51,7 @@ export default function SavesTab() {
     <SafeAreaView edges={["top"]} style={styles.screen}>
       <View style={styles.nav}>
         <Kicker color={C.green}>Heard about · been to</Kicker>
-        <Text style={styles.title}>Saves</Text>
+        <Text style={styles.title}>Places</Text>
       </View>
       {saves === null && !error ? (
         <Centered>

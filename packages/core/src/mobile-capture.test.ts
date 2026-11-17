@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -38,23 +38,38 @@ describe("capture · the two new native dependencies", () => {
   });
 });
 
-describe("capture · the tabs (Q1 A)", () => {
-  it("draws Trips · + · Saves, in that order", () => {
+describe("capture · the tabs (#111 Q1 A · #173 i2)", () => {
+  // #173 i2 (#171 · Q5 A · Q6 A): Trips · Places · Capture · You. `saves`
+  // keeps its route name; only its title becomes "Places".
+  it("draws Trips · Places · Capture · You, in that order", () => {
     const at = (name: string) => tabs.indexOf(`name="${name}"`);
     expect(at("(trips)")).toBeGreaterThan(-1);
-    expect(at("(trips)")).toBeLessThan(at("add"));
-    expect(at("add")).toBeLessThan(at("saves"));
-    expect(tabs).toContain('title: "Trips"');
-    expect(tabs).toContain('title: "Save"');
-    expect(tabs).toContain('title: "Saves"');
+    expect(at("(trips)")).toBeLessThan(at("saves"));
+    expect(at("saves")).toBeLessThan(at("add"));
+    expect(at("add")).toBeLessThan(at("you"));
+    const title = (name: string) => /title: "([^"]+)"/.exec(tabs.slice(at(name)))?.[1];
+    expect(title("(trips)")).toBe("Trips");
+    expect(title("saves")).toBe("Places");
+    expect(title("add")).toBe("Capture");
+    expect(title("you")).toBe("You");
+    expect(tabs).not.toContain('title: "Saves"');
+    // Map is TL4's (#186), not this epic's.
+    expect(tabs).not.toContain('name="map"');
+  });
+
+  it("keeps the + tab's accessibility label and draws You with the ◉ glyph", () => {
+    expect(tabs).toContain('tabBarAccessibilityLabel: "Save a place, a note or a pin"');
+    expect(tabs.slice(tabs.indexOf('name="you"'))).toContain(">◉<");
   });
 
   it("intercepts the + and opens the capture sheet instead of a tab", () => {
     expect(tabs).toMatch(/tabPress: \(e\) => \{\s*e\.preventDefault\(\);\s*router\.push\("\/capture"\);/);
   });
 
-  it("badges Saves with the queue count until it drains", () => {
-    expect(tabs).toContain("tabBarBadge: queue.length > 0 ? queue.length : undefined");
+  it("badges the Places tab with the queue count until it drains", () => {
+    const places = tabs.slice(tabs.indexOf('name="saves"'), tabs.indexOf('name="add"'));
+    expect(places).toContain("tabBarBadge: queue.length > 0 ? queue.length : undefined");
+    expect(tabs.match(/tabBarBadge:/g)).toHaveLength(1);
   });
 
   it("opens capture as a ROOT formSheet, inside Shell and so inside the gate", () => {
@@ -97,7 +112,7 @@ describe("capture · the queue runtime", () => {
     expect(runtime).toContain("if (e instanceof ApiError) return { status: e.status };");
   });
 
-  it("the Saves tab shows the waiting count", () => {
+  it("the Places tab shows the waiting count", () => {
     expect(saves).toContain("queuedToast(queue.length)");
   });
 });
@@ -127,5 +142,39 @@ describe("saves · the tab renders core's shelves", () => {
 
   it("shows Stars on a Been there row", () => {
     expect(saves).toMatch(/s\.status === "been" && s\.rating \? \(\s*<Stars value=\{s\.rating\}/);
+  });
+});
+
+// ── #173 i2 · the library is called Places (Q6 A) ──────────────────────────
+
+/** Every .ts/.tsx file under apps/mobile/{app,src}, repo-relative to apps/mobile. */
+function mobileSources(dir: string): string[] {
+  return readdirSync(join(REPO, "apps/mobile", dir), { withFileTypes: true }).flatMap((e) => {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) return mobileSources(rel);
+    return /\.tsx?$/.test(e.name) ? [rel] : [];
+  });
+}
+
+/** Source with block and line comments removed (a `//` inside a URL survives). */
+const uncommented = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
+
+describe("renames · Saves becomes Places on the phone", () => {
+  it("titles the saves.tsx screen Places", () => {
+    expect(saves).toMatch(/<Text style=\{styles\.title\}>Places<\/Text>/);
+  });
+
+  it("points the empty maybes line at Places", () => {
+    expect(read("src/itinerary.tsx")).toContain("No maybes yet — + Add one, or pull one in from your Places.");
+  });
+
+  it("names the library Saves in no user-facing string", () => {
+    const files = [...mobileSources("app"), ...mobileSources("src")];
+    expect(files.length).toBeGreaterThan(5);
+    for (const f of files) {
+      // Identifiers (useSaves, NearbySaves, dismissSaves) have no word boundary
+      // before "Saves"; what is left is copy.
+      expect(uncommented(read(f)), `${f} names the library "Saves"`).not.toMatch(/\bSaves\b/);
+    }
   });
 });

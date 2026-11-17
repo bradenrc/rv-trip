@@ -6,9 +6,10 @@ import { describe, it, expect } from "vitest";
 /**
  * The web shell's navigation contract (issue #45, item 1).
  *
- * Item 1 is layout: one `LINKS` array rendered twice (a desktop masthead row
- * and a phone tab bar) and one page gutter (`PageShell`) in place of six
- * verbatim copies. None of it is logic that can be executed here — it is JSX
+ * Item 1 is layout: a desktop masthead row, a phone tab bar and one page
+ * gutter (`PageShell`) in place of six verbatim copies. #173 i3 (#171 · Q1 C ·
+ * Q2 B) split the one `LINKS` array in two: the desktop row is Trips · Places ·
+ * Map, and the phone bar is its own `TABS`, the phone's five. None of it is logic that can be executed here — it is JSX
  * and Tailwind class strings, and `apps/web` has no DOM test environment. So,
  * exactly as `mobile-map.test.ts` / `mobile-dev-loop.test.ts` do for the phone's
  * un-mountable native renderer, the contract is asserted against the SOURCE
@@ -16,16 +17,18 @@ import { describe, it, expect } from "vitest";
  *
  * What this guards, criterion for criterion against the item's acceptance:
  *
- *   1. Five areas, declared ONCE — `/settings` (an orphan route until
- *      now) included — and mapped exactly twice.
+ *   1. Two lists, each declared ONCE and mapped ONCE: `LINKS` (Trips at
+ *      /trips · Places · Map) and `TABS` (Trips · Places · Capture · Map ·
+ *      You). /settings and /rig are reached through You, not the bar.
  *   2. The masthead keeps its `dark sticky` island and 62px height, takes
  *      `px-4 md:px-7`, and its link row is behind `hidden … md:flex`.
  *   3. The phone tab bar: fixed to the bottom inside the same `dark` island,
  *      `md:hidden`, five 56px `flex-1` targets, `pb-[env(safe-area-inset-bottom)]`,
  *      the Nav.tsx:38-40 active/inactive token pairing, and NO pill.
  *   4. Issue #19's theme toggle is byte-for-byte what it was: a CSS-driven
- *      glyph, not React state — and it and <Account/> stay outside every
- *      responsive wrapper, so they render at any width.
+ *      glyph, not React state. Since #173 · Q2 B it, + Capture and <Account/>
+ *      sit in one `hidden md:inline-flex` cluster: below md the masthead is
+ *      the mark alone.
  *   5. `PageShell` is the one page gutter, and no copy of the old literal
  *      survives anywhere under `apps/web/src`.
  *
@@ -63,7 +66,7 @@ function navElement(needle: string): string {
 
 /** The six page-gutter call sites the item replaces. */
 const GUTTER_SITES = [
-  "apps/web/src/app/page.tsx",
+  "apps/web/src/app/trips/page.tsx",
   "apps/web/src/app/places/page.tsx",
   "apps/web/src/app/map/page.tsx",
   "apps/web/src/app/trips/new/page.tsx",
@@ -79,28 +82,32 @@ function webSources(): string[] {
     .map((p) => join("apps/web/src", p));
 }
 
-describe("five areas, declared once", () => {
-  it("adds /settings to LINKS, so the orphan route finally has an entry point", () => {
-    expect(navFlat).toContain(
-      '{ href: "/settings", label: "Settings", Icon: Settings, match: (p) => p.startsWith("/settings") }',
-    );
+/** The hrefs of `const <name> … = [ … ];`, in order. */
+function hrefsOf(name: string): string[] {
+  const body = navFlat.slice(navFlat.indexOf(`const ${name}`));
+  return [...body.slice(0, body.indexOf("];")).matchAll(/href: "([^"]*)"/g)].map((m) => m[1]!);
+}
+
+describe("two lists, each declared and rendered once (#173 · Q1 C · Q2 B)", () => {
+  it("the desktop row is Trips at /trips, Places and Map", () => {
+    expect(hrefsOf("LINKS")).toEqual(["/trips", "/places", "/map"]);
   });
 
-  it("imports the Settings glyph from lucide-react", () => {
-    expect(navCode).toMatch(/import \{[^}]*\bSettings\b[^}]*\} from "lucide-react"/);
+  it("the phone bar is the phone's five: Capture goes to /places, You to /you", () => {
+    expect(hrefsOf("TABS")).toEqual(["/trips", "/places", "/places", "/map", "/you"]);
   });
 
-  it("keeps the four shipped areas beside it, in order", () => {
-    const links = navFlat.slice(navFlat.indexOf("const LINKS"));
-    const hrefs = [...links.slice(0, links.indexOf("];")).matchAll(/href: "([^"]*)"/g)].map(
-      (m) => m[1],
-    );
-    expect(hrefs).toEqual(["/", "/places", "/map", "/rig", "/settings"]);
+  it("reaches /settings and /rig through You, which is lit on both", () => {
+    expect(navFlat).toContain('["/you", "/rig", "/settings"].some((r) => p.startsWith(r))');
+    expect(hrefsOf("LINKS")).not.toContain("/settings");
+    expect(hrefsOf("LINKS")).not.toContain("/rig");
   });
 
-  it("declares the array once and renders it twice", () => {
+  it("declares each array once and renders each once", () => {
     expect(navCode.match(/const LINKS/g)).toHaveLength(1);
-    expect(navCode.match(/LINKS\.map\(/g)).toHaveLength(2);
+    expect(navCode.match(/const TABS/g)).toHaveLength(1);
+    expect(navCode.match(/LINKS\.map\(/g)).toHaveLength(1);
+    expect(navCode.match(/TABS\.map\(/g)).toHaveLength(1);
   });
 });
 
@@ -172,7 +179,7 @@ describe("the phone tab bar", () => {
   });
 });
 
-describe("issue #19's theme toggle and the account control survive intact", () => {
+describe("issue #19's theme toggle and the account control", () => {
   it("still decides the glyph in CSS off <html>, never in React state", () => {
     expect(nav).toContain('<Sun className="hidden size-[17px] theme-dark:block" />');
     expect(nav).toContain('<Moon className="block size-[17px] theme-dark:hidden" />');
@@ -194,12 +201,15 @@ describe("issue #19's theme toggle and the account control survive intact", () =
     );
   });
 
-  it("renders the toggle and <Account/> at every width — no responsive wrapper around them", () => {
-    const cluster = navFlat.slice(navFlat.indexOf('<div className="flex items-center gap-2.5">'));
-    expect(cluster).toContain("<Account />");
-    const open = cluster.slice(0, cluster.indexOf(">"));
-    expect(open).not.toContain("hidden");
-    expect(open).not.toContain("md:");
+  it("puts the toggle, + Capture and <Account/> in one cluster shown from md up (#173 · Q2 B)", () => {
+    const cluster = navFlat.slice(
+      navFlat.indexOf('<div className="hidden items-center gap-2.5 md:inline-flex">'),
+    );
+    expect(cluster.length).toBeLessThan(navFlat.length);
+    const body = cluster.slice(0, cluster.indexOf("</div>"));
+    expect(body).toContain("setTheme(");
+    expect(body).toContain("+ Capture");
+    expect(body).toContain("<Account />");
   });
 });
 

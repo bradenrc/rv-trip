@@ -408,7 +408,7 @@ export function IdeasTab({ trip }: { trip: Trip }) {
   return (
     <View style={{ gap: 8 }}>
       {pinned.length === 0 && shelf.length === 0 && (
-        <Text style={styles.rs}>No maybes yet — + Add one, or pull one in from your Saves.</Text>
+        <Text style={styles.rs}>No maybes yet — + Add one, or pull one in from your Places.</Text>
       )}
       {pinned.map(({ destination, ideas }) => (
         <View key={destination.id} style={{ gap: 6 }}>
