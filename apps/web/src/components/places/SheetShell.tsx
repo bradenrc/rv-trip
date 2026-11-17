@@ -3,6 +3,19 @@
 import type { ReactNode } from "react";
 import { X } from "lucide-react";
 import { FieldLabel } from "@rv-trip/ui";
+import { cn } from "@/lib/utils";
+
+/**
+ * The primary action's two fills (#176 i3). Each fill keeps its ink on the
+ * SAME line — the nightfall-tokens sweeps are line-based: accent-deep pairs
+ * with accent-ink, and navy ink is legal only beside a green fill.
+ */
+const SUBMIT_TONE = {
+  /** The shipped sky CTA (#19) — every /places sheet. */
+  accent: "bg-rv-accent-deep text-rv-accent-ink",
+  /** The capture sheet's log-to-the-trip submit (Q6 A), the + Capture pair. */
+  green: "bg-rv-green text-rv-navy",
+} as const;
 
 /**
  * The chrome both /places sheets share (docs/design/41 §5) — scrim, right-hand
@@ -20,6 +33,7 @@ export function SheetShell({
   hint,
   submitLabel,
   submitDisabled,
+  submitTone = "accent",
   onSubmit,
   onClose,
   children,
@@ -30,6 +44,8 @@ export function SheetShell({
   hint: string;
   submitLabel: string;
   submitDisabled?: boolean;
+  /** #176 i3 · default accent, so the /places sheets are unchanged. */
+  submitTone?: keyof typeof SUBMIT_TONE;
   onSubmit: () => void;
   onClose: () => void;
   children: ReactNode;
@@ -81,7 +97,10 @@ export function SheetShell({
             type="button"
             onClick={onSubmit}
             disabled={submitDisabled}
-            className="inline-flex cursor-pointer items-center rounded-rv-md border-none bg-rv-accent-deep px-3.5 py-2 text-[13px] font-bold text-rv-accent-ink disabled:cursor-not-allowed disabled:opacity-50"
+            className={cn(
+              "inline-flex cursor-pointer items-center rounded-rv-md border-none px-3.5 py-2 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-50",
+              SUBMIT_TONE[submitTone],
+            )}
           >
             {submitLabel}
           </button>

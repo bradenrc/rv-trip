@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import type {
@@ -26,6 +26,7 @@ import {
 } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { browserAreaLabel } from "@/lib/area-label";
+import type { CapturedDetail } from "@/lib/captured";
 import { PlacesLibrary } from "./PlacesLibrary";
 import { PlaceCardMenu } from "./PlaceCardMenu";
 import { PlaceSheet } from "./PlaceSheet";
@@ -78,6 +79,20 @@ export function PlacesWorkspace({
    */
   const [areaLabel, setAreaLabel] = useState<string | null>(null);
   const areaAsked = useRef(false);
+
+  /**
+   * #176 i3 · a library save from Nav's + Capture lands in the list the island
+   * owns — appended, as this island's own save is (vet MED: shipped is append).
+   */
+  useEffect(() => {
+    const onCaptured = (e: Event) => {
+      const d = (e as CustomEvent<CapturedDetail>).detail;
+      if (d.kind !== "place") return;
+      setPlaces((ps) => (ps.some((p) => p.id === d.place.id) ? ps : [...ps, d.place]));
+    };
+    window.addEventListener("rv:captured", onCaptured);
+    return () => window.removeEventListener("rv:captured", onCaptured);
+  }, []);
 
   const openSaveSheet = () => {
     areaAsked.current = false;

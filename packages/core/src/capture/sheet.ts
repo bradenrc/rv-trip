@@ -1,13 +1,16 @@
 import { reservationTypeOfGoogle } from "../domain/places";
+import { placeOf } from "../domain/place-form";
 import type {
+  Idea,
   IdeaCreateBody,
+  IdeaPatchInput,
   ReservationType,
   SavedPlace,
   SavedPlaceCreateInput,
   SavedPlaceStatus,
 } from "../domain/types";
 import { ideaCategoryOfSaveType } from "../planner/nearby-saves";
-import type { PlaceSummary } from "../providers/index";
+import type { PickedPlace, PlaceSummary } from "../providers/index";
 
 /**
  * The capture sheet's decisions (#111 · docs/design/111 #100), pure, so they
@@ -205,7 +208,8 @@ export type DidItBody = IdeaCreateBody & { clientId: string; status: "done" };
  *   so its Been save is anchored to the AREA.
  */
 export function didItBody(
-  where: { clientId: string; tripId: string; destinationId: string },
+  /** #176 · a null `destinationId` is a SHELF idea — a travel day's capture. */
+  where: { clientId: string; tripId: string; destinationId: string | null },
   target:
     | { kind: "place"; hit: PlaceSummary }
     | { kind: "note"; text: string; at: { lat: number; lng: number } | null; areaLabel: string | null },
@@ -241,6 +245,72 @@ export function didItBody(
     place: target.at ? { name, lat: target.at.lat, lng: target.at.lng, googlePlaceId: null } : null,
     areaLabel: target.areaLabel,
   };
+}
+
+// ── #176 · capture mid-trip ─────────────────────────────────────────────────
+
+/**
+ * "Been here" on an open idea that already names the place (#174 · Q3 B):
+ * the `PATCH /api/ideas/:id` body that checks it off. Only what the sheet set
+ * rides along — a null rating or Again and a blank note are left out, so a
+ * match never wipes what the idea already holds.
+ */
+export function checkOffBody(a: DidItAnswers): IdeaPatchInput {
+  const body: IdeaPatchInput = { status: "done" };
+  if (a.rating !== null) body.rating = a.rating;
+  if (a.again !== null) body.again = a.again;
+  const notes = blank(a.note);
+  if (notes !== null) body.notes = notes;
+  return body;
+}
+
+/**
+ * The web's "Been here" (#175 · i3): the `POST /api/ideas` body for a place the
+ * web PlacePicker handed back — `didItBody`'s fields, minus the phone's queue
+ * id (the web has no queue, so it never sends a `clientId`). The category is
+ * the one a Google type reads as; a typed name has no type and files as a Do.
+ * A null `destinationId` is a shelf idea ("Around the trip").
+ */
+export function pickedDidItBody(
+  where: { tripId: string; destinationId: string | null },
+  picked: PickedPlace,
+  a: DidItAnswers,
+): IdeaCreateBody & { status: "done" } {
+  const place = placeOf(picked);
+  return {
+    tripId: where.tripId,
+    destinationId: where.destinationId,
+    status: "done",
+    title: place.name,
+    category: ideaCategoryOfSaveType(reservationTypeOfGoogle(picked.primaryType)),
+    place,
+    rating: a.rating,
+    again: a.again,
+    notes: blank(a.note),
+  };
+}
+
+/** The check-off's Undo: the four fields `checkOffBody` can touch, as they were. */
+export function checkOffUndo(before: Pick<Idea, "status" | "rating" | "again" | "notes">): IdeaPatchInput {
+  return { status: before.status, rating: before.rating, again: before.again, notes: before.notes };
+}
+
+/** The mid-trip CTA (Q5 A): "Save to Pacific Northwest Loop". */
+export function logCtaLabel(tripTitle: string): string {
+  return `Save to ${tripTitle}`;
+}
+
+/** The status chips while a trip is in progress — "Been here" first. */
+export const CAPTURE_MIDTRIP_CHIPS = ["Been here", "Want to go"] as const;
+
+/**
+ * The line under the mid-trip CTA. `writesThrough` is whether the capture also
+ * lands on the Been there shelf (a capture with no place does not).
+ */
+export function logHelperLine(writesThrough: boolean): string {
+  return writesThrough
+    ? "In the trip’s Journal today, and on your Been there shelf."
+    : "In the trip’s Journal today.";
 }
 
 // ── the toasts ─────────────────────────────────────────────────────────────

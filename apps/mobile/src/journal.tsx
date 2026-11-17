@@ -160,11 +160,13 @@ export function HowWasItSheet({
   );
 }
 
-/** "✓ Log it" — the green-cta the capture sheet's Save is. */
-export function LogCta({ onPress }: { onPress: () => void }) {
+/** "✓ Log it" — the green-cta the capture sheet's Save is. The capture sheet
+ * mid-trip passes core's `logCtaLabel` ("Save to Pacific Northwest Loop");
+ * the ✓ is the phone's own (#176 · the web footer draws none). */
+export function LogCta({ onPress, label = "Log it" }: { onPress: () => void; label?: string }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [styles.cta, pressed && { opacity: 0.85 }]}>
-      <Text style={styles.ctaText}>✓ Log it</Text>
+      <Text style={styles.ctaText}>✓ {label}</Text>
     </Pressable>
   );
 }

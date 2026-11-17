@@ -93,8 +93,9 @@ describe("two lists, each declared and rendered once (#173 · Q1 C · Q2 B)", ()
     expect(hrefsOf("LINKS")).toEqual(["/trips", "/places", "/map"]);
   });
 
-  it("the phone bar is the phone's five: Capture goes to /places, You to /you", () => {
-    expect(hrefsOf("TABS")).toEqual(["/trips", "/places", "/places", "/map", "/you"]);
+  it("the phone bar is the phone's five: Capture is an action (#176 i3), You goes to /you", () => {
+    expect(hrefsOf("TABS")).toEqual(["/trips", "/places", "/map", "/you"]);
+    expect(navFlat).toContain('{ href: null, label: "Capture"');
   });
 
   it("reaches /settings and /rig through You, which is lit on both", () => {

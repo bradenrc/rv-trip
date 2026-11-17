@@ -145,6 +145,99 @@ describe("saves · the tab renders core's shelves", () => {
   });
 });
 
+// ── #176 i2 · capture mid-trip on the phone (#174 · Q1 A … Q6 A) ───────────
+
+const journalUi = read("src/journal.tsx");
+const ui = read("src/ui.tsx");
+
+/** The body of `export function <name>(` up to the next top-level `export`. */
+const fnBody = (src: string, name: string) => {
+  const at = src.indexOf(`export function ${name}(`);
+  expect(at, `${name} is exported`).toBeGreaterThan(-1);
+  const next = src.indexOf("\nexport ", at + 1);
+  return src.slice(at, next === -1 ? undefined : next);
+};
+
+describe("capture · the sheet files onto the trip in progress (#176 i2)", () => {
+  it("reads the target through useCaptureTarget, not useTodaysDestination", () => {
+    expect(sheet).toContain("useCaptureTarget()");
+    expect(sheet).not.toContain("useTodaysDestination");
+    expect(store).toContain("export function useCaptureTarget()");
+    expect(store).toContain("captureTarget(");
+    expect(store).not.toContain("export function useTodaysDestination");
+  });
+
+  it("opens on Been here when a trip is in progress, else Want to go", () => {
+    expect(sheet).toContain('useState<SavedPlaceStatus | "did">(target ? "did" : "want")');
+    // Re-evaluated once the target resolves, unless the chips were touched.
+    expect(sheet).toMatch(/if \(!touched\) setStatus\(target \? "did" : "want"\)/);
+  });
+
+  it("draws Been here · Want to go (neutral) mid-trip, and Been there only outside a trip", () => {
+    const mid = sheet.indexOf("{target ? (");
+    const off = sheet.indexOf(") : (", mid);
+    const end = sheet.indexOf("\n      )}", off);
+    expect(mid).toBeGreaterThan(-1);
+    const midTrip = sheet.slice(mid, off);
+    const noTrip = sheet.slice(off, end);
+    expect(midTrip).toContain('<Chip neutral on={status === "did"} onPress={() => pick("did")}>\n            Been here');
+    expect(midTrip).toContain('<Chip neutral on={status === "want"} onPress={() => pick("want")}>\n            Want to go');
+    expect(midTrip).not.toContain("Been there");
+    expect(noTrip).toContain('<Chip on={status === "want"} onPress={() => pick("want")}>\n            Want to go');
+    expect(noTrip).toContain('<Chip on={status === "been"} onPress={() => pick("been")}>\n            Been there');
+    expect(noTrip).not.toContain("neutral");
+    expect(sheet).not.toContain("Did it\n");
+  });
+
+  it("labels the CTA with logCtaLabel and the helper with logHelperLine", () => {
+    expect(sheet).toContain("<LogCta label={logCtaLabel(target.trip.title)}");
+    expect(sheet).toContain("logHelperLine(");
+    expect(sheet).toContain("didItContext(target.trip.title, target.destination?.place.name ?? null)");
+  });
+
+  it("checks off a matching open idea through queuePatch, else writes a Did-it with destination?.id ?? null", () => {
+    expect(sheet).toContain("matchingOpenIdea(");
+    expect(sheet).toContain("target.destination ? target.destination.ideas : target.trip.ideas");
+    expect(sheet).toContain("const patch = checkOffBody(answers);");
+    expect(sheet).toMatch(/queuePatch\("idea", match\.id, patch, \{/);
+    expect(sheet).toMatch(/updateTrip\(tripId, \(t\) => setIdeaFields\(t, match\.id, /);
+    // Undo restores what the idea held before the check-off.
+    expect(sheet).toContain("{ status: match.status, rating: match.rating, again: match.again, notes: match.notes }");
+    expect(sheet).toMatch(/queuePatch\("idea", match\.id, before\)/);
+    expect(sheet).toContain("destinationId: target.destination?.id ?? null");
+    expect(sheet).toContain("addProvisionalIdea(tripId, target.destination?.id ?? null,");
+  });
+});
+
+describe("store · the shelf takes a provisional idea (#176 i2 · vet HIGH)", () => {
+  it("addProvisionalIdea accepts a null destination and appends it to the trip's ideas", () => {
+    const add = fnBody(store, "addProvisionalIdea");
+    expect(add).toContain("destinationId: string | null");
+    expect(add).toContain("destinationId === null");
+    expect(add).toContain("appendShelfIdea(t, idea)");
+  });
+
+  it("replaceIdea swaps / removes the row on the shelf too, not only on destinations", () => {
+    const replace = fnBody(store, "replaceIdea");
+    expect(replace).toMatch(/ideas: swap\(t\.ideas\)/);
+    expect(replace).toMatch(/ideas: swap\(s\.ideas\)/);
+  });
+});
+
+describe("ui · LogCta and Chip (#176 i2)", () => {
+  it("LogCta's default label is still Log it, and the ✓ is the phone's own", () => {
+    const cta = fnBody(journalUi, "LogCta");
+    expect(cta).toContain('label = "Log it"');
+    expect(cta).toContain("✓ {label}");
+  });
+
+  it("Chip's neutral selected tone is AgainPair's seg2On (ink · navySoft · ink)", () => {
+    const chip = fnBody(ui, "Chip");
+    expect(chip).toContain("neutral?: boolean");
+    expect(chip).toContain("{ borderColor: C.ink, backgroundColor: C.navySoft, color: C.ink }");
+  });
+});
+
 // ── #173 i2 · the library is called Places (Q6 A) ──────────────────────────
 
 /** Every .ts/.tsx file under apps/mobile/{app,src}, repo-relative to apps/mobile. */

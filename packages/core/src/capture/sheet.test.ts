@@ -1,9 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { ideaCreateInput, savedPlaceCreate } from "../domain/types";
+import { ideaCreateInput, ideaPatchInput, savedPlaceCreate } from "../domain/types";
 import type { PlaceSummary } from "../providers/index";
 import {
+  CAPTURE_MIDTRIP_CHIPS,
   JOURNAL_QUEUED_TOAST,
   OFFLINE_NOTICE,
+  checkOffBody,
+  checkOffUndo,
+  pickedDidItBody,
+  logCtaLabel,
+  logHelperLine,
   captureFieldPlaceholder,
   didItBody,
   journalToast,
@@ -202,6 +208,88 @@ describe("didItBody (#113 · Did it)", () => {
       place: { name: "Coco Loco", lat: 10.43, lng: -85.78, googlePlaceId: "ChIJ_sunset_bar" },
     });
     expect(body).not.toHaveProperty("areaLabel");
+  });
+});
+
+describe("capture mid-trip (#176)", () => {
+  it("didItBody with no destination round-trips as a shelf idea", () => {
+    const body = didItBody(
+      { clientId: "cap_shelf", tripId: "5d3c9d7e-9b8e-4a8e-8f55-5a1f7b6d2c11", destinationId: null },
+      { kind: "note", text: "Sisters Coffee", at: { lat: 44.29, lng: -121.55 }, areaLabel: "Sisters" },
+      { rating: 4, again: true, note: "" },
+    );
+    expect(body.destinationId).toBeNull();
+    const parsed = ideaCreateInput.safeParse(body);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.destinationId).toBeNull();
+  });
+
+  it("checkOffBody sends only what the sheet set", () => {
+    expect(checkOffBody({ rating: null, again: null, note: "  " })).toEqual({ status: "done" });
+    const full = checkOffBody({ rating: 5, again: false, note: " Get the hazelnut brown. " });
+    expect(full).toEqual({ status: "done", rating: 5, again: false, notes: "Get the hazelnut brown." });
+    expect(ideaPatchInput.safeParse(full).success).toBe(true);
+  });
+
+  it("the CTA, the chips and the helper line read as the frames", () => {
+    expect(logCtaLabel("Pacific Northwest Loop")).toBe("Save to Pacific Northwest Loop");
+    expect(CAPTURE_MIDTRIP_CHIPS).toEqual(["Been here", "Want to go"]);
+    expect(logHelperLine(true)).toBe("In the trip’s Journal today, and on your Been there shelf.");
+    expect(logHelperLine(false)).toBe("In the trip’s Journal today.");
+  });
+});
+
+describe("web capture (#176 i3)", () => {
+  const TRIP = "5d3c9d7e-9b8e-4a8e-8f55-5a1f7b6d2c11";
+  const DEST = "7a1e2b3c-4d5e-4f60-8a71-92b3c4d5e6f7";
+  const rogue = {
+    name: " Rogue Ales Public House ",
+    lat: 44.6265,
+    lng: -124.0577,
+    googlePlaceId: "ChIJ_rogue",
+    address: "748 SW Bay Blvd, Newport, OR 97365, USA",
+    rating: 4.5,
+    primaryType: "bar",
+  };
+
+  it("pickedDidItBody: a Google pick is a done idea on today's destination, no clientId", () => {
+    const body = pickedDidItBody({ tripId: TRIP, destinationId: DEST }, rogue, {
+      rating: 4,
+      again: true,
+      note: " Fish and chips. ",
+    });
+    expect(body).toEqual({
+      tripId: TRIP,
+      destinationId: DEST,
+      status: "done",
+      title: "Rogue Ales Public House",
+      category: "eat",
+      place: { name: "Rogue Ales Public House", lat: 44.6265, lng: -124.0577, googlePlaceId: "ChIJ_rogue" },
+      rating: 4,
+      again: true,
+      notes: "Fish and chips.",
+    });
+    expect(body).not.toHaveProperty("clientId");
+    expect(ideaCreateInput.safeParse(body).success).toBe(true);
+  });
+
+  it("pickedDidItBody: a travel day files on the shelf; a typed name is a coordless Do", () => {
+    const body = pickedDidItBody(
+      { tripId: TRIP, destinationId: null },
+      { name: "Sisters Coffee", lat: null, lng: null, googlePlaceId: null, address: null, rating: null, primaryType: null },
+      { rating: null, again: null, note: "" },
+    );
+    expect(body.destinationId).toBeNull();
+    expect(body.category).toBe("do");
+    expect(body.place).toEqual({ name: "Sisters Coffee", lat: null, lng: null, googlePlaceId: null });
+    expect(body.notes).toBeNull();
+    expect(ideaCreateInput.safeParse(body).data?.destinationId).toBeNull();
+  });
+
+  it("checkOffUndo puts back the four fields the check-off can touch", () => {
+    const before = checkOffUndo({ status: "planned", rating: null, again: null, notes: "Lunch?" });
+    expect(before).toEqual({ status: "planned", rating: null, again: null, notes: "Lunch?" });
+    expect(ideaPatchInput.safeParse(before).success).toBe(true);
   });
 });
 
