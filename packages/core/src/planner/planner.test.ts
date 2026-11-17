@@ -377,6 +377,19 @@ describe("routeModel", () => {
     expect(chapters[0]!.outboundDrive).toMatchObject({ estimate: true });
   });
 
+  it("carries the arriving destination's coordinate and the leaving destination's id (#180)", () => {
+    const chapters = routeModel(fixture());
+    const d = chapters[0]!.rows[0]!.drive!;
+    expect(d.navTo).toEqual({ lat: 44.63, lng: -124.05 });
+    expect(d.fromDestinationId).toBe("S1");
+    expect(d.toDestinationId).toBe("S2");
+    // The chapter-boundary drive (S2 → S3) carries the same two fields.
+    const boundary = chapters[0]!.outboundDrive!;
+    expect(boundary.navTo).toEqual({ lat: 44.05, lng: -121.31 });
+    expect(boundary.fromDestinationId).toBe("S2");
+    expect(boundary.toDestinationId).toBe("S3");
+  });
+
   it("gives every drive a Google Maps handoff URL", () => {
     const d = routeModel(fixture())[0]!.rows[0]!.drive!;
     expect(d.navUrl).toMatch(/^https:\/\/www\.google\.com\/maps\/dir\/\?api=1&origin=46\.18/);

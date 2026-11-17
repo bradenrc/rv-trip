@@ -464,6 +464,15 @@ export interface RouteDrive {
   /** How far Google's route ran from the corridor, in meters — `null` when the
    * check never ran. */
   navDeviationMeters: number | null;
+  /** The arriving destination's coordinate — what `navigateLinks` reads for the
+   * Google · Apple · Waze pills (#180). */
+  navTo: { lat: number; lng: number };
+  /** The destination this drive leaves — names the rig-on "RV route · from
+   * Astoria" line (#180 · q2 A). */
+  fromDestinationId: string;
+  /** The destination this drive arrives at — names the "→ Newport, OR" label
+   * beside the pills. */
+  toDestinationId: string;
   miles: number;
   minutes: number;
 }
@@ -498,6 +507,9 @@ function toDrive(
     navWegoUrl: handoff.wegoUrl,
     navVerdict: handoff.verdict,
     navDeviationMeters: handoff.deviationMeters,
+    navTo: { lat: pair.to.lat, lng: pair.to.lng },
+    fromDestinationId: pair.fromDestinationId,
+    toDestinationId: pair.toDestinationId,
     miles: driveMiles(result),
     minutes: driveMinutes(result),
   };

@@ -267,10 +267,12 @@ describe("mapAvailable() degrades, and nothing routes to Google Maps instead", (
     for (const src of [mapCode, destinationCode, tripCode]) {
       expect(src).not.toMatch(/google/i);
     }
-    // The phone's ONE hand-off to Google is a drive's Navigate button, which
-    // predates this item and is turn-by-turn, not a map fallback: it goes
-    // through core's `drive.navUrl` and no map surface can reach it.
-    expect(tripCode).toContain("Linking.openURL(drive.navUrl)");
+    // The phone's hand-off to the navigation apps is a drive's Navigate pills
+    // (#180), which are turn-by-turn, not a map fallback: they live in
+    // src/navigate.tsx, reached through `<NavigateLinks`, and no map surface
+    // can reach them.
+    expect(tripCode).toContain("<NavigateLinks drive={drive}");
+    expect(tripCode).not.toContain("Linking.openURL(drive.navUrl)");
   });
 });
 
@@ -351,7 +353,9 @@ describe("the trip screen's Route ⇄ Map lens", () => {
       "<Legend color={C.green} label=\"Stay\" />",
       "<Kicker>On the road</Kicker>",
       "behind the wheel",
-      "Navigation may not follow the RV-safe route — check notices.",
+      // #180 — the amber caption moved into the RV route line (src/navigate.tsx,
+      // read from core's navigationCaption); the Drive renders it from here.
+      "<NavigateLinks drive={drive} rigOn={rigOn} toName={toName} fromName={fromName} />",
       "{timeline!.openLabel}",
     ]) {
       expect(tripScreen).toContain(fragment);

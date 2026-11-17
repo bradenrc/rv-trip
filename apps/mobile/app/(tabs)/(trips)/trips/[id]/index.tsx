@@ -2,7 +2,6 @@ import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -55,6 +54,7 @@ import {
   type HopRef,
 } from "../../../../../src/hops";
 import { RoundTripSheet } from "../../../../../src/round-trip";
+import { NavigateLinks } from "../../../../../src/navigate";
 import {
   AddIdeaSheet,
   AddSheet,
@@ -215,6 +215,9 @@ export default function TripScreen() {
   const driveRow = (drive: RouteDrive) => (
     <Drive
       drive={drive}
+      rigOn={trip.rigOn}
+      toName={destinationName(drive.toDestinationId)}
+      fromName={destinationName(drive.fromDestinationId)}
       trailing={
         drive.segmentId === null ? null : driveTrip ? (
           <Pressable
@@ -704,9 +707,23 @@ function DestinationRow({
 /**
  * A drive has exactly three renderings, and only one is amber — the same
  * contract as the web's connector: clean · restricted (notices) · estimate.
- * Navigate hands Google Maps origin + destination, never the corridor.
+ * #180 — Navigate is three plain pills to the arriving destination and, on a
+ * rig-on trip, the RV route line with the shipped caption (src/navigate). Fly
+ * and ferry hops are HopRows and never reach here, so they carry no Navigate.
  */
-function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React.ReactNode }) {
+function Drive({
+  drive,
+  rigOn,
+  toName,
+  fromName,
+  trailing = null,
+}: {
+  drive: RouteDrive;
+  rigOn: boolean;
+  toName: string;
+  fromName: string;
+  trailing?: React.ReactNode;
+}) {
   const restricted = drive.notices.length > 0;
   return (
     <View
@@ -720,23 +737,15 @@ function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React
         <Text style={[styles.mono, { color: C.inkMuted }]}>{drive.label}</Text>
         {drive.primaryRoad && <Text style={styles.mono}>· {drive.primaryRoad}</Text>}
         {drive.estimate && <EstimateChip />}
-        <View style={{ marginLeft: "auto" }}>
-          <Button onPress={() => void Linking.openURL(drive.navUrl)}>Navigate</Button>
-        </View>
-        {trailing}
+        {trailing && <View style={{ marginLeft: "auto" }}>{trailing}</View>}
       </View>
-      {restricted && (
-        <>
-          <Text style={{ color: C.warning, fontSize: 11.5, textAlign: "right" }}>
-            Navigation may not follow the RV-safe route — check notices.
-          </Text>
-          {drive.notices.map((n, i) => (
-            <View key={`${n.code}-${i}`} style={styles.notice}>
-              <Text style={{ color: C.warning, fontSize: 12.5 }}>⚠ {n.message}</Text>
-            </View>
-          ))}
-        </>
-      )}
+      <NavigateLinks drive={drive} rigOn={rigOn} toName={toName} fromName={fromName} />
+      {restricted &&
+        drive.notices.map((n, i) => (
+          <View key={`${n.code}-${i}`} style={styles.notice}>
+            <Text style={{ color: C.warning, fontSize: 12.5 }}>⚠ {n.message}</Text>
+          </View>
+        ))}
     </View>
   );
 }

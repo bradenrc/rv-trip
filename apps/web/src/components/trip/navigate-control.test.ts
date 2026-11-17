@@ -4,70 +4,83 @@ import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 
 /**
- * The split Navigate control (docs/design/43 §4), asserted where it CAN be.
+ * Navigate on a drive (#180 · docs/design/181 frames 2 and 5), asserted where
+ * it CAN be. It replaced the split Navigate control of docs/design/43 §4.
  *
- * The acceptance asks for a RouteView render test. There is no DOM in this
- * repo to render it in: apps/web's vitest is `environment: "node"`, collects
- * only `.test.ts`, and the workspace ships no jsdom, no happy-dom, no
- * @testing-library/react and no @vitejs/plugin-react (the vet's HIGH). Adding
- * four dependencies to assert three class names is not this item's scope, so
- * the split is asserted in two honest halves instead:
+ * There is no DOM in this repo to render it in: apps/web's vitest is
+ * `environment: "node"`, collects only `.test.ts`, and the workspace ships no
+ * jsdom or @testing-library/react. So it is asserted in two honest halves:
  *
- *  · the COPY and the ORDER — the parts that are logic — are pure functions in
- *    @rv-trip/core and executed by packages/core's suite
- *    (`navigationOptions` / `navigationCaption` in planner.test.ts);
- *  · the CLASSES are asserted here, as source text, in the same idiom
- *    packages/core/src/theme/nightfall-tokens.test.ts already uses for the
- *    token call sites it cannot render.
+ *  · the URLS and the COPY — the parts that are logic — are pure functions in
+ *    @rv-trip/core and executed by packages/core's suite (`navigateLinks` in
+ *    navigation.test.ts, `navigationCaption` in planner.test.ts);
+ *  · the WIRING and the CLASSES are asserted here, as source text, in the same
+ *    idiom packages/core/src/theme/nightfall-tokens.test.ts uses.
  *
- * What neither half can do is prove a radix portal opens inside the route rail.
- * That is render-required at the walk.
+ * What neither half can prove is that the Apple Maps and Waze links hand off
+ * to the native apps. That is render-required at the walk.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const source = readFileSync(join(HERE, "RouteView.tsx"), "utf8");
+const route = readFileSync(join(HERE, "RouteView.tsx"), "utf8");
+const links = readFileSync(join(HERE, "NavigateLinks.tsx"), "utf8");
 
-describe("RouteView's Navigate control, as source", () => {
-  it("is ONE control, used by both drive renderings", () => {
-    expect(source.match(/function NavigateButton\(/g)).toHaveLength(1);
-    // The clean one-liner and the restricted card — the two renderings that
-    // draw a drive. There is no third call site and no fourth state.
-    expect(source.match(/<NavigateButton drive=\{drive\}/g)).toHaveLength(2);
-    expect(source).not.toContain("NavigateButton href=");
+describe("RouteView's Navigate, as source", () => {
+  it("retires the split NavigateButton and its accent pill", () => {
+    expect(route).not.toContain("function NavigateButton(");
+    expect(route).not.toContain("<NavigateButton");
+    expect(route).not.toContain("NAV_PILL");
+    expect(route).not.toContain("navigationOptions");
   });
 
-  it("keeps the 32px floor on every half of the split", () => {
-    // Pressed at a fuel stop with the engine running: the pill, the body and
-    // the caret all carry min-h-8, so no half of the control can shrink under
-    // the touch target.
-    const control = source.slice(source.indexOf("const NAV_PILL"));
-    expect(control.match(/min-h-8/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(control).toContain("bg-rv-accent-deep text-rv-accent-ink");
+  it("renders NavigateLinks and the RV route line in BOTH drive renderings", () => {
+    // The clean one-liner and the restricted card — there is no third.
+    expect(route.match(/<NavigateLinks drive=\{drive\} toName=\{toName\}/g)).toHaveLength(2);
+    expect(
+      route.match(/<RvRouteLine drive=\{drive\} rigOn=\{rigOn\} fromName=\{fromName\} \/>/g),
+    ).toHaveLength(2);
+    // The restricted card's standalone caption moved into the RV line.
+    expect(route).not.toContain("DriveCaption");
+    expect(route).toContain("rigOn={trip.rigOn}");
+  });
+});
+
+describe("NavigateLinks, as source", () => {
+  it("reads its three URLs from core's navigateLinks, destination only", () => {
+    expect(links).toContain("navigateLinks(drive.navTo)");
+    for (const href of ["links.google", "links.apple", "links.waze"]) {
+      expect(links).toContain(`href={${href}} target="_blank" rel="noreferrer"`);
+    }
+    expect(links).not.toMatch(/https?:\/\//);
   });
 
-  it("composes the shipped menu rather than restyling one", () => {
-    // MENU_SURFACE / MENU_ITEM are the row menu's own classes (row-menu.tsx),
-    // which is what keeps this menu the same object as the other three.
-    expect(source).toMatch(/DropdownMenuContent align="end" className=\{MENU_SURFACE\}/);
-    expect(source).toContain("${MENU_ITEM} items-start");
+  it("draws the RV route line only under rigOn", () => {
+    const at = links.indexOf("export function RvRouteLine");
+    const line = links.slice(at);
+    const guard = line.indexOf("if (!rigOn) return null;");
+    expect(guard).toBeGreaterThan(-1);
+    expect(line.indexOf("RV route · from {")).toBeGreaterThan(guard);
+    // And nowhere outside that component.
+    expect(links.slice(0, at)).not.toContain("RV route · from {");
   });
 
-  it("paints the caption green on 'checked' and amber otherwise", () => {
-    const caption = source.slice(
-      source.indexOf("function DriveCaption"),
-      source.indexOf("const NAV_PILL"),
-    );
-    expect(caption).toContain('caption.tone === "checked" ? "text-rv-green" : "text-rv-warning"');
-    // The strings themselves come from core — one place, and a place a runner
-    // can reach. The component must not carry copy of its own.
-    expect(caption).toContain("{caption.text}");
-    expect(caption).not.toContain("RV-safe");
+  it("puts the ✓ on the checked Google link only, and reads the caption from core", () => {
+    expect(links).toContain("href={drive.navUrl}");
+    expect(links).toContain("href={drive.navWegoUrl}");
+    expect(links).toContain('{checked && <span className="text-rv-green">✓</span>}');
+    expect(links).toContain('const checked = drive.navVerdict === "checked";');
+    expect(links).toContain("navigationCaption(drive)");
+    expect(links).toContain('caption.tone === "checked" ? "text-rv-green" : "text-rv-warning"');
+    expect(links).toContain("{caption.text}");
+    expect(links).not.toContain("RV-safe");
   });
 
-  it("carries no raw colour and no hand-written navigation copy", () => {
-    const control = source.slice(source.indexOf("function DriveCaption"));
-    expect(control).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
-    expect(control).not.toContain("WeGo");
-    expect(control).not.toContain("Google Maps");
+  it("wears the neutral pill with the 32px floor, and no raw colour", () => {
+    expect(links).toContain("min-h-8");
+    expect(links).toContain("rounded-rv-pill bg-rv-navy-soft");
+    expect(links).toContain("text-[12px] font-bold text-rv-ink");
+    // Code, not the doc comment (which cites issue numbers like #180).
+    expect(links.replace(/\/\*[\s\S]*?\*\//g, "")).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(links).not.toContain("accent-deep");
   });
 });
