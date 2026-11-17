@@ -99,3 +99,43 @@ Scope: epic item **i2 of 9 only** (#182 renders · q1 A · q3 A · q4 A · q11 A
 - TDD red (core): `npx vitest run src/capture/shelves.test.ts` with the new tests and no implementation → `Tests 4 failed | 23 passed (27)`. Green afterwards → `27 passed`.
 - The web and mobile source tests were written before the code but were **not** run red first. They were run after implementing: `npx vitest run src/mobile-places.test.ts src/mobile-capture.test.ts` → `40 passed`; `npx vitest run src/components/places/near-you.test.ts` → `11 passed`.
 - Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1533 passed`, web `Tests 554 passed`, ui `Tests 55 passed`. The first run failed on the web lint rule and on the hard-coded "mi" sweep; both are fixed as described above.
+
+---
+
+# i3 · Core: tripCard and its lines
+
+Scope: epic item **i3 of 9 only** (#183 core seam · q5 A). Core only. No UI, no schema, no route changes. The renders are i4.
+
+## What changed
+
+- **New** `packages/core/src/planner/trip-card.ts`:
+  - `TripCard` :19 is the three-kind union, exactly as the wireframe names it.
+  - `TRIP_CARD_WINDOW_DAYS = 7` :25.
+  - `staysToRate` :28 counts `unratedOf` rows across all of the trip's destinations, keeping `categoryOf(r.type).cat === "Stay"` only.
+  - `closest` :36 picks the trip 1–7 days away with the fewest days. A tie keeps input order, and an undated trip is skipped.
+  - `tripCard(trips, today)` :47 checks now → starting → ended.
+    - now uses `activeTrip`, with `day = daysUntil(today, start) + 1` and `of = daysUntil(end, start) + 1`.
+    - starting uses `daysUntil(startDate, today)`.
+    - ended uses `daysUntil(today, endDate)` and is kept even when `toRate` is 0.
+    - `tab` comes from `defaultTripTab(trip, today)`.
+  - `tripCardLines(card)` :82 returns the "in N day(s)", "day D of N" and "back N day(s)" wording.
+    - On ended only: when toRate > 0 the line is "<n> stay still needs / stays still need a “How was it?”" with amber true. Otherwise it is "Finish the journal" with amber false.
+    - `cta = TRIP_TAB_LABEL[tab] + " →"`.
+- `packages/core/src/planner/journal.ts:433`: `unratedOf` is now exported, with no body change. The Stay-only filter lives in trip-card.ts, so the Journal's "How was it?" count is unchanged.
+- `packages/core/src/planner/index.ts:76` re-exports `./trip-card`.
+- **New** `packages/core/src/planner/trip-card.test.ts` has 14 tests:
+  - Every row of the §1 #183 table: Jul 24 null; Jul 25 starting 7, Agenda →; Aug 7 now 7 of 28, Journal →; Sep 4 ended 7, "1 stay still needs…"; Sep 5 null; Nov 10 Bellingham in 1 day beats McCall (back 2 days); Nov 17 ended 2, toRate 2, amber; Nov 17 both rated → "Finish the journal", amber false; Sep 20 null.
+  - Also: an unrated Eat reservation not counted, now beating starting and ended, closest-wins on both sides, singular "back 1 day", and no trips.
+
+## Decisions / flags
+
+- **Ended trips are `complete` in the fixture.** `defaultTripTab` opens Journal on an ended trip only when `status === "complete"`. The table's ended CTAs are "Journal →", which holds when status is derived: `deriveTripStatus` reads an ended auto trip as complete. An ended trip with a **pinned** non-complete status (like the PNW seed, `statusAuto:false, "planning"`) would show "Agenda →". That is correct per the spec ("tab = defaultTripTab"), but i4 must pass trips whose `status` is already derived (server rows are), or the CTA will differ from the table.
+- **Name collision note for i4.** The web already has a React component `apps/web/src/components/dashboard/TripCard.tsx`. Core's `TripCard` is a type, so nothing clashes today, but any file that imports both should alias one of them.
+- `tripCard` takes `readonly Trip[]`, which `Trip[]` satisfies.
+- No render surface changed, so there is nothing for the walk in this item.
+
+## Checks run
+
+- TDD red: `npx vitest run src/planner/trip-card.test.ts` (packages/core) before the module existed → `Test Files 1 failed (1)` (import unresolved).
+- Green: same command after → `Tests 14 passed (14)`.
+- Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`; core `Tests 1547 passed (1547)`, web `Tests 554 passed (554)`, ui `Tests 55 passed (55)`. A first gate run hung in the web vitest worker (0 CPU for over 20 min, no output). I killed only that run's own PIDs, re-ran, and it went green.

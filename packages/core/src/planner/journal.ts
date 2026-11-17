@@ -428,8 +428,9 @@ export interface JournalToday {
   earlier: JournalEarlierGroup[];
 }
 
-/** A destination's stays, meals and things to do that carry neither ★ nor Again. */
-function unratedOf(destination: Destination | null): Reservation[] {
+/** A destination's stays, meals and things to do that carry neither ★ nor Again.
+ * Exported for the Places trip card's count (#183 · `tripCard`). */
+export function unratedOf(destination: Destination | null): Reservation[] {
   if (!destination) return [];
   return destination.reservations.filter((r) => isRateableReservation(r) && r.rating === null && r.again === null);
 }
