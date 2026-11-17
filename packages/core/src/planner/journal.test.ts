@@ -17,11 +17,13 @@ import {
   journalTallyParts,
   setIdeaFields,
   setDestinationReservationFields,
+  setDestinationFields,
   destinationsInDateOrder,
   todaysDestination,
   toggleAgain,
   travelFoldLabel,
   tripJournal,
+  journalToday,
 } from "./journal";
 
 /**
@@ -388,5 +390,60 @@ describe("isRootLaunchUrl (#173 i5 · a plain cold start vs a deep link)", () =>
     expect(isRootLaunchUrl({ scheme: "exp", hostname: null, path: "trips/abc" })).toBe(false);
     expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "trips", path: "abc" })).toBe(false);
     expect(isRootLaunchUrl({ scheme: "tripcaddie", hostname: "saves", path: null })).toBe(false);
+  });
+});
+
+describe("journalToday (#178 · #181 i3)", () => {
+  const withRes = (trip: Trip, id: string, patch: Parameters<typeof setDestinationReservationFields>[2]) =>
+    setDestinationReservationFields(trip, id, patch);
+
+  it("Aug 7: Today is Newport, and Earlier is Astoria", () => {
+    const j = journalToday(pnwTrip(), "2026-08-07");
+    expect(j.today.heading).toBe("Today · Fri Aug 7 · Newport, OR");
+    expect(j.today.destination?.id).toBe("stp_newport");
+    expect(j.today.entries.map((e) => e.id)).toEqual(["res_southbeach"]);
+    expect(j.earlier.map((g) => g.heading)).toEqual(["Astoria, OR"]);
+    expect(j.earlier[0]).toMatchObject({ rating: 5, again: null });
+  });
+
+  it("Aug 10, between destinations: Around the trip, and Earlier is Newport then Astoria", () => {
+    const j = journalToday(pnwTrip(), "2026-08-10");
+    expect(j.today.heading).toBe("Today · Mon Aug 10 · Around the trip");
+    expect(j.today.heading.endsWith("Around the trip")).toBe(true);
+    expect(j.today.destination).toBeNull();
+    expect(j.today.toRate).toEqual([]);
+    expect(j.earlier.map((g) => g.destination?.id)).toEqual(["stp_newport", "stp_astoria"]);
+  });
+
+  it("an unrated KOA lands in Astoria's toRate; a rated one does not", () => {
+    const unrated = withRes(pnwTrip(), "res_koa", { rating: null, again: null });
+    const astoria = journalToday(unrated, "2026-08-07").earlier.find((g) => g.destination?.id === "stp_astoria")!;
+    expect(astoria.toRate.map((r) => r.id)).toContain("res_koa");
+
+    const rated = journalToday(pnwTrip(), "2026-08-07").earlier.find((g) => g.destination?.id === "stp_astoria")!;
+    expect(rated.toRate.map((r) => r.id)).not.toContain("res_koa");
+  });
+
+  it("keeps a past destination whose only row is an unrated stay (vet MED)", () => {
+    let t = withRes(pnwTrip(), "res_koa", { rating: null, again: null });
+    t = setDestinationFields(t, "stp_astoria", { rating: null, again: null });
+    // tripJournal drops Astoria — nothing journal-worthy and no ★ of its own …
+    expect(tripJournal(t).destinations.map((g) => g.destination.id)).not.toContain("stp_astoria");
+    // … but Today's Earlier still shows it, with its "How was it?" pill.
+    const astoria = journalToday(t, "2026-08-07").earlier.find((g) => g.destination?.id === "stp_astoria")!;
+    expect(astoria.entries).toEqual([]);
+    expect(astoria.toRate.map((r) => r.id)).toContain("res_koa");
+  });
+
+  it("closes Earlier with Around the trip when today has a destination and the shelf has entries", () => {
+    const t = { ...pnwTrip() };
+    t.ideas = t.ideas.map((i) => (i.id === "idea_kiwanda" ? { ...i, status: "done" as const } : i));
+    const j = journalToday(t, "2026-08-07");
+    expect(j.earlier.at(-1)).toMatchObject({ destination: null, heading: "Around the trip" });
+    expect(j.earlier.at(-1)!.entries.map((e) => e.id)).toEqual(["idea_kiwanda"]);
+    // With no destination today the shelf IS Today, so it is not repeated.
+    const gap = journalToday(t, "2026-08-10");
+    expect(gap.today.entries.map((e) => e.id)).toEqual(["idea_kiwanda"]);
+    expect(gap.earlier.some((g) => g.destination === null)).toBe(false);
   });
 });

@@ -72,6 +72,11 @@ import {
   tripSettingsDraft,
   tripSettingsPatch,
   unscheduleDestinationPatch,
+  defaultTripTab,
+  TRIP_TABS,
+  TRIP_TAB_LABEL,
+  type IsoDate,
+  type TripTab,
 } from "@rv-trip/core";
 import {
   CategoryTile,
@@ -134,6 +139,7 @@ import {
   destinationAbove,
   timelineModel,
   routeModel,
+  routeDrives,
   routeSummary,
   routeCountKicker,
   logisticsModel,
@@ -230,6 +236,8 @@ export function TripPlanner({
   nearby: initialNearby,
   nextTime: initialNextTime = { cards: [], saveIds: [] },
   householdHome = null,
+  today = null,
+  now,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -274,6 +282,14 @@ export function TripPlanner({
    * it optimistically, the way `getTripById` coalesces on the next read.
    */
   householdHome?: Place | null;
+  /**
+   * #177 · the browser's date, from the `tz` cookie (trips/[id]/page.tsx) —
+   * null when the server cannot know it yet. It picks the tab the trip opens
+   * on (`defaultTripTab`): a trip whose dates cover today opens on Journal.
+   */
+  today?: IsoDate | null;
+  /** #178 · the request's instant (ISO), for the Journal's Today projection. */
+  now?: string;
 }) {
   const router = useRouter();
   const [trip, setTrip] = useState(initialTrip);
@@ -306,19 +322,18 @@ export function TripPlanner({
   // Route, a fly trip on Timeline. #113 · Q4 B: a traveled trip (status
   // `complete`, the dashboard's "Traveled") opens on its Journal. Derived,
   // never stored — the Traveled card's /trips/[id] href is the deep-link.
-  // #131 · Q1 A · Q2 A — three MINDSET tabs: Itinerary · Ideas · Journal.
-  // The old lenses are Itinerary's sub-lens. The derivation is kept: a
-  // traveled trip opens on Journal; otherwise Itinerary, on Route for a drive
-  // trip and Timeline for a fly trip.
-  const [tab, setTab] = useState<"itinerary" | "ideas" | "journal">(
-    initialTrip.status === "complete" ? "journal" : "itinerary",
-  );
+  // #131 · Q1 A · Q2 A — three MINDSET tabs, #177 reordered and renamed:
+  // Journal · Agenda · Ideas. The old lenses are Agenda's sub-lens. #177: the
+  // tab is core's `defaultTripTab` — a trip in progress today, or a traveled
+  // one, opens on Journal; otherwise Agenda, on Route for a drive trip and
+  // Timeline for a fly trip.
+  const [tab, setTab] = useState<TripTab>(defaultTripTab(initialTrip, today));
   const [sub, setSub] = useState<"route" | "timeline">(
     initialTrip.defaultMode === "drive" ? "route" : "timeline",
   );
-  const lens = tab === "itinerary" ? sub : tab;
+  const lens = tab === "agenda" ? sub : tab;
   const showRoute = () => {
-    setTab("itinerary");
+    setTab("agenda");
     setSub("route");
   };
   /** #128 · the Add stay sheet — `destinationId` null is Itinerary ▸ Add ▸ Stay. */
@@ -439,6 +454,8 @@ export function TripPlanner({
     () => routeModel(trip, routes, routingHash, nav, units),
     [trip, routes, routingHash, nav, units],
   );
+  // #178 · the Journal's Up next card puts Navigate on the drive it names.
+  const drives = useMemo(() => routeDrives(route), [route]);
   const summary = useMemo(
     () => routeSummary(trip, routes, routingHash),
     [trip, routes, routingHash],
@@ -1654,23 +1671,23 @@ export function TripPlanner({
 
           <div className="flex w-full flex-wrap items-center gap-3 md:w-auto">
             <div className="inline-flex flex-1 rounded-rv-pill border border-rv-border bg-rv-surface p-[3px] md:flex-none">
-              <ToggleTab active={tab === "itinerary"} onClick={() => setTab("itinerary")}>
-                <Route className="size-4" />
-                Itinerary
-              </ToggleTab>
-              <ToggleTab active={tab === "ideas"} onClick={() => setTab("ideas")}>
-                <Lightbulb className="size-4" />
-                Ideas
-                <small className="font-mono text-[11px] text-rv-ink-faded">{ideaCount}</small>
-              </ToggleTab>
-              <ToggleTab active={tab === "journal"} onClick={() => setTab("journal")}>
-                <BookOpen className="size-4" />
-                Journal
-              </ToggleTab>
+              {TRIP_TABS.map((t) => (
+                <ToggleTab key={t} active={tab === t} onClick={() => setTab(t)}>
+                  {t === "journal" ? (
+                    <BookOpen className="size-4" />
+                  ) : t === "agenda" ? (
+                    <Route className="size-4" />
+                  ) : (
+                    <Lightbulb className="size-4" />
+                  )}
+                  {TRIP_TAB_LABEL[t]}
+                  {t === "ideas" && <small className="font-mono text-[11px] text-rv-ink-faded">{ideaCount}</small>}
+                </ToggleTab>
+              ))}
             </div>
             <PrefSwitch checked={costTracking} onChange={changeCostTracking} label="Track costs" />
             {/* #131 · the Add verb keeps its shipped trigger and offers only
-                what fits the tab: Itinerary adds KNOWNS (a flight, a stay, a
+                what fits the tab: Agenda adds KNOWNS (a flight, a stay, a
                 destination), Ideas adds MAYBES (the three idea kinds, or a copy from
                 your Places). On Journal it is hidden — the Journal lens (#113)
                 keeps its own per-row "How was it?". A destination still has no chapter in
@@ -1685,9 +1702,9 @@ export function TripPlanner({
                   Add
                   <ChevronDown className="size-3.5" />
                 </DropdownMenuTrigger>
-                {tab === "itinerary" ? (
+                {tab === "agenda" ? (
                   <DropdownMenuContent align="end" className={MENU_SURFACE}>
-                    <MenuHead>Add to Itinerary · the knowns</MenuHead>
+                    <MenuHead>Add to Agenda · the knowns</MenuHead>
                     <DropdownMenuItem className={MENU_ITEM} onSelect={() => setFlightSheetOpen(true)}>
                       <Plane />
                       Flight
@@ -1748,7 +1765,14 @@ export function TripPlanner({
         </div>
 
         {tab === "journal" ? (
-          <JournalLens trip={trip} onRateTrip={rateTrip} onNoteTrip={noteTrip} />
+          <JournalLens
+            trip={trip}
+            today={today}
+            now={now ?? new Date().toISOString()}
+            drives={drives}
+            onRateTrip={rateTrip}
+            onNoteTrip={noteTrip}
+          />
         ) : tab === "ideas" ? (
           <IdeasLens
             trip={trip}
@@ -2235,7 +2259,7 @@ function updateDestinationIdeas(trip: Trip, destinationId: string, f: (i: Idea) 
   return updateDestination(trip, destinationId, (s) => ({ ...s, ideas: s.ideas.map(f) }));
 }
 
-/** A menu's small mono section head ("Add to Itinerary · the knowns"). */
+/** A menu's small mono section head ("Add to Agenda · the knowns"). */
 function MenuHead({ children }: { children: React.ReactNode }) {
   return (
     <div className="px-2 pb-0.5 pt-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-rv-ink-faded">

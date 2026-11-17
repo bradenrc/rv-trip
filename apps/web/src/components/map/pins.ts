@@ -120,6 +120,10 @@ export interface IdeaPin {
   destinationName: string | null;
   tripId: string;
   tripTitle: string;
+  /** #179 · the Journal map's logged places carry their five-category colour
+   * (core's `journalMap`). Absent everywhere else — the /map rule above still
+   * holds there — and an absent category keeps the Do ring. */
+  category?: CategoryLabel;
 }
 
 export type MapPin = DestinationPin | PlacePin | IdeaPin;

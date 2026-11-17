@@ -23,8 +23,9 @@ export function stayClockLine(
 }
 
 /** "4:00 PM" — assembled from parts, because ICU joins the day period with a
- * narrow no-break space (U+202F) that would make two renders disagree. */
-function wallClock12(instant: string, tz: string | null): string {
+ * narrow no-break space (U+202F) that would make two renders disagree.
+ * Exported for Up next (#178 · #181 i3), which prints the same clock. */
+export function wallClock12(instant: string, tz: string | null): string {
   const fmt = new Intl.DateTimeFormat("en-US", {
     timeZone: tz ?? "UTC",
     hour: "numeric",

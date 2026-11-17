@@ -7,6 +7,7 @@ import { driveMiles } from "../providers/route-format";
 import {
   timelineModel,
   routeModel,
+  routeDrives,
   routeSummary,
   scheduleFloating,
   reorderFloating,
@@ -375,6 +376,31 @@ describe("routeModel", () => {
     const chapters = routeModel(trip, routes, "rig-x");
     expect(chapters[0]!.rows[0]!.drive).toMatchObject({ estimate: false, primaryRoad: "US-101" });
     expect(chapters[0]!.outboundDrive).toMatchObject({ estimate: true });
+  });
+
+  it("carries the arriving destination's coordinate and the leaving destination's id (#180)", () => {
+    const chapters = routeModel(fixture());
+    const d = chapters[0]!.rows[0]!.drive!;
+    expect(d.navTo).toEqual({ lat: 44.63, lng: -124.05 });
+    expect(d.fromDestinationId).toBe("S1");
+    expect(d.toDestinationId).toBe("S2");
+    // The chapter-boundary drive (S2 → S3) carries the same two fields.
+    const boundary = chapters[0]!.outboundDrive!;
+    expect(boundary.navTo).toEqual({ lat: 44.05, lng: -121.31 });
+    expect(boundary.fromDestinationId).toBe("S2");
+    expect(boundary.toDestinationId).toBe("S3");
+  });
+
+  it("routeDrives keys every drawn drive by its segment, the boundary drive too (#178 · #181 i4)", () => {
+    const chapters = routeModel(fixture());
+    const drives = routeDrives(chapters);
+    const inChapter = chapters[0]!.rows[0]!.drive!;
+    const boundary = chapters[0]!.outboundDrive!;
+    expect(inChapter.segmentId).not.toBeNull();
+    expect(drives.get(inChapter.segmentId!)).toBe(inChapter);
+    expect(drives.get(boundary.segmentId!)).toBe(boundary);
+    const drawn = chapters.flatMap((c) => [...c.rows.map((r) => r.drive), c.outboundDrive]).filter(Boolean);
+    expect(drives.size).toBe(drawn.length);
   });
 
   it("gives every drive a Google Maps handoff URL", () => {

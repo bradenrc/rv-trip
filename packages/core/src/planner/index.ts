@@ -66,6 +66,12 @@ export * from "./for-next-time";
 export * from "./stay-clock";
 /** `get_context`'s digest — the MCP session's first read (#162 · Q1 B). */
 export * from "./context-digest";
+/** The trip screen's tabs and the tab it opens on (#177 · #181 i1). */
+export * from "./trip-tab";
+/** Up next — the Journal's Today block (#178 · #181 i3). */
+export * from "./up-next";
+/** The Journal map — what the Journal lists, as points and a dashed join (#179 · #181 i5). */
+export * from "./journal-map";
 
 export function allDestinations(trip: Trip): Destination[] {
   return trip.chapters.flatMap((l) => l.destinations);
@@ -462,6 +468,15 @@ export interface RouteDrive {
   /** How far Google's route ran from the corridor, in meters — `null` when the
    * check never ran. */
   navDeviationMeters: number | null;
+  /** The arriving destination's coordinate — what `navigateLinks` reads for the
+   * Google · Apple · Waze pills (#180). */
+  navTo: { lat: number; lng: number };
+  /** The destination this drive leaves — names the rig-on "RV route · from
+   * Astoria" line (#180 · q2 A). */
+  fromDestinationId: string;
+  /** The destination this drive arrives at — names the "→ Newport, OR" label
+   * beside the pills. */
+  toDestinationId: string;
   miles: number;
   minutes: number;
 }
@@ -496,6 +511,9 @@ function toDrive(
     navWegoUrl: handoff.wegoUrl,
     navVerdict: handoff.verdict,
     navDeviationMeters: handoff.deviationMeters,
+    navTo: { lat: pair.to.lat, lng: pair.to.lng },
+    fromDestinationId: pair.fromDestinationId,
+    toDestinationId: pair.toDestinationId,
     miles: driveMiles(result),
     minutes: driveMinutes(result),
   };
@@ -668,6 +686,24 @@ export function routeModel(
       returnHop: hops.home?.chapterId === chapter.id ? hops.home.hop : null,
     };
   });
+}
+
+/**
+ * #178 · #181 i4 — every drive `routeModel` drew, keyed by its segment: what
+ * the Journal's Up next card reads to put Navigate (and, rig on, the RV route
+ * line) on a drive `upNext` names by `segmentId`. Read off the chapters the
+ * screen already holds — each row's `drive` plus each chapter's
+ * `outboundDrive` — so it is the same RouteDrive the Agenda draws. A drive an
+ * optimistic edit invented (`segmentId` null) has no key and is left out.
+ */
+export function routeDrives(chapters: RouteChapter[]): Map<string, RouteDrive> {
+  const out = new Map<string, RouteDrive>();
+  for (const c of chapters) {
+    for (const d of [...c.rows.map((r) => r.drive), c.outboundDrive]) {
+      if (d?.segmentId) out.set(d.segmentId, d);
+    }
+  }
+  return out;
 }
 
 /**

@@ -117,6 +117,30 @@ export function buildNavigationHandoff(
 }
 
 /**
+ * The three plain Navigate links every drive carries (#180 · q1 A): Google,
+ * Apple Maps and Waze, each handed the arriving destination and nothing else.
+ * No origin — every app starts from where the phone IS, which at a fuel stop is
+ * the only honest origin. Same 4-decimal coordinate as the handoff above.
+ *
+ * These make no RV-safety claim at all; the rig-on "RV route" line
+ * (buildNavigationHandoff's url + wegoUrl + verdict) is where that lives.
+ */
+export interface NavigateLinks {
+  google: string;
+  apple: string;
+  waze: string;
+}
+
+export function navigateLinks(to: LatLng): NavigateLinks {
+  const at = coord(to);
+  return {
+    google: `https://www.google.com/maps/dir/?api=1&destination=${at}&travelmode=driving`,
+    apple: `https://maps.apple.com/?daddr=${at}&dirflg=d`,
+    waze: `https://waze.com/ul?ll=${at}&navigate=yes`,
+  };
+}
+
+/**
  * The deviation, from whichever input carries it. `null` — "the check never
  * ran" — is a different answer from a large number, and only a number can ever
  * produce a "checked" verdict.

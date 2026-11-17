@@ -110,11 +110,17 @@ describe("the native map's dependencies and plugin", () => {
 
 describe("one shape source, three line layers, at the web's grammar", () => {
   it("is ONE source — a drive rendered twice is unrepresentable", () => {
-    expect(mapCode.match(/<ShapeSource/g)).toHaveLength(1);
+    // Drives live in ONE source. The only other source is #179's Journal join
+    // (`rv-journal-join`), which is never a drive: one straight dashed line
+    // between the destinations of a trip already traveled.
+    expect(mapCode.match(/<ShapeSource id=\{SOURCE_ID\}/g)).toHaveLength(1);
+    expect(mapCode.match(/<ShapeSource/g)).toHaveLength(2);
+    expect(mapCode).toContain("<ShapeSource id={JOIN_ID} shape={joinShape}>");
     expect(mapCode).toContain('const SOURCE_ID = "rv-drive-arcs"');
     // The same source id the web uses, so the two are recognisably one grammar.
     expect(webMapView).toContain('id="rv-drive-arcs"');
-    expect(mapCode.match(/<LineLayer/g)).toHaveLength(3);
+    expect(mapCode.match(/<LineLayer id=\{`\$\{SOURCE_ID\}/g)).toHaveLength(3);
+    expect(mapCode.match(/<LineLayer/g)).toHaveLength(4);
   });
 
   it("paints by the ONE predicate, verbatim from MapView.tsx:50", () => {
@@ -163,8 +169,9 @@ describe("one shape source, three line layers, at the web's grammar", () => {
   });
 
   it("all three layers set line-cap round, as the web does", () => {
-    expect(mapCode.match(/lineCap: "round"/g)).toHaveLength(3);
-    expect(webMapView.match(/"line-cap": "round"/g)).toHaveLength(3);
+    // Three drive layers plus #179's Journal join, on both clients.
+    expect(mapCode.match(/lineCap: "round"/g)).toHaveLength(4);
+    expect(webMapView.match(/"line-cap": "round"/g)).toHaveLength(4);
   });
 
   it("fits the camera at the web's padding, max zoom and duration", () => {
@@ -267,10 +274,12 @@ describe("mapAvailable() degrades, and nothing routes to Google Maps instead", (
     for (const src of [mapCode, destinationCode, tripCode]) {
       expect(src).not.toMatch(/google/i);
     }
-    // The phone's ONE hand-off to Google is a drive's Navigate button, which
-    // predates this item and is turn-by-turn, not a map fallback: it goes
-    // through core's `drive.navUrl` and no map surface can reach it.
-    expect(tripCode).toContain("Linking.openURL(drive.navUrl)");
+    // The phone's hand-off to the navigation apps is a drive's Navigate pills
+    // (#180), which are turn-by-turn, not a map fallback: they live in
+    // src/navigate.tsx, reached through `<NavigateLinks`, and no map surface
+    // can reach them.
+    expect(tripCode).toContain("<NavigateLinks drive={drive}");
+    expect(tripCode).not.toContain("Linking.openURL(drive.navUrl)");
   });
 });
 
@@ -351,7 +360,9 @@ describe("the trip screen's Route ⇄ Map lens", () => {
       "<Legend color={C.green} label=\"Stay\" />",
       "<Kicker>On the road</Kicker>",
       "behind the wheel",
-      "Navigation may not follow the RV-safe route — check notices.",
+      // #180 — the amber caption moved into the RV route line (src/navigate.tsx,
+      // read from core's navigationCaption); the Drive renders it from here.
+      "<NavigateLinks drive={drive} rigOn={rigOn} toName={toName} fromName={fromName} />",
       "{timeline!.openLabel}",
     ]) {
       expect(tripScreen).toContain(fragment);

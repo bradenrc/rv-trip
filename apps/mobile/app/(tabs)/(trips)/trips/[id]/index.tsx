@@ -1,8 +1,7 @@
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useRef, useState } from "react";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -32,10 +31,16 @@ import {
   tripModeChoice,
   TRIP_MODE_CHOICES,
   routeModel,
+  routeDrives,
   routeSummary,
   timelineModel,
   tripArcs,
   tripDestinationPins,
+  defaultTripTab,
+  localIsoDate,
+  TRIP_TABS,
+  TRIP_TAB_LABEL,
+  type TripTab,
 } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode } from "../../../../../src/map";
 import { NearbyBanner, NearbySheet } from "../../../../../src/nearby";
@@ -50,6 +55,7 @@ import {
   type HopRef,
 } from "../../../../../src/hops";
 import { RoundTripSheet } from "../../../../../src/round-trip";
+import { NavigateLinks } from "../../../../../src/navigate";
 import {
   AddIdeaSheet,
   AddSheet,
@@ -91,8 +97,11 @@ import {
  * sit inside Route; Map still renders OUTSIDE the ScrollView — a map's pan
  * gesture and a vertical scroll cannot share a box. A traveled trip (status
  * `complete`) opens on its Journal; otherwise Itinerary ▸ Route.
+ *
+ * #177 · #181 i1 — reordered and renamed Journal · Agenda · Ideas (core's
+ * `TRIP_TABS`), and the tab is core's `defaultTripTab`: a trip whose dates
+ * cover today, or a traveled one, opens on Journal; otherwise Agenda ▸ Route.
  */
-type Tab = "itinerary" | "ideas" | "journal";
 type Sub = "route" | "timeline" | "map";
 
 const SUBS: SegmentedOption<Sub>[] = [
@@ -106,7 +115,7 @@ export default function TripScreen() {
   const { bundle, error, reload } = useBundle(id);
   const [refreshing, setRefreshing] = useState(false);
   // Null until picked: the tab is DERIVED until then (below).
-  const [picked, setTab] = useState<Tab | null>(null);
+  const [picked, setTab] = useState<TripTab | null>(null);
   const [sub, setSub] = useState<Sub>("route");
   // #131 · the trip's + Add and the sheets it opens.
   const [addOpen, setAddOpen] = useState(false);
@@ -142,6 +151,15 @@ export default function TripScreen() {
     () => (bundle ? routeModel(bundle.trip, bundle.routes, bundle.rigHash) : []),
     [bundle],
   );
+  // #178 · the Journal's Up next card puts Navigate on the drive it names.
+  const drives = useMemo(() => routeDrives(chapters), [chapters]);
+  // #178 · Up next's clock — refreshed each time the screen takes focus.
+  const [now, setNow] = useState(() => new Date());
+  useFocusEffect(
+    useCallback(() => {
+      setNow(new Date());
+    }, []),
+  );
   const summary = useMemo(
     () => (bundle ? routeSummary(bundle.trip, bundle.routes, bundle.rigHash) : null),
     [bundle],
@@ -175,9 +193,10 @@ export default function TripScreen() {
   }
 
   const { trip } = bundle;
-  // The tab is derived until it is picked: a traveled trip opens on Journal.
-  const tab: Tab = picked ?? (trip.status === "complete" ? "journal" : "itinerary");
-  const lens = tab === "itinerary" ? sub : tab;
+  // The tab is derived until it is picked (#177 · `defaultTripTab`): a trip in
+  // progress today, or a traveled one, opens on Journal.
+  const tab: TripTab = picked ?? defaultTripTab(trip, localIsoDate());
+  const lens = tab === "agenda" ? sub : tab;
   const modeLabel =
     TRIP_MODE_CHOICES.find((c) => c.value === tripModeChoice(trip.defaultMode))?.label ?? "";
   const ideaCount =
@@ -206,6 +225,9 @@ export default function TripScreen() {
   const driveRow = (drive: RouteDrive) => (
     <Drive
       drive={drive}
+      rigOn={trip.rigOn}
+      toName={destinationName(drive.toDestinationId)}
+      fromName={destinationName(drive.fromDestinationId)}
       trailing={
         drive.segmentId === null ? null : driveTrip ? (
           <Pressable
@@ -302,7 +324,7 @@ export default function TripScreen() {
           )}
           {/* #131 · the mindset tabs, an underline row; the trip's + Add at its end. */}
           <View style={styles.tabs}>
-            {(["itinerary", "ideas", "journal"] as const).map((t) => (
+            {TRIP_TABS.map((t) => (
               <Pressable
                 key={t}
                 onPress={() => setTab(t)}
@@ -311,7 +333,7 @@ export default function TripScreen() {
                 style={[styles.tab, tab === t && styles.tabOn]}
               >
                 <Text style={[styles.tabText, tab === t && { color: C.ink }]}>
-                  {t === "itinerary" ? "Itinerary" : t === "ideas" ? "Ideas" : "Journal"}
+                  {TRIP_TAB_LABEL[t]}
                   {t === "ideas" && <Text style={styles.tabCount}> {ideaCount}</Text>}
                 </Text>
               </Pressable>
@@ -322,7 +344,7 @@ export default function TripScreen() {
               </Pressable>
             )}
           </View>
-          {tab === "itinerary" && <Segmented value={sub} options={SUBS} onChange={setSub} />}
+          {tab === "agenda" && <Segmented value={sub} options={SUBS} onChange={setSub} />}
         </View>
 
         {lens === "map" ? (
@@ -347,12 +369,18 @@ export default function TripScreen() {
             {lens === "journal" ? (
               <JournalView
                 trip={trip}
+                today={localIsoDate()}
+                now={now}
+                drives={drives}
                 onRateTrip={rateTrip}
                 onNoteTrip={noteTrip}
                 // A Did-it still waiting for signal has no server id to PATCH.
                 onOpen={(e) => {
                   if (!isProvisionalIdea(e)) setJournalEntry(e);
                 }}
+                // #178 · q8 A — Log something opens the TL2 capture sheet,
+                // which files under today's destination.
+                onLog={() => router.push("/capture")}
               />
             ) : (
             lens === "ideas" ? (
@@ -695,9 +723,23 @@ function DestinationRow({
 /**
  * A drive has exactly three renderings, and only one is amber — the same
  * contract as the web's connector: clean · restricted (notices) · estimate.
- * Navigate hands Google Maps origin + destination, never the corridor.
+ * #180 — Navigate is three plain pills to the arriving destination and, on a
+ * rig-on trip, the RV route line with the shipped caption (src/navigate). Fly
+ * and ferry hops are HopRows and never reach here, so they carry no Navigate.
  */
-function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React.ReactNode }) {
+function Drive({
+  drive,
+  rigOn,
+  toName,
+  fromName,
+  trailing = null,
+}: {
+  drive: RouteDrive;
+  rigOn: boolean;
+  toName: string;
+  fromName: string;
+  trailing?: React.ReactNode;
+}) {
   const restricted = drive.notices.length > 0;
   return (
     <View
@@ -711,23 +753,15 @@ function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React
         <Text style={[styles.mono, { color: C.inkMuted }]}>{drive.label}</Text>
         {drive.primaryRoad && <Text style={styles.mono}>· {drive.primaryRoad}</Text>}
         {drive.estimate && <EstimateChip />}
-        <View style={{ marginLeft: "auto" }}>
-          <Button onPress={() => void Linking.openURL(drive.navUrl)}>Navigate</Button>
-        </View>
-        {trailing}
+        {trailing && <View style={{ marginLeft: "auto" }}>{trailing}</View>}
       </View>
-      {restricted && (
-        <>
-          <Text style={{ color: C.warning, fontSize: 11.5, textAlign: "right" }}>
-            Navigation may not follow the RV-safe route — check notices.
-          </Text>
-          {drive.notices.map((n, i) => (
-            <View key={`${n.code}-${i}`} style={styles.notice}>
-              <Text style={{ color: C.warning, fontSize: 12.5 }}>⚠ {n.message}</Text>
-            </View>
-          ))}
-        </>
-      )}
+      <NavigateLinks drive={drive} rigOn={rigOn} toName={toName} fromName={fromName} />
+      {restricted &&
+        drive.notices.map((n, i) => (
+          <View key={`${n.code}-${i}`} style={styles.notice}>
+            <Text style={{ color: C.warning, fontSize: 12.5 }}>⚠ {n.message}</Text>
+          </View>
+        ))}
     </View>
   );
 }

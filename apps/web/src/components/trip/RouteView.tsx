@@ -7,8 +7,6 @@ import {
   GripVertical,
   CalendarDays,
   Caravan,
-  Navigation,
-  ChevronDown,
   TriangleAlert,
   Plus,
   CirclePlus,
@@ -29,6 +27,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  allDestinations,
   areaSubtitle,
   LODGING_KIND_LABEL,
   LOCATE_MAX_ROWS,
@@ -55,19 +54,15 @@ import {
   RouteNotice,
   money,
 } from "@rv-trip/ui";
-import { navigationCaption, navigationOptions } from "@/lib/trip-logic";
 import type { RouteDrive, RouteChapter, RouteSummary } from "@/lib/trip-logic";
 import { InlineText } from "@/components/ui/inline-text";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   MenuHint,
@@ -79,6 +74,7 @@ import {
 import { HopCard, HopModeSwitch, type HopCardActions } from "./HopCard";
 import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { Logistics } from "./Logistics";
+import { NavigateLinks, RvRouteLine } from "./NavigateLinks";
 
 /**
  * Every structural verb in the route lens lives on a row menu (⋯) — the chapter
@@ -186,9 +182,12 @@ export function RouteView({
   const hopCard = (hop: NonNullable<RouteChapter["leadingHop"]>, flush: boolean) => (
     <HopCard key={hop.segmentId} hop={hop} flush={flush} actions={actions.hops} />
   );
+  const names = new Map(allDestinations(trip).map((d) => [d.id, d.place.name] as const));
   const driveRow = (drive: RouteDrive) => (
     <Drive
       drive={drive}
+      rigOn={trip.rigOn}
+      names={names}
       trailing={
         drive.segmentId === null ? null : driveTrip ? (
           <DriveHopMenu onMode={(m) => actions.hops.onMode(drive.segmentId!, m)} />
@@ -712,27 +711,43 @@ function PlaceEditor({
  * spinner and never a blocked save. A pair with no coordinates yields no
  * connector at all — it never reaches here.
  *
- * Navigate is the same plain Google link in all three: origin and destination,
- * never the corridor. What changed in #36 is the ANSWER about that link — the
- * control is a split button whose caret offers HERE WeGo, and in state 2 the
- * caption is green when the corridor check passed and the shipped amber string
- * when it did not.
+ * #180 — Navigate is the same in all three: three plain pills (Google · Apple ·
+ * Waze) to the arriving destination, and on a rig-on trip the dashed "RV route"
+ * line under them — the corridor-checked link, HERE WeGo, and the caption that
+ * says whether the check passed (./NavigateLinks). The restricted card's
+ * caption moved into that line.
  */
-function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React.ReactNode }) {
+function Drive({
+  drive,
+  rigOn,
+  names,
+  trailing = null,
+}: {
+  drive: RouteDrive;
+  rigOn: boolean;
+  /** destination id → name, for "→ Newport, OR" and "RV route · from Astoria". */
+  names: Map<string, string>;
+  trailing?: React.ReactNode;
+}) {
+  const toName = names.get(drive.toDestinationId) ?? "";
+  const fromName = names.get(drive.fromDestinationId) ?? "";
   if (drive.notices.length === 0) {
     return (
-      <div className="my-1 ml-8 flex flex-wrap items-center gap-[9px] py-[5px] font-mono text-[12px] text-rv-ink-faded">
-        <Caravan className="size-4 text-rv-ink" />
-        <span className="text-rv-ink-muted">{drive.label}</span>
-        {drive.primaryRoad && (
-          <>
-            <span aria-hidden>·</span>
-            <span>{drive.primaryRoad}</span>
-          </>
-        )}
-        {drive.estimate && <EstimateChip />}
-        <NavigateButton drive={drive} className="ml-2" />
-        {trailing}
+      <div className="my-1 ml-8 py-[5px]">
+        <div className="flex flex-wrap items-center gap-[9px] font-mono text-[12px] text-rv-ink-faded">
+          <Caravan className="size-4 text-rv-ink" />
+          <span className="text-rv-ink-muted">{drive.label}</span>
+          {drive.primaryRoad && (
+            <>
+              <span aria-hidden>·</span>
+              <span>{drive.primaryRoad}</span>
+            </>
+          )}
+          {drive.estimate && <EstimateChip />}
+          <NavigateLinks drive={drive} toName={toName} className="ml-2" />
+          {trailing}
+        </div>
+        <RvRouteLine drive={drive} rigOn={rigOn} fromName={fromName} />
       </div>
     );
   }
@@ -747,17 +762,14 @@ function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React
             <span className="font-mono text-[12px] text-rv-ink-faded">· {drive.primaryRoad}</span>
           )}
           {drive.estimate && <EstimateChip />}
-          <NavigateButton drive={drive} className="ml-auto" />
+          <NavigateLinks drive={drive} toName={toName} className="ml-auto" />
           {trailing}
         </div>
-        {/* The caveat belongs ON the action. The handoff is still origin and
-            destination only — Google's URL scheme has no pass-through waypoint
-            — so this line says whether that link was HELD AGAINST the corridor
-            HERE cleared for the rig. Green when it was and matched, and
-            otherwise the shipped amber string, character for character. Plain
-            text rather than a bordered row either way: a caption on a button,
-            not a second error. */}
-        <DriveCaption drive={drive} />
+        {/* The caveat belongs ON the action: the RV route line carries the
+            caption — green when Google's link was held against the corridor
+            and matched, the shipped amber string otherwise. Rig off there is
+            no line and no caption; the notices below still say it. */}
+        <RvRouteLine drive={drive} rigOn={rigOn} fromName={fromName} />
         {/* One row per notice, unbounded — no truncation. The notices do NOT
             dismiss on handoff — they are the thing you can still read at the
             next fuel stop, and the only place your clearance is written down. */}
@@ -774,7 +786,7 @@ function Drive({ drive, trailing = null }: { drive: RouteDrive; trailing?: React
 /**
  * A drive trip's hop menu (#104 · Q7 B): the one way a PNW drive becomes a
  * flight or a ferry. The shipped RowMenu surface; the mock's "Open in Maps" is
- * dropped — Navigate's split button already hands off to Maps.
+ * dropped — the Navigate pills already hand off to Maps.
  */
 function DriveHopMenu({ onMode }: { onMode: (m: TravelMode) => void }) {
   return (
@@ -788,93 +800,6 @@ function DriveHopMenu({ onMode }: { onMode: (m: TravelMode) => void }) {
         Take a ferry instead
       </DropdownMenuItem>
     </RowMenu>
-  );
-}
-
-/**
- * The caption under a restricted drive's Navigate. Both strings and the tone
- * come from `navigationCaption` in @rv-trip/core — the only place a test runner
- * in this repo can reach them (apps/web's vitest has no DOM).
- */
-function DriveCaption({ drive }: { drive: RouteDrive }) {
-  const caption = navigationCaption(drive);
-  return (
-    <div
-      className={`mt-[7px] text-right text-[11.5px] ${
-        caption.tone === "checked" ? "text-rv-green" : "text-rv-warning"
-      }`}
-    >
-      {caption.text}
-    </div>
-  );
-}
-
-/** The pill both halves of the split control sit in. Its accent fill and its
- * ink are on ONE source line, because nightfall-tokens.test.ts sweeps that pair
- * per call site. */
-const NAV_PILL =
-  "inline-flex min-h-8 items-center whitespace-nowrap rounded-rv-md bg-rv-accent-deep text-rv-accent-ink shadow-rv-sm";
-
-/**
- * The slice's primary action, and one you press at a fuel stop with the engine
- * running — so it carries a 32px floor (`min-h-8`) on top of the design's
- * padding, on the pill, the body AND the caret. Type, colour and padding are
- * the wireframe's; the floor only stops the box shrinking under the touch
- * target.
- *
- * ONE control, split: the body takes the verdict's primary handoff and the
- * caret opens the two, on the shipped `dropdown-menu` primitive and the shipped
- * menu classes (`MENU_SURFACE` / `MENU_ITEM` from ./row-menu — the row menu's
- * own surface, so the four menus in this app stay one object). The active row
- * carries the wireframe's `.mi.on` tint.
- */
-function NavigateButton({ drive, className }: { drive: RouteDrive; className: string }) {
-  const options = navigationOptions(drive);
-  const [primary] = options;
-  return (
-    <div className={`${NAV_PILL} ${className}`}>
-      <a
-        href={primary!.url}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex min-h-8 items-center gap-1.5 px-3 py-[5px] text-[13px] font-bold no-underline"
-      >
-        <Navigation className="size-3.5" />
-        Navigate
-      </a>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label="Choose a navigation app"
-          className="inline-flex min-h-8 cursor-pointer items-center border-l border-l-rv-accent-ink pl-2 pr-2.5 opacity-55"
-        >
-          <ChevronDown className="size-3" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className={MENU_SURFACE}>
-          {options.map((option) => (
-            <DropdownMenuItem
-              key={option.id}
-              asChild
-              className={`${MENU_ITEM} items-start ${
-                option.primary ? "bg-rv-green-soft" : ""
-              }`}
-            >
-              <a href={option.url} target="_blank" rel="noreferrer" className="no-underline">
-                <span className="flex flex-col gap-0.5">
-                  <span
-                    className={`font-bold ${option.primary ? "text-rv-green-ink" : "text-rv-ink"}`}
-                  >
-                    {option.title}
-                  </span>
-                  <span className="whitespace-normal font-mono text-[9.5px] text-rv-ink-faded">
-                    {option.caption}
-                  </span>
-                </span>
-              </a>
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
   );
 }
 

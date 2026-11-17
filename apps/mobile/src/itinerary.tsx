@@ -160,7 +160,7 @@ export function AddSheet({
   onIdea,
   onSwitchToIdeas,
 }: {
-  tab: "itinerary" | "ideas";
+  tab: "agenda" | "ideas";
   onClose: () => void;
   onFlight: () => void;
   onStay: () => void;
@@ -177,9 +177,9 @@ export function AddSheet({
   );
   return (
     <Sheet visible onClose={onClose}>
-      {tab === "itinerary" ? (
+      {tab === "agenda" ? (
         <>
-          <Text style={styles.mh}>Add to Itinerary · the knowns</Text>
+          <Text style={styles.mh}>Add to Agenda · the knowns</Text>
           {item("transport", "Flight", "round trip on", onFlight)}
           {item("lodging", "Stay", "hotel · campground · friends", onStay)}
           {item("other", "Destination", "a new place", onDestination)}

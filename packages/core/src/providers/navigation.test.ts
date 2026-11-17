@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNavigationHandoff } from "./navigation";
+import { buildNavigationHandoff, navigateLinks } from "./navigation";
 import { CORRIDOR_TOLERANCE_METERS } from "./frechet";
 import { haversineMeters, type LatLng } from "./index";
 
@@ -136,5 +136,22 @@ describe("buildNavigationHandoff · the corridor verdict", () => {
     expect(
       buildNavigationHandoff(NEWPORT, BEND, { corridor: [], googleCorridor: [] }).deviationMeters,
     ).toBeNull();
+  });
+});
+
+describe("navigateLinks (#180)", () => {
+  it("returns exactly the three wireframe URLs — destination only, no origin", () => {
+    expect(navigateLinks({ lat: 44.6046, lng: -124.0645 })).toEqual({
+      google:
+        "https://www.google.com/maps/dir/?api=1&destination=44.6046,-124.0645&travelmode=driving",
+      apple: "https://maps.apple.com/?daddr=44.6046,-124.0645&dirflg=d",
+      waze: "https://waze.com/ul?ll=44.6046,-124.0645&navigate=yes",
+    });
+  });
+
+  it("uses the handoff's 4-decimal coordinate", () => {
+    const links = navigateLinks({ lat: 44.6, lng: -124.06451234 });
+    expect(links.apple).toBe("https://maps.apple.com/?daddr=44.6000,-124.0645&dirflg=d");
+    expect(links.google).not.toMatch(/origin=/);
   });
 });

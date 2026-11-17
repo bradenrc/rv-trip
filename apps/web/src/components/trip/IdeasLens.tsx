@@ -255,7 +255,7 @@ function PlanStayDialog({
         <DialogHeader className="gap-1.5">
           <DialogTitle className="text-[17px] font-extrabold text-rv-ink">Plan {idea.title}</DialogTitle>
           <DialogDescription className="text-[11.5px] text-rv-ink-faded">
-            Pick its nights — it becomes a destination on the Itinerary.
+            Pick its nights — it becomes a destination on the Agenda.
           </DialogDescription>
         </DialogHeader>
         <div className="mt-3 flex flex-col gap-2.5">
