@@ -139,6 +139,7 @@ import {
   destinationAbove,
   timelineModel,
   routeModel,
+  routeDrives,
   routeSummary,
   routeCountKicker,
   logisticsModel,
@@ -236,6 +237,7 @@ export function TripPlanner({
   nextTime: initialNextTime = { cards: [], saveIds: [] },
   householdHome = null,
   today = null,
+  now,
 }: {
   trip: Trip;
   /** Server-resolved drives, keyed `from|to|routingHash`. */
@@ -452,6 +454,8 @@ export function TripPlanner({
     () => routeModel(trip, routes, routingHash, nav, units),
     [trip, routes, routingHash, nav, units],
   );
+  // #178 · the Journal's Up next card puts Navigate on the drive it names.
+  const drives = useMemo(() => routeDrives(route), [route]);
   const summary = useMemo(
     () => routeSummary(trip, routes, routingHash),
     [trip, routes, routingHash],
@@ -1761,7 +1765,14 @@ export function TripPlanner({
         </div>
 
         {tab === "journal" ? (
-          <JournalLens trip={trip} onRateTrip={rateTrip} onNoteTrip={noteTrip} />
+          <JournalLens
+            trip={trip}
+            today={today}
+            now={now ?? new Date().toISOString()}
+            drives={drives}
+            onRateTrip={rateTrip}
+            onNoteTrip={noteTrip}
+          />
         ) : tab === "ideas" ? (
           <IdeasLens
             trip={trip}

@@ -162,3 +162,84 @@ This dispatch covers epic item **i3 only**. It is core only: no client renders t
 ## For the walk
 
 Nothing renders yet. This item is pure core, and nothing in either client calls `upNext` or `journalToday` until i4/i5.
+
+---
+
+# #181 · dev notes · i4 — the mid-trip Journal on both clients (#178 · q3 B · q4 B · q5 A · q8 A)
+
+This dispatch covers epic item **i4 only**. i1–i3 are already on the branch. i5 (the Journal map, #179) is a separate dispatch, so "Whole trip and map →" opens the shipped whole-trip Journal, which has no map yet.
+
+## What changed
+
+**Core (small additions the clients need)**
+- `packages/core/src/planner/index.ts:697`: new `routeDrives(chapters)` returns a `Map<segmentId, RouteDrive>`. It reads each row's `drive` plus each chapter's `outboundDrive` (the vet MED fix, since `routeModel` returns chapters and has no `.drives`). Drives with a null `segmentId` are left out. Only driven pairs are in it, so a fly or ferry segment is never a key.
+- `packages/core/src/planner/up-next.ts:223`: new `upNextThenLine(then)`. It returns "Then · Drive to Newport, OR", or "Then · Fly SEA → BOI · 6:10 PM PST" when the hop is timed. `then` is always on `next`'s date, so the day half of `when` is dropped. This matches wireframe frames 3a and 3c.
+- `packages/core/src/planner/journal.ts:96`: `reservationEntry` is now exported. A `toRate` row uses it to open the shipped sheet.
+
+**Phone**
+- `apps/mobile/src/journal.tsx:204` `JournalView` gains `today`, `now`, `drives` (a `ReadonlyMap`) and `onLog`. It sets `midTrip = activeTrip([trip], today) !== null` and keeps a visit-local `whole` flag.
+  - `:249` `JournalTodayView` renders:
+    - the "Up next" kicker and card, only when `upNext` is non-null. The card has the bold title and the `when` in mono uppercase `C.inkMuted`. It shows `NavigateLinks` when `next.navTo` is set and the drive is in `drives`. Below that come the mono "Then ·" line and the `NavigateLinks` for a drive `then`.
+    - the Today kicker (`C.ink`, 700) with `journalToday`'s heading, then EntryRows plus `toRate` rows. With neither, it shows "Nothing logged here yet."
+    - the green "＋ Log something" (`C.green` fill, `C.navy` text), which calls `onLog`.
+    - the Earlier groups.
+    - "Whole trip and map →" (`C.greenInk`, underlined), which sets `whole`.
+  - `:338` `WholeTripJournal` is the shipped Journal, unchanged. Mid-trip it gets a "‹ Today" link at the top.
+  - `:436` `EntryRows` takes optional `toRate` rows. Each has a "How was it?" pill (border `C.borderHi`, text `C.greenInk`) that calls `onOpen(reservationEntry(r))`. That is the trip screen's existing `setJournalEntry`, which opens the shipped `HowWasItSheet` and its queued PATCH.
+  - New styles start at `:672`.
+- `apps/mobile/app/(tabs)/(trips)/trips/[id]/index.tsx`:
+  - `:155` `drives = routeDrives(chapters)`;
+  - `:158` `useFocusEffect` refreshes `now`;
+  - `:372` passes `today={localIsoDate()} now drives`;
+  - `:383` `onLog={() => router.push("/capture")}`.
+
+**Web**
+- `apps/web/src/components/trip/JournalLens.tsx:37` gains `today: IsoDate | null`, `now: string` and `drives`.
+  - The clock starts at the server's `now`, so the first paint matches. `setInterval` re-reads `new Date()` every 60 s after mount (`:59`).
+  - `midTrip` requires `today !== null`.
+  - `:84` `JournalTodayLens` is the same form in the left column (`md:grid-cols-[minmax(300px,420px)_1fr]`), and i5 fills the right column with the map. The card's drives get `NavigateLinks` and `RvRouteLine`. Log something is `bg-rv-green … text-rv-navy` on one line and dispatches `rv:capture` (`:147`).
+  - It never reads `toRate` and draws no pill, so the web stays read-only.
+  - Earlier keeps a group only if it has entries or its own ★/Again. Without that filter, a group that exists only for `toRate` would show an empty header.
+  - `:183` `WholeTripLens` is the shipped lens, with "‹ Today" when mid-trip.
+- `apps/web/src/components/nav/Nav.tsx:58-64`: a `useEffect` adds and removes a `window` `"rv:capture"` listener that calls `setCapturing(true)`, which opens the shipped `CaptureSheet`.
+- `apps/web/src/components/trip/TripPlanner.tsx`:
+  - `now` is now destructured;
+  - `:458` `drives = routeDrives(route)`;
+  - `:1768` passes `today`, `now ?? new Date().toISOString()` and `drives`. `page.tsx` always passes `now`, so the fallback exists only for other callers.
+
+## Decisions and deviations (qa, please check)
+- **`kind === "drive"` is banned repo-wide** by `w0-reset.test.ts` (the DayKind guard). The plan said "NavigateLinks when then is a drive". I implemented that by looking `then.segmentId` up in `drives`, which holds only driven segments. A fly or ferry `then` finds nothing and gets no Navigate. A drive whose RouteDrive is missing (for example an optimistic pair with no segment yet) also gets no Navigate, rather than three pills built some other way.
+- **Today shows `toRate` rows on the phone**, as the plan says. Wireframe frame 3a (Aug 5) draws Today as "Nothing logged here yet." even though South Beach is unrated. With the plan's rule, Aug 5 Today shows South Beach with a "How was it?" pill. That gap between the plan and the frame is for the walk to judge.
+- **Acceptance wording:** the acceptance says journal.tsx "pushes /capture" and "opens HowWasItSheet". As the plan's own `onLog` prop implies, the push lives in the trip screen's `onLog`, and the sheet stays mounted once in the trip screen. The source tests pin both halves: journal.tsx calls `onLog` and `onOpen(reservationEntry(r))`, and index.tsx pushes "/capture" and shows `HowWasItSheet` for `journalEntry`.
+- **Web type scale:** the shipped web Journal draws about 1.1× the phone (14 px rows against 12.5). The new web elements follow that scale: 15 px titles and CTA, 10.5 px kickers, 11 px when, 13 px links. The phone uses the wireframe's pixel values directly.
+- **Phone shadow:** the Up next card's shadow-rv-sm is `shadowOpacity/Radius/Offset` plus `elevation: 1`, with no `shadowColor`. iOS defaults the colour to black, and leaving it out keeps raw hex out of the file.
+- **Web `today`** is the server's tz-cookie date and is not re-derived on the 60 s tick. Only `now` moves. A page left open past midnight keeps yesterday's Today until it reloads.
+
+## Tests
+- `packages/core/src/planner/planner.test.ts`: `routeDrives` keys the in-chapter drive and the boundary drive by segment, one entry per drawn drive.
+- `packages/core/src/planner/up-next.test.ts`: `upNextThenLine` covers the untimed drive (Aug 5) and the timed flight (Nov 15).
+- `packages/core/src/mobile-journal-today.test.ts` (new, source-reading, 10 tests) checks:
+  - the `activeTrip` gate and the `whole` flag;
+  - the `upNext`, `journalToday` and `upNextThenLine` calls;
+  - Navigate on next and then;
+  - Up next only when non-null;
+  - Log something in `C.green` with `C.navy` text, wired to `onLog`, and the trip screen's push to "/capture";
+  - the "How was it?" pill (`C.borderHi` / `C.greenInk`) calling `onOpen(reservationEntry(r))`, plus the trip screen's `HowWasItSheet` wiring;
+  - "Whole trip and map →" and "‹ Today";
+  - the empty copy;
+  - the trip screen passing `today`, the focus-refreshed `now`, `drives` and `onLog`.
+- `apps/web/src/components/trip/journal-today.test.ts` (new, 8 tests) checks:
+  - JournalLens's gate, its `upNext`/`journalToday` calls, and the 60 s clock with its `clearInterval`;
+  - Log something's `bg-rv-green … text-rv-navy` and its `rv:capture` dispatch;
+  - no `toRate` and no "How was it?";
+  - Navigate on the card;
+  - the swap both ways;
+  - TripPlanner's props;
+  - Nav adding and removing the `rv:capture` listener and still rendering `CaptureSheet` on `capturing`.
+- Honesty note: the two source-reading suites were written first and watched failing (10/10 and 7/8 red), then the code was written. The two core helpers' tests were written alongside them. `routeDrives` was implemented before its test.
+
+## For the walk
+- **Phone, Pacific NW Loop, Aug 5 09:00.** Up next reads "Check out of Astoria/Warrenton KOA · TODAY · OUT BY 11:00 AM", then "THEN · DRIVE TO NEWPORT, OR" with Google · Apple · Waze. Rig is on, so the RV route line shows the amber caption and no ✓ (the i2 vet HIGH). Earlier shows Astoria, and the KOA row has a "How was it?" pill that opens the sheet.
+- **Log something.** On the phone it opens `/capture`. On the web it opens Nav's CaptureSheet, and the logged row should appear under Today: through `rv:captured` on the web, and through the store on the phone.
+- **Swap.** "Whole trip and map →" swaps in place, and "‹ Today" swaps back. Switching tabs resets it, because the swap lasts for the visit only.
+- **No Mapbox map yet.** The map is i5.

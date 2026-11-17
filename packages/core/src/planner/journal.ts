@@ -91,7 +91,9 @@ function ideaEntry(i: Idea): JournalEntry {
   };
 }
 
-function reservationEntry(r: Reservation): JournalEntry {
+/** A reservation as a Journal row — also how a `toRate` row opens the phone's
+ * "How was it?" sheet (#178 · #181 i4). */
+export function reservationEntry(r: Reservation): JournalEntry {
   return {
     kind: "reservation",
     id: r.id,

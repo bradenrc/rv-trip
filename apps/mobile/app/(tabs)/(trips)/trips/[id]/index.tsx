@@ -1,5 +1,5 @@
-import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import { useMemo, useRef, useState } from "react";
+import { Stack, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -31,6 +31,7 @@ import {
   tripModeChoice,
   TRIP_MODE_CHOICES,
   routeModel,
+  routeDrives,
   routeSummary,
   timelineModel,
   tripArcs,
@@ -149,6 +150,15 @@ export default function TripScreen() {
   const chapters = useMemo(
     () => (bundle ? routeModel(bundle.trip, bundle.routes, bundle.rigHash) : []),
     [bundle],
+  );
+  // #178 · the Journal's Up next card puts Navigate on the drive it names.
+  const drives = useMemo(() => routeDrives(chapters), [chapters]);
+  // #178 · Up next's clock — refreshed each time the screen takes focus.
+  const [now, setNow] = useState(() => new Date());
+  useFocusEffect(
+    useCallback(() => {
+      setNow(new Date());
+    }, []),
   );
   const summary = useMemo(
     () => (bundle ? routeSummary(bundle.trip, bundle.routes, bundle.rigHash) : null),
@@ -359,12 +369,18 @@ export default function TripScreen() {
             {lens === "journal" ? (
               <JournalView
                 trip={trip}
+                today={localIsoDate()}
+                now={now}
+                drives={drives}
                 onRateTrip={rateTrip}
                 onNoteTrip={noteTrip}
                 // A Did-it still waiting for signal has no server id to PATCH.
                 onOpen={(e) => {
                   if (!isProvisionalIdea(e)) setJournalEntry(e);
                 }}
+                // #178 · q8 A — Log something opens the TL2 capture sheet,
+                // which files under today's destination.
+                onLog={() => router.push("/capture")}
               />
             ) : (
             lens === "ideas" ? (

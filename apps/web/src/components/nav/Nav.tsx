@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -55,6 +55,13 @@ export function Nav() {
   const dark = theme === "dark";
   /** #176 i3 · + Capture and the Capture tab open the sheet; the URL never changes. */
   const [capturing, setCapturing] = useState(false);
+  /** #178 · #181 i4 — the trip Journal's Log something asks for the same
+   * sheet through a window event, mirroring the sheet's own `rv:captured`. */
+  useEffect(() => {
+    const onCapture = () => setCapturing(true);
+    window.addEventListener("rv:capture", onCapture);
+    return () => window.removeEventListener("rv:capture", onCapture);
+  }, []);
   return (
     <>
       <nav className="dark sticky top-0 z-20 flex h-[62px] items-center justify-between gap-6 border-b border-rv-border bg-rv-surface px-4 md:px-7">

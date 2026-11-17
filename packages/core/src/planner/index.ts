@@ -687,6 +687,24 @@ export function routeModel(
 }
 
 /**
+ * #178 · #181 i4 — every drive `routeModel` drew, keyed by its segment: what
+ * the Journal's Up next card reads to put Navigate (and, rig on, the RV route
+ * line) on a drive `upNext` names by `segmentId`. Read off the chapters the
+ * screen already holds — each row's `drive` plus each chapter's
+ * `outboundDrive` — so it is the same RouteDrive the Agenda draws. A drive an
+ * optimistic edit invented (`segmentId` null) has no key and is left out.
+ */
+export function routeDrives(chapters: RouteChapter[]): Map<string, RouteDrive> {
+  const out = new Map<string, RouteDrive>();
+  for (const c of chapters) {
+    for (const d of [...c.rows.map((r) => r.drive), c.outboundDrive]) {
+      if (d?.segmentId) out.set(d.segmentId, d);
+    }
+  }
+  return out;
+}
+
+/**
  * #155 · Q1 A — "Chapter N" for each NAMED chapter, by sortOrder; N counts the
  * named ones only, so an unnamed chapter between two named ones never leaves a
  * gap in the numbering. An unnamed chapter has no entry.

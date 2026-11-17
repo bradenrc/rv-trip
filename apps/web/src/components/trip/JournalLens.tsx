@@ -1,21 +1,28 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CircleMinus, RefreshCw } from "lucide-react";
 import {
   JOURNAL_AROUND_HEADING,
   JOURNAL_EMPTY_COPY,
+  activeTrip,
   againBadge,
+  journalToday,
+  upNext,
+  upNextThenLine,
   didntGetToLabel,
   journalIsEmpty,
   journalTallyParts,
   travelFoldLabel,
   tripJournal,
+  type IsoDate,
   type JournalEntry,
+  type RouteDrive,
   type Trip,
 } from "@rv-trip/core";
 import { CategoryTile, Stars } from "@rv-trip/ui";
 import { dateRange } from "@/lib/trip-logic";
+import { NavigateLinks, RvRouteLine } from "./NavigateLinks";
 
 /**
  * The web's Journal lens (#113 · #106, Q4 B · docs/design/113 Screen 3, the
@@ -29,12 +36,160 @@ import { dateRange } from "@/lib/trip-logic";
  */
 export function JournalLens({
   trip,
+  today,
+  now,
+  drives,
   onRateTrip,
   onNoteTrip,
 }: {
   trip: Trip;
+  /** The browser's date (the `tz` cookie); null when the server cannot know it. */
+  today: IsoDate | null;
+  /** The request's instant (ISO) — Up next's clock until the first tick. */
+  now: string;
+  /** The route's drives by segment (core's `routeDrives`). */
+  drives: ReadonlyMap<string, RouteDrive>;
   onRateTrip: (n: number) => void;
   onNoteTrip: (note: string) => void;
+}) {
+  // #178 · Up next moves with the clock: the server's instant first (so the
+  // first paint matches), then the browser's, re-read once a minute.
+  const [clock, setClock] = useState(now);
+  useEffect(() => {
+    const t = setInterval(() => setClock(new Date().toISOString()), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  // #178 · q5 A — the whole-trip form, swapped in place for this visit only.
+  const [whole, setWhole] = useState(false);
+  const midTrip = today !== null && activeTrip([trip], today) !== null;
+
+  return midTrip && !whole ? (
+    <JournalTodayLens trip={trip} today={today} clock={clock} drives={drives} onWhole={() => setWhole(true)} />
+  ) : (
+    <WholeTripLens
+      trip={trip}
+      onRateTrip={onRateTrip}
+      onNoteTrip={onNoteTrip}
+      onToday={midTrip ? () => setWhole(false) : null}
+    />
+  );
+}
+
+/**
+ * #178 · #181 i4 (q3 B · q4 B · q8 A, docs/design/181 frame 5) — the mid-trip
+ * Journal: Up next (`upNext`), Today and Earlier (`journalToday`) and the green
+ * Log something, which asks Nav to open its CaptureSheet (`rv:capture`). Still
+ * read-only: no "How was it?" here — that is the phone's.
+ */
+function JournalTodayLens({
+  trip,
+  today,
+  clock,
+  drives,
+  onWhole,
+}: {
+  trip: Trip;
+  today: IsoDate;
+  clock: string;
+  drives: ReadonlyMap<string, RouteDrive>;
+  onWhole: () => void;
+}) {
+  const up = upNext(trip, new Date(clock), today);
+  const j = journalToday(trip, today);
+  const names = new Map(trip.chapters.flatMap((c) => c.destinations).map((d) => [d.id, d.place.name] as const));
+  const nextDrive = up?.next.navTo ? (drives.get(up.next.segmentId ?? "") ?? null) : null;
+  // Only a drive's segment is in `drives`, so a fly or ferry "then" gets no Navigate.
+  const thenDrive = up?.then ? (drives.get(up.then.segmentId ?? "") ?? null) : null;
+  const earlier = j.earlier.filter((g) => g.entries.length > 0 || g.rating !== null || g.again !== null);
+  const sect = "px-0.5 pt-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-rv-ink-faded";
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(300px,420px)_1fr]">
+      <div className="flex min-w-0 flex-col gap-2">
+        {up && (
+          <>
+            <div className={sect}>Up next</div>
+            <div className="flex flex-col gap-2 rounded-rv-card border border-rv-border-hi bg-rv-surface px-3 py-2.5 shadow-rv-sm">
+              <div className="flex items-baseline gap-2">
+                <b className="flex-1 text-[15px] leading-[1.3] text-rv-ink">{up.next.title}</b>
+                <span className="whitespace-nowrap font-mono text-[11px] uppercase text-rv-ink-muted">{up.next.when}</span>
+              </div>
+              {nextDrive && (
+                <div>
+                  <NavigateLinks drive={nextDrive} toName={names.get(nextDrive.toDestinationId) ?? ""} />
+                  <RvRouteLine drive={nextDrive} rigOn={trip.rigOn} fromName={names.get(nextDrive.fromDestinationId) ?? ""} />
+                </div>
+              )}
+              {up.then && (
+                <div className="border-t border-rv-border-soft pt-1.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-rv-ink-faded">
+                  {upNextThenLine(up.then)}
+                </div>
+              )}
+              {thenDrive && (
+                <div>
+                  <NavigateLinks drive={thenDrive} toName={names.get(thenDrive.toDestinationId) ?? ""} />
+                  <RvRouteLine drive={thenDrive} rigOn={trip.rigOn} fromName={names.get(thenDrive.fromDestinationId) ?? ""} />
+                </div>
+              )}
+            </div>
+          </>
+        )}
+        <div className={`${sect} font-bold text-rv-ink`}>{j.today.heading}</div>
+        {j.today.entries.length > 0 ? (
+          <JournalRows entries={j.today.entries} />
+        ) : (
+          <div className="rounded-rv-card border border-rv-border bg-rv-surface px-2.5 py-2 text-[13px] text-rv-ink-faded">
+            Nothing logged here yet.
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => window.dispatchEvent(new CustomEvent("rv:capture"))}
+          className="flex cursor-pointer items-center justify-center gap-1.5 rounded-rv-card border-none bg-rv-green p-3 text-[15px] font-extrabold text-rv-navy"
+        >
+          ＋ Log something
+        </button>
+        {earlier.length > 0 && <div className={sect}>Earlier</div>}
+        {earlier.map((g) => (
+          <div key={g.destination?.id ?? "around"} className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between gap-2 px-0.5 pt-1">
+              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <b className="text-[15px] text-rv-ink">{g.heading}</b>
+                {g.rating !== null && <Stars value={g.rating} size={13} />}
+                <AgainBadge again={g.again} />
+              </span>
+              {g.destination?.arriveDate && g.destination.departDate && (
+                <span className="flex-none font-mono text-[11px] text-rv-ink-faded">
+                  {dateRange(g.destination.arriveDate, g.destination.departDate)}
+                </span>
+              )}
+            </div>
+            {g.entries.length > 0 && <JournalRows entries={g.entries} />}
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={onWhole}
+          className="cursor-pointer border-none bg-transparent p-1.5 text-center text-[13px] font-bold text-rv-green-ink underline"
+        >
+          Whole trip and map →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The shipped whole-trip Journal; mid-trip it opens with "‹ Today". */
+function WholeTripLens({
+  trip,
+  onRateTrip,
+  onNoteTrip,
+  onToday,
+}: {
+  trip: Trip;
+  onRateTrip: (n: number) => void;
+  onNoteTrip: (note: string) => void;
+  onToday: (() => void) | null;
 }) {
   const j = tripJournal(trip);
   const [note, setNote] = useState(trip.note ?? "");
@@ -43,6 +198,15 @@ export function JournalLens({
   return (
     <div className="grid grid-cols-1 gap-3.5 md:grid-cols-[320px_1fr]">
       <div className="flex flex-col gap-2.5">
+        {onToday && (
+          <button
+            type="button"
+            onClick={onToday}
+            className="cursor-pointer self-start border-none bg-transparent p-0 text-left text-[13px] font-bold text-rv-green-ink underline"
+          >
+            ‹ Today
+          </button>
+        )}
         <div className="rounded-rv-card border border-rv-border bg-rv-surface p-3.5 shadow-rv-sm">
           <div className="flex items-center justify-between">
             <span className="font-mono text-[9.5px] uppercase tracking-[0.08em] text-rv-ink-faded">The trip</span>

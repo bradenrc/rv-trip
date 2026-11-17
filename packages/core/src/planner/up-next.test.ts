@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Destination, Reservation, Segment, Trip } from "../domain/types";
 import { pnwTrip } from "../seeds/index";
-import { upNext } from "./up-next";
+import { upNext, upNextThenLine } from "./up-next";
 
 /**
  * #178 · #181 i3 — the wireframe's Up next table, over the two worked trips:
@@ -262,5 +262,14 @@ describe("upNext (#178 · the wireframe's table)", () => {
     const t = patchRes(loop(), "res_maritime", { startsAt: "2026-08-03T10:00:00-07:00", startsTz: LA });
     const u = upNext(t, new Date("2026-08-03T08:00:00-07:00"), "2026-08-03")!;
     expect(u.next).toMatchObject({ kind: "booking", title: "Columbia River Maritime Museum", when: "TODAY · 10:00 AM" });
+  });
+});
+
+describe("upNextThenLine (#178 · #181 i4 · the card's 'Then ·' line)", () => {
+  it("names the hop, and adds its clock only when it is timed — the day is next's", () => {
+    const a = upNext(loop(), new Date("2026-08-05T09:00:00-07:00"), "2026-08-05")!;
+    expect(upNextThenLine(a.then!)).toBe("Then · Drive to Newport, OR");
+    const b = upNext(bellingham(), new Date("2026-11-15T12:30:00-08:00"), "2026-11-15")!;
+    expect(upNextThenLine(b.then!)).toBe("Then · Fly SEA → BOI · 6:10 PM PST");
   });
 });

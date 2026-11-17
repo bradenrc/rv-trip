@@ -214,3 +214,13 @@ export function upNext(
     then: after && isHop(after.kind) && after.date === n.date ? view(after) : null,
   };
 }
+
+/**
+ * The Up next card's "Then · …" line (#178 · #181 i4): the hop's title, plus
+ * its clock when it is timed ("Then · Fly SEA → BOI · 6:10 PM PST"). `then` is
+ * always on `next`'s date, so the day half of its `when` is dropped.
+ */
+export function upNextThenLine(then: UpNextItem): string {
+  const clock = then.when.split(" · ").slice(1).join(" · ");
+  return clock ? `Then · ${then.title} · ${clock}` : `Then · ${then.title}`;
+}
