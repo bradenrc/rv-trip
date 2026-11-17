@@ -10,6 +10,7 @@ import type {
   Trip,
   TravelMode,
 } from "../domain/types";
+import { isAlreadySaved, type MatchCandidate } from "../domain/places";
 import { categoryOf } from "../theme/tokens";
 
 /**
@@ -385,7 +386,46 @@ export function isoDateInZone(now: Date, timeZone: string): IsoDate | null {
   }
 }
 
-/** "Costa Rica Fly & Stay · Westin Reserva Conchal · today". */
-export function didItContext(tripTitle: string, destinationName: string): string {
-  return `${tripTitle} · ${destinationName} · today`;
+// ── #176 · capture mid-trip: the trip first, then the destination ───────────
+
+/**
+ * Where a mid-trip capture files (#174 · Q1 A · Q2 A): the trip in progress
+ * (`activeTrip`), then today's destination on it if one covers today
+ * (`todaysDestination` — a changeover keeps the destination you're ARRIVING at;
+ * a floating destination never matches). A travel day or a stretch with only
+ * floating destinations left is `{ trip, destination: null }` — the capture
+ * lands on the trip's shelf ("Around the trip"). No trip covering today is
+ * null: the sheet is exactly today's library save.
+ */
+export function captureTarget<T extends Pick<Trip, "id" | "title" | "startDate" | "endDate" | "chapters">>(
+  trips: readonly T[],
+  today: IsoDate,
+): { trip: T; destination: Destination | null } | null {
+  const trip = activeTrip(trips, today);
+  if (!trip) return null;
+  return { trip, destination: todaysDestination([trip], today)?.destination ?? null };
+}
+
+/** An idea as the match rule sees it: its own place, else its title, coordless. */
+function candidateOfIdea(idea: Idea): MatchCandidate {
+  return idea.place ?? { name: idea.title, lat: null, lng: null, googlePlaceId: null };
+}
+
+/**
+ * The open idea a "Been here" capture checks off instead of creating a twin
+ * (#174 · Q3 B): the first idea in `sortOrder` that is not `done` and that
+ * `isAlreadySaved` matches against the capture. A done idea never matches; an
+ * idea with no place is compared by its title alone. No match is null.
+ */
+export function matchingOpenIdea(ideas: readonly Idea[], c: MatchCandidate): Idea | null {
+  const open = ideas.filter((i) => i.status !== "done").sort((a, b) => a.sortOrder - b.sortOrder);
+  return open.find((i) => isAlreadySaved(c, [candidateOfIdea(i)])) ?? null;
+}
+
+/**
+ * "Costa Rica Fly & Stay · Westin Reserva Conchal · today"; with no destination
+ * (#176 · a shelf capture) "Pacific Northwest Loop · Around the trip · today".
+ */
+export function didItContext(tripTitle: string, destinationName: string | null): string {
+  return `${tripTitle} · ${destinationName ?? JOURNAL_AROUND_HEADING} · today`;
 }

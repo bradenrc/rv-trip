@@ -1,9 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { ideaCreateInput, savedPlaceCreate } from "../domain/types";
+import { ideaCreateInput, ideaPatchInput, savedPlaceCreate } from "../domain/types";
 import type { PlaceSummary } from "../providers/index";
 import {
+  CAPTURE_MIDTRIP_CHIPS,
   JOURNAL_QUEUED_TOAST,
   OFFLINE_NOTICE,
+  checkOffBody,
+  logCtaLabel,
+  logHelperLine,
   captureFieldPlaceholder,
   didItBody,
   journalToast,
@@ -202,6 +206,34 @@ describe("didItBody (#113 · Did it)", () => {
       place: { name: "Coco Loco", lat: 10.43, lng: -85.78, googlePlaceId: "ChIJ_sunset_bar" },
     });
     expect(body).not.toHaveProperty("areaLabel");
+  });
+});
+
+describe("capture mid-trip (#176)", () => {
+  it("didItBody with no destination round-trips as a shelf idea", () => {
+    const body = didItBody(
+      { clientId: "cap_shelf", tripId: "5d3c9d7e-9b8e-4a8e-8f55-5a1f7b6d2c11", destinationId: null },
+      { kind: "note", text: "Sisters Coffee", at: { lat: 44.29, lng: -121.55 }, areaLabel: "Sisters" },
+      { rating: 4, again: true, note: "" },
+    );
+    expect(body.destinationId).toBeNull();
+    const parsed = ideaCreateInput.safeParse(body);
+    expect(parsed.success).toBe(true);
+    expect(parsed.data?.destinationId).toBeNull();
+  });
+
+  it("checkOffBody sends only what the sheet set", () => {
+    expect(checkOffBody({ rating: null, again: null, note: "  " })).toEqual({ status: "done" });
+    const full = checkOffBody({ rating: 5, again: false, note: " Get the hazelnut brown. " });
+    expect(full).toEqual({ status: "done", rating: 5, again: false, notes: "Get the hazelnut brown." });
+    expect(ideaPatchInput.safeParse(full).success).toBe(true);
+  });
+
+  it("the CTA, the chips and the helper line read as the frames", () => {
+    expect(logCtaLabel("Pacific Northwest Loop")).toBe("Save to Pacific Northwest Loop");
+    expect(CAPTURE_MIDTRIP_CHIPS).toEqual(["Been here", "Want to go"]);
+    expect(logHelperLine(true)).toBe("In the trip’s Journal today, and on your Been there shelf.");
+    expect(logHelperLine(false)).toBe("In the trip’s Journal today.");
   });
 });
 

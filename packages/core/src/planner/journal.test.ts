@@ -4,6 +4,9 @@ import { costaRicaTrip, pnwTrip, seedTrips } from "../seeds/index";
 import {
   JOURNAL_EMPTY_COPY,
   activeTrip,
+  captureTarget,
+  didItContext,
+  matchingOpenIdea,
   isoDateInZone,
   isRootLaunchUrl,
   againBadge,
@@ -283,6 +286,79 @@ describe("activeTrip (#173 · the landing rule, Q4 A)", () => {
   it("reads dates only — a complete trip with statusAuto:false covering today is still active", () => {
     const pinned = t("done", "2026-11-11", "2026-11-15", { status: "complete", statusAuto: false });
     expect(activeTrip([pinned], "2026-11-13")?.id).toBe("done");
+  });
+});
+
+describe("captureTarget (#176 · the trip first, then the destination)", () => {
+  // docs/design/176 §1: the Pacific Northwest Loop, AUG 01–28 — Astoria Aug 2–5,
+  // Newport Aug 5–9, Bend Aug 12–16, Crater Lake floating.
+  const trips = [pnwTrip()];
+
+  it("Aug 7, a stay day → the trip and Newport", () => {
+    const t = captureTarget(trips, "2026-08-07");
+    expect(t?.trip.id).toBe("trip_pnw");
+    expect(t?.destination?.id).toBe("stp_newport");
+  });
+
+  it("Aug 5, a changeover → Newport, the destination you're arriving at", () => {
+    expect(captureTarget(trips, "2026-08-05")?.destination?.id).toBe("stp_newport");
+  });
+
+  it("Aug 10, a travel-day gap → the trip with no destination", () => {
+    const t = captureTarget(trips, "2026-08-10");
+    expect(t?.trip.id).toBe("trip_pnw");
+    expect(t?.destination).toBeNull();
+  });
+
+  it("Aug 20, only a floating destination left → the trip with no destination", () => {
+    const t = captureTarget(trips, "2026-08-20");
+    expect(t?.trip.id).toBe("trip_pnw");
+    expect(t?.destination).toBeNull();
+  });
+
+  it("Sep 3, the trip is over → null", () => {
+    expect(captureTarget(trips, "2026-09-03")).toBeNull();
+    expect(captureTarget([], "2026-08-07")).toBeNull();
+  });
+});
+
+describe("didItContext (#176 · a shelf capture)", () => {
+  it("names the destination, or reads Around the trip with none", () => {
+    expect(didItContext("Pacific Northwest Loop", "Newport, OR")).toBe("Pacific Northwest Loop · Newport, OR · today");
+    expect(didItContext("Pacific Northwest Loop", null)).toBe("Pacific Northwest Loop · Around the trip · today");
+  });
+});
+
+describe("matchingOpenIdea (#176 · Q3 B, check off instead of a twin)", () => {
+  const gid = "ChIJ_rogue_ales";
+  const rogue = idea({
+    id: "i_rogue",
+    title: "Rogue Ales brewery lunch",
+    place: { name: "Rogue Ales Brewery", lat: 44.62, lng: -124.05, googlePlaceId: gid },
+    sortOrder: 1,
+  });
+  const hit = { name: "Rogue Ales & Spirits", lat: 44.6201, lng: -124.0501, googlePlaceId: gid };
+
+  it("returns an open idea the capture's Google id matches", () => {
+    expect(matchingOpenIdea([rogue], hit)?.id).toBe("i_rogue");
+  });
+
+  it("never matches the same idea once it is done", () => {
+    expect(matchingOpenIdea([{ ...rogue, status: "done" }], hit)).toBeNull();
+  });
+
+  it("matches a coordless idea by its title alone", () => {
+    const sisters = idea({ id: "i_sisters", title: "Sisters Coffee", destinationId: null });
+    const note = { name: "sisters coffee", lat: 44.29, lng: -121.55, googlePlaceId: null };
+    expect(matchingOpenIdea([sisters], note)?.id).toBe("i_sisters");
+    expect(matchingOpenIdea([sisters], { ...note, name: "Sisters Bakery" })).toBeNull();
+  });
+
+  it("picks the lower sortOrder when two open ideas match", () => {
+    const later = { ...rogue, id: "i_later", sortOrder: 5 };
+    const earlier = { ...rogue, id: "i_earlier", sortOrder: 0 };
+    expect(matchingOpenIdea([later, earlier], hit)?.id).toBe("i_earlier");
+    expect(matchingOpenIdea([earlier, later], hit)?.id).toBe("i_earlier");
   });
 });
 
