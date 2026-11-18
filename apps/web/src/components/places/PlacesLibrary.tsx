@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BookmarkCheck,
   CircleCheckBig,
@@ -111,6 +111,18 @@ export function PlacesLibrary({
   /** Which card has its research pad open — one at a time, the library's own
    * state. The card renders the pad; it never knows about the shelf. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  /** #186 i7 · the card ⇄ pin link of the md+ panel: hovering or clicking a
+   * card selects it, and a pin selects its card. */
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** The md+ split's grid column — where a pin looks for its card. The lens
+   * below md renders its own copies, so the lookup is scoped, never by id. */
+  const gridRef = useRef<HTMLDivElement>(null);
+  const selectPin = useCallback((id: string) => {
+    setSelectedId(id);
+    gridRef.current
+      ?.querySelector(`[data-save-id="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, []);
 
   /** Where the browser is — null until it says (and for good, if refused). */
   const [here, setHere] = useState<LatLng | null>(null);
@@ -219,8 +231,18 @@ export function PlacesLibrary({
   // the card's own box. `onAddToTrip` stays unpassed: the add-a-destination path it
   // needs is issue #22, in epic #40 — until then the DS button is inert by
   // design, not by omission.
+  // #186 i7: the wrapper is also the panel's hover/click target, and the
+  // selected one carries the ring its pin is lit for.
   const cardFor = (p: SavedPlace, distance?: string) => (
-    <div key={p.id} className="relative grid">
+    <div
+      key={p.id}
+      data-save-id={p.id}
+      onMouseEnter={() => setSelectedId(p.id)}
+      onClick={() => setSelectedId(p.id)}
+      className={`relative grid rounded-rv-card${
+        selectedId === p.id ? " ring-2 ring-rv-green shadow-rv-lg" : ""
+      }`}
+    >
       <PlaceCard
         savedPlace={p}
         distance={distance}
@@ -251,6 +273,63 @@ export function PlacesLibrary({
   // the list, and the grouping is the grid's (#111 i4).
   const cards = list.map(renderCard);
 
+  /** The grid column: the grouped grid, or the shelf's empty state. */
+  const body =
+    list.length > 0 || leading ? (
+      <>
+        {/* The "Been there?" suggestions are not library rows, so they sit
+          in their own row ahead of the groups rather than under a header. */}
+        {leading && (
+          <div className="mb-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
+              {leading}
+            </div>
+          </div>
+        )}
+        {/* #186 i2 · q1 A: with a fix, Near you leads, nearest first. */}
+        {here && list.length > 0 && (
+          <div className="mb-4 flex flex-col gap-2.5">
+            <div className={`${GROUP_HEAD} font-bold text-rv-ink`}>
+              Near you
+              <span className="ml-auto font-medium normal-case tracking-normal text-rv-ink-faded">
+                {nearYouWithin(name)}
+              </span>
+            </div>
+            {split.near.length > 0 ? (
+              <div className={GRID}>{split.near.map((n) => cardFor(n.save, miles(n.mi)))}</div>
+            ) : (
+              <div className="rounded-rv-card border border-dashed border-rv-border-hi p-2.5 text-center text-[11.5px] text-rv-ink-muted">
+                {nearYouNothing(name)}
+              </div>
+            )}
+            {split.total > split.near.length && (
+              <div className={`${GROUP_HEAD} mt-1 text-rv-ink-faded`}>Everywhere else</div>
+            )}
+          </div>
+        )}
+        {/* #111 i4 · Q4 B: the grid is grouped by area under region
+          headers — core's savesShelves, the phone's Saves tab order.
+          #186 i2: it draws nearYou's `rest` (all of it, with no fix). */}
+        <SavesGroups places={list} status={status} shelves={split.rest} renderCard={renderCard} />
+      </>
+    ) : shelf.length > 0 && cat !== "All" ? (
+      <div className="rounded-rv-card border border-dashed border-rv-border-hi p-2.5 text-center text-[11.5px] text-rv-ink-muted">
+        {placesCategoryEmpty(cat, status)}
+      </div>
+    ) : status === "want" ? (
+      <EmptyShelf
+        Icon={BookmarkCheck}
+        title="Nothing in the queue yet"
+        blurb="Heard about a great campground or diner? Save it here and add it to a trip when you're ready."
+      />
+    ) : (
+      <EmptyShelf
+        Icon={MapPinned}
+        title="No visited places yet"
+        blurb="Places you rate on a trip show up here so you can decide what's worth a return."
+      />
+    );
+
   return (
     <>
       <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
@@ -279,15 +358,19 @@ export function PlacesLibrary({
             </button>
           )}
         </div>
-        <ViewSwitch
-          value={view}
-          onChange={setView}
-          fill
-          options={[
-            { value: "grid", Icon: LayoutGrid, label: "Grid" },
-            { value: "map", Icon: MapIcon, label: "Map" },
-          ]}
-        />
+        {/* #186 i7 · q9 A: at md+ the grid and the map are always side by
+            side, so the switch has no job there. */}
+        <div className="md:hidden">
+          <ViewSwitch
+            value={view}
+            onChange={setView}
+            fill
+            options={[
+              { value: "grid", Icon: LayoutGrid, label: "Grid" },
+              { value: "map", Icon: MapIcon, label: "Map" },
+            ]}
+          />
+        </div>
       </div>
 
       <div className="mb-[22px] flex flex-wrap gap-2">
@@ -309,8 +392,10 @@ export function PlacesLibrary({
         ))}
       </div>
 
-      {view === "map" ? (
-        <>
+      {/* The shipped map lens, below md only (#186 i7): at md+ the panel
+          below is the one map, whatever the switch was left on. */}
+      {view === "map" && (
+        <div className="md:hidden">
           <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-[1fr_360px]">
             <div className="min-h-[420px]">
               <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} />
@@ -325,61 +410,38 @@ export function PlacesLibrary({
               {hidden} {hidden === 1 ? "place" : "places"} hidden by the {cat} filter
             </p>
           )}
-        </>
-      ) : list.length > 0 || leading ? (
-        <>
-          {/* The "Been there?" suggestions are not library rows, so they sit
-              in their own row ahead of the groups rather than under a header. */}
-          {leading && (
-            <div className="mb-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-[repeat(auto-fill,minmax(340px,1fr))]">
-                {leading}
-              </div>
-            </div>
-          )}
-          {/* #186 i2 · q1 A: with a fix, Near you leads, nearest first. */}
-          {here && list.length > 0 && (
-            <div className="mb-4 flex flex-col gap-2.5">
-              <div className={`${GROUP_HEAD} font-bold text-rv-ink`}>
-                Near you
-                <span className="ml-auto font-medium normal-case tracking-normal text-rv-ink-faded">
-                  {nearYouWithin(name)}
-                </span>
-              </div>
-              {split.near.length > 0 ? (
-                <div className={GRID}>{split.near.map((n) => cardFor(n.save, miles(n.mi)))}</div>
-              ) : (
-                <div className="rounded-rv-card border border-dashed border-rv-border-hi p-2.5 text-center text-[11.5px] text-rv-ink-muted">
-                  {nearYouNothing(name)}
-                </div>
-              )}
-              {split.total > split.near.length && (
-                <div className={`${GROUP_HEAD} mt-1 text-rv-ink-faded`}>Everywhere else</div>
-              )}
-            </div>
-          )}
-          {/* #111 i4 · Q4 B: the grid is grouped by area under region
-              headers — core's savesShelves, the phone's Saves tab order.
-              #186 i2: it draws nearYou's `rest` (all of it, with no fix). */}
-          <SavesGroups places={list} status={status} shelves={split.rest} renderCard={renderCard} />
-        </>
-      ) : shelf.length > 0 && cat !== "All" ? (
-        <div className="rounded-rv-card border border-dashed border-rv-border-hi p-2.5 text-center text-[11.5px] text-rv-ink-muted">
-          {placesCategoryEmpty(cat, status)}
         </div>
-      ) : status === "want" ? (
-        <EmptyShelf
-          Icon={BookmarkCheck}
-          title="Nothing in the queue yet"
-          blurb="Heard about a great campground or diner? Save it here and add it to a trip when you're ready."
-        />
-      ) : (
-        <EmptyShelf
-          Icon={MapPinned}
-          title="No visited places yet"
-          blurb="Places you rate on a trip show up here so you can decide what's worth a return."
-        />
       )}
+
+      {/* #186 i7 · #185 · q9 A: at md+ the grouped grid on the left and a
+          sticky map panel on the right that draws exactly `list`. Below md the
+          panel is hidden and this is the shipped grid (or, on Map, hidden). */}
+      <div
+        className={`${view === "map" ? "hidden md:grid" : "grid"} grid-cols-1 items-start gap-4 md:grid-cols-[1fr_360px]`}
+      >
+        <div ref={gridRef} className="min-w-0">
+          {body}
+        </div>
+        <aside className="hidden flex-col gap-1.5 md:sticky md:top-0 md:flex">
+          <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-rv-ink-faded">
+            On the map · {lens.pins.length} of {list.length} listed
+          </span>
+          <div className="relative">
+            <MapMount
+              pins={lens.pins}
+              unmappedCount={lens.unmapped.length}
+              selectedId={selectedId}
+              onSelect={selectPin}
+              height="520px"
+            />
+            {lens.pins.length > 0 && lens.unmapped.length > 0 && (
+              <span className="pointer-events-none absolute bottom-1.5 right-2 z-[3] font-mono text-[9.5px] text-rv-ink-faded">
+                {lens.unmapped.length} {lens.unmapped.length === 1 ? "has" : "have"} no coordinates
+              </span>
+            )}
+          </div>
+        </aside>
+      </div>
     </>
   );
 }

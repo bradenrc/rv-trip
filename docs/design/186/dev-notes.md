@@ -327,3 +327,61 @@ Provenance: when this dispatch started, the worktree already held **uncommitted*
   - UI: `Tests 55 passed (55)`.
   - It also covers `@rv-trip/mobile:typecheck` and `@rv-trip/web:lint`.
 - **No device or browser render was run.** Everything under "Render-required" is the walk's.
+
+---
+
+# i7 · The web Places map panel beside the grid
+
+Scope: epic item **i7 of 9 only** (#185 renders · web only, no core seam · q9 A). No core, DS, schema or route changes.
+
+## What changed
+
+All in `apps/web/src/components/places/PlacesLibrary.tsx`:
+
+- **Selection state** :113-124. `selectedId` (`useState<string | null>`) and `gridRef` on the md+ grid column. `selectPin(id)` sets the selection and runs `gridRef.current.querySelector('[data-save-id=…]').scrollIntoView({ block: "nearest" })`. The lookup is scoped to the split's grid column because the below-md lens renders its own copies of the cards, so DOM ids would collide.
+- **Card wrapper** `cardFor` :236-246. It carries `data-save-id`, and `onMouseEnter` / `onClick` select the card. The wrapper is always `rounded-rv-card`, and the selected one adds `ring-2 ring-rv-green shadow-rv-lg`. Near you cards and grouped cards share this, so every card the grid lists can be selected.
+- **Grid body** :276-330. The old grid / empty-state ternary moved unchanged into a `const body` so it can sit in the split's left column.
+- **ViewSwitch** :361-372 is wrapped in `<div className="md:hidden">`.
+- **Shipped lens** :397-414 is now `{view === "map" && (<div className="md:hidden">…)}`. Below md it is unchanged: the map, the flat card list and the "hidden by the filter" line.
+- **md+ split** :416-446. `grid grid-cols-1 items-start gap-4 md:grid-cols-[1fr_360px]`, and `hidden md:grid` while `view === "map"`. This resolves the vet MED: a user who picks Map below md and then widens the window sees only the panel's map, and below md on Map only the lens shows. Left column: `body`. Right column: `<aside className="hidden … md:sticky md:top-0 md:flex">` holding
+  - the mono kicker "On the map · {lens.pins.length} of {list.length} listed" (10px, uppercase, tracking 0.1em, `text-rv-ink-faded`, per the wireframe's `.wpanel .k`);
+  - `MapMount` with `pins={lens.pins}`, `unmappedCount`, `selectedId`, `onSelect={selectPin}`, `height="520px"`;
+  - the "N has/have no coordinates" overlay (mono 9.5px, bottom-right, per `.nomap`), shown only when there are pins and some are unmapped. With zero pins, MapMount's own empty frame shows the count.
+- The panel reuses the existing `lens = buildMapModel([], list)` (:216), so it draws exactly `list`, the shelf- and chip-filtered array the grid renders. The vet HIGH on pin counts was already resolved in i6: `buildMapModel` pins saves at `savePoint`, so the wireframe's "9 of 10" case, with The Springs pinned at its area, holds.
+
+Tests: new `apps/web/src/components/places/map-panel.test.ts` (7 source-reading tests). They check:
+- the ViewSwitch is inside `md:hidden`;
+- the lens is its own `view === "map"` branch inside `md:hidden`, and the split is `hidden md:grid` on Map;
+- `MapMount` sits in an `<aside>` (`hidden … md:flex`, `md:sticky`, 520px) after the `md:grid-cols-[1fr_360px]` split marker;
+- `buildMapModel([], list)` feeds `lens.pins` and the unmapped count;
+- `selectedId` and `onSelect={selectPin}` are passed, along with `scrollIntoView({ block: "nearest" })`;
+- the card's hover/click handlers, the ring classes and `data-save-id`;
+- the kicker copy.
+
+## Decisions / flags
+
+- **The panel also shows beside the empty states** (EmptyShelf, the per-chip dashed box). There it is MapMount's "empty" frame and "0 of 0 listed". The design doesn't cover this case, and this was the simplest faithful reading of "the panel draws exactly `list`".
+- **Two MapMounts stay in the DOM while Map is picked.** One is CSS-hidden at each breakpoint, so only one *shows*. The hidden one still mounts its lazy MapView in a `display:none` box. Mounting only one would need a JS media query, and the vet asked for the CSS route.
+- **Clicking inside a card also selects it**, including its expand, rating and menu controls. This is harmless and matches "clicking a card selects it".
+- `CSS.escape` runs only in the pin handler (browser-only), never during SSR.
+
+## Render-required (walk)
+
+At md+, check:
+- the sticky panel stays in view while the grid scrolls;
+- hovering a card rings both the card and its pin;
+- clicking a pin rings its card and scrolls it into view (`nearest`);
+- the "N has no coordinates" overlay sits over the canvas, clear of the style pill.
+
+Resize from below md with Map picked: only one map should show at each width.
+
+## Checks run
+
+- TDD red: `npx vitest run src/components/places/map-panel.test.ts` (apps/web) before the implementation → `Tests 7 failed (7)`.
+- Green: `npx vitest run src/components/places/` → `Test Files 6 passed (6)`, `Tests 65 passed (65)`.
+- Gate: `pnpm turbo run lint typecheck test` was run twice. Both times every task finished green. It printed `@rv-trip/web:lint` and all typechecks (mobile included) clean, plus core `Tests 1578 passed (1578)`, web `Test Files 64 passed (64)` / `Tests 589 passed (589)`, and ui `Tests 55 passed (55)`.
+- **However, the web vitest process never exited after its results.** It hung in the suite's global teardown. In `pg_stat_activity` on the shared local Postgres (:5433), a `DROP DATABASE IF EXISTS "rvtrip_test_1bt8" WITH (FORCE)` had been active for over 8 minutes, and a second one was queued behind it on a Lock wait.
+- I killed only my own worktree's vitest PIDs (checked by cwd), so turbo recorded `Tasks: 9 successful, 10 total · Failed: @rv-trip/web#test`. That failure was the kill, not a failing test.
+- A third, web-only run then stalled in global setup behind the same DROP, and I stopped it. I did not touch any Postgres backend, because the database is shared with other worktrees. The i3 notes record the same hang.
+- **qa / engine:** re-run the gate once the local Postgres is not stuck on that DROP.
+- No browser render was run. Everything under "Render-required" is the walk's.
