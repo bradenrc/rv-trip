@@ -118,6 +118,22 @@ describe("the capture bodies — each one is a valid POST /api/places", () => {
     expect(placeCaptureBody(CHANDELIER, { ...want, status: "been" }).source).toBeNull();
   });
 
+  // #186 i9 (#160 · q10 A): a been capture carries its memory — the rating and
+  // the trip it happened on — and a want capture never does.
+  it("a been capture carries rating and tripId; a want capture sends both null", () => {
+    const TRIP = "4f0b8a52-8f0e-4b8e-9c1a-0a6f1c2d3e4f";
+    const been = { status: "been" as const, source: null, note: "patio", rating: 4, tripId: TRIP };
+    const place = placeCaptureBody(CHANDELIER, been);
+    expect(place).toMatchObject({ status: "been", rating: 4, tripId: TRIP });
+    expect(savedPlaceCreate.safeParse({ ...place, clientId: "cap_1" }).success).toBe(true);
+    const note = noteCaptureBody("taco cart", { lat: 9.93, lng: -84.07 }, null, true, been);
+    expect(note).toMatchObject({ status: "been", rating: 4, tripId: TRIP });
+    expect(savedPlaceCreate.safeParse(note).success).toBe(true);
+    expect(placeCaptureBody(CHANDELIER, { ...been, rating: 0, tripId: null })).toMatchObject({ rating: null, tripId: null });
+    expect(placeCaptureBody(CHANDELIER, { ...been, status: "want" })).toMatchObject({ rating: null, tripId: null });
+    expect(noteCaptureBody("x", null, null, true, { ...been, status: "want" })).toMatchObject({ rating: null, tripId: null });
+  });
+
   it("a pin is a pin save, named on the sub-screen", () => {
     const body = pinCaptureBody("great BLM camp spot", { lat: 43.05, lng: -124.33 }, "campground", false);
     expect(body).toMatchObject({ anchor: "pin", type: "campground", name: "great BLM camp spot" });

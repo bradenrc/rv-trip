@@ -1,8 +1,20 @@
 import type { CategoryLabel } from "@rv-trip/ui";
 import { categoryMeta } from "@rv-trip/ui";
-import { DEFAULT_UNITS, NO_ROUTING_HASH, arcLabel, hasCoords, isScheduled, tripArcs } from "@rv-trip/core";
+import {
+  DEFAULT_UNITS,
+  NO_ROUTING_HASH,
+  arcLabel,
+  destinationBeen,
+  hasCoords,
+  isScheduled,
+  libraryFilterKeeps,
+  savePoint,
+  tripArcs,
+} from "@rv-trip/core";
 import type {
   IdeaStatus,
+  IsoDate,
+  LibraryFilter,
   LocateRow,
   LocateRowKind,
   ReservationType,
@@ -28,8 +40,11 @@ import { dateRange } from "@/lib/trip-ui";
  * and the phone, which draws the same arcs from the same call.
  */
 
-/** The four layers, in the order their chips read — labelled verbatim from the
- * dashboard's own section heads (apps/web/src/app/trips/page.tsx). */
+/** Which shelf of the dashboard a pin's trip sits on — labelled verbatim from
+ * the dashboard's own section heads (apps/web/src/app/trips/page.tsx). It is no
+ * longer a chip (#186 i6 · q8 A: the four library filters replaced the layer
+ * chips); the rail still names a destination's trip by it, and arcs keep their
+ * planning / upcoming paint. */
 export type MapLayer = "planning" | "upcoming" | "been" | "saved";
 
 export const LAYER_LABEL: Record<MapLayer, string> = {
@@ -38,8 +53,6 @@ export const LAYER_LABEL: Record<MapLayer, string> = {
   been: "Been there",
   saved: "Saved places",
 };
-
-export const LAYER_ORDER: MapLayer[] = ["planning", "upcoming", "been", "saved"];
 
 export interface PinReservation {
   id: string;
@@ -56,6 +69,10 @@ export interface DestinationPin {
   lat: number;
   lng: number;
   layer: Exclude<MapLayer, "saved">;
+  /** #186 i6 · q7 A: core's `destinationBeen` — the trip is complete, or this
+   * stop's departDate is behind today. A trip in progress draws its past stops
+   * hollow and the rest filled. */
+  been: boolean;
   name: string;
   /** 1-based position in the trip's scheduled sequence; null when floating. */
   ordinal: number | null;
@@ -90,6 +107,8 @@ export interface PlacePin {
   source: string | null;
   rating: number | null;
   tripName: string | null;
+  /** The trip it was visited on (`SavedPlace.tripId`) — what One trip keeps. */
+  tripId: string | null;
 }
 
 /**
@@ -120,6 +139,9 @@ export interface IdeaPin {
   destinationName: string | null;
   tripId: string;
   tripTitle: string;
+  /** #186 i6: the destination it hangs under is been (a shelf idea: its trip
+   * is complete). Set by `buildMapModel`; absent ⇒ the trip's layer decides. */
+  been?: boolean;
   /** #179 · the Journal map's logged places carry their five-category colour
    * (core's `journalMap`). Absent everywhere else — the /map rule above still
    * holds there — and an absent category keeps the Do ring. */
@@ -135,6 +157,9 @@ export interface UnmappedRow {
   layer: MapLayer;
   /** Which TABLE the id names, set at each `unmapped.push` site below. */
   kind: LocateRowKind;
+  /** #186 i6 — what the four filters read, as on a pin (`filterFacts`). */
+  been: boolean;
+  tripId: string | null;
 }
 
 /**
@@ -167,6 +192,8 @@ export function locateRowOf(row: UnmappedRow): LocateRow {
 export interface DriveArc {
   id: string;
   layer: Exclude<MapLayer, "saved" | "been">;
+  /** #186 i6 — One trip draws that trip's arcs only. */
+  tripId: string;
   /** The pair's endpoints — still the chord, for the estimate label's midpoint. */
   from: { lat: number; lng: number };
   to: { lat: number; lng: number };
@@ -248,6 +275,7 @@ function pushIdeas(
   ideas: Destination["ideas"],
   destinationName: string | null,
   layer: Exclude<MapLayer, "saved">,
+  been: boolean,
 ): void {
   for (const idea of ideas) {
     // `mapIdea` returns a non-null `place` the moment place_name is set, with
@@ -255,7 +283,7 @@ function pushIdeas(
     // row. Half a place is not a pin, so the same `hasCoords` test the destinations
     // make decides it here too.
     if (!idea.place || !hasCoords(idea.place)) {
-      unmapped.push({ id: idea.id, name: idea.title, layer, kind: "idea" });
+      unmapped.push({ id: idea.id, name: idea.title, layer, kind: "idea", been, tripId: trip.id });
       continue;
     }
     pins.push({
@@ -269,6 +297,7 @@ function pushIdeas(
       destinationName,
       tripId: trip.id,
       tripTitle: trip.title,
+      been,
     });
   }
 }
@@ -286,6 +315,14 @@ function pushIdeas(
  * passed down (lib/units.ts). It reaches exactly one thing here — the arc
  * label's distance — and it defaults, so the lens that draws no arc at all does
  * not have to name it.
+ *
+ * `today` (#186 i6 · q7 A) is the reader's date (map/page.tsx reads the tz
+ * cookie). Each destination's `been` is core's `destinationBeen`; with no
+ * today only a complete trip's stops are been.
+ *
+ * A save is pinned at core's `savePoint` — its own lat/lng, else its area's —
+ * the one point rule every map surface shares with the phone's `libraryMap`
+ * and with Near you (#185 vet HIGH). Only a save with neither is unmapped.
  */
 export function buildMapModel(
   trips: Trip[],
@@ -296,6 +333,7 @@ export function buildMapModel(
    * reads the no-rig hash. */
   routingHash: string | Readonly<Record<string, string>> = NO_ROUTING_HASH,
   units: Units = DEFAULT_UNITS,
+  today: IsoDate | null = null,
 ): MapModel {
   const pins: MapPin[] = [];
   const unmapped: UnmappedRow[] = [];
@@ -309,11 +347,19 @@ export function buildMapModel(
     for (const chapter of trip.chapters) {
       for (const destination of chapter.destinations) {
         const floating = !isScheduled(destination);
+        const been = destinationBeen(trip, destination, today);
         if (!hasCoords(destination.place)) {
-          unmapped.push({ id: destination.id, name: destination.place.name, layer, kind: "destination" });
+          unmapped.push({
+            id: destination.id,
+            name: destination.place.name,
+            layer,
+            kind: "destination",
+            been,
+            tripId: trip.id,
+          });
           // The destination has no pin, but its ideas still do — an idea's coordinates
           // are its own, not borrowed from the destination it hangs under.
-          pushIdeas(pins, unmapped, trip, destination.ideas, destination.place.name, layer);
+          pushIdeas(pins, unmapped, trip, destination.ideas, destination.place.name, layer, been);
           continue;
         }
         pins.push({
@@ -322,6 +368,7 @@ export function buildMapModel(
           lat: destination.place.lat,
           lng: destination.place.lng,
           layer,
+          been,
           name: destination.place.name,
           ordinal: ordinalOf.get(destination.id) ?? null,
           floating,
@@ -335,14 +382,14 @@ export function buildMapModel(
           notes: destination.notes,
           reservations: reservationsOf(destination),
         });
-        pushIdeas(pins, unmapped, trip, destination.ideas, destination.place.name, layer);
+        pushIdeas(pins, unmapped, trip, destination.ideas, destination.place.name, layer, been);
       }
     }
 
     // The shelf, after the chapters: the trip's unattached ideas (#80). They are
     // drawn last, so a maybe never lands between the destinations in the rail's
     // reading order.
-    pushIdeas(pins, unmapped, trip, trip.ideas, null, layer);
+    pushIdeas(pins, unmapped, trip, trip.ideas, null, layer, trip.status === "complete");
 
     // Arcs are drawn only for the trips AHEAD of you — a traveled trip's drive
     // already happened, and a dashed estimate over a real past route is a lie.
@@ -363,6 +410,7 @@ export function buildMapModel(
       arcs.push({
         id: arc.id,
         layer,
+        tripId: trip.id,
         from: arc.from,
         to: arc.to,
         miles: arc.miles,
@@ -374,15 +422,23 @@ export function buildMapModel(
   }
 
   for (const p of places) {
-    if (!hasCoords(p.place)) {
-      unmapped.push({ id: p.id, name: p.place.name, layer: "saved", kind: "place" });
+    const point = savePoint(p);
+    if (!point) {
+      unmapped.push({
+        id: p.id,
+        name: p.place.name,
+        layer: "saved",
+        kind: "place",
+        been: p.status === "been",
+        tripId: p.tripId,
+      });
       continue;
     }
     pins.push({
       kind: "place",
       id: p.id,
-      lat: p.place.lat,
-      lng: p.place.lng,
+      lat: point.lat,
+      lng: point.lng,
       layer: "saved",
       name: p.place.name,
       type: p.type,
@@ -393,10 +449,46 @@ export function buildMapModel(
       source: p.source,
       rating: p.rating,
       tripName: p.tripName,
+      tripId: p.tripId,
     });
   }
 
   return { pins, unmapped, arcs };
+}
+
+/**
+ * What the four /map filters read off a pin (#186 i6 · #184): been, and the
+ * trip it belongs to. A destination: its own `been`. A save: its shelf and the
+ * trip it was visited on. An idea: the destination it hangs under (absent, its
+ * trip's layer).
+ */
+export function filterFacts(pin: MapPin): { been: boolean; tripId: string | null } {
+  if (pin.kind === "place") return { been: pin.status === "been", tripId: pin.tripId };
+  if (pin.kind === "idea") return { been: pin.been ?? pin.layer === "been", tripId: pin.tripId };
+  return { been: pin.been, tripId: pin.tripId };
+}
+
+/** The chip counts: the drawable pins each filter keeps, before the category
+ * row. `trip` is 0 until a trip is picked. */
+export function filterCounts(
+  pins: MapPin[],
+  tripId: string | null,
+): { all: number; been: number; want: number; trip: number } {
+  const count = (f: LibraryFilter) => pins.filter((p) => libraryFilterKeeps(f, filterFacts(p))).length;
+  return {
+    all: pins.length,
+    been: count({ kind: "been" }),
+    want: count({ kind: "want" }),
+    trip: tripId === null ? 0 : count({ kind: "trip", tripId }),
+  };
+}
+
+/** Arcs show under All, Want to go and One trip (that trip's only), never
+ * under Been there: a drive already taken draws none (q8 A). */
+export function arcKept(f: LibraryFilter, arc: Pick<DriveArc, "tripId">): boolean {
+  if (f.kind === "been") return false;
+  if (f.kind === "trip") return arc.tripId === f.tripId;
+  return true;
 }
 
 /**
@@ -410,13 +502,5 @@ export function categoryCounts(places: SavedPlace[]): Record<string, number> {
     const k = categoryMeta(p.type).cat;
     c[k] = (c[k] ?? 0) + 1;
   }
-  return c;
-}
-
-/** How many drawable points each layer contributes, before any chip filtering. */
-export function layerCounts(pins: MapPin[], unmapped: UnmappedRow[]): Record<MapLayer, number> {
-  const c: Record<MapLayer, number> = { planning: 0, upcoming: 0, been: 0, saved: 0 };
-  for (const p of pins) c[p.layer]++;
-  for (const u of unmapped) c[u.layer]++;
   return c;
 }

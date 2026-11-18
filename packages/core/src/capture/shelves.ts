@@ -5,7 +5,10 @@ import type {
   SavedPlaceStatus,
   SuggestedPlace,
 } from "../domain/types";
-import type { PlaceSummary } from "../providers/index";
+import { haversineMeters, type LatLng, type PlaceSummary } from "../providers/index";
+import { savePoint } from "../planner/nearby-saves";
+import { METERS_PER_MILE, NEAR_RADIUS_MI } from "../planner/shelf";
+import { categoryOf } from "../theme/tokens";
 import { formatCoords, placeRowSubline } from "./sheet";
 
 /**
@@ -79,6 +82,95 @@ export function savesShelves(saves: SavedPlace[], status: SavedPlaceStatus): Sav
   });
   out.sort((a, b) => b.count - a.count || byName(a.region ?? "", b.region ?? ""));
   return { regions: out, unanchored: unanchored.sort(newestFirst) };
+}
+
+/**
+ * The Places tab's category chips (#186 i1 · #182, q3 A). Travel and Other
+ * have no chip: those saves show under All only.
+ */
+export type PlacesCategory = "All" | "Stay" | "Eat" | "Do";
+export const PLACES_CATEGORIES: readonly PlacesCategory[] = ["All", "Stay", "Eat", "Do"];
+
+export interface NearYouSave {
+  save: SavedPlace;
+  /** Raw miles from `here` to `savePoint(save)`. Clients round for display. */
+  mi: number;
+}
+
+export interface NearYou {
+  /** Within `NEAR_RADIUS_MI` of `here`, nearest first. Empty when `here` is null. */
+  near: NearYouSave[];
+  /** Everything else on the shelf, grouped exactly as `savesShelves` does. */
+  rest: SavesShelves;
+  /** The filtered count (status + category) — the chip's number. */
+  total: number;
+}
+
+/**
+ * The Places tab with a "Near you" group on top (#186 i1 · #182, q1 A · q2
+ * A · q3 A). Filters by shelf (`status`), then by chip (`cat`, matched on
+ * `categoryOf(type).cat`). With no location (`here` null) there is no near
+ * group and `rest` is today's `savesShelves` list. Otherwise every filtered
+ * save whose `savePoint` (own lat/lng, else its area's) is within
+ * `NEAR_RADIUS_MI` is near, nearest first; a save with no point is never near.
+ */
+export function nearYou(
+  saves: SavedPlace[],
+  status: SavedPlaceStatus,
+  here: LatLng | null,
+  cat: PlacesCategory,
+): NearYou {
+  const filtered = saves.filter(
+    (s) => s.status === status && (cat === "All" || categoryOf(s.type).cat === cat),
+  );
+  if (!here) return { near: [], rest: savesShelves(filtered, status), total: filtered.length };
+
+  const near: NearYouSave[] = [];
+  const rest: SavedPlace[] = [];
+  for (const save of filtered) {
+    const point = savePoint(save);
+    const mi = point ? haversineMeters(here, point) / METERS_PER_MILE : null;
+    if (mi !== null && mi <= NEAR_RADIUS_MI) near.push({ save, mi });
+    else rest.push(save);
+  }
+  near.sort((a, b) => a.mi - b.mi || a.save.place.name.localeCompare(b.save.place.name));
+  return { near, rest: savesShelves(rest, status), total: filtered.length };
+}
+
+/** A stored chip value (`rv-places-cat`, #186 i2 · q4 A) narrowed to the four
+ * chips this build draws — a stale "Travel" from before q3 A reads as absent. */
+export function isPlacesCategory(v: unknown): v is PlacesCategory {
+  return typeof v === "string" && (PLACES_CATEGORIES as readonly string[]).includes(v);
+}
+
+/**
+ * The location chip's place name (#186 i2): the area of the nearest near save
+ * that has one, else the resolved locality, else null — the chip then reads
+ * "Near you". Pass the active shelf's All-category `near`, so the name does
+ * not change with the chip you pick.
+ */
+export function nearYouName(near: NearYouSave[], resolved: string | null): string | null {
+  for (const n of near) if (n.save.area) return n.save.area.name;
+  return resolved;
+}
+
+const SHELF_WORDS: Record<SavedPlaceStatus, string> = { want: "Want to go", been: "Been there" };
+
+/** The dashed line under a chip with nothing on this shelf: "No eat places on Want to go yet." */
+export function placesCategoryEmpty(cat: Exclude<PlacesCategory, "All">, status: SavedPlaceStatus): string {
+  return `No ${cat.toLowerCase()} places on ${SHELF_WORDS[status]} yet.`;
+}
+
+/** The "Near you" heading's right-hand note: "within 50 mi" (phone) or
+ * "within 50 mi of Boise" (web). The radius is always miles (docs/design/186
+ * "Units"): it is a fixed rule, not a measured distance. */
+export function nearYouWithin(name: string | null): string {
+  return `within ${NEAR_RADIUS_MI} mi${name ? ` of ${name}` : ""}`;
+}
+
+/** The dashed line under "Near you" when a fix is known and nothing is within the radius. */
+export function nearYouNothing(name: string | null): string {
+  return `Nothing on this shelf within ${NEAR_RADIUS_MI} mi${name ? ` of ${name}` : ""}.`;
 }
 
 /** The Want to go / Been there segment's counts. */

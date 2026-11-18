@@ -337,12 +337,15 @@ const JOIN_ID = "rv-journal-join";
 export type TripMapPin = TripDestinationPin & { been?: boolean };
 
 /** #179 · a logged place on the Journal map: a small disc in its five-category
- * colour (core's `journalMap` entry points). */
+ * colour (core's `journalMap` entry points). #186 i6 · q6 A: `been` (a Map tab
+ * save on the Been there shelf) draws it as a ring in that colour on
+ * `hollowGround` — the web PlaceDrop's filled = want, hollow = been. */
 export interface TripMapEntry {
   id: string;
   lat: number;
   lng: number;
   category: RvCategory;
+  been?: boolean;
 }
 
 export interface TripMapProps {
@@ -380,6 +383,9 @@ export interface TripMapProps {
   selectedId?: string | null;
   /** #179 · present ⇒ discs and entries are tappable. */
   onSelect?: (id: string) => void;
+  /** #186 i6 · a tap on the map itself, off every pin (the Map tab clears its
+   * card on it). */
+  onPressMap?: () => void;
 }
 
 /**
@@ -400,6 +406,7 @@ export function TripMap({
   entries = NO_ENTRIES,
   selectedId = null,
   onSelect,
+  onPressMap,
 }: TripMapProps) {
   const palette = MAP_PALETTE[mode];
   const shape = useMemo(() => arcFeatureCollection(arcs), [arcs]);
@@ -434,6 +441,7 @@ export function TripMap({
         styleURL={MAP_STYLES[mode]}
         scaleBarEnabled={false}
         compassEnabled={false}
+        onPress={onPressMap ? () => onPressMap() : undefined}
       >
         <Camera
           // `defaultSettings` frames the trip on mount with no animation, the
@@ -488,7 +496,9 @@ export function TripMap({
               accessibilityRole="button"
               style={[
                 styles.entry,
-                { backgroundColor: palette.category[e.category], borderColor: palette.hollowGround },
+                e.been === true
+                  ? { backgroundColor: palette.hollowGround, borderColor: palette.category[e.category] }
+                  : { backgroundColor: palette.category[e.category], borderColor: palette.hollowGround },
                 e.id === selectedId && [styles.entrySel, { borderColor: palette.selStroke }],
               ]}
             />

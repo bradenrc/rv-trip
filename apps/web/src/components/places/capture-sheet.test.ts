@@ -124,8 +124,12 @@ describe("PlaceSheet.tsx — capture mode", () => {
     );
   });
 
-  it("draws no switch on the /places sheets (capture absent)", () => {
-    expect(sheet).toContain("capture === undefined ? null");
+  // #186 i9 (#160): a new /places save now draws Want to go · Been there too
+  // (been-sheet.test.ts); only the edit sheet (capture absent) draws none.
+  it("draws no switch on the /places edit sheet (capture absent, mode edit)", () => {
+    expect(sheet).toContain('const libraryStatus = capture === null || (capture === undefined && mode === "save")');
+    expect(sheet).toContain(") : capture ? (");
+    expect(sheet).toContain(") : null; if (log) {");
   });
 
   it("Been here: the context line, Stars at 26, the Again pair and the note", () => {

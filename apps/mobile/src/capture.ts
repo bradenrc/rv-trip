@@ -10,6 +10,7 @@ import type {
   PatchEntity,
   QueuedItem,
   SavedPlace,
+  SavedPlaceStatus,
   ToastCopy,
 } from "@rv-trip/core";
 import {
@@ -335,6 +336,25 @@ export async function loadRecents(): Promise<void> {
   } catch {
     // Keep whatever we had — the chips are a convenience.
   }
+}
+
+// ── the Places tab's shelf (#186 i9 · #160 · q10 A) ─────────────────────────
+
+/**
+ * The shelf the Places tab is showing, published while that tab is focused
+ * (and while the capture sheet covers it) and cleared when it is left — so ＋
+ * from Places on Been there opens the sheet on Been there, and ＋ from any
+ * other tab keeps Want to go. A plain module value: the sheet reads it once,
+ * when it opens, so nothing needs to re-render on a change.
+ */
+let placesShelf: SavedPlaceStatus | null = null;
+
+export function publishPlacesShelf(shelf: SavedPlaceStatus | null): void {
+  placesShelf = shelf;
+}
+
+export function publishedPlacesShelf(): SavedPlaceStatus | null {
+  return placesShelf;
 }
 
 // ── the runtime ──────────────────────────────────────────────────────────────

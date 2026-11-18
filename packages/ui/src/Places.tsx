@@ -53,8 +53,13 @@ export function PlaceCard({
   onPatch,
   onAddToTrip,
   onRevisit,
+  distance,
 }: {
   savedPlace: SavedPlace;
+  /** How far the place is from you, already formatted ("11 mi") — #186 i2's
+   * Near you. Printed in the mono meta line after the region; absent, the card
+   * renders exactly as it shipped. */
+  distance?: string;
   /** The research pad, open in place (#82). */
   expanded?: boolean;
   /** the doors out, inside the pad. Locality is `savedPlace.region`. */
@@ -109,10 +114,10 @@ export function PlaceCard({
                 p.place.name
               )}
             </h3>
-            {p.region && (
+            {(p.region || distance) && (
               <div className="inline-flex items-center gap-[5px] font-mono text-[12px] text-rv-ink-faded">
                 <MapPin className="size-3 text-rv-green" />
-                {p.region}
+                {[p.region, distance].filter(Boolean).join(" · ")}
               </div>
             )}
           </div>

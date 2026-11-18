@@ -419,7 +419,9 @@ function DestinationDisc({
   selected: boolean;
   palette: OverlayPalette;
 }) {
-  const been = pin.layer === "been";
+  // #186 i6 · q7 A: the destination's own been (core's `destinationBeen`), so a
+  // trip in progress draws its past stops hollow and the rest filled.
+  const been = pin.been;
   // Layout only. Every colour on this disc used to be a Tailwind `rv-*` class,
   // and every one of those was a Night literal frozen into a class name — so
   // colour moves to the palette and the geometry stays where it was.

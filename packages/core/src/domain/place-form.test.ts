@@ -12,7 +12,10 @@ import {
   savePlaceBody,
   savePlaceFormFromSaved,
   savedPlaceToCreate,
+  tripNearInputs,
+  tripsNearPlace,
 } from "./place-form";
+import { pnwTrip } from "../seeds/index";
 import { savedPlaceCreate, savedPlacePatch } from "./types";
 import type { SavedPlace } from "./types";
 import type { PickedPlace } from "../providers/place-picker";
@@ -367,5 +370,121 @@ describe("savedPlaceToCreate — the undo toast's re-save", () => {
     // `tripName` is joined on read and never written.
     expect(Object.keys(body)).not.toContain("tripName");
     expect(savedPlaceCreate.safeParse(body).success).toBe(true);
+  });
+});
+
+// #186 i8 (#160 core seam · q10 A): the save form takes a shelf and carries a
+// memory — a "been" save can be rated and filed under the trip it happened on.
+describe("the save form on the Been shelf (#186 i8)", () => {
+  it("emptySavePlaceForm opens on the shelf it is handed, Want by default", () => {
+    expect(emptySavePlaceForm("been").status).toBe("been");
+    expect(emptySavePlaceForm().status).toBe("want");
+    expect(emptySavePlaceForm()).toMatchObject({ rating: 0, tripId: "" });
+  });
+
+  it("a been form with a rating and a trip posts both", () => {
+    const form = { ...pickPlace(emptySavePlaceForm("been"), KALALOCH), rating: 4, tripId: TRIP_ID };
+    const body = savePlaceBody(form);
+    expect(body).toMatchObject({ status: "been", rating: 4, tripId: TRIP_ID });
+    expect(savedPlaceCreate.safeParse(body).success).toBe(true);
+  });
+
+  it("a been form left unrated and trip-less sends nulls", () => {
+    const body = savePlaceBody(pickPlace(emptySavePlaceForm("been"), KALALOCH));
+    expect(body).toMatchObject({ status: "been", rating: null, tripId: null });
+  });
+
+  it("a want form with the same values sends rating null and tripId null", () => {
+    const form = { ...pickPlace(emptySavePlaceForm(), KALALOCH), rating: 4, tripId: TRIP_ID };
+    expect(savePlaceBody(form)).toMatchObject({ status: "want", rating: null, tripId: null });
+  });
+
+  it("savePlaceFormFromSaved seeds the rating and the trip from the row", () => {
+    const form = savePlaceFormFromSaved({ ...SAVED, status: "been", rating: 5, tripId: TRIP_ID });
+    expect(form).toMatchObject({ status: "been", rating: 5, tripId: TRIP_ID });
+    expect(savePlaceFormFromSaved(SAVED)).toMatchObject({ rating: 0, tripId: "" });
+  });
+
+  it("editPlacePatch still never names rating or tripId", () => {
+    const form = { ...savePlaceFormFromSaved(SAVED), rating: 3, tripId: TRIP_ID };
+    const patch = editPlacePatch(form)!;
+    expect(Object.keys(patch)).not.toContain("rating");
+    expect(Object.keys(patch)).not.toContain("tripId");
+  });
+});
+
+describe("tripsNearPlace — which trip was this? (#186 i8)", () => {
+  const ASLAN = { lat: 48.7508, lng: -122.4781 };
+  const BOGUS_BASIN = { lat: 43.764, lng: -116.1029 };
+  const TRIPS = [
+    {
+      id: "t-pnw",
+      title: "Bellingham",
+      startDate: "2025-08-02",
+      endDate: "2025-08-05",
+      points: [{ lat: 47.6062, lng: -122.3321 }, { lat: 48.751, lng: -122.478 }],
+    },
+    {
+      id: "t-coast",
+      title: "Oregon coast",
+      startDate: "2026-06-10",
+      endDate: "2026-06-20",
+      points: [{ lat: 46.1879, lng: -123.8313 }],
+    },
+    {
+      id: "t-skagit",
+      title: "Skagit tulips",
+      startDate: "2026-04-11",
+      endDate: "2026-04-12",
+      points: [{ lat: 48.4201, lng: -122.3375 }],
+    },
+  ];
+
+  it("lists Bellingham for Aslan Brewing", () => {
+    expect(tripsNearPlace(TRIPS, ASLAN).map((t) => t.title)).toContain("Bellingham");
+    expect(tripsNearPlace(TRIPS, ASLAN).map((t) => t.title)).not.toContain("Oregon coast");
+  });
+
+  it("orders newest startDate first and carries the trip's dates", () => {
+    const near = tripsNearPlace(TRIPS, ASLAN);
+    expect(near.map((t) => t.id)).toEqual(["t-skagit", "t-pnw"]);
+    expect(near[1]).toEqual({ id: "t-pnw", title: "Bellingham", dates: "Aug 2 – 5, 2025" });
+  });
+
+  it("returns [] for Bogus Basin and for a null point", () => {
+    expect(tripsNearPlace(TRIPS, BOGUS_BASIN)).toEqual([]);
+    expect(tripsNearPlace(TRIPS, null)).toEqual([]);
+  });
+
+  it("a trip with no located points is never near", () => {
+    expect(tripsNearPlace([{ ...TRIPS[0]!, points: [] }], ASLAN)).toEqual([]);
+  });
+});
+
+// #186 i9 (#160 renders · q10 A): both clients feed tripsNearPlace from the
+// same slim input — a complete trip's id, title, dates and destination points.
+describe("tripNearInputs — the Which trip? input (#186 i9)", () => {
+  it("keeps complete trips only, with every located destination as a point", () => {
+    const done = { ...pnwTrip(), status: "complete" as const };
+    const ahead = { ...pnwTrip(), id: "trip_ahead", status: "upcoming" as const };
+    const out = tripNearInputs([done, ahead]);
+    expect(out.map((t) => t.id)).toEqual([done.id]);
+    const located = done.chapters
+      .flatMap((c) => c.destinations)
+      .filter((d) => d.place.lat !== null && d.place.lng !== null);
+    expect(out[0]).toMatchObject({ title: done.title, startDate: done.startDate, endDate: done.endDate });
+    expect(out[0]!.points).toHaveLength(located.length);
+    expect(out[0]!.points[0]).toEqual({ lat: located[0]!.place.lat, lng: located[0]!.place.lng });
+  });
+
+  it("a destination with no coordinates adds no point", () => {
+    const t = pnwTrip();
+    const first = t.chapters[0]!.destinations[0]!;
+    const coordless = {
+      ...t,
+      status: "complete" as const,
+      chapters: [{ ...t.chapters[0]!, destinations: [{ ...first, place: { ...first.place, lat: null, lng: null } }] }],
+    };
+    expect(tripNearInputs([coordless])[0]!.points).toEqual([]);
   });
 });

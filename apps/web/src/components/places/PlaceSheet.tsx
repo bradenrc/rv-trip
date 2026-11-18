@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import type { DidItAnswers, ReservationType, SavePlaceForm } from "@rv-trip/core";
+import type { DidItAnswers, ReservationType, SavePlaceForm, TripNear } from "@rv-trip/core";
 import {
   SAVE_SHEET_TYPES,
   didItContext,
@@ -49,6 +49,7 @@ export function PlaceSheet({
   answers = NO_ANSWERS,
   onLogging,
   onAnswers,
+  nearTrips = NO_TRIPS,
 }: {
   form: SavePlaceForm;
   mode: "save" | "edit";
@@ -68,6 +69,12 @@ export function PlaceSheet({
   answers?: DidItAnswers;
   onLogging?: (on: boolean) => void;
   onAnswers?: (a: DidItAnswers) => void;
+  /**
+   * #186 i9 (#160 · q10 A): the trips a been save could be filed under —
+   * `tripsNearPlace` over the picked point, narrowed by the caller. Empty draws
+   * no "Which trip?" field (Nav's + Capture holds no trip trees).
+   */
+  nearTrips?: TripNear[];
 }) {
   const ids = useId();
   const activeCat = categoryMeta(form.type).cat;
@@ -83,11 +90,14 @@ export function PlaceSheet({
     </SheetField>
   );
 
-  // The status switch sits under Place in capture mode only. Mid-trip it is
-  // Been here · Want to go (Want keeps the library form); outside a trip it is
-  // the shipped Want to go · Been there, which `form.status` already holds.
-  const status =
-    capture === undefined ? null : capture === null ? (
+  // The status switch sits under Place. Mid-trip it is Been here · Want to go
+  // (Want keeps the library form). Outside a trip — + Capture with no trip, and
+  // since #186 i9 (#160) a new save on /places — it is the shipped Want to go ·
+  // Been there, which `form.status` already holds. The edit sheet draws none.
+  const libraryStatus = capture === null || (capture === undefined && mode === "save");
+  // On Been there the sheet asks how it was and which trip (docs/design/186 §6).
+  const been = libraryStatus && form.status === "been";
+  const status = libraryStatus ? (
       <div className="self-start">
         <SegmentedControl
           value={form.status}
@@ -98,7 +108,7 @@ export function PlaceSheet({
           onChange={(v) => onChange({ ...form, status: v })}
         />
       </div>
-    ) : (
+    ) : capture ? (
       <div className="self-start">
         <SegmentedControl
           value={logging ? "did" : "want"}
@@ -112,7 +122,7 @@ export function PlaceSheet({
           }}
         />
       </div>
-    );
+    ) : null;
 
   if (log) {
     return (
@@ -198,6 +208,31 @@ export function PlaceSheet({
         </div>
       </SheetField>
 
+      {been ? (
+        <div className="flex flex-col gap-2 border-l-[3px] border-rv-green pl-[10px]">
+          <SheetField label="How was it">
+            <Stars value={form.rating} size={26} onSet={(n) => onChange({ ...form, rating: n })} />
+          </SheetField>
+          {nearTrips.length > 0 ? (
+            <SheetField label="Which trip?" htmlFor={`${ids}-trip`}>
+              <select
+                id={`${ids}-trip`}
+                value={form.tripId}
+                onChange={(e) => onChange({ ...form, tripId: e.target.value })}
+                className={SHEET_INPUT}
+              >
+                <option value="">None · before the app</option>
+                {nearTrips.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title} · {t.dates}
+                  </option>
+                ))}
+              </select>
+            </SheetField>
+          ) : null}
+        </div>
+      ) : null}
+
       <SheetField label="Region" aside="— from the address, editable" htmlFor={`${ids}-region`}>
         <input
           id={`${ids}-region`}
@@ -236,6 +271,7 @@ export function PlaceSheet({
 }
 
 const NO_ANSWERS: DidItAnswers = { rating: null, again: null, note: "" };
+const NO_TRIPS: TripNear[] = [];
 
 /**
  * The web's "Do it again?" pair (#176 · Q4 A) — the phone's AgainPair as two

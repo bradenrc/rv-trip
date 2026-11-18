@@ -60,6 +60,8 @@ import { onQueueSent } from "./capture";
  */
 interface State {
   trips: TripSummary[] | null;
+  /** Every trip as its full tree (#186 i4) — the Places trip card and the Map tab. */
+  trees: Trip[] | null;
   /** The Places tab's library, both shelves (#111 i2; retitled by #173 i2). */
   saves: SavedPlace[] | null;
   bundles: Record<string, TripBundle>;
@@ -70,7 +72,7 @@ interface State {
   errors: Record<string, string>;
 }
 
-let state: State = { trips: null, saves: null, bundles: {}, nearby: {}, nextTime: {}, errors: {} };
+let state: State = { trips: null, trees: null, saves: null, bundles: {}, nearby: {}, nextTime: {}, errors: {} };
 const listeners = new Set<() => void>();
 
 function set(next: State) {
@@ -280,6 +282,32 @@ export function useSaves() {
   }, [saves]);
   const reload = useCallback(() => loadSaves(), []);
   return { saves, error, reload };
+}
+
+// ── Trip trees (#186 i4 · #183) ──────────────────────────────────────────────
+
+/** Refetch every trip's full tree. A failure keeps the last list (offline, the
+ * card and the map draw from what was loaded): the card is a nudge, never an
+ * error screen. */
+export async function loadTripTrees(): Promise<void> {
+  try {
+    const trees = await api.trips.trees();
+    set({ ...state, trees, errors: { ...state.errors, trees: "" } });
+  } catch (e) {
+    set({ ...state, errors: { ...state.errors, trees: message(e) } });
+  }
+}
+
+/** The full trips list, cached in the store. The screen reloads it on focus
+ * (Places, and the Map tab), since a trip edited elsewhere changes the card. */
+export function useTripTrees() {
+  const trees = useSyncExternalStore(subscribe, () => state.trees);
+  const error = useSyncExternalStore(subscribe, () => state.errors.trees ?? "");
+  useEffect(() => {
+    if (trees === null) void loadTripTrees();
+  }, [trees]);
+  const reload = useCallback(() => loadTripTrees(), []);
+  return { trees, error, reload };
 }
 
 // ── Trip surfacing (#111 i3) ─────────────────────────────────────────────────

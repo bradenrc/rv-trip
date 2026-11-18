@@ -1,4 +1,5 @@
-import { tripRig, type RouteMap } from "@rv-trip/core";
+import { cookies } from "next/headers";
+import { isoDateInZone, tripRig, type RouteMap } from "@rv-trip/core";
 import {
   getPrefsByOwner,
   getRigByOwner,
@@ -6,6 +7,7 @@ import {
   listTripsWithDestinationsForOwner,
 } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
+import { TZ_COOKIE } from "@/lib/tz";
 import { routeTrip } from "@/lib/routing";
 import { MapOverview } from "@/components/map/MapOverview";
 import { PageShell } from "@/components/nav/PageShell";
@@ -15,16 +17,23 @@ export const dynamic = "force-dynamic";
 
 export default async function MapPage() {
   const owner = await getOwner();
-  const [trips, places, rig, prefs] = await Promise.all([
+  const [trips, places, rig, prefs, jar] = await Promise.all([
     listTripsWithDestinationsForOwner(owner),
     listSavedPlacesForOwner(owner),
     getRigByOwner(owner),
     getPrefsByOwner(owner),
+    cookies(),
   ]);
   // The account's display units, read beside the owner it is already scoped by
   // — so the arc labels render in the right unit with no flash and no island
   // has to become a preference consumer (lib/units.ts).
   const units = unitsFromPrefs(prefs);
+
+  // Which destinations are been (#186 i6 · q7 A): "today" is the browser's
+  // date, read from the tz cookie as places/page.tsx does. With no cookie yet
+  // only a complete trip's stops are been.
+  const tz = jar.get(TZ_COOKIE)?.value;
+  const today = tz ? isoDateInZone(new Date(), tz) : null;
 
   // The same seam trips/[id]/page.tsx already uses: HERE is server-side only,
   // so every drive is resolved HERE, before render, and handed down as one
@@ -63,6 +72,7 @@ export default async function MapPage() {
         routes={routes}
         routingHash={routingHash}
         units={units}
+        today={today}
       />
     </PageShell>
   );

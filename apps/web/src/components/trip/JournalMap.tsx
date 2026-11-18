@@ -62,6 +62,7 @@ function toPins(trip: Trip, points: ReturnType<typeof journalMap>["points"]): Ma
           lat: p.lat,
           lng: p.lng,
           layer: p.been ? "been" : layer,
+          been: p.been,
           name: p.name,
           ordinal: p.ordinal,
           floating: !isScheduled(d),

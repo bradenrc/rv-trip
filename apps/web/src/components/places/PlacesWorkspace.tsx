@@ -1,14 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import type {
   GraduateForm,
+  LatLng,
   PlaceSuggestion,
   SavedPlace,
   SavedPlacePatch,
+  SavedPlaceStatus,
   SavePlaceForm,
+  TripCard as TripCardModel,
+  TripNearInput,
+  Units,
 } from "@rv-trip/core";
 import {
   applySavedPlacePatch,
@@ -23,6 +29,8 @@ import {
   savePlaceFormFromSaved,
   savedPlaceToCreate,
   suggestionToCreate,
+  tripCardLines,
+  tripsNearPlace,
 } from "@rv-trip/core";
 import { tripApi } from "@/lib/trip-api";
 import { browserAreaLabel } from "@/lib/area-label";
@@ -51,16 +59,28 @@ import { SuggestedPlaceCard, SuggestionBar } from "./Suggestions";
 export function PlacesWorkspace({
   places: initialPlaces,
   trips,
+  card = null,
   suggestions = [],
+  units,
+  nearTrips = [],
   children,
 }: {
   places: SavedPlace[];
   /** Complete trips only — the graduate sheet's "Visited on" list. */
   trips: { id: string; title: string }[];
+  /** The trip card (#186 i4 · #183), computed on the server by core's
+   * `tripCard`; null draws no card and holds no space. */
+  card?: TripCardModel | null;
   /** "Been there?" candidates — every destination and reservation rated ★4+ on a
    * complete trip (§7). De-duplication against the library happens here, not in
    * the query, so accepting one drops it on the next render. */
   suggestions?: PlaceSuggestion[];
+  /** The account's display units — Near you's distances (#186 i2). */
+  units?: Units;
+  /** #186 i9 (#160 · q10 A): complete trips' id, title, dates and destination
+   * points (core's `tripNearInputs`, on the server) — the save sheet's
+   * "Which trip?" list, narrowed here to the trips near the picked place. */
+  nearTrips?: TripNearInput[];
   children: ReactNode;
 }) {
   const [places, setPlaces] = useState(initialPlaces);
@@ -70,6 +90,8 @@ export function PlacesWorkspace({
   );
   const [gradSheet, setGradSheet] = useState<{ place: SavedPlace; form: GraduateForm } | null>(null);
   const [saving, setSaving] = useState(false);
+  /** The library's active shelf (#186 i9): a new save starts on it. */
+  const [libraryShelf, setLibraryShelf] = useState<SavedPlaceStatus>("want");
   /**
    * #111 i4 · the escape row's area label: the locality the browser is in,
    * asked for ONCE per open save sheet, the first time the picker's value
@@ -97,10 +119,22 @@ export function PlacesWorkspace({
   const openSaveSheet = () => {
     areaAsked.current = false;
     setAreaLabel(null);
-    setSaveSheet({ id: null, form: emptySavePlaceForm() });
+    setSaveSheet({ id: null, form: emptySavePlaceForm(libraryShelf) });
   };
 
-  const changeSaveForm = (form: SavePlaceForm) => {
+  /** "Which trip?" — the page's complete trips with a destination near the
+   * picked place (tripsNearPlace, NEAR_RADIUS_MI). No point → none. */
+  const near = useMemo(
+    () => tripsNearPlace(nearTrips, pointOf(saveSheet?.form.picked ?? null)),
+    [nearTrips, saveSheet?.form.picked],
+  );
+
+  const changeSaveForm = (next: SavePlaceForm) => {
+    // A trip chosen for one place does not follow the sheet to a place it is
+    // not near: the field would vanish while the body still carried it.
+    const nearNext = tripsNearPlace(nearTrips, pointOf(next.picked));
+    const form =
+      next.tripId !== "" && !nearNext.some((t) => t.id === next.tripId) ? { ...next, tripId: "" } : next;
     setSaveSheet((s) => (s ? { ...s, form } : s));
     if (saveSheet?.id !== null || areaAsked.current || !isFreeTextPick(form.picked)) return;
     areaAsked.current = true;
@@ -259,6 +293,8 @@ export function PlacesWorkspace({
         </button>
       </div>
 
+      <PlacesTripCard card={card} />
+
       {shelf && (
         <SuggestionBar
           shelf={shelf}
@@ -268,7 +304,9 @@ export function PlacesWorkspace({
 
       <PlacesLibrary
         places={places}
+        units={units}
         onPatch={patchPlace}
+        onShelfChange={setLibraryShelf}
         leading={shelf?.suggestions.map((s) => (
           <SuggestedPlaceCard
             key={s.key}
@@ -296,6 +334,7 @@ export function PlacesWorkspace({
           onChange={changeSaveForm}
           onSubmit={submitSave}
           onClose={() => setSaveSheet(null)}
+          nearTrips={near}
         />
       ) : null}
 
@@ -311,5 +350,37 @@ export function PlacesWorkspace({
         />
       ) : null}
     </>
+  );
+}
+
+/** The picked place's own point, or null (a free-text pick has none). */
+function pointOf(picked: SavePlaceForm["picked"]): LatLng | null {
+  return picked && picked.lat !== null && picked.lng !== null ? { lat: picked.lat, lng: picked.lng } : null;
+}
+
+/**
+ * The trip card above the library (#186 i4 · #183 · docs/design/186 §4
+ * `.tcard`): the trip in the week before, during or after it, linking to the
+ * trip, which opens on its own default tab. Every word is core's
+ * `tripCardLines`, so the phone says the same thing.
+ */
+export function PlacesTripCard({ card }: { card: TripCardModel | null }) {
+  if (!card) return null;
+  const { title, when, line, amber, cta } = tripCardLines(card);
+  return (
+    <Link
+      href={`/trips/${card.tripId}`}
+      className="mb-5 flex max-w-[520px] items-center gap-[10px] rounded-rv-card border border-rv-border-hi bg-rv-surface px-[11px] py-[9px] no-underline shadow-rv-sm"
+    >
+      <div className="flex min-w-0 flex-1 flex-col gap-px">
+        <b className="text-[13px] leading-[1.3] text-rv-ink">
+          {title} · <span className="font-mono text-[11.5px] font-semibold text-rv-ink-muted">{when}</span>
+        </b>
+        {line !== null && (
+          <span className={`text-[11px] ${amber ? "text-rv-warning" : "text-rv-ink-muted"}`}>{line}</span>
+        )}
+      </div>
+      <span className="whitespace-nowrap text-[11px] font-bold text-rv-green-ink">{cta}</span>
+    </Link>
   );
 }

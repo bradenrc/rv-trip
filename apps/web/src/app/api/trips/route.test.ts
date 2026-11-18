@@ -6,11 +6,14 @@ import {
   routeCacheKey,
   type RouteResult,
 } from "@rv-trip/core";
-import { tripSummaryListSchema } from "@rv-trip/core/api-client";
+import { tripSchema, tripSummaryListSchema } from "@rv-trip/core/api-client";
 import { putCachedRoutes } from "@rv-trip/db";
 import { fx, read } from "@rv-trip/db/testing";
 import { GET, POST } from "@/app/api/trips/route";
 import { describeDb, req } from "@/test/db";
+
+/** A GET of the trips list, optionally with a query (`"?tree=1"`). */
+const list = (query = "") => new Request(`http://test.local/api/trips${query}`, { method: "GET" });
 
 /**
  * §6 the four derivation cases, from the same pinned clock — the cheapest way
@@ -48,7 +51,7 @@ describeDb("GET /api/trips — derived status", () => {
       statusAuto: false,
     });
 
-    const res = await GET();
+    const res = await GET(list());
     expect(res.status).toBe(200);
     const rows = tripSummaryListSchema.parse(await res.json());
     const status = new Map(rows.map((r) => [r.id, r.status]));
@@ -57,6 +60,38 @@ describeDb("GET /api/trips — derived status", () => {
     expect(status.get(ended.id)).toBe("complete");
     expect(status.get(far.id)).toBe("planning");
     expect(status.get(pinned.id)).toBe("planning");
+  });
+});
+
+/**
+ * #186 i4 · #183: the phone's trip card and Map tab need the whole tree
+ * (chapters → destinations → reservations), which the summary throws away.
+ * `?tree=1` answers with `listTripsWithDestinationsForOwner`; a plain GET is
+ * still the dashboard's `TripSummary[]`.
+ */
+describeDb("GET /api/trips?tree=1 — full trips (#186 i4)", () => {
+  it("returns the trip trees, destinations and derived status included", async () => {
+    const trip = await fx.trip({ title: "Bellingham", startDate: "2026-08-01", endDate: "2026-08-05" });
+    const chapter = await fx.chapter({ tripId: trip.id });
+    await fx.destination({ chapterId: chapter.id, placeName: "Bellingham, WA" });
+
+    const res = await GET(list("?tree=1"));
+    expect(res.status).toBe(200);
+    const trees = tripSchema.array().parse(await res.json());
+    const tree = trees.find((t) => t.id === trip.id)!;
+    expect(tree.chapters).toHaveLength(1);
+    expect(tree.chapters[0]!.destinations.map((d) => d.place.name)).toEqual(["Bellingham, WA"]);
+    // Ended before the pinned "2026-08-15": derived complete, as the summary reads it.
+    expect(tree.status).toBe("complete");
+  });
+
+  it("without the query still returns the summaries — no tree on the wire", async () => {
+    const trip = await fx.trip({ title: "Summary only" });
+    const res = await GET(list());
+    const rows = tripSummaryListSchema.parse(await res.json());
+    const row = rows.find((r) => r.id === trip.id)!;
+    // A summary counts its chapters; the tree would carry them.
+    expect(typeof row.chapters).toBe("number");
   });
 });
 
@@ -103,7 +138,7 @@ describeDb("GET /api/trips — the miles chip", () => {
   }
 
   async function row(id: string) {
-    const res = await GET();
+    const res = await GET(list());
     expect(res.status).toBe(200);
     const rows = tripSummaryListSchema.parse(await res.json());
     return rows.find((r) => r.id === id)!;

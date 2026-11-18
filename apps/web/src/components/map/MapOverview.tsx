@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleDashed, LocateFixed } from "lucide-react";
 import { toast } from "sonner";
-import { LOCATE_MAX_ROWS, locateToastMessage } from "@rv-trip/core";
-import type { ReservationType, RouteMap, SavedPlace, Trip, Units } from "@rv-trip/core";
+import { LOCATE_MAX_ROWS, libraryFilterKeeps, libraryTrips, locateToastMessage } from "@rv-trip/core";
+import type { IsoDate, LibraryFilter, ReservationType, RouteMap, SavedPlace, Trip, Units } from "@rv-trip/core";
 import {
   CategoryTile,
   FilterChip,
@@ -14,17 +14,23 @@ import {
   money,
   type CategoryLabel,
 } from "@rv-trip/ui";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { tripApi } from "@/lib/trip-api";
 import { MapMount } from "./MapMount";
 import {
   LAYER_LABEL,
-  LAYER_ORDER,
+  arcKept,
   buildMapModel,
   categoryCounts,
-  layerCounts,
+  filterCounts,
+  filterFacts,
   locateRowOf,
   type IdeaPin,
-  type MapLayer,
   type MapPin,
   type PlacePin,
   type DestinationPin,
@@ -32,8 +38,15 @@ import {
 } from "./pins";
 
 /**
- * /map — everything on one map. Four layers, all on when you land, the canvas
- * docked to a 360px rail that carries what a pin can't say.
+ * /map — everything on one map, the canvas docked to a 360px rail that carries
+ * what a pin can't say.
+ *
+ * #186 i6 · #184 (docs/design/186 §5 · q8 A): the first chip row is the
+ * library's four single-select filters — All · Been there · Want to go · One
+ * trip — landing on All, the same rule the phone's Map tab reads (core's
+ * `libraryFilterKeeps`). One trip opens the shipped dropdown-menu over core's
+ * `libraryTrips`. Arcs show under All, Want to go and One trip (that trip's).
+ * The category row is unchanged and still scopes saves only.
  *
  * The page fetches; this component owns the chip state, the selection and the
  * lazy map import (`next/dynamic({ ssr: false })` is illegal in a Server
@@ -57,6 +70,7 @@ export function MapOverview({
   routes,
   routingHash,
   units,
+  today,
 }: {
   trips: Trip[];
   places: SavedPlace[];
@@ -68,25 +82,37 @@ export function MapOverview({
   /** The account's display units, resolved on the server (map/page.tsx). It
    * reaches exactly one thing: the distance in each arc's label. */
   units: Units;
+  /** The reader's date from the tz cookie (map/page.tsx), or null before the
+   * cookie exists. It decides which destinations are been (q7 A). */
+  today: IsoDate | null;
 }) {
   const model = useMemo(
-    () => buildMapModel(trips, places, routes, routingHash, units),
-    [trips, places, routes, routingHash, units],
+    () => buildMapModel(trips, places, routes, routingHash, units, today),
+    [trips, places, routes, routingHash, units, today],
   );
-  const [layers, setLayers] = useState<Set<MapLayer>>(() => new Set(LAYER_ORDER));
+  const [picked, setFilter] = useState<LibraryFilter>({ kind: "all" });
+  const [tripMenuOpen, setTripMenuOpen] = useState(false);
   const [cat, setCat] = useState<CatFilter>("All");
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
   const router = useRouter();
 
-  const lCounts = useMemo(() => layerCounts(model.pins, model.unmapped), [model]);
+  const chooser = useMemo(() => libraryTrips(trips), [trips]);
+  const pickedTrip = picked.kind === "trip" ? (chooser.find((t) => t.id === picked.tripId) ?? null) : null;
+  // A picked trip that no longer has a mapped destination falls back to All —
+  // the phone's Map tab reads the same rule.
+  const filter = useMemo<LibraryFilter>(
+    () => (picked.kind === "trip" && pickedTrip === null ? { kind: "all" } : picked),
+    [picked, pickedTrip],
+  );
+  const fCounts = useMemo(() => filterCounts(model.pins, pickedTrip?.id ?? null), [model, pickedTrip]);
   const cCounts = useMemo(() => categoryCounts(places), [places]);
 
   const visible = useMemo(
     () =>
       model.pins.filter(
         (p) =>
-          layers.has(p.layer) &&
+          libraryFilterKeeps(filter, filterFacts(p)) &&
           // The category filter scopes to saved places — the only pins that
           // carry a ReservationType. Neither a Destination (types.ts:79-90) nor an
           // Idea has a category, so both stay visible under their layer. The
@@ -96,15 +122,15 @@ export function MapOverview({
           // its own number does not describe.
           (p.kind !== "place" || cat === "All" || p.category === cat),
       ),
-    [model.pins, layers, cat],
+    [model.pins, filter, cat],
   );
   const visibleArcs = useMemo(
-    () => model.arcs.filter((a) => layers.has(a.layer)),
-    [model.arcs, layers],
+    () => model.arcs.filter((a) => arcKept(filter, a)),
+    [model.arcs, filter],
   );
   const unmappedVisible = useMemo(
-    () => model.unmapped.filter((u) => layers.has(u.layer)),
-    [model.unmapped, layers],
+    () => model.unmapped.filter((u) => libraryFilterKeeps(filter, u)),
+    [model.unmapped, filter],
   );
 
   // A selection that a chip has just hidden falls back to the first visible pin,
@@ -140,27 +166,55 @@ export function MapOverview({
       .finally(() => setLocating(false));
   };
 
-  const toggleLayer = (l: MapLayer) => {
-    setLayers((prev) => {
-      const next = new Set(prev);
-      if (next.has(l)) next.delete(l);
-      else next.add(l);
-      return next;
-    });
-  };
-
   return (
     <>
       <div className="mb-[9px] flex flex-wrap gap-2">
-        {LAYER_ORDER.map((l) => (
-          <FilterChip
-            key={l}
-            label={LAYER_LABEL[l]}
-            count={lCounts[l]}
-            active={layers.has(l)}
-            onClick={() => toggleLayer(l)}
-          />
-        ))}
+        <FilterChip label="All" count={fCounts.all} active={filter.kind === "all"} onClick={() => setFilter({ kind: "all" })} />
+        <FilterChip
+          label="Been there"
+          count={fCounts.been}
+          active={filter.kind === "been"}
+          onClick={() => setFilter({ kind: "been" })}
+        />
+        <FilterChip
+          label="Want to go"
+          count={fCounts.want}
+          active={filter.kind === "want"}
+          onClick={() => setFilter({ kind: "want" })}
+        />
+        {/* FilterChip renders its own <button> and forwards no ref, so the
+            dropdown's trigger is a wrapping span (asChild) and the open state is
+            held here: the chip's own click opens it too. */}
+        <DropdownMenu open={tripMenuOpen} onOpenChange={setTripMenuOpen}>
+          <DropdownMenuTrigger asChild>
+            <span className="inline-flex">
+              <FilterChip
+                label={pickedTrip ? pickedTrip.title + " ▾" : "One trip"}
+                count={pickedTrip ? fCounts.trip : chooser.length}
+                active={pickedTrip !== null}
+                onClick={() => setTripMenuOpen(true)}
+              />
+            </span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-auto min-w-[220px]">
+            {chooser.length === 0 ? (
+              <div className="px-2.5 py-1.5 font-mono text-[11px] text-rv-ink-faded">No trip has a mapped destination yet.</div>
+            ) : (
+              chooser.map((t) => (
+                <DropdownMenuItem
+                  key={t.id}
+                  onSelect={() => setFilter({ kind: "trip", tripId: t.id })}
+                  className="flex-col items-start gap-0"
+                >
+                  <span className="text-[12.5px] font-bold text-rv-ink">{t.title}</span>
+                  <span className="font-mono text-[10px] text-rv-ink-faded">
+                    {t.dates} · {t.destinations} {t.destinations === 1 ? "destination" : "destinations"}
+                  </span>
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <div className="mb-[22px] flex flex-wrap items-center gap-2">
@@ -217,7 +271,7 @@ export function MapOverview({
               <SelectedCard pin={selected} />
             ) : (
               <p className="m-0 font-mono text-[11px] text-rv-ink-faded">
-                Every layer is switched off.
+                Nothing on the map under this filter.
               </p>
             )}
 
@@ -503,7 +557,7 @@ function RailGlyph({ pin }: { pin: MapPin }) {
   return (
     <span
       className={
-        pin.layer === "been"
+        pin.been
           ? `${base} border-rv-green bg-rv-navy-deep text-rv-green`
           : `${base} border-rv-green bg-rv-green-soft text-rv-green-ink`
       }
@@ -515,7 +569,7 @@ function RailGlyph({ pin }: { pin: MapPin }) {
 
 function railMeta(pin: MapPin): string {
   if (pin.kind === "destination") {
-    return `${LAYER_LABEL[pin.layer]} · ${pin.dates ?? "floating"}`;
+    return `${pin.been ? LAYER_LABEL.been : LAYER_LABEL[pin.layer]} · ${pin.dates ?? "floating"}`;
   }
   if (pin.kind === "idea") {
     return ["Idea", pin.status, pin.destinationName].filter(Boolean).join(" · ");

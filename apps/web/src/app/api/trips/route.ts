@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { homeBaseColumns, tripCreateInput } from "@rv-trip/core";
-import { createTrip, getTripById, listTripsForOwner } from "@rv-trip/db";
+import { createTrip, getTripById, listTripsForOwner, listTripsWithDestinationsForOwner } from "@rv-trip/db";
 import { getOwner } from "@/lib/owner";
 
-/** The dashboard rows — `TripSummary[]` (schema in @rv-trip/core). */
-export async function GET() {
-  return NextResponse.json(await listTripsForOwner(await getOwner()));
+/**
+ * The dashboard rows — `TripSummary[]` (schema in @rv-trip/core). With
+ * `?tree=1` (#186 i4 · #183), every trip as its full tree — `Trip[]`, the query
+ * /map already reads — for the phone's Places trip card and Map tab.
+ */
+export async function GET(req: Request) {
+  const owner = await getOwner();
+  if (new URL(req.url).searchParams.get("tree") === "1") {
+    return NextResponse.json(await listTripsWithDestinationsForOwner(owner));
+  }
+  return NextResponse.json(await listTripsForOwner(owner));
 }
 
 /**
