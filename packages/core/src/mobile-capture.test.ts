@@ -170,10 +170,13 @@ describe("capture · the sheet files onto the trip in progress (#176 i2)", () =>
     expect(store).not.toContain("export function useTodaysDestination");
   });
 
-  it("opens on Been here when a trip is in progress, else Want to go", () => {
-    expect(sheet).toContain('useState<SavedPlaceStatus | "did">(target ? "did" : "want")');
+  // #186 i9 (#160): outside a trip the sheet opens on `outside` — the Places
+  // tab's published shelf when it is Been there, else Want to go
+  // (mobile-been-capture.test.ts).
+  it("opens on Been here when a trip is in progress, else the outside-a-trip shelf", () => {
+    expect(sheet).toContain('useState<SavedPlaceStatus | "did">(target ? "did" : outside)');
     // Re-evaluated once the target resolves, unless the chips were touched.
-    expect(sheet).toMatch(/if \(!touched\) setStatus\(target \? "did" : "want"\)/);
+    expect(sheet).toMatch(/if \(!touched\) setStatus\(target \? "did" : outside\)/);
   });
 
   it("draws Been here · Want to go (neutral) mid-trip, and Been there only outside a trip", () => {

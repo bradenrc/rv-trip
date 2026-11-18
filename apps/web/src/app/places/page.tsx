@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { isoDateInZone, tripCard } from "@rv-trip/core";
+import { isoDateInZone, tripCard, tripNearInputs } from "@rv-trip/core";
 import {
   getPrefsByOwner,
   listSavedPlacesForOwner,
@@ -46,12 +46,17 @@ export default async function PlacesPage() {
     .filter((t) => t.status === "complete")
     .map((t) => ({ id: t.id, title: t.title }));
 
+  // #186 i9 (#160 · q10 A): the save sheet's "Which trip?" input — complete
+  // trips' id, title, dates and destination points. Slim, like visitedOn: the
+  // island narrows it to the trips near the picked place.
+  const nearTrips = tripNearInputs(trips);
+
   // The header copy stays on the server; the island owns only the button beside
   // it, both sheets and the ⋯ menu. #173 · #171: the library is "Places" again
   // (the nav label and this kicker); the URL stays /places.
   return (
     <PageShell>
-      <PlacesWorkspace places={places} trips={visitedOn} card={card} suggestions={suggestions} units={units}>
+      <PlacesWorkspace places={places} trips={visitedOn} card={card} suggestions={suggestions} units={units} nearTrips={nearTrips}>
         <div>
           <div className="mb-2 font-mono text-[12px] font-semibold uppercase tracking-[0.14em] text-rv-accent">
             Your places

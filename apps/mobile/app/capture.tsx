@@ -26,11 +26,13 @@ import {
   placeCaptureBody,
   placeRowSubline,
   reservationTypeOfGoogle,
+  tripNearInputs,
+  tripsNearPlace,
 } from "@rv-trip/core";
 import { api } from "../src/api";
-import { capture, loadRecents, queueDidIt, queuePatch, useCaptureState } from "../src/capture";
+import { capture, loadRecents, publishedPlacesShelf, queueDidIt, queuePatch, useCaptureState } from "../src/capture";
 import { AgainPair, LogCta } from "../src/journal";
-import { addProvisionalIdea, replaceIdea, updateTrip, useCaptureTarget } from "../src/store";
+import { addProvisionalIdea, replaceIdea, updateTrip, useCaptureTarget, useTripTrees } from "../src/store";
 import { PinMap, useStyleMode } from "../src/map";
 import { C, F, R } from "../src/theme";
 import { CategoryTile, Chip, Stars, Toast } from "../src/ui";
@@ -204,12 +206,16 @@ function Confirm({
   // trip in progress, so this works with no signal). A destination when one
   // covers today, else null: the capture lands on the trip's shelf.
   const target = useCaptureTarget();
-  const [status, setStatus] = useState<SavedPlaceStatus | "did">(target ? "did" : "want");
+  // #186 i9 (#160 · q10 A): outside a trip the sheet opens on the shelf the
+  // Places tab is showing when that is Been there (src/capture.ts), read once
+  // as the sheet opens; from any other tab it is Want to go, as shipped.
+  const [outside] = useState<SavedPlaceStatus>(() => (publishedPlacesShelf() === "been" ? "been" : "want"));
+  const [status, setStatus] = useState<SavedPlaceStatus | "did">(target ? "did" : outside);
   const [touched, setTouched] = useState(false);
   // The bundles may hydrate after the sheet opens: follow the target until the
   // chips are touched.
   useEffect(() => {
-    if (!touched) setStatus(target ? "did" : "want");
+    if (!touched) setStatus(target ? "did" : outside);
   }, [target !== null]); // eslint-disable-line react-hooks/exhaustive-deps
   const pick = (s: SavedPlaceStatus | "did") => {
     setTouched(true);
@@ -221,7 +227,15 @@ function Confirm({
   const [addingWho, setAddingWho] = useState(false);
   const [who, setWho] = useState("");
   const [note, setNote] = useState("");
+  // Been there's "Which trip?": complete trips with a destination within
+  // NEAR_RADIUS_MI of the place (a note's point is where it was typed).
+  const { trees } = useTripTrees();
+  const [tripId, setTripId] = useState<string | null>(null);
   const placeAt = subject.kind === "place" ? subject.hit.location : null;
+  const memoryAt = subject.kind === "place" ? (placeAt ?? null) : fix ? { lat: fix.lat, lng: fix.lng } : null;
+  const nearTrips = status === "been" ? tripsNearPlace(tripNearInputs(trees ?? []), memoryAt) : [];
+  // A trip that is no longer listed is not sent.
+  const chosenTrip = nearTrips.some((t) => t.id === tripId) ? tripId : null;
   const placeDest = useResolvedName(online ? placeAt : null);
 
   const name = subject.kind === "place" ? subject.hit.name : subject.text.trim();
@@ -286,7 +300,7 @@ function Confirm({
       });
       return;
     }
-    const c = { status, source: chosenSource, note };
+    const c = { status, source: chosenSource, note, rating, tripId: chosenTrip };
     onSave(
       subject.kind === "place"
         ? placeCaptureBody(subject.hit, c)
@@ -337,6 +351,31 @@ function Confirm({
         </>
       )}
 
+      {/* #186 i9 (docs/design/186 §6): Been there asks how it was and, when a
+          trip was near the place, which trip. "Heard from" stays Want-only. */}
+      {status === "been" && (
+        <>
+          <Text style={styles.lbl}>How was it</Text>
+          <Stars value={rating} size={28} onSet={setRating} />
+          {nearTrips.length > 0 && (
+            <>
+              <Text style={styles.lbl}>Which trip?</Text>
+              <View style={styles.chips}>
+                {nearTrips.map((t) => (
+                  <Chip key={t.id} on={chosenTrip === t.id} onPress={() => setTripId(t.id)}>
+                    {t.title}
+                  </Chip>
+                ))}
+                <Chip on={chosenTrip === null} onPress={() => setTripId(null)}>
+                  None
+                </Chip>
+              </View>
+            </>
+          )}
+          <Text style={styles.lbl}>Note</Text>
+        </>
+      )}
+
       {status === "want" && (
         <>
           <Text style={styles.lbl}>Heard from</Text>
@@ -374,7 +413,7 @@ function Confirm({
       <TextInput
         value={note}
         onChangeText={setNote}
-        placeholder={didIt ? "For next time…" : "Why? (optional)"}
+        placeholder={didIt || status === "been" ? "For next time…" : "Why? (optional)"}
         placeholderTextColor={C.inkSubtle}
         style={styles.note}
         multiline

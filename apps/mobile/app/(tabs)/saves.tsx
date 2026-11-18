@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import type {
@@ -30,7 +30,7 @@ import {
   tripCardLines,
 } from "@rv-trip/core";
 import { API_URL, api } from "../../src/api";
-import { useCaptureState } from "../../src/capture";
+import { publishPlacesShelf, useCaptureState } from "../../src/capture";
 import { patchSave, useSaves, useTripTrees } from "../../src/store";
 import { C, F, R } from "../../src/theme";
 import { Button, CategoryTile, Centered, FilterChip, Kicker, Muted, Stars, Toast } from "../../src/ui";
@@ -76,6 +76,7 @@ export default function SavesTab() {
   const [cat, setCat] = useState<PlacesCategory>("All");
   const [refreshing, setRefreshing] = useState(false);
   const { here, ask: onAsk } = useHere();
+  const navigation = useNavigation();
 
   // The remembered chip, read once AsyncStorage answers (q4 A).
   useEffect(() => {
@@ -109,6 +110,19 @@ export default function SavesTab() {
       void reload();
       void reloadTrees();
     }, [reload, reloadTrees]),
+  );
+
+  // #186 i9 (#160 · q10 A): the shelf you are on is published while this tab
+  // is focused, so ＋ opens the capture sheet on it. The sheet is a root
+  // formSheet, which blurs this tab too — so a blur clears it only when Places
+  // is no longer the selected tab.
+  useFocusEffect(
+    useCallback(() => {
+      publishPlacesShelf(status);
+      return () => {
+        if (!stillShowing(navigation)) publishPlacesShelf(null);
+      };
+    }, [status, navigation]),
   );
   // …and whenever the queue drains, since a flush is new rows on the server.
   const waitingBefore = useRef(queue.length);
@@ -158,6 +172,15 @@ export default function SavesTab() {
       )}
     </SafeAreaView>
   );
+}
+
+/** Whether the tabs navigator still has Places selected — true under the
+ * capture formSheet, false once another tab is chosen. */
+function stillShowing(navigation: {
+  getState: () => { index: number; routes: readonly { name: string }[] } | undefined;
+}): boolean {
+  const s = navigation.getState();
+  return s ? s.routes[s.index]?.name === "saves" : false;
 }
 
 /**

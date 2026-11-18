@@ -84,6 +84,7 @@ export function PlacesLibrary({
   leading,
   cardMenu,
   onPatch,
+  onShelfChange,
   units = DEFAULT_UNITS,
 }: {
   places: SavedPlace[];
@@ -104,6 +105,9 @@ export function PlacesLibrary({
    * owned one level up, in PlacesWorkspace; absent, the pad renders read-only,
    * which is today's behaviour. */
   onPatch?: (place: SavedPlace, patch: SavedPlacePatch) => void;
+  /** #186 i9 (#160 · q10 A): told the active shelf whenever it switches, so
+   * "Save a place" opens on the shelf you are looking at. Starts on "want". */
+  onShelfChange?: (status: SavedPlaceStatus) => void;
 }) {
   const [status, setStatus] = useState<SavedPlaceStatus>("want");
   const [cat, setCat] = useState<PlacesCategory>("All");
@@ -223,6 +227,7 @@ export function PlacesLibrary({
   // may have nothing on the other, and a silent empty result reads as a bug.
   const changeStatus = (s: SavedPlaceStatus) => {
     setStatus(s);
+    onShelfChange?.(s);
     pickCat("All");
   };
 

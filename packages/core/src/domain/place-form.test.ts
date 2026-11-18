@@ -12,8 +12,10 @@ import {
   savePlaceBody,
   savePlaceFormFromSaved,
   savedPlaceToCreate,
+  tripNearInputs,
   tripsNearPlace,
 } from "./place-form";
+import { pnwTrip } from "../seeds/index";
 import { savedPlaceCreate, savedPlacePatch } from "./types";
 import type { SavedPlace } from "./types";
 import type { PickedPlace } from "../providers/place-picker";
@@ -456,5 +458,33 @@ describe("tripsNearPlace — which trip was this? (#186 i8)", () => {
 
   it("a trip with no located points is never near", () => {
     expect(tripsNearPlace([{ ...TRIPS[0]!, points: [] }], ASLAN)).toEqual([]);
+  });
+});
+
+// #186 i9 (#160 renders · q10 A): both clients feed tripsNearPlace from the
+// same slim input — a complete trip's id, title, dates and destination points.
+describe("tripNearInputs — the Which trip? input (#186 i9)", () => {
+  it("keeps complete trips only, with every located destination as a point", () => {
+    const done = { ...pnwTrip(), status: "complete" as const };
+    const ahead = { ...pnwTrip(), id: "trip_ahead", status: "upcoming" as const };
+    const out = tripNearInputs([done, ahead]);
+    expect(out.map((t) => t.id)).toEqual([done.id]);
+    const located = done.chapters
+      .flatMap((c) => c.destinations)
+      .filter((d) => d.place.lat !== null && d.place.lng !== null);
+    expect(out[0]).toMatchObject({ title: done.title, startDate: done.startDate, endDate: done.endDate });
+    expect(out[0]!.points).toHaveLength(located.length);
+    expect(out[0]!.points[0]).toEqual({ lat: located[0]!.place.lat, lng: located[0]!.place.lng });
+  });
+
+  it("a destination with no coordinates adds no point", () => {
+    const t = pnwTrip();
+    const first = t.chapters[0]!.destinations[0]!;
+    const coordless = {
+      ...t,
+      status: "complete" as const,
+      chapters: [{ ...t.chapters[0]!, destinations: [{ ...first, place: { ...first.place, lat: null, lng: null } }] }],
+    };
+    expect(tripNearInputs([coordless])[0]!.points).toEqual([]);
   });
 });

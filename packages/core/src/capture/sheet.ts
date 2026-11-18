@@ -111,9 +111,20 @@ interface Confirmed {
   status: SavedPlaceStatus;
   source: string | null;
   note: string | null;
+  /** #186 i9 (#160 · q10 A): a been capture's memory. 0 / absent = unrated. */
+  rating?: number | null;
+  /** The trip it happened on; null / absent = none. */
+  tripId?: string | null;
 }
 
 const blank = (s: string | null | undefined) => (s && s.trim() ? s.trim() : null);
+
+/** The memory a been capture carries — the Been shelf only, as `savePlaceBody`
+ * does on the web: a want capture never posts a rating or a trip. */
+function memoryOf(c: Confirmed): { rating: number | null; tripId: string | null } {
+  if (c.status !== "been") return { rating: null, tripId: null };
+  return { rating: c.rating && c.rating > 0 ? c.rating : null, tripId: blank(c.tripId) };
+}
 
 /** A picked Google row → a `place` save. Its tile type comes from Google's. */
 export function placeCaptureBody(hit: PlaceSummary, c: Confirmed): CaptureDraft {
@@ -127,6 +138,7 @@ export function placeCaptureBody(hit: PlaceSummary, c: Confirmed): CaptureDraft 
     status: c.status,
     source: c.status === "been" ? null : blank(c.source),
     note: blank(c.note),
+    ...memoryOf(c),
     capturedOffline: false,
   };
 }
@@ -154,6 +166,7 @@ export function noteCaptureBody(
     status: c.status,
     source: c.status === "been" ? null : blank(c.source),
     note: blank(c.note),
+    ...memoryOf(c),
     capturedOffline: !online,
   };
 }

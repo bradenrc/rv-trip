@@ -426,3 +426,53 @@ Tests are in `packages/core/src/domain/place-form.test.ts:376-470`, two new desc
 - TDD red: `npx vitest run src/domain/place-form.test.ts` (packages/core) before the implementation → `Tests  8 failed | 31 passed (39)`.
 - Green: same command after → `Tests  39 passed (39)`.
 - Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. It reported core `Tests 1588 passed (1588)`, web `Tests 589 passed (589)` and ui `Tests 55 passed (55)`. This time the web suite exited cleanly.
+
+# i9 · A new save starts on the shelf you're viewing, on both clients
+
+Scope: epic item **i9 of 9 only** (#160 renders · q10 A · docs/design/186 §6). It renders the i8 core seam on both clients. There are no schema, route or migration changes.
+
+## What changed
+
+Core (two small additions so both clients share one rule):
+- `packages/core/src/capture/sheet.ts:114-117,122-128,141,169`: `Confirmed` gains optional `rating` / `tripId`. The new `memoryOf(c)` sends them only when `status === "been"` (rating 0 or absent becomes null, a blank tripId becomes null), the same rule as the web's `savePlaceBody`. `placeCaptureBody` and `noteCaptureBody` spread it. Existing callers compile unchanged.
+- `packages/core/src/domain/place-form.ts:217-236`: new `tripNearInputs(trips: Trip[]): TripNearInput[]`. It keeps complete trips only and takes every destination with coordinates as a point. Both clients build the "Which trip?" input with it.
+
+Web:
+- `apps/web/src/components/places/PlacesLibrary.tsx:87,108-110,230`: new `onShelfChange?` prop, called from `changeStatus`.
+- `apps/web/src/components/places/PlacesWorkspace.tsx:93-94`: `libraryShelf` state, fed by `onShelfChange={setLibraryShelf}` (`:309`). (The name `shelf` was already taken by the suggestion shelf.) `openSaveSheet` (`:122`) seeds `emptySavePlaceForm(libraryShelf)`. The new `nearTrips?: TripNearInput[]` prop (`:80-83`) is narrowed by `tripsNearPlace(nearTrips, pointOf(picked))` (`:125-131`) and passed as `nearTrips={near}` (`:337`). `changeSaveForm` drops a chosen tripId once the newly picked place is no longer near that trip, so the hidden field cannot still post it. `pointOf` is at `:356-360`.
+- `apps/web/src/app/places/page.tsx:49-53,59`: `const nearTrips = tripNearInputs(trips)` (the slim input; the tree never crosses into the island), passed to `PlacesWorkspace`.
+- `apps/web/src/components/places/PlaceSheet.tsx`:
+  - `:93-100`: `libraryStatus = capture === null || (capture === undefined && mode === "save")` draws the Want to go · Been there `SegmentedControl`. The mid-trip switch is unchanged, and the edit sheet still draws none.
+  - `:211-235`: under `been` (libraryStatus and status "been"), a green-ruled reveal (`border-l-[3px] border-rv-green pl-[10px]`, the wireframe's `.reveal`) sits between Category and Region. It holds "How was it" (`Stars` size 26 on `form.rating`). When `nearTrips` is non-empty it also holds "Which trip?": a `<select>` whose first option is "None · before the app", then `{title} · {dates}` for each trip. "Who told you" stays want-only.
+  - New `nearTrips?: TripNear[]` prop, default empty. Nav's + Capture (`CaptureSheet.tsx`, unchanged) holds only trip summaries, which have no points. So with no trip it shows Stars and no "Which trip?".
+
+Phone:
+- `apps/mobile/src/capture.ts:341-359`: a module value `placesShelf` with `publishPlacesShelf` / `publishedPlacesShelf`.
+- `apps/mobile/app/(tabs)/saves.tsx:114-126`: a `useFocusEffect` on `[status, navigation]` publishes the shelf. Its cleanup clears the value only when `stillShowing(navigation)` (`:177-185`) says Places is no longer the selected tab.
+- `apps/mobile/app/capture.tsx`:
+  - `:209-213`: `outside` is read once from `publishedPlacesShelf()` ("been" stays "been", anything else becomes "want"). The initial status and the follow-the-target effect use `target ? "did" : outside`, so mid-trip still opens on "did".
+  - `:230-238`: `useTripTrees()`, then `nearTrips = tripsNearPlace(tripNearInputs(trees ?? []), memoryAt)`. `memoryAt` is the hit's location, or for a note the fix. `chosenTrip` is null unless the chosen trip is still listed.
+  - `:303`: the body gets `{ status, source, note, rating, tripId: chosenTrip }`.
+  - `:354-378`: on "been" the sheet shows "How was it" with `Stars` size 28, then "Which trip?" chips (each near trip plus "None") when any trip qualifies, then a "Note" label. The note's placeholder is "For next time…" on been (`:416`).
+
+## Tests
+
+- Core: `capture/sheet.test.ts:121-136` checks that a been place capture and a been note capture carry rating 4 and the tripId and parse as `savedPlaceCreate`, that unrated or no trip gives nulls, and that a want capture sends nulls. `domain/place-form.test.ts:463-490` checks that `tripNearInputs` keeps complete trips only with every located destination, and that a coordless destination adds no point.
+- Web, source-reading: new `apps/web/src/components/places/been-sheet.test.ts` covers `onShelfChange`, `emptySavePlaceForm(libraryShelf)`, `tripsNearPlace(nearTrips, …)`, the page's `tripNearInputs`, the switch for `mode === "save"` without capture, and Stars 26 plus "Which trip?" (with "None · before the app") before Region under been. `capture-sheet.test.ts:127-133`: I rewrote the old "draws no switch … (capture absent)" assertion, because a /places save now draws the switch on purpose. It now pins that only the edit sheet draws none.
+- Phone, source-reading: new `packages/core/src/mobile-been-capture.test.ts` covers the published shelf, saves.tsx publishing on focus and clearing on blur, capture.tsx reading `outside` from `publishedPlacesShelf()`, Stars 28 and the "Which trip?" chips under been, and the bodies carrying rating and tripId. In `mobile-capture.test.ts:173-180` I updated the initial-status assertions from `"want"` to `outside`.
+
+## Decisions / flags for the walk
+
+- **A literal "clear on blur" would break the feature.** ＋ opens `/capture` as a root formSheet. That blurs the Places tab before `Confirm` mounts and reads the shelf. So the cleanup clears only when the tabs navigator no longer has `saves` selected (`navigation.getState()`). **Render-required:** on a dev client, Places › Been there › ＋ should open on Been there, and Trips › ＋ should open on Want to go after visiting Been there. Static analysis cannot prove the focus and blur ordering.
+- **"Which trip?" starts on None on both clients**, not on the nearest trip. The frame shows Bellingham chosen, but the caption reads as a select you pick from, and auto-filing a memory under a trip would invent an attribution. Flag this if the design meant to pre-select.
+- **The phone's near trips are complete trips only**, the same as the web (and the graduate sheet's "Visited on"). The plan named `useTripTrees` without a status filter. I used `tripNearInputs` for both so that both clients list the same trips for the same place.
+- The web option text is `Bellingham · Nov 11 – 15, 2026` (`fullRange`, from i8). The frame's mono "NOV 11–15" can't be styled inside a native `<option>`.
+- `useTripTrees()` in the capture sheet fetches the trees if the store has none. Offline it fails quietly, and "Which trip?" is then not drawn.
+- **Render-required (web):** /places › Been there › Save a place should open on Been there with the reveal. With Aslan-like data near a complete trip's destination, "Which trip?" should appear, and for a place with no near trip (or a free-text pick) it should not. Server acceptance of a been `POST /api/places` with rating and tripId is exercised only through core's schema parse. The route test suite was not extended.
+
+## Checks run
+
+- TDD red (core): `npx vitest run src/capture/sheet.test.ts src/domain/place-form.test.ts` → `Tests  3 failed | 65 passed (68)`. Green after: `Tests  68 passed (68)`.
+- TDD red (web): `npx vitest run src/components/places/been-sheet.test.ts` → `Tests  9 failed (9)`. Green after: `npx vitest run src/components/places/` → `Tests  74 passed (74)`.
+- TDD red (phone): `npx vitest run src/mobile-been-capture.test.ts src/mobile-capture.test.ts` → `Tests  8 failed | 28 passed (36)`. Green after: `Tests  36 passed (36)`.
+- Gate: `pnpm turbo run lint typecheck test` → `Tasks:    10 successful, 10 total`, with core `Tests  1598 passed (1598)`, web `Tests  598 passed (598)` and ui `Tests  55 passed (55)`. The nightfall-tokens sweeps are part of these suites and pass. Two earlier runs failed and were fixed before this one: a mobile typecheck error on `getState()` possibly being undefined, and `mobile-places.test.ts` reading the first `useFocusEffect` (the publish effect now sits after the reload effect).

@@ -10,6 +10,7 @@ import type {
   SavedPlaceCreate,
   SavedPlacePatch,
   SavedPlaceStatus,
+  Trip,
   DestinationCreateInput,
   DestinationPatchInput,
   TripPatchInput,
@@ -211,6 +212,26 @@ export interface TripNear {
   id: string;
   title: string;
   dates: string;
+}
+
+/**
+ * #186 i9 (#160 renders · q10 A): `tripsNearPlace`'s input from full trips —
+ * complete trips only (the graduate sheet's "Visited on" rule), each with
+ * every destination the map can place. Both clients build it here: the web's
+ * places/page.tsx on the server, the phone's capture sheet over its trip trees.
+ */
+export function tripNearInputs(trips: Trip[]): TripNearInput[] {
+  return trips
+    .filter((t) => t.status === "complete")
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      startDate: t.startDate,
+      endDate: t.endDate,
+      points: t.chapters
+        .flatMap((c) => c.destinations)
+        .flatMap((d) => (d.place.lat !== null && d.place.lng !== null ? [{ lat: d.place.lat, lng: d.place.lng }] : [])),
+    }));
 }
 
 /**
