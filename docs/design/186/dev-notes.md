@@ -385,3 +385,44 @@ Resize from below md with Map picked: only one map should show at each width.
 - A third, web-only run then stalled in global setup behind the same DROP, and I stopped it. I did not touch any Postgres backend, because the database is shared with other worktrees. The i3 notes record the same hang.
 - **qa / engine:** re-run the gate once the local Postgres is not stuck on that DROP.
 - No browser render was run. Everything under "Render-required" is the walk's.
+
+---
+
+# i8 · Core: the save form takes a shelf and carries a memory
+
+Scope: epic item **i8 of 9 only** (#160 core seam · q10 A). Core only. No UI, schema, route or migration changes. Wiring the sheets is i9.
+
+## What changed
+
+All in `packages/core/src/domain/place-form.ts`:
+- `:1-4`: new imports: `haversineMeters`/`LatLng` (providers), `fullRange` (planner/dates), and `METERS_PER_MILE`/`NEAR_RADIUS_MI` (planner/shelf). None of these modules imports place-form, so there is no cycle.
+- `:58-60`: `SavePlaceForm` gains `rating: number` (0 = unrated) and `tripId: string` ("" = none).
+- `:99`: `emptySavePlaceForm(status: SavedPlaceStatus = "want")` seeds `rating: 0, tripId: ""`. Existing callers still compile unchanged: `PlacesWorkspace.tsx:111`, `CaptureSheet.tsx:54` (passed as a `useState` initializer, which React calls with no args, so it gets "want"), and `route.test.ts:284`.
+- `:148-149`: `savePlaceFormFromSaved` seeds `rating: p.rating ?? 0` and `tripId: p.tripId ?? ""` from the row.
+- `:181-195`: `savePlaceBody` sends `rating: rating > 0 ? rating : null` and `tripId: blank(tripId)` only when `status === "been"`. A "want" form sends both as null, whatever it holds.
+- `editPlacePatch` is unchanged. A test pins that it still never names rating or tripId.
+- `:201-225`: new `TripNearInput`, `TripNear` and `tripsNearPlace(trips, at)`. It keeps trips with any point within `NEAR_RADIUS_MI` (50) of `at`, sorts them newest `startDate` first and returns `{ id, title, dates }`. When `at` is null it returns `[]`. Exported through `domain/index.ts`.
+
+Tests are in `packages/core/src/domain/place-form.test.ts:376-470`, two new describes:
+- the shelf default (`"been"` / `"want"`);
+- a been body that carries rating 4 and the trip id, and parses as `savedPlaceCreate`;
+- a been form left unrated sends nulls;
+- a want form with the same values sends nulls;
+- the seed from a row;
+- editPlacePatch still omits both fields;
+- `tripsNearPlace` lists Bellingham (a point at 48.751, −122.478) for Aslan Brewing, newest first;
+- it returns `[]` for Bogus Basin and for a null point;
+- a trip with no points is never near.
+
+## Decisions / flags
+
+- **`dates` is display copy from `fullRange`**, for example "Aug 2 – 5, 2025". The spec gave no format and the design has no frame for it. I included the year because a memory's trip can be from any year. If i9 wants it shorter, it is a one-word swap to `dateRange`.
+- **Same-day `startDate` ties keep input order.** The sort is stable.
+- **Server-side acceptance of a been `POST /api/places` with a rating and tripId is not exercised here.** Core shows the body parses as `savedPlaceCreate`, but the route behaviour belongs to i9 / the walk.
+- No render surface changed, so there is nothing for the walk in this item.
+
+## Checks run
+
+- TDD red: `npx vitest run src/domain/place-form.test.ts` (packages/core) before the implementation → `Tests  8 failed | 31 passed (39)`.
+- Green: same command after → `Tests  39 passed (39)`.
+- Gate: `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. It reported core `Tests 1588 passed (1588)`, web `Tests 589 passed (589)` and ui `Tests 55 passed (55)`. This time the web suite exited cleanly.

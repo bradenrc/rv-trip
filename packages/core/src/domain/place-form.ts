@@ -1,4 +1,7 @@
 import type { PickedPlace } from "../providers/place-picker";
+import { haversineMeters, type LatLng } from "../providers/index";
+import { fullRange } from "../planner/dates";
+import { METERS_PER_MILE, NEAR_RADIUS_MI } from "../planner/shelf";
 import type {
   IsoDate,
   Place,
@@ -50,6 +53,11 @@ export interface SavePlaceForm {
   /** Which shelf the row belongs to. New saves land on "want" (§5's
    * "saves to · want"); an edited row keeps whatever shelf it is on. */
   status: SavedPlaceStatus;
+  /** #186 i8 (#160 · q10 A): a save made on the Been shelf carries a memory.
+   * 0 while unrated (`Stars`' empty value); sent only when `status` is "been". */
+  rating: number;
+  /** The trip it happened on; "" for none. Sent only when `status` is "been". */
+  tripId: string;
 }
 
 /** The graduate sheet's fields. `rating` is 0 while unrated — `Stars`' own
@@ -86,8 +94,19 @@ export function regionFromAddress(address: string | null): string | null {
   return tail.join(", ");
 }
 
-export function emptySavePlaceForm(): SavePlaceForm {
-  return { picked: null, type: "other", region: "", source: "", note: "", status: "want" };
+/** A blank sheet on the shelf it was opened from (#186 i8): the Been shelf's
+ * add button opens it on "been"; every other caller keeps "want". */
+export function emptySavePlaceForm(status: SavedPlaceStatus = "want"): SavePlaceForm {
+  return {
+    picked: null,
+    type: "other",
+    region: "",
+    source: "",
+    note: "",
+    status,
+    rating: 0,
+    tripId: "",
+  };
 }
 
 /**
@@ -126,6 +145,8 @@ export function savePlaceFormFromSaved(p: SavedPlace): SavePlaceForm {
     source: p.source ?? "",
     note: p.note ?? "",
     status: p.status,
+    rating: p.rating ?? 0,
+    tripId: p.tripId ?? "",
   };
 }
 
@@ -155,6 +176,9 @@ export function savePlaceBody(
   const picked = form.picked;
   if (!picked || picked.name.trim() === "") return null;
   const area = isFreeTextPick(picked) ? { anchor: "area" as const, areaLabel } : {};
+  // A memory belongs to the Been shelf only: a "want" save never posts one,
+  // whatever the form still holds from a shelf toggle.
+  const been = form.status === "been";
   return {
     ...area,
     name: picked.name.trim(),
@@ -166,10 +190,40 @@ export function savePlaceBody(
     status: form.status,
     source: blank(form.source),
     note: blank(form.note),
-    rating: null,
+    rating: been && form.rating > 0 ? form.rating : null,
     again: null,
-    tripId: null,
+    tripId: been ? blank(form.tripId) : null,
   };
+}
+
+/** A trip as `tripsNearPlace` reads it: its dates and every located point on
+ * it (destinations, stops — whatever the caller has coordinates for). */
+export interface TripNearInput {
+  id: string;
+  title: string;
+  startDate: IsoDate;
+  endDate: IsoDate;
+  points: LatLng[];
+}
+
+/** One row of the save sheet's "which trip?" list. `dates` is display copy. */
+export interface TripNear {
+  id: string;
+  title: string;
+  dates: string;
+}
+
+/**
+ * #186 i8 (#160 · q10 A): the trips a been save could belong to — those with
+ * any point within `NEAR_RADIUS_MI` of the place, newest `startDate` first.
+ * No point to measure from (an unpicked or coordless save) → [].
+ */
+export function tripsNearPlace(trips: TripNearInput[], at: LatLng | null): TripNear[] {
+  if (!at) return [];
+  return trips
+    .filter((t) => t.points.some((p) => haversineMeters(at, p) / METERS_PER_MILE <= NEAR_RADIUS_MI))
+    .sort((a, b) => (a.startDate < b.startDate ? 1 : a.startDate > b.startDate ? -1 : 0))
+    .map((t) => ({ id: t.id, title: t.title, dates: fullRange(t.startDate, t.endDate) }));
 }
 
 /**
