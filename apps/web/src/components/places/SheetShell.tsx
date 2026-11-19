@@ -22,6 +22,12 @@ const SUBMIT_TONE = {
  * panel, sticky navy header with a kicker over the title, a scrolling body and
  * a footer that carries a mono hint plus Cancel and the primary action.
  *
+ * #197 · #196: the footer is optional — no `onSubmit`, no footer — so the
+ * read-only Place view (`PlaceView`) reuses this scrim, panel and navy header
+ * rather than a second sheet grammar. `leading` sits before the kicker (the
+ * Place view's category tile) and `actions` before ✕ (its Edit). Every /places
+ * sheet still passes `onSubmit` and `submitLabel` and renders as it did.
+ *
  * It is the app's shipped sheet idiom (components/trip/DestinationDetailSheet.tsx:80-127)
  * factored out, deliberately NOT the unused shadcn `sheet.tsx`: the planner's
  * sheet is what the app already looks like, and a second sheet grammar on the
@@ -36,18 +42,25 @@ export function SheetShell({
   submitTone = "accent",
   onSubmit,
   onClose,
+  leading,
+  actions,
   children,
 }: {
   kicker: string;
   title: string;
   /** The mono line in the footer — "saves to · want", "want → been". */
-  hint: string;
-  submitLabel: string;
+  hint?: string;
+  submitLabel?: string;
   submitDisabled?: boolean;
   /** #176 i3 · default accent, so the /places sheets are unchanged. */
   submitTone?: keyof typeof SUBMIT_TONE;
-  onSubmit: () => void;
+  /** #197 · absent → no footer at all (the read-only Place view). */
+  onSubmit?: () => void;
   onClose: () => void;
+  /** #197 · drawn before the kicker and title (the Place view's tile). */
+  leading?: ReactNode;
+  /** #197 · drawn in the header before ✕ (the Place view's Edit). */
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -62,7 +75,8 @@ export function SheetShell({
       >
         <div className="sticky top-0 z-[1] bg-rv-navy px-6 py-5 text-rv-ink">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+            {leading}
+            <div className="min-w-0 flex-1">
               <div className="mb-1.5 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-rv-green-on-dark">
                 {kicker}
               </div>
@@ -70,41 +84,46 @@ export function SheetShell({
                 {title}
               </h2>
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="inline-flex size-[34px] flex-none cursor-pointer items-center justify-center rounded-rv-pill border-none text-rv-ink"
-              style={{ background: "color-mix(in srgb, white 14%, transparent)" }}
-            >
-              <X className="size-[18px]" />
-            </button>
+            <div className="flex flex-none items-center gap-3">
+              {actions}
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                className="inline-flex size-[34px] flex-none cursor-pointer items-center justify-center rounded-rv-pill border-none text-rv-ink"
+                style={{ background: "color-mix(in srgb, white 14%, transparent)" }}
+              >
+                <X className="size-[18px]" />
+              </button>
+            </div>
           </div>
         </div>
 
         <div className="flex flex-col gap-[18px] p-6">{children}</div>
 
-        <div className="mt-auto sticky bottom-0 flex items-center gap-2.5 border-t border-rv-border bg-rv-surface-alt px-6 py-4">
-          <span className="font-mono text-[11px] text-rv-ink-faded">{hint}</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="ml-auto inline-flex cursor-pointer items-center rounded-rv-md border border-rv-border-hi bg-transparent px-3 py-1.5 text-[13px] font-bold text-rv-ink-muted"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={submitDisabled}
-            className={cn(
-              "inline-flex cursor-pointer items-center rounded-rv-md border-none px-3.5 py-2 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-50",
-              SUBMIT_TONE[submitTone],
-            )}
-          >
-            {submitLabel}
-          </button>
-        </div>
+        {onSubmit ? (
+          <div className="mt-auto sticky bottom-0 flex items-center gap-2.5 border-t border-rv-border bg-rv-surface-alt px-6 py-4">
+            <span className="font-mono text-[11px] text-rv-ink-faded">{hint}</span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="ml-auto inline-flex cursor-pointer items-center rounded-rv-md border border-rv-border-hi bg-transparent px-3 py-1.5 text-[13px] font-bold text-rv-ink-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={submitDisabled}
+              className={cn(
+                "inline-flex cursor-pointer items-center rounded-rv-md border-none px-3.5 py-2 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-50",
+                SUBMIT_TONE[submitTone],
+              )}
+            >
+              {submitLabel}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -331,3 +331,158 @@ not touched.
   It took 87 s of test time. This branch does not touch web code.
 - `apps/mobile`, `npx tsc --noEmit`: exit 0, with no output.
 - Not run: no simulator or device walk.
+
+---
+
+# #197 · dev notes — i4 (#196): /places/[id] on the web
+
+This dispatch covers item **i4 of 4** only. The pixel target is `docs/design/197/index.html` on
+`mc/wireframe/issue-197-v0` §5, with the vet findings applied (below). No phone or core code
+changed.
+
+## What changed
+
+**Routes**
+- `apps/web/src/app/@modal/default.tsx` (new) returns null.
+- `apps/web/src/app/@modal/[...catchAll]/page.tsx` (new) also returns null. The design did not
+  name it, but it is needed. On a soft navigation, Next keeps a slot's last page when the new URL
+  does not match it. Without the catch-all, an open sheet would stay up after Delete's push to
+  `/places` and after "On the map"'s push to `/map?place=`.
+- `apps/web/src/app/@modal/(.)places/[id]/page.tsx` (new) is the intercepted sheet over the
+  current page, with `close="back"`.
+- `apps/web/src/app/places/[id]/page.tsx` (new) is a direct load. It renders the shipped
+  `PlacesPage` (the default export of `../page`) with the sheet over it, and `close="/places"`.
+- Both pages `await params`, call `placeViewFor(await getOwner(), id)` and call `notFound()` when
+  it returns null.
+- `apps/web/src/lib/place-view.ts` (new) `placeViewFor` finds the save in
+  `listSavedPlacesForOwner(owner)`. When the save names a trip, it also reads that trip's dates
+  from `listTripsForOwner`.
+- `apps/web/src/app/layout.tsx:45-51,82` takes the `modal` slot and renders it after `children`.
+
+**Sheet chrome**
+- `components/places/SheetShell.tsx`:
+  - `hint`, `submitLabel` and `onSubmit` are now optional (`:52-59`). With no `onSubmit` there
+    is no footer (`:104`).
+  - New `leading` slot (before the kicker) and `actions` slot (before ✕) (`:61-63`).
+  - Every existing caller (PlaceSheet, GraduateSheet, NearbySaves) still passes `onSubmit` and
+    `submitLabel` and is unchanged. The title column became `min-w-0 flex-1`. This changes nothing
+    visible for the existing callers, which already pushed ✕ right with `justify-between`.
+
+**PlaceView** — `components/places/PlaceView.tsx` (new client component)
+- **Header:** `CategoryTile md`, kicker `placeScreenMeta(save)`, the title, and an accent
+  **Edit** beside ✕.
+- **Go** (`:154`):
+  - three navy-soft buttons from `navigateLinksForPlace` (no point → no block);
+  - **Call** (`placeTelUrl`) and **Website**, only when details carry them;
+  - **On the map**, which goes to `/map?place=<id>`.
+- **Yours** (`:178`):
+  - the shelf switch (`SegmentedControl`);
+  - on been, `Stars` with `onSet` and `AgainBadge`;
+  - the note, the accent trip link (`placeTripLine`, to `/trips/<id>`) and the source line
+    (`placeSourceLine`).
+  - Shelf and stars write `tripApi.updatePlace` (the shipped PATCH) and then `router.refresh()`
+    (`:71`). The change is applied locally first and reverted on failure.
+- **What others say** (`:217`): the G line and the shipped `DrillRow`.
+- **Delete place** (`:228`), in `text-destructive`.
+- **Edit** opens the existing `PlaceSheet mode="edit"`, seeded by `savePlaceFormFromSaved`. It
+  saves `editPlacePatch`, then refreshes (`:83`).
+- **Delete** (`:104`) is the ⋯ menu's flow:
+  - `deletePlace`;
+  - then `Deleted <name>.` with Undo, which runs `savePlace(savedPlaceToCreate(save))` and then
+    refreshes;
+  - then `router.push("/places")` and refresh.
+
+**Every way in**
+- `components/places/PinOpenCard.tsx` (new) is the `.mcard`: tile, name,
+  "Been there · <area/region>", stars and an accent **Open** link to `/places/[id]`.
+- **/map:** `components/map/MapOverview.tsx` `SelectedPlace` gains **Open** in its name row
+  (`:485-492`).
+  - `app/map/page.tsx:18-24,82` reads `searchParams.place` and passes it as `focus`.
+  - `MapOverview` starts `pickedId` on `focus`.
+  - `:104-111`: when `focus` changes it re-selects the pin and resets both chip rows to All,
+    keyed on the param (vet MED). It does not only read the param on mount.
+- **Places map panel:** in `PlacesLibrary.tsx` (not PlacesWorkspace, per the vet HIGH), the
+  selected pin shows a `PinOpenCard` over the panel map (`:224`, `:450`). While the card is up, the
+  "N have no coordinates" note, which sits in the same corner, is hidden.
+- **Journal map:** `components/trip/JournalMap.tsx:42,49` shows a `PinOpenCard` only when the
+  selected pin is a logged place (an idea pin) whose name matches a save under core's
+  `saveForJournalEntry`. Destinations and unmatched places get no card.
+- **Journal entries:** in `components/trip/JournalLens.tsx:421`, `EntryOpen` adds a › link to
+  `/places/[id]` on rows that match `saveForJournalEntry`.
+  - Unmatched rows get nothing.
+  - The row's shipped click (select the pin) is kept, and the › stops propagation.
+  - The library reaches the rows through a context (`:81`, `:121`) fed by a new
+    `JournalLens.saves` prop, which `TripPlanner` passes `savedPlaces`.
+- **Library re-seed:** `components/places/PlacesWorkspace.tsx:90-94` re-seeds its list when a
+  fresh server render hands it new `places`. Without this, a delete or edit made in a sheet over
+  /places would leave the stale card in the island's own list.
+- The library card's ⋯ menu is unchanged.
+
+**Tests** — `apps/web/src/components/places/place-view.test.ts` (new, 26 tests, reads source like
+`been-sheet.test.ts`, because the web vitest has no DOM). It covers:
+- the three route files and `@modal/default.tsx`;
+- `notFound()` on both pages, the owner-list lookup and both close modes;
+- the layout slot;
+- SheetShell's optional footer, its slots, and the existing callers still passing
+  `onSubmit`/`submitLabel`;
+- the block order, the Go/Call/Website/On the map wiring, the PATCH + refresh, the Edit path, and
+  Delete + Undo + /places;
+- no raw hex;
+- Open on MapOverview, the Places panel and the Journal map;
+- the `?place=` focus effect, the Journal ›, and the re-seed.
+
+## Decisions and departures
+- **G line.** The task says "GoogleLine". PlaceView instead draws the wireframe's `.gline` box
+  ("G ★ 4.6 · 1,284 reviews" from core's `placeGoogleLine`, plus "Google Maps ↗"). It uses the same
+  four states as `GoogleLine`: checking…, or nothing with no id, no key or no answer.
+  - **Why:** a single details request feeds both this line and Call/Website.
+  - The shipped `GoogleLine` is the research pad's line (border-top, "website · call · map"). It
+    would repeat the Go row's Call and Website, and would fetch a second time.
+- **Shelf switch.** This is the shipped DS `SegmentedControl` (the library's own Want/Been
+  switch, with icons), not the wireframe's full-width navy-soft `.pseg`. The rules are compose,
+  don't restyle, and Q6 A's "shipped tokens".
+- **Size steps.** The header title stays SheetShell's 28px (the wireframe draws 26px). The header
+  tile is `CategoryTile md` (38px) and the pin card's is `sm` (30px), because those are the DS
+  sizes (the wireframe draws 26px).
+- **Open on /map** sits in the rail's selected card. That is the only card /map has (vet HIGH).
+- **Journal map Open** appears only for a selected logged place that matches a save. The vet
+  allowed skipping it, but the match rule made it cheap.
+- **Journal ›** is `text-rv-ink-faded`, not ink-subtle. The nightfall sweep test bans ink-subtle
+  on text glyphs.
+- **Delete** navigates after DELETE answers, so a refused delete leaves the sheet open with the
+  shipped error toast. It always closes to /places (design §5), even when opened over /map.
+- **Plan/acceptance wording.** "PlacesWorkspace ... links to /places/[id]" is met in
+  `PlacesLibrary.tsx`, where the panel really lives (vet HIGH). PlacesWorkspace itself gains only
+  the re-seed.
+
+## For qa / the walk (render-required)
+- **Interception (vet FLAG).**
+  - Open from /map's rail, from the Places panel card, and from a Journal ›: each should draw the
+    sheet over that page, and ✕ should go back to it.
+  - A hard load or refresh of `/places/<id>` should draw the library with the sheet over it, and
+    ✕ should go to /places.
+  - Navigating anywhere else while the sheet is open should close it (the catch-all).
+  - `/` has no `@modal` page. A soft navigation to `/` redirects (the landing rule), but check that
+    no sheet lingers.
+- **Not-found.** An unknown or another household's id should show the not-found page on both
+  routes.
+- **Writes.**
+  - Shelf and stars update the sheet at once, and still hold after refresh.
+  - Edit → Save updates the title and kicker.
+  - Delete lands on /places with the card gone and "Deleted X." with Undo. Undo brings the card
+    back.
+- **On the map** lands on /map with that pin selected, including when the sheet was opened over
+  /map.
+- **Details.** Go deep links, and Call, Website and the G line, need a real Places key. With no
+  key, the second row is "On the map" alone and there is no G line.
+
+## Checks run
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. Core reported
+  `Tests 1661 passed (1661)`, ui `Tests 56 passed (56)` and web `Test Files 66 passed (66)` /
+  `Tests 624 passed (624)`.
+  - The first run failed one core test, `nightfall-tokens` "rv-ink-subtle paints no text glyphs",
+    on the Journal ›. I fixed it as described above.
+- `apps/web`, `npx next build`: it compiled and listed `ƒ /places/[id]` beside `ƒ /places`, so the
+  `@modal` slot, the interception route and the layout's `modal` prop type-check in Next's own
+  build.
+- Not run: no browser walk.

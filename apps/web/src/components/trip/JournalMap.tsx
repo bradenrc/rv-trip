@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { isScheduled, journalMap, type IsoDate, type Trip } from "@rv-trip/core";
+import { isScheduled, journalMap, saveForJournalEntry, type IsoDate, type SavedPlace, type Trip } from "@rv-trip/core";
+import { PinOpenCard } from "@/components/places/PinOpenCard";
 import { MapMount } from "@/components/map/MapMount";
 import type { MapPin } from "@/components/map/pins";
 import { dateRange } from "@/lib/trip-logic";
@@ -22,8 +23,13 @@ export function JournalMap({
   label,
   selectedId,
   onSelect,
+  saves = [],
 }: {
   trip: Trip;
+  /** #197 · #196: the owner's library. A selected logged place whose name is in
+   * it gets a card with Open (core's `saveForJournalEntry`, the Journal rule);
+   * a destination, or a place not in the library, gets none. */
+  saves?: readonly SavedPlace[];
   today: IsoDate | null;
   /** The mono kicker over the map ("The trip so far" / "Everything logged on this trip"). */
   label: string;
@@ -32,12 +38,15 @@ export function JournalMap({
 }) {
   const m = useMemo(() => journalMap(trip, today), [trip, today]);
   const pins = useMemo(() => toPins(trip, m.points), [trip, m.points]);
+  const picked = pins.find((p) => p.id === selectedId);
+  const open = picked?.kind === "idea" ? saveForJournalEntry(picked, saves) : null;
 
   return (
     <div className="order-first flex min-w-0 flex-col gap-1.5 md:order-none">
       <div className="px-0.5 pt-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-rv-ink-faded">{label}</div>
-      <div className="h-[200px] md:h-auto md:min-h-[440px] md:flex-1">
+      <div className="relative h-[200px] md:h-auto md:min-h-[440px] md:flex-1">
         <MapMount pins={pins} join={m.join} unmappedCount={m.unmapped} selectedId={selectedId} onSelect={onSelect} showLabels={false} />
+        {open && <PinOpenCard save={open} className="absolute bottom-2 left-2 right-2 z-[3]" />}
       </div>
     </div>
   );

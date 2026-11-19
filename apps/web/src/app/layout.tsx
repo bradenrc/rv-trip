@@ -42,8 +42,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({
   children,
+  modal,
 }: Readonly<{
   children: React.ReactNode;
+  /** The `@modal` slot (#197 · #196): the Place view over the current page when
+   * /places/[id] is reached by a soft navigation; null otherwise. */
+  modal: React.ReactNode;
 }>) {
   return (
     // `dark` is the literal default in the HTML, so it is true with JS off and
@@ -75,6 +79,7 @@ export default function RootLayout({
           <TooltipProvider>
             <Nav />
             {children}
+            {modal}
           </TooltipProvider>
           <Toaster />
         </MaybeClerk>
