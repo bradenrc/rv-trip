@@ -2,12 +2,11 @@ import { useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import * as Linking from "expo-linking";
 import { Tabs, useRouter } from "expo-router";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { activeTrip, isRootLaunchUrl, localIsoDate } from "@rv-trip/core";
-import { dismissToast, undoSave, useCaptureState, type ToastTone } from "../../src/capture";
+import { useCaptureState } from "../../src/capture";
 import { heldTrips, hydrateInProgress, useTrips } from "../../src/store";
 import { C, F, R } from "../../src/theme";
-import { Toast } from "../../src/ui";
+import { CaptureToastHost } from "../../src/toast-host";
 
 /**
  * The landing rule has run this JS launch (#173 i5). Module-level, so a tab
@@ -93,8 +92,7 @@ function useLandingRule() {
  */
 export default function TabsLayout() {
   const router = useRouter();
-  const { queue, toast } = useCaptureState();
-  const insets = useSafeAreaInsets();
+  const { queue } = useCaptureState();
   useLandingRule();
 
   return (
@@ -158,32 +156,10 @@ export default function TabsLayout() {
         />
       </Tabs>
 
-      {toast && (
-        <View pointerEvents="box-none" style={[styles.toastLayer, { top: insets.top + 52 }]}>
-          <Toast
-            tone={toast.tone === "queued" || toast.tone === "journal-queued" ? "amber" : "green"}
-            glyph={TOAST_GLYPH[toast.tone]}
-            title={toast.title}
-            sub={toast.sub}
-            onUndo={toast.undoId ? () => void undoSave(toast.undoId!) : toast.onUndo}
-          />
-          {!toast.undoId && !toast.onUndo && <View onTouchEnd={dismissToast} style={StyleSheet.absoluteFill} />}
-        </View>
-      )}
+      <CaptureToastHost />
     </View>
   );
 }
-
-/** The toast's lead glyph per tone. #113's journal pair: the Places tab's
- * book (▤, docs/design/113 i-book) when it landed, the capture sheet's
- * offline mark (⊘) when it waits for signal. */
-const TOAST_GLYPH: Record<ToastTone, string> = {
-  saved: "✓",
-  synced: "✓",
-  queued: "◷",
-  journal: "▤",
-  "journal-queued": "⊘",
-};
 
 const styles = StyleSheet.create({
   glyph: { fontSize: 16 },
@@ -212,5 +188,4 @@ const styles = StyleSheet.create({
     fontFamily: F.mono,
     fontSize: 9,
   },
-  toastLayer: { position: "absolute", left: 12, right: 12 },
 });

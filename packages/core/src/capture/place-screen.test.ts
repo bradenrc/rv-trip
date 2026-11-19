@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { savedPlace, type SavedPlace } from "../domain/types";
 import type { PlaceDetails } from "../providers/index";
 import {
+  DELETE_OFFLINE_TOAST,
+  EDIT_OFFLINE_NOTICE,
+  RESTORED_TOAST,
   placeGoogleLine,
+  removedToast,
   placeScreenMeta,
   placeSourceLine,
   placeTelUrl,
@@ -96,5 +100,20 @@ describe("placeTelUrl — Call", () => {
   it("dials the digits, assuming +1 for a national number", () => {
     expect(placeTelUrl("(360) 778-2088")).toBe("tel:+13607782088");
     expect(placeTelUrl("+44 20 7946 0958")).toBe("tel:+442079460958");
+  });
+});
+
+describe("#194 · the Edit and Delete copy (docs/design/197 §3 frames 5–8)", () => {
+  it("says what Delete removed, by name (frame 6)", () => {
+    expect(removedToast("Aslan Brewing Co.")).toEqual({ title: "Removed Aslan Brewing Co.", sub: null });
+  });
+
+  it("says what Undo put back (frame 7)", () => {
+    expect(RESTORED_TOAST).toEqual({ title: "Restored, with its rating, note and shelf", sub: null });
+  });
+
+  it("refuses offline: Delete's toast and Edit's sheet line (frame 8)", () => {
+    expect(DELETE_OFFLINE_TOAST).toEqual({ title: "Deleting needs a connection", sub: null });
+    expect(EDIT_OFFLINE_NOTICE).toBe("Editing needs a connection. Nothing is saved offline.");
   });
 });

@@ -36,6 +36,7 @@ import {
   captureTarget,
   applyHopBooking,
   applySavedPlacePatch,
+  savedPlaceToCreate,
   nearbyIdeaBody,
   setSegmentMode,
   withReconciledSegments,
@@ -272,6 +273,33 @@ export async function patchSave(id: string, patch: SavedPlacePatch): Promise<voi
   } finally {
     await loadSaves();
   }
+}
+
+/**
+ * #197 · #194 — Delete on the Place screen. DELETE is a hard delete; the row
+ * leaves the list at once (the web's ⋯ menu does the same) and the library is
+ * then refetched, so a refused delete puts it back. Throws on failure, so the
+ * screen can say so.
+ */
+export async function deleteSave(id: string): Promise<void> {
+  if (state.saves) set({ ...state, saves: state.saves.filter((s) => s.id !== id) });
+  try {
+    await api.places.remove(id);
+  } finally {
+    await loadSaves();
+  }
+}
+
+/**
+ * #197 · #194 — Undo on the removed toast. The delete was hard, so this is a
+ * re-save: `savedPlaceToCreate(save)` re-posts the same content — rating,
+ * note, shelf, trip — and the row comes back under a NEW id, which is
+ * returned so the restored toast's View can open it.
+ */
+export async function restoreSave(save: SavedPlace): Promise<SavedPlace> {
+  const created = await api.places.create(savedPlaceToCreate(save));
+  await loadSaves();
+  return created;
 }
 
 export function useSaves() {

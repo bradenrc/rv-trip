@@ -2,6 +2,7 @@ import type { SavedPlace } from "../domain/types";
 import { shortDay } from "../domain/date-range";
 import { localIsoDate } from "../planner/journal";
 import type { PlaceDetails } from "../providers/index";
+import type { ToastCopy } from "./sheet";
 import { categoryOf } from "../theme/tokens";
 
 /**
@@ -77,3 +78,19 @@ export function placeTelUrl(phone: string): string {
   const digits = phone.replace(/[^\d+]/g, "");
   return `tel:${digits.startsWith("+") ? digits : `+1${digits}`}`;
 }
+
+// ── #194 · Edit and Delete (docs/design/197 §3 frames 5–8) ──────────────────
+
+/** Amber, ⌫, with Undo — Delete went through and the screen went back (frame 6). */
+export function removedToast(name: string): ToastCopy {
+  return { title: `Removed ${name}`, sub: null };
+}
+
+/** Green, ↺, with View — Undo re-saved it under a new id (frame 7). */
+export const RESTORED_TOAST: ToastCopy = { title: "Restored, with its rating, note and shelf", sub: null };
+
+/** Amber, ! — Delete with no signal: nothing is queued, the screen stays (frame 8). */
+export const DELETE_OFFLINE_TOAST: ToastCopy = { title: "Deleting needs a connection", sub: null };
+
+/** The Edit sheet's line over Save with no signal (frame 8). */
+export const EDIT_OFFLINE_NOTICE = "Editing needs a connection. Nothing is saved offline.";

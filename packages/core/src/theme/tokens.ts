@@ -43,6 +43,13 @@ export const RV = {
   infoSoft: "#083344",
   travel: "#a78bfa",
   travelSoft: "#2e1065",
+  /**
+   * #197 · q3 B: the colour of Delete and nothing else. Not an `--rv-*` token —
+   * it is shadcn's dark `--destructive` in apps/web's globals.css,
+   * `oklch(0.704 0.191 22.216)` (Tailwind red-400), as hex because React
+   * Native reads no oklch. `tokens.test.ts` converts and checks it.
+   */
+  destructive: "#ff6467",
 } as const;
 
 export type RvColor = keyof typeof RV;

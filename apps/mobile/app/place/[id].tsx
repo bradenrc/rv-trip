@@ -1,25 +1,33 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import type { DrillDoor, DrillGroup, SavedPlace, SavedPlaceStatus } from "@rv-trip/core";
+import { router as appRouter, useLocalSearchParams, useRouter } from "expo-router";
+import type { DrillDoor, DrillGroup, ReservationType, SavedPlace, SavedPlaceStatus, SavePlaceForm } from "@rv-trip/core";
 import {
+  EDIT_OFFLINE_NOTICE,
+  SAVE_SHEET_TYPES,
+  categoryOf,
   drillDoors,
   drillGroupLabel,
+  editPlacePatch,
   navigateLinksForPlace,
   placeGoogleLine,
   placeScreenMeta,
   placeSourceLine,
   placeTelUrl,
   placeTripLine,
+  savePlaceFormFromSaved,
 } from "@rv-trip/core";
 import type { PlaceDetailsEnvelope } from "@rv-trip/core/api-client";
 import { API_URL, api } from "../../src/api";
+import { announceDeleteNeedsSignal, announceRemoved, announceRestored, useCaptureState } from "../../src/capture";
+import { Input, Label, Sheet } from "../../src/hops";
 import { AgainBadge } from "../../src/journal";
 import { Suggestion } from "../../src/places";
-import { patchSave, useSaves, useTrips } from "../../src/store";
+import { deleteSave, patchSave, restoreSave, useSaves, useTrips } from "../../src/store";
 import { C, F, R } from "../../src/theme";
-import { Button, CategoryTile, Centered, Muted, Stars } from "../../src/ui";
+import { CaptureToastHost } from "../../src/toast-host";
+import { Button, CategoryTile, Centered, Chip, Muted, Stars } from "../../src/ui";
 
 type Details = PlaceDetailsEnvelope["results"][number];
 
@@ -43,45 +51,94 @@ type Details = PlaceDetailsEnvelope["results"][number];
  *      states) and core's doors, grouped, as text chips (q2 A).
  *
  * There is no single-place read: the save is found in `useSaves()` (which
- * loads the list when it isn't loaded). Edit and Delete land with #194 (i2).
+ * loads the list when it isn't loaded).
+ *
+ * #194 (docs/design/197 §3 frames 5–8): Edit, top right, opens the edit sheet;
+ * Delete, at the end of the body, asks nothing — it goes back with the amber
+ * Undo toast. Both need a connection and nothing is queued. The capture toast
+ * host is mounted here too (vet HIGH): this screen covers the tabs, so the
+ * offline refusal would otherwise draw underneath it.
  */
 export default function PlaceScreen() {
   const router = useRouter();
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const { saves, error, reload } = useSaves();
-  const save = saves?.find((s) => s.id === id) ?? null;
+  const { online } = useCaptureState();
+  // Delete drops the row from the list at once; the screen keeps drawing it
+  // while it animates away rather than flashing "no longer in your library".
+  const [gone, setGone] = useState<SavedPlace | null>(null);
+  const [editing, setEditing] = useState(false);
+  const save = saves?.find((s) => s.id === id) ?? (gone?.id === id ? gone : null);
   const back = () => (router.canGoBack() ? router.back() : router.navigate("/saves"));
 
+  /** Delete (frames 6–8). Offline: the amber refusal, and stay. Online: back
+   * first, then DELETE; when it lands, "Removed <name>" with Undo, which
+   * re-saves through `restoreSave` and offers View on the new id. */
+  const remove = (s: SavedPlace) => {
+    if (!online) {
+      announceDeleteNeedsSignal();
+      return;
+    }
+    setGone(s);
+    back();
+    deleteSave(s.id).then(
+      () =>
+        announceRemoved(s.place.name, () => {
+          restoreSave(s)
+            .then((created) => announceRestored(() => appRouter.push(`/place/${created.id}`)))
+            .catch(() => {});
+        }),
+      () => announceDeleteNeedsSignal(),
+    );
+  };
+
   return (
-    <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
-      <View style={styles.top}>
-        <Pressable onPress={back} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
-          <Text style={styles.back}>‹ {from || "Back"}</Text>
-        </Pressable>
-      </View>
-      {save ? (
-        <PlaceBody save={save} />
-      ) : saves === null && !error ? (
-        <Centered>
-          <ActivityIndicator color={C.green} />
-        </Centered>
-      ) : error && !saves ? (
-        <Centered>
-          <Text style={{ color: C.ink, fontWeight: "700", fontSize: 17 }}>Couldn’t reach the hub</Text>
-          <Muted>{API_URL}</Muted>
-          <Muted>{error}</Muted>
-          <Button onPress={() => void reload()}>Try again</Button>
-        </Centered>
-      ) : (
-        <Centered>
-          <Muted>This place is no longer in your library.</Muted>
-        </Centered>
-      )}
-    </SafeAreaView>
+    <View style={styles.root}>
+      <SafeAreaView edges={["top", "bottom"]} style={styles.screen}>
+        <View style={styles.top}>
+          <Pressable onPress={back} hitSlop={8} accessibilityRole="button" accessibilityLabel="Back">
+            <Text style={styles.back}>‹ {from || "Back"}</Text>
+          </Pressable>
+          {save ? (
+            <Pressable
+              onPress={() => setEditing(true)}
+              hitSlop={8}
+              accessibilityRole="button"
+              style={{ marginLeft: "auto" }}
+            >
+              <Text style={styles.edit}>Edit</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {save ? (
+          <PlaceBody save={save} onDelete={() => remove(save)} />
+        ) : saves === null && !error ? (
+          <Centered>
+            <ActivityIndicator color={C.green} />
+          </Centered>
+        ) : error && !saves ? (
+          <Centered>
+            <Text style={{ color: C.ink, fontWeight: "700", fontSize: 17 }}>Couldn’t reach the hub</Text>
+            <Muted>{API_URL}</Muted>
+            <Muted>{error}</Muted>
+            <Button onPress={() => void reload()}>Try again</Button>
+          </Centered>
+        ) : (
+          <Centered>
+            <Muted>This place is no longer in your library.</Muted>
+          </Centered>
+        )}
+      </SafeAreaView>
+      {/* Mounted only while open, so each open re-seeds from the row and Cancel discards. */}
+      {save && editing ? (
+        <EditSheet save={save} visible online={online} onClose={() => setEditing(false)} />
+      ) : null}
+      <CaptureToastHost />
+    </View>
   );
 }
 
-function PlaceBody({ save }: { save: SavedPlace }) {
+function PlaceBody({ save, onDelete }: { save: SavedPlace; onDelete: () => void }) {
   const router = useRouter();
   const { trips } = useTrips();
   const details = useDetails(save.place.googlePlaceId);
@@ -171,7 +228,93 @@ function PlaceBody({ save }: { save: SavedPlace }) {
         <GoogleLine details={details} />
         <Doors save={save} />
       </View>
+
+      {/* Delete — the destructive colour, and nothing else wears it (q3 B) */}
+      <Pressable onPress={onDelete} accessibilityRole="button" style={styles.del}>
+        <Text style={styles.delText}>Delete place</Text>
+      </Pressable>
     </ScrollView>
+  );
+}
+
+/**
+ * The edit sheet (frame 5): Name · Category · Note, seeded by core's
+ * `savePlaceFormFromSaved` and sent as core's `editPlacePatch` through
+ * `patchSave`. Rating and Shelf are NOT here (vet HIGH): `editPlacePatch`
+ * never sends status, rating or tripId — the Yours block writes those — so
+ * the sheet draws only what it saves, as the web's edit sheet does.
+ * Offline (frame 8): the line over Save, and Save does nothing.
+ */
+function EditSheet({
+  save,
+  visible,
+  online,
+  onClose,
+}: {
+  save: SavedPlace;
+  visible: boolean;
+  online: boolean;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<SavePlaceForm>(() => savePlaceFormFromSaved(save));
+  const [busy, setBusy] = useState(false);
+  const patch = editPlacePatch(form);
+  const activeCat = categoryOf(form.type).cat;
+
+  const submit = () => {
+    if (!online || !patch || busy) return;
+    setBusy(true);
+    patchSave(save.id, patch)
+      .then(onClose, () => {})
+      .finally(() => setBusy(false));
+  };
+  const setName = (name: string) =>
+    setForm((f) => ({ ...f, picked: f.picked ? { ...f.picked, name } : f.picked }));
+  // The row picks the category, not the type: a "lodging" row under Stay keeps
+  // its own type (the web's PlaceSheet rule).
+  const pickType = (t: ReservationType) =>
+    setForm((f) => ({ ...f, type: categoryOf(f.type).cat === categoryOf(t).cat ? f.type : t }));
+
+  return (
+    <Sheet visible={visible} onClose={onClose}>
+      <View style={styles.eh}>
+        <Text style={styles.ehTitle}>Edit place</Text>
+        <Pressable onPress={onClose} hitSlop={8} accessibilityRole="button">
+          <Text style={styles.ehCancel}>Cancel</Text>
+        </Pressable>
+      </View>
+      <View style={styles.fld}>
+        <Label>Name</Label>
+        <Input value={form.picked?.name ?? ""} onChangeText={setName} autoCapitalize="words" />
+      </View>
+      <View style={styles.fld}>
+        <Label>Category</Label>
+        <View style={styles.cats}>
+          {SAVE_SHEET_TYPES.map((t) => {
+            const cat = categoryOf(t).cat;
+            return (
+              <Chip key={t} neutral on={cat === activeCat} onPress={() => pickType(t)}>
+                {cat}
+              </Chip>
+            );
+          })}
+        </View>
+      </View>
+      <View style={styles.fld}>
+        <Label>Note</Label>
+        <Input
+          value={form.note}
+          onChangeText={(note) => setForm((f) => ({ ...f, note }))}
+          multiline
+          autoCapitalize="sentences"
+          autoCorrect
+        />
+      </View>
+      {!online ? <Text style={styles.off}>{EDIT_OFFLINE_NOTICE}</Text> : null}
+      <Button onPress={submit} disabled={!online || !patch || busy}>
+        {online ? "Save" : "Save · offline"}
+      </Button>
+    </Sheet>
   );
 }
 
@@ -313,10 +456,13 @@ function DoorChip({ door }: { door: DrillDoor }) {
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: C.surfaceAlt },
   screen: { flex: 1, backgroundColor: C.surfaceAlt },
   // .ptop / .back
   top: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingTop: 4 },
   back: { fontSize: 12, fontWeight: "600", color: C.accent, paddingVertical: 6 },
+  // .ptop .edit
+  edit: { fontSize: 13, fontWeight: "700", color: C.accent, paddingVertical: 6 },
   // .pl-body
   body: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 12, gap: 11 },
   // .phd
@@ -402,4 +548,14 @@ const styles = StyleSheet.create({
   door: { borderRadius: R.pill, paddingVertical: 4, paddingHorizontal: 9, backgroundColor: C.navySoft },
   doorText: { fontSize: 10.5, fontWeight: "700", color: C.ink },
   doorBadge: { color: C.inkFaded },
+  // .del — Delete, in the destructive colour (q3 B)
+  del: { marginTop: 4, padding: 10, alignItems: "center" },
+  delText: { fontSize: 12.5, fontWeight: "600", color: C.destructive },
+  // .esheet .eh / .fld / .off
+  eh: { flexDirection: "row", alignItems: "baseline" },
+  ehTitle: { flex: 1, fontSize: 14, fontWeight: "700", color: C.ink },
+  ehCancel: { fontSize: 12, fontWeight: "700", color: C.accent },
+  fld: { gap: 2 },
+  cats: { flexDirection: "row", flexWrap: "wrap", gap: 5 },
+  off: { fontSize: 10.5, color: C.warning, textAlign: "center" },
 });
