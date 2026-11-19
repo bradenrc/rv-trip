@@ -223,3 +223,111 @@ This dispatch covers item **i2 of 4** only. The pixel target is `docs/design/197
 - `apps/mobile`: `npx tsc --noEmit` exited 0 with no output. This is also part of the turbo
   typecheck.
 - Not run: no simulator or device walk.
+
+---
+
+# #197 · dev notes — i3 (#195): every way into the Place screen on the phone
+
+This dispatch covers item **i3 of 4** only. The pixel target is `docs/design/197/index.html` on
+`mc/wireframe/issue-197-v0` §4 frames 9–12, with the vet findings applied (below). i4 (web) is
+not touched.
+
+## What changed
+
+**Core**
+- `packages/core/src/capture/place-screen.ts:107` adds `saveForJournalEntry(entry, saves)`. It
+  returns the save a Journal entry opens, or `null`. A `JournalEntry` carries only a name, so
+  this is `isAlreadySaved`'s rule applied by name only: it runs
+  `isAlreadySaved({name, lat:null, lng:null, googlePlaceId:null}, [matchCandidateFromSaved(s)])`
+  over each row and returns the first match in library order. It returns `null` while Places is
+  unloaded.
+
+**Phone**
+- **Places rows** (`apps/mobile/app/(tabs)/saves.tsx:388-418`): each library row is a
+  `Pressable` that pushes `{ pathname: "/place/[id]", params: { id, from: "Places" } }`.
+  - Pressing a row gives it the `rv-navy-soft` press state (`rowPressed`, `:613`).
+  - Each row ends with a `›` in `inkSubtle` at 14 (`.lrow.press` / `.lrow .chev`).
+  - The suggestion strip stays outside the rows, with its own Upgrade and Dismiss buttons.
+- **Map tab** (`apps/mobile/app/(tabs)/map.tsx`):
+  - The saved-pin card is a `Pressable` (`:166-183`). It pushes `/place/[id]` with
+    `from: "Map"` and ends with **Open →** in `C.accent` (`.mcard .go`, `:290`).
+  - The destination card is unchanged and still shows **Trip →** in `greenInk`.
+  - `:55-63` reads the `place` search param with `useLocalSearchParams`, in an effect keyed on
+    the param rather than on mount (vet MED). The effect resets the filter to **All**, selects
+    the pin, then clears the param with `router.setParams({ place: undefined })`.
+  - `:117-120` clears `selectedId` once the selected pin has neither a destination nor a save
+    behind it, for example after a delete.
+- **Journal entries** (`apps/mobile/src/journal.tsx:562-630`), following the vet HIGH:
+  - `EntryRows` reads `useSaves()` and calls `saveForJournalEntry(e, saves)` for each entry.
+  - The **row tap is the shipped one**: it selects the pin (#179), then opens "How was it?".
+  - A matched entry also draws a **›** as its own nested `Pressable`. It pushes `/place/[id]`
+    with `from: "Trip"`, has `hitSlop` 10, and shows a navy-soft press state.
+  - An unmatched entry draws no ›.
+- **Saved capture toast** (`apps/mobile/src/capture.ts:281-289`): the green `saved` tone now
+  passes `onView`. It dismisses the toast, then pushes `/place/[id]` with `id: mine.id`, which is
+  the same id as its `undoId`. The toast shows "View · Undo". The host from i2 already forwards
+  `onView`. The `queued`, `journal-queued` and `synced` tones get no View.
+
+**Tests**
+- `capture/place-screen.test.ts` adds `saveForJournalEntry` cases:
+  - a normalized-name match;
+  - a save with coordinates still matching an entry that has none;
+  - no match, unloaded Places, and an empty library all return `null`;
+  - with a duplicate name, the first row wins.
+- `mobile-place-entry-points.test.ts` (new) reads the phone source, because `apps/mobile` has no
+  runner. It checks:
+  - each of saves/map/journal pushes `/place/[id]`, with its `from`;
+  - the row press state and › tokens;
+  - Open → in accent, and Trip → kept;
+  - the place-param effect's shape (keyed on `place`, selects it, clears it);
+  - the gone-selection clear;
+  - the Journal › appears only on a match, and the shipped row tap is kept;
+  - the saved toast's `onView`, and that no queued tone has View.
+
+## Decisions, defaults and deferrals
+- **The Journal row departs from frame 11 / the task's literal wording** ("push on the entry,
+  no press state when unmatched"). I followed the vet HIGH instead. The row already opens the
+  shipped log/edit sheet, so only the › goes to the Place screen. Unmatched rows keep the shipped
+  row press (opacity) because that tap still opens "How was it?". The only thing they lack is the
+  ›.
+- **The Journal match is by name only.** Two saves with the same normalized name resolve to the
+  first one in library order. A Journal entry whose name differs from its save's name (for
+  example, edited later) gets no ›.
+- **`EntryRows` calls `useSaves()`.** On a trip screen opened before Places has loaded, this
+  starts one `GET /api/places`. The › appears once the library arrives.
+- **"On the map" resets the Map filter to All.** That guarantees the pin is drawn, which the
+  user's Been there / Want to go / One trip filter might not. If the place has no coordinates, it
+  has no pin, and the gone-selection effect clears the selection, so the tab lands with no card.
+- **Back labels:** Places → "‹ Places", Map → "‹ Map", Journal → "‹ Trip" (the design's words).
+  The toast's View passes no `from`, so it reads "‹ Back", the same as i2's restored View.
+- **Open → colour.** Open → is `C.accent` (wireframe `.mcard .go`). The shipped Trip → stays
+  `greenInk`, so the two cards' arrows differ in colour, as drawn.
+
+## For qa / the walk
+- Places: tap a row and the Place screen opens with "‹ Places". Back returns to the same scroll
+  position, shelf and chip. Tapping the suggestion strip still upgrades or dismisses it and does
+  not open the place.
+- Map: tap a save pin → the card reads "Open →" → the Place screen opens with "‹ Map". From the
+  Place screen, "On the map" lands on the Map tab with that pin selected, including when the Map
+  tab was already mounted and when a filter was hiding the pin. Deleting the selected place then
+  returning to the Map tab shows no stale card.
+- Journal: a logged entry whose name is in Places shows ›. Tapping › opens the place
+  ("‹ Trip"). Tapping the row body still opens "How was it?". An entry not in Places shows no ›.
+- Capture: an online save shows "Saved … · View · Undo", and View opens the new place. Offline,
+  the save shows the amber queued toast with no View.
+- `router.setParams({ place: undefined })` clearing the param on a tab screen is expo-router
+  behaviour that needs a render check, because static analysis cannot prove it.
+
+## Checks run
+- Full `pnpm turbo run lint typecheck test` (first run): `Tasks: 9 successful, 10 total`.
+  - Every lint and typecheck task passed, including `apps/mobile`'s typecheck.
+  - Core reported `Tests 1661 passed (1661)`.
+  - `@rv-trip/web:test` printed `Tests 598 passed (598)`, then `ELIFECYCLE`. That failure is
+    mine: on a loaded machine the suite was quiet for more than 5 minutes, I took it for a hang
+    and killed my own run by PID before vitest exited.
+- `pnpm turbo run lint typecheck test --filter='!@rv-trip/web'`: `Tasks: 6 successful, 6 total`.
+  Core reported `Tests 1661 passed (1661)` and ui `Tests 56 passed (56)`.
+- `apps/web`, `npx vitest run`: `Test Files 65 passed (65)`, `Tests 598 passed (598)`, exit 0.
+  It took 87 s of test time. This branch does not touch web code.
+- `apps/mobile`, `npx tsc --noEmit`: exit 0, with no output.
+- Not run: no simulator or device walk.

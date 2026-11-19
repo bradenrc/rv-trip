@@ -11,6 +11,7 @@ import {
   placeSourceLine,
   placeTelUrl,
   placeTripLine,
+  saveForJournalEntry,
 } from "./place-screen";
 
 /** #197 · #193 — the phone Place screen's copy (docs/design/197 §2 frames 1–4). */
@@ -115,5 +116,30 @@ describe("#194 · the Edit and Delete copy (docs/design/197 §3 frames 5–8)", 
   it("refuses offline: Delete's toast and Edit's sheet line (frame 8)", () => {
     expect(DELETE_OFFLINE_TOAST).toEqual({ title: "Deleting needs a connection", sub: null });
     expect(EDIT_OFFLINE_NOTICE).toBe("Editing needs a connection. Nothing is saved offline.");
+  });
+});
+
+describe("saveForJournalEntry — #195 · a Journal entry's way into its Place (frame 11)", () => {
+  const aslan = save({ id: "s-aslan", place: { name: "Aslan Brewing Co.", lat: 48.75, lng: -122.48 } });
+  const koa = save({ id: "s-koa", type: "campground", place: { name: "Astoria/Warrenton KOA" } });
+
+  it("finds the save whose name matches, by isAlreadySaved's normalized-name rule", () => {
+    expect(saveForJournalEntry({ name: "Aslan Brewing Co." }, [koa, aslan])?.id).toBe("s-aslan");
+    expect(saveForJournalEntry({ name: "  aslan brewing co " }, [koa, aslan])?.id).toBe("s-aslan");
+  });
+
+  it("matches by name only — a save's coordinates never rule an entry out (the entry has none)", () => {
+    expect(saveForJournalEntry({ name: "Astoria/Warrenton KOA" }, [aslan, koa])?.id).toBe("s-koa");
+  });
+
+  it("is null when nothing in Places matches, or Places has not loaded", () => {
+    expect(saveForJournalEntry({ name: "Whatcom Falls walk" }, [aslan, koa])).toBeNull();
+    expect(saveForJournalEntry({ name: "Aslan Brewing Co." }, null)).toBeNull();
+    expect(saveForJournalEntry({ name: "Aslan Brewing Co." }, [])).toBeNull();
+  });
+
+  it("takes the first match in library order when two saves share a name", () => {
+    const again = save({ id: "s-aslan-2", place: { name: "Aslan Brewing Co." } });
+    expect(saveForJournalEntry({ name: "Aslan Brewing Co." }, [again, aslan])?.id).toBe("s-aslan-2");
   });
 });

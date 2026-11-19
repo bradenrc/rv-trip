@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { Alert, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
+import { router } from "expo-router";
 import type {
   CaptureDraft,
   DidItBody,
@@ -74,7 +75,8 @@ export interface CaptureToast extends ToastCopy {
   undoId?: string;
   /** "journal" / "removed": puts the thing back the way it was. */
   onUndo?: () => void;
-  /** "restored" only: opens the place Undo just put back. */
+  /** "restored": opens the place Undo just put back. "saved" (#195, frame
+   * 12): opens the place just saved — its `undoId`. A queued save has no id. */
   onView?: () => void;
   key: number;
 }
@@ -278,7 +280,14 @@ async function flush(announce: Announce): Promise<void> {
     const waiting = (clientId: string) => out.queue.some((q) => q.clientId === clientId);
     if (announce.kind === "capture") {
       const mine = out.sent.find((s) => s.item.clientId === announce.clientId)?.value as SavedPlace | undefined;
-      if (mine) showToast(savedToast(mine), "saved", { undoId: mine.id });
+      if (mine)
+        showToast(savedToast(mine), "saved", {
+          undoId: mine.id,
+          onView: () => {
+            dismissToast();
+            router.push({ pathname: "/place/[id]", params: { id: mine.id } });
+          },
+        });
       else if (waiting(announce.clientId)) showToast(queuedToast(out.queue.length), "queued");
     } else if (announce.kind === "journal") {
       const mine = out.sent.find((s) => s.item.clientId === announce.clientId);

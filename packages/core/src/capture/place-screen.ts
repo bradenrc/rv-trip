@@ -1,4 +1,5 @@
 import type { SavedPlace } from "../domain/types";
+import { isAlreadySaved, matchCandidateFromSaved } from "../domain/places";
 import { shortDay } from "../domain/date-range";
 import { localIsoDate } from "../planner/journal";
 import type { PlaceDetails } from "../providers/index";
@@ -94,3 +95,19 @@ export const DELETE_OFFLINE_TOAST: ToastCopy = { title: "Deleting needs a connec
 
 /** The Edit sheet's line over Save with no signal (frame 8). */
 export const EDIT_OFFLINE_NOTICE = "Editing needs a connection. Nothing is saved offline.";
+
+// ── #195 · every way in (docs/design/197 §4 frame 11) ───────────────────────
+
+/**
+ * The save a Journal entry opens, or null. A `JournalEntry` carries only a
+ * name (no coordinates, no Google id), so this is `isAlreadySaved`'s rule
+ * name-only: a normalized-name match against each library row, first in
+ * library order. Null means the row draws no › and pushes nothing.
+ */
+export function saveForJournalEntry(
+  entry: { name: string },
+  saves: readonly SavedPlace[] | null,
+): SavedPlace | null {
+  const c = { name: entry.name, lat: null, lng: null, googlePlaceId: null };
+  return (saves ?? []).find((s) => isAlreadySaved(c, [matchCandidateFromSaved(s)])) ?? null;
+}

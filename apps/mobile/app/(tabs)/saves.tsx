@@ -377,13 +377,27 @@ function Groups({ shelves }: { shelves: SavesShelves }) {
   );
 }
 
-/** One bordered block of rows, then a suggestion strip for each save that has one. */
+/**
+ * One bordered block of rows, then a suggestion strip for each save that has one.
+ *
+ * #197 · #195 (docs/design/197 frame 9): a row opens its Place screen — a
+ * navy-soft press state and a ›. The Place screen is a root-Stack push over the
+ * tabs, so Back returns to this scroll position and these filters. The strip
+ * keeps its own Upgrade and Dismiss, outside the row.
+ */
 function Rows({ saves, miles }: { saves: SavedPlace[]; miles?: Record<string, string> }) {
+  const router = useRouter();
   return (
     <>
       <View style={styles.rows}>
         {saves.map((s, i) => (
-          <View key={s.id} style={[styles.row, i > 0 && styles.rowRule]}>
+          <Pressable
+            key={s.id}
+            onPress={() => router.push({ pathname: "/place/[id]", params: { id: s.id, from: "Places" } })}
+            accessibilityRole="link"
+            accessibilityLabel={s.place.name}
+            style={({ pressed }) => [styles.row, i > 0 && styles.rowRule, pressed && styles.rowPressed]}
+          >
             <CategoryTile type={s.type} size={26} />
             <View style={styles.rowText}>
               <Text style={styles.rowName} numberOfLines={1}>
@@ -398,7 +412,8 @@ function Rows({ saves, miles }: { saves: SavedPlace[]; miles?: Record<string, st
               )}
             </View>
             {miles?.[s.id] ? <Text style={styles.mi}>{miles[s.id]}</Text> : null}
-          </View>
+            <Text style={styles.chev}>›</Text>
+          </Pressable>
         ))}
       </View>
       {saves.map((s) => (s.suggestedPlace ? <Suggestion key={`sp_${s.id}`} save={s} /> : null))}
@@ -594,6 +609,9 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
   },
   rowRule: { borderTopWidth: 1, borderTopColor: C.borderSoft },
+  // docs/design/197 `.lrow.press` / `.lrow .chev`
+  rowPressed: { backgroundColor: C.navySoft },
+  chev: { color: C.inkSubtle, fontSize: 14 },
   rowText: { flex: 1, minWidth: 0 },
   rowName: { fontSize: 13, fontWeight: "700", color: C.ink, lineHeight: 16 },
   rowLine: { fontFamily: F.mono, fontSize: 10, color: C.inkFaded },

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
 import type {
   ForNextTime,
   HowWasIt,
@@ -21,6 +22,7 @@ import {
   journalMap,
   journalToday,
   reservationEntry,
+  saveForJournalEntry,
   upNext,
   upNextThenLine,
   dateRange,
@@ -37,6 +39,7 @@ import {
 import { Sheet } from "./hops";
 import { MapFrame, TripMap, useStyleMode, type TripMapEntry, type TripMapPin } from "./map";
 import { NavigateLinks } from "./navigate";
+import { useSaves } from "./store";
 import { C, F, R } from "./theme";
 import { Card, CategoryTile, Segmented, Stars, type SegmentedOption } from "./ui";
 
@@ -547,6 +550,15 @@ function WholeTripJournal({
   );
 }
 
+/**
+ * A block of journal rows. Tapping a row is the shipped path: select its pin
+ * (#179), then open the "How was it?" sheet (`onOpen`).
+ *
+ * #197 · #195 (docs/design/197 frame 11, vet HIGH): an entry whose save core's
+ * `saveForJournalEntry` finds in Places also draws a ›, its own Pressable,
+ * that pushes the Place screen; an entry with no save draws no ›. The row tap
+ * is unchanged, so logging and editing an entry still work.
+ */
 function EntryRows({
   entries,
   toRate = [],
@@ -562,6 +574,8 @@ function EntryRows({
   selectedId?: string | null;
   onSelect?: (id: string) => void;
 }) {
+  const router = useRouter();
+  const { saves } = useSaves();
   return (
     <View style={styles.rows}>
       {toRate.map((r, i) => (
@@ -575,29 +589,43 @@ function EntryRows({
           </Pressable>
         </View>
       ))}
-      {entries.map((e, i) => (
-        <Pressable
-          key={`${e.kind}:${e.id}`}
-          onPress={() => {
-            onSelect?.(e.id);
-            onOpen(e);
-          }}
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.row,
-            (i > 0 || toRate.length > 0) && styles.rowRule,
-            e.id === selectedId && styles.sel,
-            pressed && { opacity: 0.85 },
-          ]}
-        >
-          <CategoryTile type={e.type} size={26} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.rn}>{e.name}</Text>
-            <LoggedMeta rating={e.rating} again={e.again} />
-            {e.notes ? <Text style={styles.rq}>{e.notes}</Text> : null}
-          </View>
-        </Pressable>
-      ))}
+      {entries.map((e, i) => {
+        const match = saveForJournalEntry(e, saves);
+        return (
+          <Pressable
+            key={`${e.kind}:${e.id}`}
+            onPress={() => {
+              onSelect?.(e.id);
+              onOpen(e);
+            }}
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.row,
+              (i > 0 || toRate.length > 0) && styles.rowRule,
+              e.id === selectedId && styles.sel,
+              pressed && { opacity: 0.85 },
+            ]}
+          >
+            <CategoryTile type={e.type} size={26} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.rn}>{e.name}</Text>
+              <LoggedMeta rating={e.rating} again={e.again} />
+              {e.notes ? <Text style={styles.rq}>{e.notes}</Text> : null}
+            </View>
+            {match ? (
+              <Pressable
+                onPress={() => router.push({ pathname: "/place/[id]", params: { id: match.id, from: "Trip" } })}
+                accessibilityRole="link"
+                accessibilityLabel={`Open ${match.place.name}`}
+                hitSlop={10}
+                style={({ pressed }) => [styles.chevHit, pressed && styles.chevPressed]}
+              >
+                <Text style={styles.chev}>›</Text>
+              </Pressable>
+            ) : null}
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -758,6 +786,10 @@ const styles = StyleSheet.create({
   rows: { borderWidth: 1, borderColor: C.border, borderRadius: R.card, overflow: "hidden", backgroundColor: C.surface },
   row: { flexDirection: "row", gap: 9, alignItems: "flex-start", paddingHorizontal: 10, paddingVertical: 8, backgroundColor: C.surface },
   rowRule: { borderTopWidth: 1, borderTopColor: C.borderSoft },
+  // docs/design/197 `.lrow .chev` / `.lrow.press` — a matched entry's way into its Place.
+  chev: { color: C.inkSubtle, fontSize: 14 },
+  chevHit: { alignSelf: "stretch", justifyContent: "center", paddingHorizontal: 6, borderRadius: R.sm },
+  chevPressed: { backgroundColor: C.navySoft },
   rn: { fontSize: 12.5, fontWeight: "700", color: C.ink, lineHeight: 16 },
   rq: { fontSize: 11.5, color: C.inkMuted, marginTop: 2, lineHeight: 15.5 },
   fold: {

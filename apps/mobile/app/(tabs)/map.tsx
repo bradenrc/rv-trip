@@ -1,7 +1,7 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import type { LibraryFilter, LibraryTrip } from "@rv-trip/core";
 import { libraryMap, libraryTrips, localIsoDate } from "@rv-trip/core";
 import { MapFrame, TripMap, useStyleMode, type TripMapEntry, type TripMapPin } from "../../src/map";
@@ -33,9 +33,14 @@ function destLine(trip: string, ordinal: number | null, been: boolean): string {
  * = Want to go, ring = Been there. The overview draws no drive arcs and never
  * asks a server for a route.
  *
- * Tap a pin to raise its card; tap it again, or the map, to clear it. A save
- * has no screen of its own on the phone, so its card has no arrow; a
+ * Tap a pin to raise its card; tap it again, or the map, to clear it. A
  * destination's card opens the trip with Trip →.
+ *
+ * #197 · #195 (docs/design/197 frame 10): a save's card opens its Place screen
+ * with Open →. The Place screen's "On the map" navigates here with a `place`
+ * search param; the tab is usually already mounted, so the param is read in an
+ * effect keyed on it (not on mount), selects that pin under All, and is then
+ * cleared. A selected save that leaves the library (deleted) clears the card.
  */
 export default function MapTab() {
   const router = useRouter();
@@ -47,6 +52,15 @@ export default function MapTab() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const today = localIsoDate();
+  const { place } = useLocalSearchParams<{ place?: string }>();
+
+  // "On the map": select the pin under All — a filter could be hiding it.
+  useEffect(() => {
+    if (!place) return;
+    setPicked({ kind: "all" });
+    setSelectedId(place);
+    router.setParams({ place: undefined });
+  }, [place, router]);
 
   // Fresh on every visit: a save captured or a trip edited on another tab
   // lands here.
@@ -100,6 +114,11 @@ export default function MapTab() {
 
   const loaded = trees !== null && saves !== null && mode !== null;
 
+  // The selected save is gone (deleted on its Place screen): drop the selection.
+  useEffect(() => {
+    if (loaded && selectedId !== null && !dest && !save) setSelectedId(null);
+  }, [loaded, selectedId, dest, save]);
+
   return (
     <SafeAreaView edges={["top"]} style={styles.screen}>
       <View style={styles.canvas}>
@@ -145,7 +164,11 @@ export default function MapTab() {
             <Text style={styles.cardGo}>Trip →</Text>
           </Pressable>
         ) : save ? (
-          <View style={styles.card}>
+          <Pressable
+            onPress={() => router.push({ pathname: "/place/[id]", params: { id: save.id, from: "Map" } })}
+            accessibilityRole="button"
+            style={styles.card}
+          >
             <CategoryTile type={save.type} size={26} />
             <View style={styles.cardText}>
               <Text style={styles.cardName} numberOfLines={1}>
@@ -156,7 +179,8 @@ export default function MapTab() {
               </Text>
             </View>
             {save.rating ? <Stars value={save.rating} size={10} /> : null}
-          </View>
+            <Text style={styles.cardOpen}>Open →</Text>
+          </Pressable>
         ) : loaded && pins.length + entries.length > 0 ? (
           <Text style={styles.hint}>{`${pins.length + entries.length} pins · tap one`}</Text>
         ) : null}
@@ -262,6 +286,8 @@ const styles = StyleSheet.create({
   cardName: { fontSize: 13, fontWeight: "700", lineHeight: 16, color: C.ink },
   cardLine: { fontSize: 10.5, color: C.inkMuted },
   cardGo: { fontSize: 11, fontWeight: "700", color: C.greenInk },
+  // docs/design/197 `.mcard .go` — a save's Open →
+  cardOpen: { fontSize: 11.5, fontWeight: "700", color: C.accent },
   // .mhint
   hint: {
     position: "absolute",
