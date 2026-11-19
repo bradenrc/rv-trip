@@ -1,6 +1,6 @@
 ---
 name: wireframe
-description: Engine-native Wireframe stage. Resolves the answered mock into ONE pixel-faithful wireframe of the chosen variant, writes docs/design/<issue>/index.html with Sign off / Refine buttons, plus the docs/design/<issue>/resolved-answers.json manifest. Bounded — no state/board/gh/MC-server; the engine owns orchestration + verification. One issue per dispatch.
+description: Engine-native Wireframe stage. Resolves the answered mock into ONE pixel-faithful wireframe of the chosen variant, writes a static docs/design/<issue>/index.html (no controls, no script), plus the docs/design/<issue>/resolved-answers.json manifest. Bounded — no state/board/gh/MC-server; the engine owns orchestration + verification. One issue per dispatch.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
@@ -37,7 +37,7 @@ work — you do NOT orchestrate.
    truth lives). The wireframe is the visual source of truth dev matches pixel-for-pixel.
 2. **Color = follow the design system as the AUTHORITY.** `packages/ui/styles/entry.css`'s
    `@theme` block is the raw `rv-*` vocabulary; `.design-sync/conventions.md` documents which
-   token plays which role (surface, ink, green/CTA, border, amber/blue status, the
+   token plays which role (surface, ink, the accent CTA, green, border, amber/blue status, the
    five-category language, `font-mono` for numbers + dates). Choose every color by the role
    documented there and name it verbatim — never pick a token from memory or invent one (an
    `rv-…` not in `entry.css` doesn't exist), never a raw hex. Undocumented role → STOP,
@@ -67,20 +67,18 @@ before they reach dev. For any slice with an FE surface, before you resolve:
   needs new data must have a path for it across that boundary.
 
 If a gap surfaces: resolve it in the wireframe if the answer is unambiguous from the code,
-OR flag it as a real fork (a `Rework the direction` sign-off, below). Do NOT let a design
-gap pass through.
+OR, when it is a real fork, fail the gate back toward the mock with the evidence (see "No
+questions" below). Do NOT let a design gap pass through.
 
 ## Build the wireframe — `docs/design/<issue>/index.html`
 
 - **ONE resolved design: the chosen variant only**, real copy, `rv-*` tokens. No variants
   grid, no survey, no A/B/C.
 - **ALL visual content is static HTML — never JS-generated DOM.** The glass runs no content
-  JS, so a JS-built page renders as an empty frame. A `<script>` is ONLY for the Sign off /
-  Refine button POSTs. If you'd loop in JS, unroll it into static markup.
+  JS, so a JS-built page renders as an empty frame. The page carries no `<script>` at all.
+  If you'd loop in JS, unroll it into static markup.
 - For a **logic/data slice** (no screen) the "wireframe" is the resolved response-shape
   contract + algorithm spec, rendered in the production visual language — not pixels.
-
-## Sign-off contract — how your artifact talks to the engine
 
 ## No sign-off gate — the wireframe RESOLVES and the pipeline moves (2026-09-15)
 
@@ -98,9 +96,8 @@ manifest section below) re-enters this gate the same way.
 
 The mock already collected every answer. The wireframe renders ONE resolved design; it has
 **NO interactive controls at all** — no buttons, no textarea, no `<input>`, no radios, no
-option cards, no survey questions.** You are past
-the deciding; you are drawing the decided thing (the textarea is the re-work channel, not a
-question).
+option cards, no survey questions. You are past the deciding; you are drawing the decided
+thing.
 
 **A NON-NULL survey answer is BINDING — every question, material or not.** The human
 picked it; you build it — even when your own read prefers the ★recommended option, even
@@ -116,7 +113,7 @@ value.
 
 If a material answer came through NULL or ambiguous in your feedback, resolve it to that
 question's ★recommended default and render a **plain, NON-interactive** note —
-"⚠ defaulted — confirm at sign-off: `<question> → <default>`" — as static text, _not_ a
+"⚠ defaulted — confirm at the walk: `<question> → <default>`" — as static text, _not_ a
 control. Never re-ask.
 
 ## The resolved-answers manifest — `docs/design/<issue>/resolved-answers.json`
@@ -184,24 +181,21 @@ the dev gate (one dev dispatch per item, one shared branch). Schema:
 - **Honor the Mode line:** `cohesive` → design the surface ONCE holistically, then split the
   plan into implementation items (items may each cover several children); `convoy` → one
   item per child fix, minimal coupling, shared branch/walk economy only.
-- The wireframe HTML still renders as usual — the human signs off the composition **and**
-  the plan together; render a compact read-only "Plan" section in the wireframe so the plan
-  is visible at sign-off.
+- The wireframe HTML still renders as usual. Render a compact read-only "Plan" section in
+  it so vet, and the human at the walk, read the plan beside the composition.
 - Non-epic issues: no plan.json, nothing changes.
 
 ## Hard rules
 
 - **Never render an `<input>` / radio / option card / survey question.** The wireframe
-  resolves the answered mock; it never asks. The only interactive controls are Sign off /
-  Refine **plus the single `#rework-comment` textarea** (the re-work channel — required, last).
+  resolves the answered mock; it never asks. There are no interactive controls of any
+  kind: no buttons, no textarea, no `<script>`.
 - **Static HTML only** — no JS-generated content; the glass renders none.
 - **Never invent** copy/spacing/color not in the mock, `entry.css`, or the DS.
 - **Color = whatever `.design-sync/conventions.md` documents for that role**, named verbatim
   from `packages/ui/styles/entry.css`. No token from memory, none invented, no raw hex; STOP
   if a role isn't documented.
 - **Never edit `ds-bundle/`** — it is generated + gitignored; read it only, if present.
-- **Sign off / Refine POST to the relative `answers` url** — never `/act`, never a hardcoded
-  origin/`localhost`.
 - **TWO files: `docs/design/<issue>/index.html` + `docs/design/<issue>/resolved-answers.json`**
   (an EPIC adds exactly one more: `docs/design/<issue>/plan.json` — see Epics). No git, no
   state, no board, no `gh`.

@@ -33,7 +33,8 @@ Read before writing any HTML:
    memory.** `docs/personas/design_claude.md` §1 carries the authority order.
    `packages/ui/styles/entry.css`'s `@theme` block is the raw `rv-*` vocabulary;
    `.design-sync/conventions.md` documents **which token plays which role** (surface,
-   ink, green/CTA, border, the amber/blue status pair, the five-category language, and
+   ink, the accent CTA, green, border, the amber/blue status pair, the five-category
+   language, and
    `font-mono` for numbers + dates). **Choose every color by the role documented there and
    use the `rv-*` name verbatim** — open the files and read them;
    `grep -n '\--color-rv-\|--radius-rv-\|--shadow-rv-' packages/ui/styles/entry.css` for

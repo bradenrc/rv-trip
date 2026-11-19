@@ -21,7 +21,8 @@ rather than inventing it.
 3. **`.design-sync/conventions.md`** (same text ships as `ds-bundle/README.md`'s
    "Styling idiom" section) — **which token plays which role**: surfaces
    (`rv-surface` / `rv-surface-alt` / `rv-navy`), ink (`rv-ink` →
-   `rv-ink-subtle`, placeholder only), green (accents · CTAs · "stay"),
+   `rv-ink-subtle`, placeholder only), the sky accent (CTAs, links, selection,
+   our stars), green ("stay", verified claims, planning marks),
    borders, status (`rv-warning*` amber = attention/floating, `rv-info*` blue
    = activities). Also the **five-category language** (Stay · Eat · Do ·
    Travel · Other) and the type convention: `font-mono` for numbers, dates,
@@ -148,12 +149,11 @@ double-click fires exactly one verdict.
 tokens. No variants grid, no survey, no A/B. The wireframe **resolves**; it
 never asks. A material answer that arrived null resolves to that question's
 ★recommended default plus a plain, non-interactive
-"⚠ defaulted — confirm at sign-off" note.
+"⚠ defaulted — confirm at the walk" note.
 
 **Static HTML only — no content JS.** The glass that renders the artifact
-executes no content scripts; a JS-built DOM shows up as an empty frame. A
-`<script>` exists solely for the sign-off POSTs. If you'd loop in JS, unroll
-it into markup.
+executes no content scripts; a JS-built DOM shows up as an empty frame. The
+page carries no `<script>` at all. If you'd loop in JS, unroll it into markup.
 
 **Pixel-faithful to the design system.** Compose the components `packages/ui`
 actually ships, at the props their source declares, composed the way
@@ -166,20 +166,12 @@ against real production: grep the real component in `packages/ui/src/` or
 collision with a shipped screen, and confirm the data can reach the component
 where it is mounted (server component vs `"use client"` boundary). A gap you
 can resolve unambiguously from the code, resolve. A gap that is a real fork
-goes back as a rework.
+fails the gate back toward the mock, with the evidence.
 
-**Embedded sign-off affordances.** A visible `#rework-comment` `<textarea>` at
-the very bottom, then the buttons directly under it, POSTing to the relative
-`answers` url:
-
-- (Sign-off buttons retired 2026-09-15 — the wireframe is a pure static artifact; vet is next.)
-- **Review · Refine** → two reject choices, each carrying the textarea
-  verbatim: **Rework the direction** (`intent:'refine', route:'mock'`) and
-  **Refine this wireframe** (`intent:'refine', route:'wireframe'`).
-
-**Never `prompt()`** — the artifact renders in a sandboxed iframe that blocks
-it, so the comment would be lost. Read the textarea. The textarea then the
-buttons are the last two elements; the submit is one-shot.
+**No sign-off affordances.** The sign-off gate was retired on 2026-09-15: the
+wireframe is a pure static artifact with no buttons, no textarea, no POST and
+no `<script>`. Vet is the next gate. Operator feedback arrives as a walk-reject
+or a reset to this gate, with notes threaded back.
 
 ---
 
