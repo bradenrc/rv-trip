@@ -51,6 +51,15 @@ set on 2026-11-15. The boards are filed as four epics, in order:
 - #186 TL4 Places and Map — near you first, trip card, Map tab
   (`Places`, `MapTab`, `WebPlaces`)
 
+Added 2026-11-18, in this order:
+
+- #197 Place — one screen per saved place, the same on phone and web: Go
+  first (Google · Apple · Waze), then yours, then what others say; edit and
+  delete; every row, pin and journal entry opens it (`Place.dc.html`)
+- #202 Google map — a second map engine beside Mapbox, switched on the map
+  itself and remembered per account; on Google, tap a business to save it.
+  Mapbox stays (`MapTab.dc.html`)
+
 ## How stage agents use it
 
 The canvas outranks older stage artifacts under docs/design/<issue>/ where
