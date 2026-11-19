@@ -25,6 +25,8 @@ const tabs = read("app/(tabs)/_layout.tsx");
 const sheet = read("app/capture.tsx");
 const runtime = read("src/capture.ts");
 const saves = read("app/(tabs)/saves.tsx");
+/** The suggestion strip, lifted out of saves.tsx by #197 · #193 so the Place screen shares it. */
+const strip = read("src/places.tsx");
 
 describe("capture · the two new native dependencies", () => {
   it("declares netinfo and expo-location, SDK-aligned", () => {
@@ -137,8 +139,9 @@ describe("saves · the tab renders core's shelves", () => {
   });
 
   it("wires the strip: tap upgrades, Dismiss clears — then refetches", () => {
-    expect(saves).toContain("patchSave(save.id, { upgradeToSuggested: true })");
-    expect(saves).toContain("patchSave(save.id, { suggestedPlace: null })");
+    expect(saves).toContain('import { Suggestion } from "../../src/places";');
+    expect(strip).toContain("patchSave(save.id, { upgradeToSuggested: true })");
+    expect(strip).toContain("patchSave(save.id, { suggestedPlace: null })");
     expect(store).toContain("await api.places.patch(id, patch);");
     expect(store).toMatch(/finally \{\s*await loadSaves\(\);/);
   });

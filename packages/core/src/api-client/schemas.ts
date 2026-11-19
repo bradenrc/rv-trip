@@ -87,6 +87,23 @@ export const placesEnvelopeSchema = z.object({
 });
 export type PlacesSearchEnvelope = z.infer<typeof placesEnvelopeSchema>;
 
+/**
+ * `GET /api/places/details/[id]` (#197 · #193) — the same envelope, its rows a
+ * `PlaceDetails`: the summary plus the four fields the Google line, Call and
+ * Website read. Each defaults to null, so a row cached before a field existed
+ * (#91's `googleMapsUri`) still parses rather than throwing the answer away.
+ */
+export const placeDetailsSchema = placeSummarySchema.extend({
+  userRatingCount: z.number().nullable().default(null),
+  websiteUri: z.string().nullable().default(null),
+  nationalPhoneNumber: z.string().nullable().default(null),
+  googleMapsUri: z.string().nullable().default(null),
+});
+export const placeDetailsEnvelopeSchema = placesEnvelopeSchema.extend({
+  results: z.array(placeDetailsSchema),
+});
+export type PlaceDetailsEnvelope = z.infer<typeof placeDetailsEnvelopeSchema>;
+
 /** `GET /api/areas/resolve` — the locality, or null (#111). */
 export const resolvedAreaSchema = z
   .object({

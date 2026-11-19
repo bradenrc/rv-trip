@@ -7,3 +7,4 @@ export * from "./theme/map-palette";
 export * from "./capture/queue";
 export * from "./capture/sheet";
 export * from "./capture/shelves";
+export * from "./capture/place-screen";

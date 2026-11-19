@@ -1,0 +1,103 @@
+# #197 · dev notes — i1 (#193): core seam + the phone Place screen
+
+This dispatch covers item **i1 of 4** only. i2 (edit/delete), i3 (entry points) and
+i4 (web `/places/[id]`) are separate dispatches. The pixel target is
+`docs/design/197/index.html` on `mc/wireframe/issue-197-v0` (§2 frames 1–4, §6 contract).
+
+## What changed
+
+**Core**
+- `packages/core/src/providers/navigation.ts:164` adds `navigateLinksForPlace(place)` beside
+  `navigateLinks` and reuses `coord()`. A Google id plus a point gives Google
+  `destination=<name>&destination_place_id=<id>`, and Apple/Waze get the point plus `q=<name>`.
+  Coordinates only gives the same result as `navigateLinks`. No lat/lng gives `null`.
+- `packages/core/src/providers/drill.ts` (new) is `drillDoors` / `drillGroupLabel` / `DrillDoor` /
+  `DrillGroup` / `DrillDoorId` / `DrillInput`, moved from `packages/ui/src/drill.ts`. Each door
+  gains a visible `label` (`:50`): Google, AI Mode, Images, Reddit, Instagram, Facebook, Yelp,
+  Tripadvisor, AllTrails, YouTube, The Dyrt, Campendium. Core reads the category word from its
+  own `categoryOf` (`theme/tokens.ts`), not ui's `categoryMeta`. It is exported through
+  `providers/index.ts`.
+- `packages/ui/src/drill.ts` now re-exports those names from `@rv-trip/core`. `DRILL_MARKS` and
+  `drillMarkId` stay there. Web imports of `drillDoors` from `@rv-trip/ui` are unchanged and
+  compile.
+- `packages/core/src/api-client/index.ts:196,319` adds `places.details(googlePlaceId)` for
+  `GET /api/places/details/[id]`. The schema is `placeDetailsSchema` / `placeDetailsEnvelopeSchema`
+  (`api-client/schemas.ts:96`). The four details fields default to `null`, so a row cached before
+  #91 still parses.
+- `packages/core/src/capture/place-screen.ts` (new, exported from `src/index.ts`) holds the
+  screen's copy: `placeScreenMeta` ("Eat · Bellingham, WA"), `placeSourceLine` ("from Jane & Rick"
+  / "dropped pin · Nov 13"), `placeTripLine` ("Bellingham · Nov 11–15 →"), `placeGoogleLine`
+  ("G ★ 4.6 · 1,284 reviews") and `placeTelUrl`. This puts it where vitest runs, since
+  `apps/mobile` has no runner (vet MED).
+
+**Phone**
+- `apps/mobile/app/place/[id].tsx` (new) is the Place screen. It finds the save in `useSaves()`,
+  so no new route is needed. Top to bottom:
+  - header: `CategoryTile` 40, the name, and the mono meta line;
+  - **Go**: three navy-soft buttons, then Call and Website only when details carry them, then
+    "On the map", which goes to `/map` with a `place` param;
+  - the locate `Suggestion` in Go's slot when the links are `null` and the save has a suggestion;
+  - **Yours**: the Been/Want switch writes `patchSave {status}`. On the been shelf, `Stars` with
+    `onSet` writes `patchSave {rating}` (0 becomes null), and `AgainBadge` sits beside it. Then the
+    note, the accent trip link (navigates to `/trips/<tripId>`, with dates from `useTrips()`), and
+    the source line;
+  - **What others say**: the phone twin of `GoogleLine`, with ① the line plus "Google Maps ↗",
+    ② "G — checking…", ③/④ nothing. Then core's doors, grouped google · social · category word,
+    as text chips with the ✦/▦ badge.
+- `apps/mobile/app/_layout.tsx:43` registers `place/[id]` on the root Stack beside `capture`,
+  with `headerShown: false`.
+- `apps/mobile/src/places.tsx` (new) is the shipped `Suggestion` strip, moved out of
+  `app/(tabs)/saves.tsx` so both screens share one component. Its behaviour and styles are
+  unchanged.
+
+**Tests**
+- `providers/navigation.test.ts` pins the exact URLs for a Google-id place and a coordinates-only
+  place, checks that the coordinates-only result equals `navigateLinks`, and checks `null` with no
+  lat/lng (including an id with no point).
+- `providers/drill.test.ts` (new) checks the counts Eat 8, Stay 9, Do 9 (Travel/Other 6), that
+  every label is non-empty, the exact label lists, and the group words.
+- `packages/ui/src/drill.test.ts` passes unchanged through the re-export. A new check asserts that
+  core's category word equals `categoryMeta(type).cat` for every `reservationType`.
+- `api-client/api-client.test.ts` covers the details URL and method, the degraded envelope, and
+  the defaulting of an old cached row.
+- `capture/place-screen.test.ts` (new) covers every copy helper.
+- `mobile-place-screen.test.ts` (new) reads the route file as source. It checks that the file
+  exists and is registered, that the blocks read core's helpers, the block order, and that no raw
+  hex is used.
+- `mobile-capture.test.ts` now reads the strip's `patchSave` calls from `src/places.tsx`.
+
+## Decisions, defaults and deferrals
+- **Edit and Delete are not on the screen yet.** Both are i2 (#194). Delete must come with its
+  Undo toast, a host the toast can render on (vet HIGH) and `C.destructive`, which does not
+  exist until i2 adds `RV.destructive`. Shipping Delete without Undo would lose data, so i1 ends
+  at What others say. i2 adds Edit to the top bar and Delete at the end of the body.
+- **Back label.** The design labels the back button with the screen you came from ("‹ Places",
+  "‹ Map", "‹ Trip"). Entry points are i3, so the screen reads an optional `from` search param
+  and falls back to **"‹ Back"**. i3's pushes should pass `from`.
+- **"On the map"** navigates to `/map?place=<id>`. The Map tab starts reading that param in i3,
+  in an effect keyed on the param, per the vet MED. Until then it lands on the Map tab with no
+  pin selected.
+- **Not-found copy** ("This place is no longer in your library.") was defaulted, because the
+  design names the state but not its words. The loading and error states copy the Places tab.
+- **An id without a point** returns `null`, so there is no Go block. Apple and Waze have nothing
+  to navigate to, and the row is three equal buttons or none. This edge case is rare: Google
+  saves normally carry coordinates.
+- **Trip link.** If the trips list has not loaded, or the trip is not in it, the link reads
+  "<tripName> →".
+- **Area line** is chosen as `area.name ?? areaLabel ?? region`.
+- **Door locality** is `save.region`, per the `DrillInput` doc.
+
+## For qa / the walk
+- The Go deep links need a render check (vet FLAG): Google's `destination_place_id` + name, and
+  whether Apple and Waze honour `q=`. `Linking.openURL` hand-off was not exercised on a device
+  here.
+- The keyed G line, Call and Website need a real Places key. With no key the screen should look
+  like frame 2: no G line, and "On the map" alone in the second row.
+- No entry point pushes `/place/[id]` yet (that is i3). To walk it, open `/place/<saveId>`
+  directly, for example with `npx uri-scheme open <scheme>://place/<id>` or an Expo Router link.
+
+## Checks run
+- `pnpm turbo run lint typecheck test` → `Tasks: 10 successful, 10 total`. Core reported
+  `Tests 1628 passed (1628)`, ui `Tests 56 passed (56)` and web `Tests 598 passed (598)`.
+- `apps/mobile`: `npx tsc --noEmit` exited 0 (also part of the turbo typecheck).
+- Not run: no simulator walk. The phone render is the walk's.

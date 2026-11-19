@@ -25,13 +25,13 @@ import {
   queuedToast,
   saveRowLine,
   shelfCounts,
-  suggestionStrip,
   tripCard,
   tripCardLines,
 } from "@rv-trip/core";
 import { API_URL, api } from "../../src/api";
 import { publishPlacesShelf, useCaptureState } from "../../src/capture";
-import { patchSave, useSaves, useTripTrees } from "../../src/store";
+import { Suggestion } from "../../src/places";
+import { useSaves, useTripTrees } from "../../src/store";
 import { C, F, R } from "../../src/theme";
 import { Button, CategoryTile, Centered, FilterChip, Kicker, Muted, Stars, Toast } from "../../src/ui";
 
@@ -473,38 +473,6 @@ function useResolvedName(at: LatLng | null): string | null {
   return name;
 }
 
-/** The Q3 A strip: "Did you mean El Chandelier?". Tap upgrades; Dismiss clears. */
-function Suggestion({ save }: { save: SavedPlace }) {
-  const copy = suggestionStrip(save.suggestedPlace!);
-  return (
-    <Pressable
-      onPress={() => void patchSave(save.id, { upgradeToSuggested: true }).catch(() => {})}
-      accessibilityRole="button"
-      accessibilityLabel={copy.title}
-      style={styles.suggest}
-    >
-      <Text style={styles.suggestGlyph}>✦</Text>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.suggestTitle} numberOfLines={1}>
-          {copy.title}
-        </Text>
-        {copy.sub ? (
-          <Text style={styles.suggestSub} numberOfLines={1}>
-            {copy.sub}
-          </Text>
-        ) : null}
-      </View>
-      <Pressable
-        onPress={() => void patchSave(save.id, { suggestedPlace: null }).catch(() => {})}
-        accessibilityRole="button"
-        hitSlop={10}
-      >
-        <Text style={styles.dismiss}>{copy.dismiss}</Text>
-      </Pressable>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: C.surfaceAlt },
   nav: {
@@ -629,23 +597,6 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0 },
   rowName: { fontSize: 13, fontWeight: "700", color: C.ink, lineHeight: 16 },
   rowLine: { fontFamily: F.mono, fontSize: 10, color: C.inkFaded },
-  // .suggest
-  suggest: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: C.info,
-    backgroundColor: C.infoSoft,
-    borderRadius: R.card,
-    paddingVertical: 7,
-    paddingHorizontal: 9,
-  },
-  // rv-info-ink resolves to rv-info in the night palette the phone mirrors.
-  suggestGlyph: { color: C.info, fontSize: 13 },
-  suggestTitle: { fontSize: 12, fontWeight: "700", color: C.ink },
-  suggestSub: { fontSize: 10.5, color: C.inkMuted },
-  dismiss: { fontFamily: F.mono, fontSize: 10, color: C.inkFaded },
   // .outside
   outside: {
     fontSize: 11.5,
