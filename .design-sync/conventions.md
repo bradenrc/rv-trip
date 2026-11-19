@@ -15,11 +15,22 @@ or new class names — the palette below is the whole vocabulary.
 **Colors** (as `bg-*` / `text-*` / `border-*`):
 - Surfaces: `rv-surface` (white cards), `rv-surface-alt` (page bg), `rv-navy` (dark chrome/headers).
 - Ink: `rv-ink` (body), `rv-ink-muted` (secondary), `rv-ink-faded` (meta), `rv-ink-subtle` (placeholder only).
-- Green (accents/CTAs/"stay", and — since docs/design/43 §4 — *verified*: a claim the
-  app has actually checked, such as "Checked against the RV-safe corridor" under a
-  Navigate button, or the chosen row in a menu): `rv-green`, `rv-green-cta`
-  (text-bearing green), `rv-green-soft` (tint), `rv-green-ink` (text on tint). Green is
-  never "success" in the generic sense — only a statement we can prove.
+- Accent (sky — every CTA and link, and the selected pin or option card; #19): the
+  primary button is
+  `bg-rv-accent-deep` with `text-rv-accent-ink`, ALWAYS as a pair — it is the one fill
+  that passes AA in both the light and dark halves, and the token test rejects either
+  class without the other. `rv-accent` is accent text and line: links, mono kickers, the
+  selected map pin or option card, and our own `<Stars>`. `rv-accent-soft` is its tint (a
+  selected option card, a link chip). `rv-accent-bright` is defined but has no call site yet; do not reach for it.
+- Green ("stay", the planning layer's marks, and — since docs/design/43 §4 — *verified*: a
+  claim the app has actually checked, such as "Checked against the RV-safe corridor"
+  under a Navigate button, or the chosen row in a menu): `rv-green`, `rv-green-soft`
+  (tint), `rv-green-ink` (text on tint), `rv-green-cta` (stay text only). Green is NOT
+  the CTA color: `bg-rv-green-cta` fails the token test, and a button that needs a fill
+  takes the accent pair above. A quiet green pill (`border-rv-green bg-rv-green-soft
+  text-rv-green`) and the numbered planning disc (`bg-rv-green` under `text-rv-navy`,
+  the only place navy is ink) are the shipped green shapes. Green is never "success" in
+  the generic sense — only a statement we can prove.
 - Borders: `rv-border`, `rv-border-soft` (hairlines), `rv-border-hi`.
 - Status: `rv-warning` / `rv-warning-soft` (amber — attention, floating); `rv-info-ink` / `rv-info-soft` (blue — activities).
 - "Do it again?" (#113 · Q9 A): **Again** is a personal opinion, not a verified claim —
