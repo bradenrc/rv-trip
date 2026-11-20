@@ -153,6 +153,22 @@ second supported loop, and **no screen offers a Google Maps fallback in its
 place**. (Navigate still opens Google Maps, as it always has; that is a drive's
 turn-by-turn hand-off, not a map fallback.)
 
+**Google, the second engine (#200).** Choosing Google in the engine pill or on
+the You tab draws the same discs and arcs on a Google basemap through
+`react-native-maps`. That is a native module, so a new dev-client build is needed.
+The Maps SDK keys are build-time only. `app.config.ts` reads them, and they are
+never committed:
+
+```
+GOOGLE_MAPS_IOS_KEY=...       # EAS env var, or apps/mobile/.env.local
+GOOGLE_MAPS_ANDROID_KEY=...   # restrict each to the app's bundle id / package
+```
+
+A binary built without this platform's key, or without the module, has no
+Google map. `loadGoogle()` returns null and a "google" choice draws Mapbox,
+with the amber "This version of the app has no Google map" note under the pill.
+Walks and CI see only that state.
+
 Two things to know about what you see:
 
 - **Night is the stock `dark-v11` basemap on the phone.** The web repaints night

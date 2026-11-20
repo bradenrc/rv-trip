@@ -14,6 +14,8 @@ import {
   mapEngineFallbackLine,
   webGoogleAvailability,
   GOOGLE_WEB_BASEMAP,
+  phoneGoogleAvailability,
+  GOOGLE_PHONE_BASEMAP,
   type GoogleAvailability,
   type UserPrefs,
 } from "./prefs";
@@ -315,6 +317,46 @@ describe("#199 · GOOGLE_WEB_BASEMAP — style mode → Google map type", () => 
       day: { mapTypeId: "roadmap", colorScheme: "LIGHT" },
       night: { mapTypeId: "roadmap", colorScheme: "DARK" },
       sat: { mapTypeId: "hybrid", colorScheme: "LIGHT" },
+    });
+  });
+});
+
+describe("#200 · phoneGoogleAvailability — the native module, else no-module", () => {
+  it("is ok when loadGoogle() resolved the native module", () => {
+    expect(phoneGoogleAvailability(true)).toEqual({ ok: true });
+  });
+
+  it('is "no-module" when it did not', () => {
+    expect(phoneGoogleAvailability(false)).toEqual({ ok: false, reason: "no-module" });
+  });
+
+  it("an absent native module resolves a google choice to Mapbox with the no-module note", () => {
+    expect(resolveMapEngine("google", phoneGoogleAvailability(false))).toEqual({
+      engine: "mapbox",
+      fallback: "no-module",
+    });
+    expect(resolveMapEngine("google", phoneGoogleAvailability(true))).toEqual({
+      engine: "google",
+      fallback: null,
+    });
+    // Mapbox, or never chosen, never shows a note whatever the build has.
+    expect(resolveMapEngine("mapbox", phoneGoogleAvailability(false))).toEqual({
+      engine: "mapbox",
+      fallback: null,
+    });
+    expect(resolveMapEngine(null, phoneGoogleAvailability(false))).toEqual({
+      engine: "mapbox",
+      fallback: null,
+    });
+  });
+});
+
+describe("#200 · GOOGLE_PHONE_BASEMAP — style mode → react-native-maps basemap", () => {
+  it("day → standard, night → standard + dark, sat → hybrid", () => {
+    expect(GOOGLE_PHONE_BASEMAP).toEqual({
+      day: { mapType: "standard", dark: false },
+      night: { mapType: "standard", dark: true },
+      sat: { mapType: "hybrid", dark: false },
     });
   });
 });

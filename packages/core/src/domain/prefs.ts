@@ -285,3 +285,33 @@ export const GOOGLE_WEB_BASEMAP: Record<StyleMode, GoogleWebBasemap> = {
   night: { mapTypeId: "roadmap", colorScheme: "DARK" },
   sat: { mapTypeId: "hybrid", colorScheme: "LIGHT" },
 };
+
+// ── #200 · the phone Google engine (docs/design/202 §3 "The seam", the mode table) ──
+
+/**
+ * Whether the PHONE can draw Google: only when `loadGoogle()` resolved the
+ * native `react-native-maps` module (apps/mobile/src/map.tsx). A binary built
+ * without it is the "no-module" case, so a choice made on the web is kept and
+ * Mapbox draws.
+ */
+export function phoneGoogleAvailability(moduleLoaded: boolean): GoogleAvailability {
+  return moduleLoaded ? { ok: true } : { ok: false, reason: "no-module" };
+}
+
+/** A react-native-maps Google basemap. `dark` is the night look: iOS sets
+ * `userInterfaceStyle="dark"`, Android a dark `customMapStyle`. */
+export interface GooglePhoneBasemap {
+  mapType: "standard" | "hybrid";
+  dark: boolean;
+}
+
+/**
+ * Style mode → Google basemap on the phone (the wireframe's mode table): day is
+ * standard, night is standard in the dark look, sat is hybrid. Our own marks
+ * keep `MAP_PALETTE[mode]` on either engine.
+ */
+export const GOOGLE_PHONE_BASEMAP: Record<StyleMode, GooglePhoneBasemap> = {
+  day: { mapType: "standard", dark: false },
+  night: { mapType: "standard", dark: true },
+  sat: { mapType: "hybrid", dark: false },
+};

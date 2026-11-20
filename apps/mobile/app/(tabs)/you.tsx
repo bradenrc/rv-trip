@@ -18,9 +18,9 @@ import { clerkEnabled } from "../../src/auth";
 import { Label, failed } from "../../src/hops";
 import { PlaceSearchField, type Picked } from "../../src/itinerary";
 import {
-  PHONE_GOOGLE_AVAILABILITY,
   STYLE_SEGMENTS,
   engineSegments,
+  googleAvailability,
   useMapEngine,
   useStyleMode,
 } from "../../src/map";
@@ -171,7 +171,7 @@ function HomeBaseRow() {
 function MapsCard() {
   const [mode, setMode] = useStyleMode();
   const [engine, setEngine] = useMapEngine();
-  const fallback = resolveMapEngine(engine, PHONE_GOOGLE_AVAILABILITY).fallback;
+  const fallback = resolveMapEngine(engine, googleAvailability()).fallback;
   return (
     <>
       <Kicker color={C.accent}>Maps</Kicker>

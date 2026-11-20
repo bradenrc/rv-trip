@@ -61,6 +61,7 @@ const dsPlaces = read("packages/ui/src/Places.tsx");
 const webMapView = read("apps/web/src/components/map/MapView.tsx");
 const webPins = read("apps/web/src/components/map/pins.ts");
 const webMapMount = read("apps/web/src/components/map/MapMount.tsx");
+const appConfigTs = read("apps/mobile/app.config.ts");
 
 /** Source with `//` and `/* … *\/` comments stripped — a claim about code must
  * not be satisfied by a comment that merely mentions the thing. */
@@ -283,7 +284,7 @@ describe("mapAvailable() degrades, and nothing routes to Google Maps instead", (
       expect(src).not.toMatch(/maps\.google|google\.com\/maps|comgooglemaps|Linking/);
     }
     for (const src of [destinationCode, tripCode]) expect(src).not.toMatch(/google/i);
-    expect(flat(mapCode)).toContain("resolveMapEngine(engine, PHONE_GOOGLE_AVAILABILITY)");
+    expect(flat(mapCode)).toContain("resolveMapEngine(engine, googleAvailability())");
     // The phone's hand-off to the navigation apps is a drive's Navigate pills
     // (#180), which are turn-by-turn, not a map fallback: they live in
     // src/navigate.tsx, reached through `<NavigateLinks`, and no map surface
@@ -463,10 +464,12 @@ describe("#198 · the map engine and the account-synced map prefs on the phone",
     expect(webMapMount).toContain('export const ENGINE_PREF_KEY = "rv-map-engine"');
   });
 
-  it('reports Google as "not-built" until the native renderer lands (#200)', () => {
+  it('#200 · reports Google through core\'s phoneGoogleAvailability — never "not-built" now', () => {
     expect(flat(mapCode)).toContain(
-      'export const PHONE_GOOGLE_AVAILABILITY: GoogleAvailability = { ok: false, reason: "not-built" };',
+      "export function googleAvailability(): GoogleAvailability { return phoneGoogleAvailability(loadGoogle() !== null); }",
     );
+    expect(mapCode).not.toContain('"not-built"');
+    expect(mapCode).not.toContain("PHONE_GOOGLE_AVAILABILITY");
   });
 
   it("q3 B · style AND engine both go through usePhonePref: device first, then /api/prefs", () => {
@@ -510,5 +513,81 @@ describe("#198 · the map engine and the account-synced map prefs on the phone",
     expect(uiCode).toContain("struck?: boolean;");
     expect(flat(uiCode)).toContain("o.struck && styles.segmentStruck");
     expect(dsPlaces).toContain("struck?: boolean;");
+  });
+});
+
+describe("#200 · the phone Google engine behind TripMap and PinMap", () => {
+  it("declares react-native-maps at the version Expo 57 bundles", () => {
+    expect(pkg.dependencies["react-native-maps"]).toBe("1.27.2");
+  });
+
+  it("loadGoogle() is a lazy require inside a try, beside loadMapbox()", () => {
+    expect(flat(mapCode)).toContain('const mod = require("react-native-maps") as GoogleModule');
+    const guard = mapCode.slice(mapCode.indexOf("export function loadGoogle"));
+    const tryAt = guard.indexOf("try {");
+    const requireAt = guard.indexOf('require("react-native-maps")');
+    expect(tryAt).toBeGreaterThan(-1);
+    expect(requireAt).toBeGreaterThan(tryAt);
+    expect(mapCode.indexOf("function loadMapbox")).toBeLessThan(mapCode.indexOf("export function loadGoogle"));
+    // Type-only, so the native module never reaches the bundle eagerly.
+    expect(mapCode).not.toMatch(/^import (?!type )[^;]*from "react-native-maps"/m);
+    expect(map).toMatch(/^import type .*from "react-native-maps";$/m);
+    // A build with no Google key for this platform has no Google map either:
+    // the iOS Google pod is only linked when the key is set.
+    expect(guard.indexOf("googleKeyConfigured()")).toBeLessThan(requireAt);
+  });
+
+  it("TripMap and PinMap each have a PROVIDER_GOOGLE render path, picked by resolveMapEngine", () => {
+    const f = flat(mapCode);
+    expect(f.match(/provider=\{maps\.PROVIDER_GOOGLE\}/g)).toHaveLength(2);
+    expect(f).toContain('resolved.engine === "google"');
+    expect(f).toContain('const maps = engine === "google" ? loadGoogle() : null;');
+    // Google needs no Mapbox token: the Mapbox guard only runs on the Mapbox path.
+    expect(f.indexOf('resolved.engine === "google"')).toBeLessThan(
+      f.indexOf('if (!mapbox) return <MapFrame state="unavailable" height={height} />'),
+    );
+  });
+
+  it("maps the style mode through core's GOOGLE_PHONE_BASEMAP: iOS userInterfaceStyle, Android customMapStyle", () => {
+    const f = flat(mapCode);
+    expect(f).toContain("GOOGLE_PHONE_BASEMAP[mode]");
+    expect(f).toContain("mapType={basemap.mapType}");
+    expect(f).toContain('userInterfaceStyle={basemap.dark ? "dark" : "light"}');
+    expect(f).toContain('customMapStyle={Platform.OS === "android" && basemap.dark ? ANDROID_NIGHT_STYLE : undefined}');
+    // The Android night style is built from rv-* tokens, never raw hex.
+    const style = mapCode.slice(mapCode.indexOf("const ANDROID_NIGHT_STYLE"));
+    expect(style.slice(0, style.indexOf("];"))).not.toMatch(/#[0-9a-f]{3,8}/i);
+  });
+
+  it("draws the same grammar: cased solid corridor, dashed estimate, the join, the same discs", () => {
+    const f = flat(mapCode);
+    expect(f).toContain("strokeWidth={CORRIDOR_WIDTH}");
+    expect(f).toContain("strokeWidth={ARC_CASING_WIDTH}");
+    expect(f).toContain("lineDashPattern={dash}");
+    expect(f).toContain("ESTIMATE_DASH.map((d) => d * palette.arcWidth)");
+    // An estimate keeps the casing only where its mode cases it (sat).
+    expect(f).toContain('arc.source === "here" || palette.arcCasing');
+    expect(f.match(/<DestinationDisc pin=\{pin\} palette=\{palette\} selected=\{pin\.id === selectedId\} \/>/g)).toHaveLength(2);
+    // The camera fits the same box at the same padding.
+    expect(f).toContain("fitToCoordinates(");
+    expect(f).toContain("edgePadding: { top: FIT_PADDING, right: FIT_PADDING, bottom: FIT_PADDING, left: FIT_PADDING }");
+  });
+
+  it("hands nothing off to Google Maps: the Android map toolbar is off", () => {
+    expect(flat(mapCode)).toContain("toolbarEnabled={false}");
+  });
+
+  it("puts the iOS and Android key slots in the app config, read from the environment", () => {
+    const f = flat(appConfigTs);
+    expect(f).toContain("process.env.GOOGLE_MAPS_IOS_KEY");
+    expect(f).toContain("process.env.GOOGLE_MAPS_ANDROID_KEY");
+    expect(f).toContain('"react-native-maps", { iosGoogleMapsApiKey: iosKey, androidGoogleMapsApiKey: androidKey }');
+    // No real key in the public tree.
+    expect(appConfigTs).not.toMatch(/AIza[0-9A-Za-z_-]/);
+    expect(appJson).not.toMatch(/AIza[0-9A-Za-z_-]/);
+    // The runtime learns only whether a key was set, never the key.
+    expect(f).toContain("googleMaps: { ios: iosKey !== undefined, android: androidKey !== undefined }");
+    expect(readme).toContain("GOOGLE_MAPS_IOS_KEY");
+    expect(readme).toContain("GOOGLE_MAPS_ANDROID_KEY");
   });
 });
