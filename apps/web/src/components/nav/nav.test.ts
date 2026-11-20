@@ -83,7 +83,7 @@ describe("the bottom bar: the phone's five", () => {
   it("renders the href-less Capture tab as a <button> that opens the capture sheet (#176 i3)", () => {
     const bar = navFlat.slice(navFlat.indexOf("TABS.map("), navFlat.lastIndexOf("</nav>"));
     expect(bar).toMatch(
-      /href === null \? \( <button key=\{label\} type="button" onClick=\{\(\) => setCapturing\(true\)\}/,
+      /href === null \? \( <button key=\{label\} type="button" onClick=\{open\}/,
     );
     expect(bar).toContain("<Link key={label} href={href}");
   });
@@ -131,7 +131,7 @@ describe("the masthead's right side", () => {
 
   it("makes + Capture a <button> (not a Link to /places) in the CTA green (#176 i3)", () => {
     expect(right).toMatch(
-      /<button type="button" onClick=\{\(\) => setCapturing\(true\)\} className="[^"]*\bbg-rv-green\b[^"]*\btext-rv-navy\b[^"]*"> \+ Capture <\/button>/,
+      /<button type="button" onClick=\{open\} className="[^"]*\bbg-rv-green\b[^"]*\btext-rv-navy\b[^"]*"> \+ Capture <\/button>/,
     );
     expect(right).not.toMatch(/<Link href="\/places"[^>]*> \+ Capture/);
     const cls = right.match(/className="([^"]*)"> \+ Capture <\/button>/)![1]!;
@@ -144,7 +144,7 @@ describe("the capture sheet's mount (#176 i3 · vet MED)", () => {
     expect(navFlat.match(/<CaptureSheet /g)).toHaveLength(1);
     const at = navFlat.indexOf("<CaptureSheet ");
     expect(at).toBeGreaterThan(navFlat.lastIndexOf("</nav>"));
-    expect(navFlat).toContain("{capturing ? <CaptureSheet onClose={() => setCapturing(false)} /> : null}");
+    expect(navFlat).toContain("{capturing ? <CaptureSheet googlePlaceId={pickedId} onClose={close} /> : null}");
   });
 });
 

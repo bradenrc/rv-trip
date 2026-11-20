@@ -544,6 +544,20 @@ export interface TripMapProps {
   /** #186 i6 · a tap on the map itself, off every pin (the Map tab clears its
    * card on it). */
   onPressMap?: () => void;
+  /**
+   * #201 · a business on the Google basemap was tapped (`onPoiClick`): its
+   * Google place id, name and point. Present ⇒ business taps are live on the
+   * Google engine; Mapbox's basemap carries no place id, so it never fires.
+   */
+  onPoi?: (poi: TappedPoi) => void;
+}
+
+/** #201 · what react-native-maps' `onPoiClick` tells us about a tap. */
+export interface TappedPoi {
+  googlePlaceId: string;
+  name: string;
+  lat: number;
+  lng: number;
 }
 
 /**
@@ -565,6 +579,7 @@ export function TripMap({
   selectedId = null,
   onSelect,
   onPressMap,
+  onPoi,
 }: TripMapProps) {
   const palette = MAP_PALETTE[mode];
   // #198 · the account's engine and what this build draws. #200 · a binary
@@ -624,6 +639,7 @@ export function TripMap({
             selectedId={selectedId}
             onSelect={onSelect}
             onPressMap={onPressMap}
+            onPoi={onPoi}
           />
           {pills}
         </View>
@@ -768,6 +784,7 @@ function GoogleTripCanvas({
   selectedId,
   onSelect,
   onPressMap,
+  onPoi,
 }: {
   maps: GoogleModule;
   mode: StyleMode;
@@ -780,6 +797,7 @@ function GoogleTripCanvas({
   selectedId: string | null;
   onSelect?: (id: string) => void;
   onPressMap?: () => void;
+  onPoi?: (poi: TappedPoi) => void;
 }) {
   const palette = MAP_PALETTE[mode];
   const basemap = GOOGLE_PHONE_BASEMAP[mode];
@@ -845,6 +863,17 @@ function GoogleTripCanvas({
         onPressMap
           ? (e) => {
               if (e.nativeEvent.action !== "marker-press") onPressMap();
+            }
+          : undefined
+      }
+      // #201 · a basemap business tap raises the Map tab's card.
+      onPoiClick={
+        onPoi
+          ? (e) => {
+              const { placeId, name, coordinate } = e.nativeEvent;
+              if (placeId) {
+                onPoi({ googlePlaceId: placeId, name, lat: coordinate.latitude, lng: coordinate.longitude });
+              }
             }
           : undefined
       }

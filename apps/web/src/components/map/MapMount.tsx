@@ -1,20 +1,28 @@
 "use client";
 
+import { useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { Moon, Satellite, Sun } from "lucide-react";
 import {
+  BUSINESS_CARD_COPY,
   DEFAULT_MAP_ENGINE,
   MAP_ENGINES,
   MAP_ENGINE_FALLBACK_COPY,
   isMapEngine,
   resolveMapEngine,
+  businessCard,
   webGoogleAvailability,
+  type BusinessCard,
   type GoogleAvailability,
   type GoogleFallbackReason,
   type MapEngine,
+  type PlaceDetails,
+  type SavedPlace,
 } from "@rv-trip/core";
-import { MapFrame, SegmentedControl, type SegmentOption } from "@rv-trip/ui";
+import { CategoryTile, MapFrame, SegmentedControl, type SegmentOption } from "@rv-trip/ui";
 import { useStringPref } from "@/lib/pref";
+import { tripApi } from "@/lib/trip-api";
 import { DEFAULT_STYLE_MODE, isStyleMode, type StyleMode } from "./palette";
 import type { DriveArc, MapPin } from "./pins";
 
@@ -125,6 +133,74 @@ export interface MapMountProps {
   /** The over-canvas style pill. Off for the destination sheet's mini-map, which
    * follows the preference but is too small to carry a control. */
   showStyleControl?: boolean;
+  /** #201 · the owner's library. Present ⇒ on the Google engine a basemap
+   * business can be tapped, and its card offers Save, or Open → when the
+   * library already holds it (core's `businessCard`). Absent (the destination
+   * mini-map) ⇒ no business taps. */
+  saves?: readonly SavedPlace[];
+  /** #201 · where the business card sits. Defaults to the shipped pin-card
+   * slot (`PinOpenCard`'s corner), so it covers a pin card while it is up. */
+  businessCardClassName?: string;
+}
+
+/** The shipped pin-card slot (PlacesLibrary / JournalMap's `PinOpenCard`). */
+const PIN_CARD_SLOT = "absolute bottom-2 left-2 right-2 z-[4]";
+
+/** A tapped business: its id, and Google's answer once details lands
+ * (`undefined` while it is in flight, `null` when it named nothing). */
+interface TappedState {
+  googlePlaceId: string;
+  details: PlaceDetails | null | undefined;
+}
+
+/**
+ * #201 · the card a tapped business raises (docs/design/202 §1 `.mcard`): the
+ * tile, the name, the town with a "Google place" tag, and Save — or, already
+ * in the library, "· saved" and Open → its Place view.
+ */
+function BusinessCardView({
+  card,
+  onSave,
+  className,
+}: {
+  card: BusinessCard;
+  onSave: () => void;
+  className: string;
+}) {
+  const saved = card.action.kind === "open";
+  return (
+    <div
+      className={`flex items-center gap-2.5 rounded-rv-card border border-rv-border-hi bg-rv-surface px-[11px] py-[9px] shadow-rv-xl ${className}`}
+    >
+      <CategoryTile type={card.type} size="sm" />
+      <div className="min-w-0 flex-1">
+        <b className="block truncate text-[13px] font-bold text-rv-ink">{card.name}</b>
+        <span className="block truncate font-mono text-[10px] text-rv-ink-faded">
+          {card.area}
+          <span className="ml-1 rounded-rv-pill border border-rv-border-hi px-1.5 font-mono text-[9px] text-rv-ink-faded">
+            {BUSINESS_CARD_COPY.tag}
+          </span>
+          {saved && ` · ${BUSINESS_CARD_COPY.saved}`}
+        </span>
+      </div>
+      {card.action.kind === "open" ? (
+        <Link
+          href={`/places/${card.action.save.id}`}
+          className="whitespace-nowrap text-[12px] font-bold text-rv-accent no-underline"
+        >
+          {BUSINESS_CARD_COPY.open}
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={onSave}
+          className="inline-block cursor-pointer rounded-rv-md border-0 bg-rv-accent-deep px-[13px] py-[7px] text-[12.5px] font-bold text-rv-accent-ink"
+        >
+          {BUSINESS_CARD_COPY.save}
+        </button>
+      )}
+    </div>
+  );
 }
 
 export function MapMount({
@@ -137,6 +213,8 @@ export function MapMount({
   height,
   unmappedCount,
   showStyleControl = true,
+  saves,
+  businessCardClassName = PIN_CARD_SLOT,
 }: MapMountProps) {
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   // null until the client has read the preference — one render, covered by the
@@ -151,6 +229,47 @@ export function MapMount({
   // #199 · Google needs no Mapbox token, so a Google reader still gets a map
   // on a build without one; Mapbox without a token is the "unavailable" frame.
   const drawable = resolved.engine === "google" || Boolean(token);
+
+  // #201 · the tapped business, named by one details call per tap. A later
+  // tap outruns an earlier answer: only the latest id's answer lands.
+  const [business, setBusiness] = useState<TappedState | null>(null);
+  const latest = useRef<string | null>(null);
+  const tapBusiness = (googlePlaceId: string | null) => {
+    latest.current = googlePlaceId;
+    if (googlePlaceId === null) {
+      setBusiness(null);
+      return;
+    }
+    setBusiness({ googlePlaceId, details: undefined });
+    void tripApi.placeDetails(googlePlaceId).then((env) => {
+      if (latest.current !== googlePlaceId) return;
+      setBusiness({ googlePlaceId, details: env.results[0] ?? null });
+    });
+  };
+  const card =
+    business && saves
+      ? businessCard(
+          {
+            googlePlaceId: business.googlePlaceId,
+            name: business.details?.name ?? null,
+            lat: business.details?.location?.lat ?? null,
+            lng: business.details?.location?.lng ?? null,
+            address: business.details?.address ?? null,
+            primaryType: business.details?.primaryType ?? null,
+          },
+          saves,
+        )
+      : null;
+  // One card on screen at a time: a pin tap closes the business card, and so
+  // does switching engine (Mapbox's basemap carries no Google place id).
+  const selectPin = (id: string) => { setBusiness(null); onSelect?.(id); };
+  const chooseEngine = (e: MapEngine) => { setBusiness(null); setEngine(e); };
+  // Save opens the shipped capture sheet at the pick (Nav listens).
+  const saveBusiness = () => {
+    if (!card) return;
+    window.dispatchEvent(new CustomEvent("rv:capture", { detail: { googlePlaceId: card.googlePlaceId } }));
+    setBusiness(null);
+  };
 
   return (
     <div className={height ? undefined : "h-full min-h-[150px]"} style={height ? { height } : undefined}>
@@ -170,9 +289,10 @@ export function MapMount({
               arcs={arcs}
               join={join}
               selectedId={selectedId}
-              onSelect={onSelect}
+              onSelect={onSelect ? selectPin : undefined}
               showLabels={showLabels}
               mode={mode}
+              onBusiness={saves ? tapBusiness : undefined}
             />
           ) : (
             <LazyMapView
@@ -201,11 +321,14 @@ export function MapMount({
                   mono
                   value={engine ?? DEFAULT_MAP_ENGINE}
                   options={engineSegments(resolved.fallback)}
-                  onChange={setEngine}
+                  onChange={chooseEngine}
                 />
               </div>
               {resolved.fallback && <EngineFallbackNote reason={resolved.fallback} />}
             </div>
+          )}
+          {resolved.engine === "google" && card && (
+            <BusinessCardView card={card} onSave={saveBusiness} className={businessCardClassName} />
           )}
         </div>
       )}

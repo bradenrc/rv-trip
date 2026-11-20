@@ -1,10 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import type { LibraryFilter, LibraryTrip } from "@rv-trip/core";
-import { libraryMap, libraryTrips, localIsoDate } from "@rv-trip/core";
-import { MapFrame, TripMap, useStyleMode, type TripMapEntry, type TripMapPin } from "../../src/map";
+import type { LibraryFilter, LibraryTrip, PlaceDetails } from "@rv-trip/core";
+import {
+  BUSINESS_CARD_COPY,
+  businessCard,
+  libraryMap,
+  libraryTrips,
+  localIsoDate,
+  resolveMapEngine,
+} from "@rv-trip/core";
+import { api } from "../../src/api";
+import {
+  MapFrame,
+  TripMap,
+  googleAvailability,
+  useMapEngine,
+  useStyleMode,
+  type TappedPoi,
+  type TripMapEntry,
+  type TripMapPin,
+} from "../../src/map";
 import { useSaves, useTripTrees } from "../../src/store";
 import { C, F, R } from "../../src/theme";
 import { CategoryTile, Stars } from "../../src/ui";
@@ -41,6 +58,12 @@ function destLine(trip: string, ordinal: number | null, been: boolean): string {
  * search param; the tab is usually already mounted, so the param is read in an
  * effect keyed on it (not on mount), selects that pin under All, and is then
  * cleared. A selected save that leaves the library (deleted) clears the card.
+ *
+ * #201 · on the Google engine a business on the basemap is tappable
+ * (`onPoiClick`): it raises the same card, with Save (→ /capture at the pick)
+ * or, when the library already holds it, Open → its Place screen — core's
+ * `businessCard`. One card at a time: a pin tap or a map tap closes it, and
+ * it is never drawn while Mapbox draws.
  */
 export default function MapTab() {
   const router = useRouter();
@@ -48,6 +71,12 @@ export default function MapTab() {
   const { trees, reload: reloadTrees } = useTripTrees();
   const { saves, reload: reloadSaves } = useSaves();
   const [mode] = useStyleMode();
+  const [engine] = useMapEngine();
+  const onGoogle = resolveMapEngine(engine, googleAvailability()).engine === "google";
+  // #201 · the tapped business, and Google's details once they land (the town
+  // for the card's line). `undefined` while in flight, null when none came.
+  const [poi, setPoi] = useState<{ tap: TappedPoi; details: PlaceDetails | null | undefined } | null>(null);
+  const latestPoi = useRef<string | null>(null);
   const [picked, setPicked] = useState<LibraryFilter>({ kind: "all" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -110,7 +139,36 @@ export default function MapTab() {
     setPicked(f);
     setSelectedId(null);
   };
-  const select = (id: string) => setSelectedId((cur) => (cur === id ? null : id));
+  const select = (id: string) => {
+    setPoi(null);
+    setSelectedId((cur) => (cur === id ? null : id));
+  };
+  const tapPoi = (tap: TappedPoi) => {
+    setSelectedId(null);
+    latestPoi.current = tap.googlePlaceId;
+    setPoi({ tap, details: undefined });
+    api.places
+      .details(tap.googlePlaceId)
+      .then((env) => env.results[0] ?? null)
+      .catch(() => null)
+      .then((details) => {
+        if (latestPoi.current === tap.googlePlaceId) setPoi({ tap, details });
+      });
+  };
+  const business =
+    poi && onGoogle
+      ? businessCard(
+          {
+            googlePlaceId: poi.tap.googlePlaceId,
+            name: poi.tap.name,
+            lat: poi.tap.lat,
+            lng: poi.tap.lng,
+            address: poi.details?.address ?? null,
+            primaryType: poi.details?.primaryType ?? null,
+          },
+          saves ?? [],
+        )
+      : null;
 
   const loaded = trees !== null && saves !== null && mode !== null;
 
@@ -130,7 +188,11 @@ export default function MapTab() {
             showLabels={false}
             selectedId={selectedId}
             onSelect={select}
-            onPressMap={() => setSelectedId(null)}
+            onPressMap={() => {
+              setSelectedId(null);
+              setPoi(null);
+            }}
+            onPoi={tapPoi}
           />
         ) : (
           <MapFrame state="loading" />
@@ -147,7 +209,39 @@ export default function MapTab() {
           />
         </View>
 
-        {dest ? (
+        {business ? (
+          <Pressable
+            onPress={() => {
+              setPoi(null);
+              if (business.action.kind === "open") {
+                router.push({ pathname: "/place/[id]", params: { id: business.action.save.id, from: "Map" } });
+              } else {
+                router.push({ pathname: "/capture", params: { googlePlaceId: business.googlePlaceId } });
+              }
+            }}
+            accessibilityRole="button"
+            style={styles.card}
+          >
+            <CategoryTile type={business.type} size={26} />
+            <View style={styles.cardText}>
+              <Text style={styles.cardName} numberOfLines={1}>
+                {business.name}
+              </Text>
+              <Text style={styles.cardLine} numberOfLines={1}>
+                {business.area ? `${business.area} ` : ""}
+                <Text style={styles.gid}>{` ${BUSINESS_CARD_COPY.tag} `}</Text>
+                {business.action.kind === "open" ? ` · ${BUSINESS_CARD_COPY.saved}` : ""}
+              </Text>
+            </View>
+            {business.action.kind === "open" ? (
+              <Text style={styles.cardOpen}>{BUSINESS_CARD_COPY.open}</Text>
+            ) : (
+              <View style={styles.cardSave}>
+                <Text style={styles.cardSaveText}>{BUSINESS_CARD_COPY.save}</Text>
+              </View>
+            )}
+          </Pressable>
+        ) : dest ? (
           <Pressable
             onPress={() => router.push(`/trips/${dest.tripId}`)}
             accessibilityRole="button"
@@ -288,6 +382,13 @@ const styles = StyleSheet.create({
   cardGo: { fontSize: 11, fontWeight: "700", color: C.greenInk },
   // docs/design/197 `.mcard .go` — a save's Open →
   cardOpen: { fontSize: 11.5, fontWeight: "700", color: C.accent },
+  // #201 · docs/design/202 `.gid` — the "Google place" tag (mono, faded). A
+  // nested Text takes no border, so the tag is the faded mono run alone.
+  gid: { fontFamily: F.mono, fontSize: 9, color: C.inkFaded },
+  // docs/design/202 `.mcard .save`: accent-deep fill, accent-ink text. The
+  // phone mirrors the dark half, where --rv-accent-ink is slate-950 (C.navy).
+  cardSave: { backgroundColor: C.accentDeep, borderRadius: R.md, paddingVertical: 7, paddingHorizontal: 13 },
+  cardSaveText: { fontSize: 12.5, fontWeight: "700", color: C.navy },
   // .mhint
   hint: {
     position: "absolute",

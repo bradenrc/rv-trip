@@ -278,6 +278,10 @@ export function MapOverview({
               onSelect={setPickedId}
               height="560px"
               unmappedCount={unmappedVisible.length}
+              saves={places}
+              // #201 · docs/design/202 §1 web .mcard: bottom-right, 300px, clear
+              // of Google's attribution. /map's selected pin card is the rail's.
+              businessCardClassName="absolute bottom-[26px] right-3 z-[4] w-[300px] max-w-[calc(100%-24px)]"
             />
           </div>
 

@@ -34,10 +34,18 @@ import type { DriveArc } from "./pins";
  * when a map is created, so a day ↔ night switch builds a fresh map at the
  * camera the reader left; a switch to or from sat only changes the map type.
  *
- * Tapping a business on the basemap (#201) is not wired here yet.
+ * #201 · a surface that passes `onBusiness` can tap a business on the basemap:
+ * a map click carrying a Google `placeId` is handed up (and Google's own info
+ * window is suppressed with `e.stop()`); a click anywhere else hands up null,
+ * which closes the card. Without `onBusiness` (the destination mini-map)
+ * Google's default behaviour is left alone.
  */
 
-export type GoogleMapViewProps = Omit<MapViewProps, "token">;
+export type GoogleMapViewProps = Omit<MapViewProps, "token"> & {
+  /** #201 · a basemap business was tapped (its Google place id), or the map
+   * was clicked off every business (null). */
+  onBusiness?: (googlePlaceId: string | null) => void;
+};
 
 /** The corridor is drawn heavier than the estimate — the same value as
  * `MapView.tsx`'s `CORRIDOR_WIDTH`, pinned equal by map-engine.test.ts. */
@@ -69,6 +77,7 @@ export function GoogleMapView({
   showLabels = true,
   height,
   mode,
+  onBusiness,
 }: GoogleMapViewProps) {
   const palette = MAP_PALETTE[mode];
   const basemap = GOOGLE_WEB_BASEMAP[mode];
@@ -78,6 +87,12 @@ export function GoogleMapView({
   const [failed, setFailed] = useState(false);
   // The camera the reader left, carried across a day ↔ night rebuild.
   const camera = useRef<{ center: google.maps.LatLngLiteral; zoom: number } | null>(null);
+  // The latest handler, read by the map's one click listener (the map is not
+  // rebuilt when a parent re-renders with a new closure).
+  const onBusinessRef = useRef(onBusiness);
+  useEffect(() => {
+    onBusinessRef.current = onBusiness;
+  }, [onBusiness]);
 
   const placements = useMemo(() => {
     const input: SpiderPoint[] = pins.map((p) => ({
@@ -141,10 +156,22 @@ export function GoogleMapView({
       const z = m.getZoom();
       if (c && z !== undefined) camera.current = { center: c.toJSON(), zoom: z };
     });
+    // #201 · a basemap business tap. Only an IconMouseEvent carries `placeId`;
+    // `e.stop()` keeps Google's own info window shut — our card replaces it.
+    const click = m.addListener("click", (e: google.maps.MapMouseEvent | google.maps.IconMouseEvent) => {
+      if (!onBusinessRef.current) return;
+      if ("placeId" in e && e.placeId) {
+        e.stop();
+        onBusinessRef.current(e.placeId);
+        return;
+      }
+      onBusinessRef.current?.(null);
+    });
     if (!resume && bounds) fit(m, bounds);
     setMap(m);
     return () => {
       idle.remove();
+      click.remove();
       setMap(null);
     };
     // Rebuilt for the scheme only; the map type and the fit have their own effects.

@@ -409,3 +409,173 @@ The answers are unchanged: A,A,B,A,A,A,A.
     did in i1. A Google reader may see Mapbox for an instant on mount.
   - PinMap now also mounts `useMapEngine()`, which shares the one `GET /api/prefs`.
 - `onPoiClick` and the business card are i4 (#201), not built here.
+
+---
+
+# #202 · dev notes, item i4 (#201): tap a business on the Google basemap to save it
+
+This covers item 4 of 4 only. I1–i3 were already on the branch and were not redone. The
+design is the same wireframe (`mc/wireframe/issue-202-v0`, §1 "tap a business, get the pin
+card" and §2 "Save → capture"). The answers are unchanged: q5 A is the shipped pin card with
+Save, q6 A is Google's default icons, and q7 A means one PR.
+
+## What changed
+
+**Core** (new file `packages/core/src/domain/business-tap.ts`, exported from
+`domain/index.ts`)
+- `:20` `BUSINESS_CARD_COPY`: the wireframe's words ("Google place", "Save", "Open →",
+  "saved").
+- `:49` `businessTapAction(tapped, library)` returns Save or Open → for a tapped Google place
+  id.
+  - It checks for an equal `googlePlaceId` across the whole library first (isAlreadySaved
+    rule 1). A same-named row earlier in the list therefore never shadows the row that IS
+    the place.
+  - Once the tap has a name, it falls back to `isAlreadySaved`'s name and 150 m rules.
+  - A tap with no name yet matches by id alone.
+- `:67` `localityOfAddress`: the town from Google's address ("Pacific City"). It is the
+  first half of `regionFromAddress`.
+- `:90` `businessCard(tapped, library)` builds the card: name, area, tile type and action.
+  - A saved place uses its own name and type. An unsaved one uses Google's.
+  - An Android POI label keeps only its first line.
+  - It returns `null` when nothing names the place, and then no card is drawn.
+
+**Web**
+- `GoogleMapView.tsx`:
+  - `:47` adds an optional `onBusiness(googlePlaceId | null)`.
+  - `:161` adds one map `"click"` listener. A click carrying `placeId` calls `e.stop()`,
+    which suppresses Google's info window, then hands up the id. Any other click hands up
+    null, which closes the card.
+  - The listener is a no-op when the surface passes no `onBusiness` (the mini-map), so
+    Google's default behaviour is left alone there.
+- `MapMount.tsx`:
+  - `:140` adds `saves?: readonly SavedPlace[]` and `:147` `businessCardClassName` (default:
+    the shipped `PinOpenCard` slot, at `z-[4]` so it covers a pin card).
+  - `:237` `tapBusiness` makes one `tripApi.placeDetails` call per tap. Only the latest
+    tap's answer lands.
+  - `:265` a pin tap closes the business card, and `:266` so does an engine switch: one card
+    at a time.
+  - `:268` Save dispatches `rv:capture` with `{ detail: { googlePlaceId } }`.
+  - `:161` `BusinessCardView` is the wireframe's `.mcard`:
+    - surface, border-hi, `shadow-rv-xl`, 13px name, 10px mono line
+    - the `.gid` pill
+    - Save as `bg-rv-accent-deep` / `text-rv-accent-ink`, or "· saved" plus Open → to
+      `/places/[id]`
+  - `:331` the card renders only while `resolved.engine === "google"`.
+- The library reaches each map surface:
+  - `MapOverview.tsx:281` passes `saves={places}`. `:284` places the card bottom-right at
+    300px, 26px up, clear of Google's attribution (`.web .mcard`).
+  - `PlacesLibrary.tsx:411` and `:446` (both maps) pass `saves={places}`.
+  - `JournalMap.tsx:48` passes `saves={saves}`. It was already handed down from
+    `trips/[id]/page.tsx` → TripPlanner → JournalLens.
+  - `DestinationMiniMap` is untouched and gets no business taps.
+- `Nav.tsx`:
+  - `:55` `googlePlaceIdOf(e)` reads the event detail.
+  - `:80` `onCapture` (the same name) stores it.
+  - + Capture and the Capture tab open with no pick.
+  - `:185` passes `googlePlaceId={pickedId}`.
+- `CaptureSheet.tsx`:
+  - `:63` adds the optional `googlePlaceId`.
+  - `:102` fetches details and seeds the pick with `pickPlace(f, pickedFromSummary(hit))`,
+    but only into an empty pick.
+  - When details returns `results: []`, the sheet stays on the search field (the vet MED's
+    fallback).
+
+**Phone**
+- `src/map.tsx`:
+  - `:552` adds `TripMap`'s optional `onPoi`, with the `TappedPoi` type at `:556`.
+  - It is passed only to `GoogleTripCanvas`, where `:870` is `onPoiClick` → `{ googlePlaceId,
+    name, lat, lng }`.
+  - The Mapbox path has no handler.
+- `app/(tabs)/map.tsx`:
+  - `:75` `onGoogle` from `useMapEngine` + `googleAvailability`.
+  - `:146` `tapPoi` clears the pin selection and makes one `api.places.details` call, for
+    the town.
+  - `:158` `businessCard(...)`, drawn only while Google draws.
+  - `:212` the card in the shipped card slot. Save pushes
+    `/capture?googlePlaceId=…`; Open → pushes `/place/[id]` from "Map".
+  - A pin tap or a map tap closes it.
+  - `:390` the Save fill is `C.accentDeep` with `C.navy` text. That is the dark-half
+    `--rv-accent-ink`, slate-950; the phone has no `accentInk` token.
+- `app/capture.tsx:78` reads `googlePlaceId`. `api.places.details` then lands it on
+  `{ kind: "confirm", target: { kind: "place", hit } }`, but only from `find`. With no
+  answer the sheet stays on find.
+
+## Tests
+- `packages/core/src/domain/business-tap.test.ts` has 15 cases. This is the acceptance:
+  - a match by `googlePlaceId` → Open
+  - no match → Save
+  - an empty library → Save
+  - an id match beats an earlier same-name row
+  - the name rule after details
+  - a nameless tap matches by id only
+  - `localityOfAddress`
+  - the card for unsaved and for saved, a tile from `primaryType`, the area falling back to
+    the save's region, the first line of an Android label, no card when nothing names it,
+    and the verbatim copy
+  - This file failed first (module missing), then passed.
+- `apps/web/src/components/map/business-tap.test.ts` has 14 source pins: the click → placeId
+  → `e.stop()` seam, the card slot, gating on Google + a library, details + `businessCard`,
+  one card at a time, Save → `rv:capture`, Open → `/places/[id]`, tokens only, the library
+  at every surface, no taps on the mini-map, Nav forwarding the id, and CaptureSheet seeding
+  the pick. 12 of them failed before the code changes.
+- `packages/core/src/mobile-business-tap.test.ts` has 8 source pins for the phone:
+  `onPoiClick` only on the Google path, the event mapping, the card gated on Google, closing
+  on a pin or map tap, Save → `/capture?googlePlaceId=`, Open →, and capture.tsx's param →
+  confirm.
+  - **Order caveat:** this file was written after the phone code, so it was not red first.
+- Existing pins updated for the intended changes:
+  - `map-engine.test.ts`: the pill writes through `chooseEngine`, and the props now extend
+    with `onBusiness`.
+  - `nav.test.ts`: the buttons call `open`, and the sheet mount passes the id.
+  - `journal-today.test.ts`: `onCapture` keeps its name and now reads the id.
+- **Cannot execute here:** a real Google click (`e.placeId`, the suppressed info window), a
+  real `onPoiClick`, and any render of either card. Covered by core unit tests, source pins
+  and tsc only.
+
+## Local gate
+- `pnpm turbo run lint typecheck test --force` → `Tasks: 10 successful, 10 total`. That is
+  core 1718 passed, web 655 passed and ui 56 passed, plus typecheck for core, db, ui, web
+  and mobile.
+- Lint is clean, with no warnings.
+
+## For the walk / qa
+- **Keyless walks cannot reach this.** With no `NEXT_PUBLIC_GOOGLE_MAPS_KEY` / Map ID (web)
+  or Maps SDK keys plus a dev-client build (phone), Google never draws, so no business card
+  ever appears.
+- What keyless walks can check: nothing regresses.
+  - Pin cards on /places and the Journal.
+  - The /map rail.
+  - + Capture and the Journal's Log something still open the blank sheet.
+- **Operator-owned, needs keys:**
+  - **Web (keys + Map ID + `GOOGLE_PLACES_KEY` for details):**
+    - On /map with Google, tap a business: no Google info window, and the card shows
+      bottom-right.
+    - Save opens capture with the place picked. Between trips that is Want to go; mid-trip
+      it is Been here.
+    - A business already in the library shows "· saved" and Open →.
+    - A pin tap swaps cards, and Mapbox closes the card.
+  - **Phone:** the same on the Map tab, where Save lands on capture's confirm step.
+- **Defaults I chose, please check:**
+  1. **Category tile for an unsaved business is Other.** The details answer carries no
+     `primaryType` (only search rows do), and widening the details field mask is out of
+     scope. A saved business uses its own type. The wireframe draws Eat for Pelican
+     Brewing.
+  2. **Nameless taps raise no card.** The web map click gives only an id, so the card waits
+     for the details call and is not drawn if details names nothing (no Places key). The
+     phone has the name from `onPoiClick`, so its card shows at once and the town fills in
+     when details answers.
+  3. **Card placement.** On Places and the Journal it uses the full-width pin-card slot, so
+     it covers a selected pin's card. On /map it uses the wireframe's 300px bottom-right
+     slot.
+  4. **The phone `.gid` tag is a faded mono text run with no pill border.** A nested RN
+     `Text` can't take a border.
+  5. **The phone confirm step is the shipped one.** The wireframe's "picked from the map"
+     subline was not added, because the design says no new sheet and the step a search hit
+     lands on.
+  6. **The phone Map tab has no engine pill** (it passes no `onModeChange`, as shipped). The
+     engine is chosen on the You tab or on a trip map. The card follows the resolved engine.
+- **Claims to verify:**
+  - A Google AdvancedMarker click does not also fire the map `click`. If it did, it would
+    only send `null`, which closes the business card. That is harmless.
+  - On iOS Google, a POI tap fires `onPoiClick` and not `onPress`. If both fire, the order
+    decides whether the card survives. Check on device.

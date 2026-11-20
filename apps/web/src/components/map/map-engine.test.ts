@@ -62,7 +62,10 @@ describe("MapMount: the engine seam on the web (#198)", () => {
     expect(mapMount).toContain("resolveMapEngine(engine, WEB_GOOGLE_AVAILABILITY)");
     // The only writer is the pill's own onChange, so a tap is the only write.
     expect((mapMount.match(/setEngine/g) ?? []).length).toBe(2);
-    expect(mapMount).toContain("onChange={setEngine}");
+    // #201 · the pill writes through chooseEngine, which also closes a business card.
+    expect(mapMount).toContain("onChange={chooseEngine}");
+    expect(mapMount).toContain("const chooseEngine = (e: MapEngine) => { setBusiness(null); setEngine(e); };");
+    expect((mapMount.match(/chooseEngine/g) ?? []).length).toBe(2);
   });
 
   it("stacks the engine pill under the style pill, with the amber note under both", () => {
@@ -113,7 +116,8 @@ describe("MapMount: the Google engine behind the seam (#199)", () => {
 
 describe("GoogleMapView: the same marks, on Google's basemap (#199)", () => {
   it("takes MapViewProps minus the Mapbox token", () => {
-    expect(google).toContain('export type GoogleMapViewProps = Omit<MapViewProps, "token">;');
+    // #201 adds the optional business-tap handler to the same props.
+    expect(google).toContain('export type GoogleMapViewProps = Omit<MapViewProps, "token"> & {');
     expect(google).toContain('import type { MapViewProps } from "./MapView";');
     // A type-only import: nothing from MapView (mapbox-gl) is loaded at runtime.
     expect(google).not.toMatch(/import \{[^}]*\} from "\.\/MapView"/);

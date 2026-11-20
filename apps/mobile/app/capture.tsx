@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Location from "expo-location";
 import type { CaptureDraft, DidItBody, Idea, PlaceSummary, ReservationType, SavedPlaceStatus } from "@rv-trip/core";
 import {
@@ -51,6 +51,11 @@ import { CategoryTile, Chip, Stars, Toast } from "../src/ui";
  * Nothing here waits on the network to save: Save closes the sheet and hands
  * the body to the queue (`src/capture.ts`), which sends it now or when signal
  * comes back. Every string is core's (`capture/sheet.ts`) or the wireframe's.
+ *
+ * #201 · `/capture?googlePlaceId=…` (the Map tab's business card Save) opens
+ * straight at the confirm step with that place as the hit, fetched from
+ * `/api/places/details/[id]` — the step a search hit already lands on. With
+ * no answer (offline, no Places key, a retired id) the sheet stays on find.
  */
 
 type Fix = { lat: number; lng: number; accuracy: number | null };
@@ -70,10 +75,31 @@ export default function CaptureSheet() {
   const { fix, locationOff } = useFix();
   const results = usePlaceSearch(query, online, fix);
   const areaName = useResolvedName(online ? fix : null);
+  const { googlePlaceId } = useLocalSearchParams<{ googlePlaceId?: string }>();
 
   useEffect(() => {
     void loadRecents();
   }, []);
+
+  // #201 · a place picked on the map: open at confirm with it. A step the
+  // reader has already moved to is never overwritten.
+  useEffect(() => {
+    if (!googlePlaceId) return;
+    let live = true;
+    api.places
+      .details(googlePlaceId)
+      .then((env) => {
+        const hit = env.results[0];
+        if (!live || !hit) return;
+        setStep((cur) => (cur.kind === "find" ? { kind: "confirm", target: { kind: "place", hit } } : cur));
+      })
+      .catch(() => {
+        // No answer: the smart field is still there.
+      });
+    return () => {
+      live = false;
+    };
+  }, [googlePlaceId]);
 
   const save = (draft: CaptureDraft) => {
     router.back();

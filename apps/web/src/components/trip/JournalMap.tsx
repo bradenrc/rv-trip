@@ -45,7 +45,7 @@ export function JournalMap({
     <div className="order-first flex min-w-0 flex-col gap-1.5 md:order-none">
       <div className="px-0.5 pt-1 font-mono text-[10.5px] uppercase tracking-[0.1em] text-rv-ink-faded">{label}</div>
       <div className="relative h-[200px] md:h-auto md:min-h-[440px] md:flex-1">
-        <MapMount pins={pins} join={m.join} unmappedCount={m.unmapped} selectedId={selectedId} onSelect={onSelect} showLabels={false} />
+        <MapMount pins={pins} join={m.join} unmappedCount={m.unmapped} selectedId={selectedId} onSelect={onSelect} showLabels={false} saves={saves} />
         {open && <PinOpenCard save={open} className="absolute bottom-2 left-2 right-2 z-[3]" />}
       </div>
     </div>

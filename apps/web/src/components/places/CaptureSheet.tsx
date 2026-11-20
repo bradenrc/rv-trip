@@ -14,6 +14,8 @@ import {
   localIsoDate,
   matchingOpenIdea,
   pickedDidItBody,
+  pickPlace,
+  pickedFromSummary,
   placeOf,
   savePlaceBody,
   savedToast,
@@ -48,8 +50,21 @@ const failed = () => toast.error("That change didn't save — check your connect
  * clientId). Want to go / no trip: today's library save (`savePlaceBody`).
  * The sheet closes, the URL never changes, and the page under it hears
  * `rv:captured`.
+ *
+ * #201 · `googlePlaceId` is a place already picked on a map (a Google
+ * basemap business's Save, through Nav's `rv:capture`). The sheet opens with
+ * it as the pick, the same `PlaceSummary` the smart field would have
+ * returned, from `/api/places/details/[id]`; the status switch is capture's
+ * own rule as ever. When details names nothing (no Places key, a retired id)
+ * the sheet stays on the search field.
  */
-export function CaptureSheet({ onClose }: { onClose: () => void }) {
+export function CaptureSheet({
+  onClose,
+  googlePlaceId = null,
+}: {
+  onClose: () => void;
+  googlePlaceId?: string | null;
+}) {
   const [target, setTarget] = useState<{ trip: Trip; destination: Destination | null } | null>(null);
   const [form, setForm] = useState<SavePlaceForm>(emptySavePlaceForm);
   const [logging, setLogging] = useState(false);
@@ -78,6 +93,21 @@ export function CaptureSheet({ onClose }: { onClose: () => void }) {
       live = false;
     };
   }, []);
+
+  // #201 · seed the pick from the map's place. A pick the reader already
+  // made in the field wins: only an empty pick is filled.
+  useEffect(() => {
+    if (!googlePlaceId) return;
+    let live = true;
+    void tripApi.placeDetails(googlePlaceId).then((env) => {
+      const hit = env.results[0];
+      if (!live || !hit) return;
+      setForm((f) => (f.picked ? f : pickPlace(f, pickedFromSummary(hit))));
+    });
+    return () => {
+      live = false;
+    };
+  }, [googlePlaceId]);
 
   const changeForm = (next: SavePlaceForm) => {
     // The no-trip switch (Want to go · Been there) is a touch too.
