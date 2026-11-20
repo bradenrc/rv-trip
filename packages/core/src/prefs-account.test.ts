@@ -139,8 +139,10 @@ describe("packages/db/src/schema.ts — userPrefs", () => {
     // (#155), which ARE vocabularies the product speaks. A preference is not,
     // and that is what this guard is about.
     expect((code(schema).match(/pgEnum\(/g) ?? []).length).toBe(13);
-    for (const name of ["theme", "units", "map_style", "track_costs"])
+    for (const name of ["theme", "units", "map_style", "track_costs", "map_engine"])
       expect(code(schema)).not.toContain(`pgEnum("${name}"`);
+    // #198 · the map engine is a bare, nullable text column like map_style.
+    expect(flat(code(schema))).toContain('mapEngine: text("map_engine"),');
   });
 });
 

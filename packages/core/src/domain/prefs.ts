@@ -41,6 +41,9 @@ export const PREF_REMOTE = {
   "rv-units": "units",
   "rv-map-style": "mapStyle",
   "rv-track-costs": "trackCosts",
+  // #198 · which map draws every map (docs/design/202). Text column, null =
+  // never chosen → DEFAULT_MAP_ENGINE.
+  "rv-map-engine": "mapEngine",
 } as const;
 
 /** A localStorage key that has a column behind it. Other `rv-*` keys are local-only. */
@@ -69,6 +72,9 @@ export const userPrefsPatch = z
     units: z.string().max(32).nullable().optional(),
     mapStyle: z.string().max(32).nullable().optional(),
     trackCosts: z.boolean().nullable().optional(),
+    /** #198 — the map engine. A free string like `mapStyle`: readers narrow it
+     * with `isMapEngine` / `resolveMapEngine` and fall back to Mapbox. */
+    mapEngine: z.string().max(32).nullable().optional(),
     /**
      * #126 · Q5 A — the HOUSEHOLD home base: where every trip starts and ends
      * unless the trip overrides it. One object on the wire (name + point + place
@@ -87,6 +93,9 @@ export interface UserPrefs {
   units: string | null;
   mapStyle: string | null;
   trackCosts: boolean | null;
+  /** #198 · the map engine, or null (never chosen). Optional so a row served by
+   * an older build (or a fixture) still types. */
+  mapEngine?: string | null;
   /** #126 · the household home base, or null. Optional so a row served by an
    * older build (or a fixture) still types. */
   homeBasePlace?: Place | null;
@@ -172,4 +181,71 @@ export function householdHomeBasePatch(
   return {
     homeBasePlace: { name: picked.name, lat: picked.lat, lng: picked.lng, googlePlaceId: picked.googlePlaceId },
   };
+}
+
+// ── #198 · the map engine (docs/design/202 §3 "The seam") ────────────────────
+
+/** Which map draws the basemap. Our own marks (discs, arcs, saves) are drawn in
+ * `MAP_PALETTE` colours on either. */
+export type MapEngine = "mapbox" | "google";
+
+/** Never chosen (a null `user_prefs.map_engine`) draws Mapbox. */
+export const DEFAULT_MAP_ENGINE: MapEngine = "mapbox";
+
+/** The two engines in pill order, with the label both clients show. */
+export const MAP_ENGINES: ReadonlyArray<{ value: MapEngine; label: string }> = [
+  { value: "mapbox", label: "Mapbox" },
+  { value: "google", label: "Google" },
+];
+
+export function isMapEngine(v: unknown): v is MapEngine {
+  return v === "mapbox" || v === "google";
+}
+
+/** Why this client can't draw Google right now.
+ *   no-key     — web build missing NEXT_PUBLIC_GOOGLE_MAPS_KEY or NEXT_PUBLIC_GOOGLE_MAP_ID
+ *   no-module  — phone binary without the native Google map module
+ *   not-built  — the Google renderer has not landed on this client yet */
+export type GoogleFallbackReason = "no-key" | "no-module" | "not-built";
+
+export type GoogleAvailability = { ok: true } | { ok: false; reason: GoogleFallbackReason };
+
+export interface ResolvedMapEngine {
+  /** What actually draws. */
+  engine: MapEngine;
+  /** Set only when the account chose Google and this client can't draw it. */
+  fallback: GoogleFallbackReason | null;
+}
+
+/**
+ * The account's choice → what gets drawn (docs/design/202, the resolution
+ * table). The choice is NEVER rewritten here: a client that can't draw Google
+ * draws Mapbox and says why, and the stored "google" is kept (q2 A), so a phone
+ * without the native module can't undo a choice made on the web.
+ */
+export function resolveMapEngine(
+  choice: string | null | undefined,
+  google: GoogleAvailability,
+): ResolvedMapEngine {
+  if (choice !== "google") return { engine: DEFAULT_MAP_ENGINE, fallback: null };
+  if (google.ok) return { engine: "google", fallback: null };
+  return { engine: "mapbox", fallback: google.reason };
+}
+
+/** The amber line under the engine pill, per fallback reason — the wireframe's
+ * copy verbatim. `title` is the bold first line, `body` the second. */
+export const MAP_ENGINE_FALLBACK_COPY: Record<GoogleFallbackReason, { title: string; body: string }> = {
+  "no-key": { title: "Google isn’t set up here", body: "Showing Mapbox. Your choice is kept." },
+  "no-module": {
+    title: "This version of the app has no Google map",
+    body: "Showing Mapbox until you update.",
+  },
+  "not-built": { title: "Google map is coming", body: "Showing Mapbox for now. Your choice is kept." },
+};
+
+/** The same copy as one line, for the Settings / You-tab rows (the wireframe's
+ * `⚠ This version of the app has no Google map. Showing Mapbox until you update.`). */
+export function mapEngineFallbackLine(reason: GoogleFallbackReason): string {
+  const { title, body } = MAP_ENGINE_FALLBACK_COPY[reason];
+  return `⚠ ${title}. ${body}`;
 }

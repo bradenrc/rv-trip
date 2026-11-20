@@ -2,6 +2,16 @@
 
 import dynamic from "next/dynamic";
 import { Moon, Satellite, Sun } from "lucide-react";
+import {
+  DEFAULT_MAP_ENGINE,
+  MAP_ENGINES,
+  MAP_ENGINE_FALLBACK_COPY,
+  isMapEngine,
+  resolveMapEngine,
+  type GoogleAvailability,
+  type GoogleFallbackReason,
+  type MapEngine,
+} from "@rv-trip/core";
 import { MapFrame, SegmentedControl, type SegmentOption } from "@rv-trip/ui";
 import { useStringPref } from "@/lib/pref";
 import { DEFAULT_STYLE_MODE, isStyleMode, type StyleMode } from "./palette";
@@ -49,6 +59,40 @@ export const STYLE_SEGMENTS: SegmentOption<StyleMode>[] = [
   { value: "sat", label: "Sat", Icon: Satellite },
 ];
 
+/** #198 · the map-engine preference (docs/design/202). Mirrored to
+ * `user_prefs.map_engine` by `lib/pref.ts` like every other mapped key. */
+export const ENGINE_PREF_KEY = "rv-map-engine";
+
+/**
+ * #198 · whether THIS client can draw Google. The web renderer lands in #199
+ * (which replaces this with the key + Map ID check); until then every web
+ * build reports "not-built", so a "google" choice is kept and Mapbox draws.
+ */
+export const WEB_GOOGLE_AVAILABILITY: GoogleAvailability = { ok: false, reason: "not-built" };
+
+/** The engine pill's two options — Mapbox · Google, no glyphs. `struck` marks
+ * Google when it is the choice but can't be drawn here (q2 A). Exported for
+ * Settings' "Map engine" row, the second front door onto the same preference. */
+export function engineSegments(fallback: GoogleFallbackReason | null): SegmentOption<MapEngine>[] {
+  return MAP_ENGINES.map(({ value, label }) => ({
+    value,
+    label,
+    struck: value === "google" && fallback !== null,
+  }));
+}
+
+/** The amber two-line note under the engine pill when Google is chosen but
+ * Mapbox draws. */
+function EngineFallbackNote({ reason }: { reason: GoogleFallbackReason }) {
+  const copy = MAP_ENGINE_FALLBACK_COPY[reason];
+  return (
+    <div className="max-w-[220px] rounded-rv-md border border-rv-warning bg-rv-warning-soft px-2 py-1 text-left text-[10.5px] leading-[1.35] text-rv-warning shadow-rv-md">
+      <b className="block font-bold">{copy.title}</b>
+      {copy.body}
+    </div>
+  );
+}
+
 export interface MapMountProps {
   pins: MapPin[];
   arcs?: DriveArc[];
@@ -84,6 +128,11 @@ export function MapMount({
   // same loading frame the lazy chunk already shows, so nothing reflows and no
   // basemap style is fetched twice.
   const [mode, setMode] = useStringPref(STYLE_PREF_KEY, isStyleMode, DEFAULT_STYLE_MODE);
+  // #198 · the account's engine choice, and what this client actually draws.
+  // The choice is never written back by the client on its own: only a tap
+  // writes. Until #199 lands, `resolved.engine` is always "mapbox".
+  const [engine, setEngine] = useStringPref(ENGINE_PREF_KEY, isMapEngine, DEFAULT_MAP_ENGINE);
+  const resolved = resolveMapEngine(engine, WEB_GOOGLE_AVAILABILITY);
 
   return (
     <div className={height ? undefined : "h-full min-h-[150px]"} style={height ? { height } : undefined}>
@@ -109,8 +158,21 @@ export function MapMount({
             // Over the canvas, never in the chrome: every surface that mounts a
             // map already spends a row or two on controls, and a third would
             // push the map below the fold on a laptop.
-            <div className="absolute right-3 top-3 z-[3] rounded-rv-pill shadow-rv-lg">
-              <SegmentedControl mono value={mode} options={STYLE_SEGMENTS} onChange={setMode} />
+            // #198 · q1 A — the engine pill stacks under the style pill, and the
+            // amber fallback note under that.
+            <div className="absolute right-3 top-3 z-[3] flex flex-col items-end gap-1.5">
+              <div className="rounded-rv-pill shadow-rv-lg">
+                <SegmentedControl mono value={mode} options={STYLE_SEGMENTS} onChange={setMode} />
+              </div>
+              <div className="rounded-rv-pill shadow-rv-lg">
+                <SegmentedControl
+                  mono
+                  value={engine ?? DEFAULT_MAP_ENGINE}
+                  options={engineSegments(resolved.fallback)}
+                  onChange={setEngine}
+                />
+              </div>
+              {resolved.fallback && <EngineFallbackNote reason={resolved.fallback} />}
             </div>
           )}
         </div>

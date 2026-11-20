@@ -4,14 +4,31 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Moon, Sun } from "lucide-react";
-import { placeOf, pickedFromPlace, type PickedPlace, type Place, type UserPrefs } from "@rv-trip/core";
+import {
+  DEFAULT_MAP_ENGINE,
+  isMapEngine,
+  mapEngineFallbackLine,
+  placeOf,
+  pickedFromPlace,
+  resolveMapEngine,
+  type MapEngine,
+  type PickedPlace,
+  type Place,
+  type UserPrefs,
+} from "@rv-trip/core";
 import { PlacePicker } from "@/components/places/PlacePicker";
 import { tripApi } from "@/lib/trip-api";
 import { SegmentedControl, type SegmentOption } from "@rv-trip/ui";
 import { Account } from "@/components/nav/Account";
 import { HouseholdCard, type HouseholdCardProps } from "@/components/settings/HouseholdCard";
 import { ApiKeysCard, type ApiKeysCardProps } from "@/components/settings/ApiKeysCard";
-import { STYLE_PREF_KEY, STYLE_SEGMENTS } from "@/components/map/MapMount";
+import {
+  ENGINE_PREF_KEY,
+  STYLE_PREF_KEY,
+  STYLE_SEGMENTS,
+  WEB_GOOGLE_AVAILABILITY,
+  engineSegments,
+} from "@/components/map/MapMount";
 import { DEFAULT_STYLE_MODE, isStyleMode, type StyleMode } from "@/components/map/palette";
 import { PrefSwitch } from "@/components/ui/pref-switch";
 import { useBooleanPref, useStringPref } from "@/lib/pref";
@@ -53,10 +70,13 @@ export function SettingsForm({
   const [theme, setTheme] = useTheme();
   const [storedUnits, setUnits] = useStringPref(UNITS_PREF_KEY, isUnits, DEFAULT_UNITS);
   const [storedStyle, setStyle] = useStringPref(STYLE_PREF_KEY, isStyleMode, DEFAULT_STYLE_MODE);
+  const [storedEngine, setEngine] = useStringPref(ENGINE_PREF_KEY, isMapEngine, DEFAULT_MAP_ENGINE);
   const [costs, setCosts] = useBooleanPref("rv-track-costs");
 
   const units = storedUnits ?? unitsFromPrefs(prefs);
   const style = storedStyle ?? styleFromPrefs(prefs);
+  const engine = storedEngine ?? engineFromPrefs(prefs);
+  const engineFallback = resolveMapEngine(engine, WEB_GOOGLE_AVAILABILITY).fallback;
 
   return (
     <>
@@ -96,9 +116,25 @@ export function SettingsForm({
         <Card>
           <Row
             label="Default map style"
-            help="What every map opens with. Night is the product default."
+            help="What every map opens with. Day is the product default."
           >
             <SegmentedControl<StyleMode> value={style} onChange={setStyle} options={STYLE_SEGMENTS} />
+          </Row>
+          {/* #198 · the second front door onto the map-engine preference. */}
+          <Row
+            label="Map engine"
+            help="Which map draws every map in the app. Your pins look the same on both."
+          >
+            <div className="flex flex-col items-start gap-1.5">
+              <SegmentedControl<MapEngine>
+                value={engine}
+                onChange={setEngine}
+                options={engineSegments(engineFallback)}
+              />
+              {engineFallback && (
+                <span className="text-[11.5px] text-rv-warning">{mapEngineFallbackLine(engineFallback)}</span>
+              )}
+            </div>
           </Row>
           <Row>
             <div className="flex items-center justify-between gap-3">
@@ -154,6 +190,11 @@ const UNIT_SEGMENTS: SegmentOption<Units>[] = [
 function styleFromPrefs(prefs: UserPrefs | null): StyleMode {
   const stored = prefs?.mapStyle;
   return stored && isStyleMode(stored) ? stored : DEFAULT_STYLE_MODE;
+}
+
+function engineFromPrefs(prefs: UserPrefs | null): MapEngine {
+  const stored = prefs?.mapEngine;
+  return isMapEngine(stored) ? stored : DEFAULT_MAP_ENGINE;
 }
 
 export function GroupKicker({ children }: { children: React.ReactNode }) {

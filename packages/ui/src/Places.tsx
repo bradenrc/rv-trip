@@ -204,6 +204,10 @@ export interface SegmentOption<T extends string> {
    * caller still passes one, so no shipped pill changes. */
   Icon?: LucideIcon;
   count?: number;
+  /** #198 · the option is chosen but this client can't honour it (the map
+   * engine pill's "Google" with no Google renderer): the label is struck
+   * through in amber. It stays selectable. Every existing caller omits it. */
+  struck?: boolean;
 }
 
 /** Pill segmented control — the primary shelf switch. */
@@ -238,7 +242,7 @@ export function SegmentedControl<T extends string>({
             } ${on ? "bg-rv-surface text-rv-ink shadow-rv-sm" : "bg-transparent text-rv-ink-faded"}`}
           >
             {o.Icon && <o.Icon className={`size-3.5 ${on ? activeIcon : "text-rv-ink-subtle"}`} />}
-            {o.label}
+            {o.struck ? <span className="line-through decoration-rv-warning">{o.label}</span> : o.label}
             {o.count != null && <span className="font-mono text-[11px] opacity-70">{o.count}</span>}
           </button>
         );

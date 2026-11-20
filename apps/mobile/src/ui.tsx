@@ -129,6 +129,10 @@ export function Button({
 export interface SegmentedOption<T extends string> {
   value: T;
   label: string;
+  /** #198 · chosen but this build can't honour it (the engine pill's "Google"
+   * with no Google renderer): struck through in amber, still selectable. The
+   * mirror of @rv-trip/ui's `SegmentOption.struck`. */
+  struck?: boolean;
 }
 
 /**
@@ -177,6 +181,7 @@ export function Segmented<T extends string>({
                 styles.segmentText,
                 mono && styles.segmentTextMono,
                 { color: on ? C.ink : C.inkFaded },
+                o.struck && styles.segmentStruck,
               ]}
             >
               {o.label}
@@ -527,6 +532,7 @@ const styles = StyleSheet.create({
   },
   segmentText: { fontSize: 13, fontWeight: "700" },
   segmentTextMono: { fontFamily: F.mono, fontSize: 11 },
+  segmentStruck: { textDecorationLine: "line-through", textDecorationColor: C.warning },
   chip: {
     flexDirection: "row",
     alignItems: "center",

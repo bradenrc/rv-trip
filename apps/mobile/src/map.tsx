@@ -1,10 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { LineLayerStyle } from "@rnmapbox/maps";
 import type {
   Bounds,
+  GoogleAvailability,
+  GoogleFallbackReason,
+  MapEngine,
   OverlayPalette,
+  PrefLocalKey,
+  UserPrefs,
   RvCategory,
   StyleMode,
   TripArc,
@@ -12,13 +17,21 @@ import type {
 } from "@rv-trip/core";
 import {
   ARC_CASING_WIDTH,
+  DEFAULT_MAP_ENGINE,
   DEFAULT_STYLE_MODE,
+  MAP_ENGINES,
+  MAP_ENGINE_FALLBACK_COPY,
   MAP_PALETTE,
+  PREF_REMOTE,
   arcFeatureCollection,
   arcLabel,
+  isMapEngine,
   isStyleMode,
   mapBounds,
+  resolveMapEngine,
+  toRemotePatch,
 } from "@rv-trip/core";
+import { api } from "./api";
 import { C, F, R } from "./theme";
 import { Segmented, type SegmentedOption } from "./ui";
 
@@ -99,55 +112,134 @@ export function mapAvailable(): boolean {
   return loadMapbox() !== null;
 }
 
-// ── the style preference ────────────────────────────────────────────────────
+// ── the map preferences: style and engine (#198 · q3 B) ─────────────────────
 
 /** Where the preference lives — the SAME key the web writes
- * (apps/web/src/components/map/MapMount.tsx:41), per device rather than per
- * browser because AsyncStorage is the device's. */
+ * (apps/web/src/components/map/MapMount.tsx:41). */
 export const STYLE_PREF_KEY = "rv-map-style";
 
-const STYLE_SEGMENTS: SegmentedOption<StyleMode>[] = [
+/** #198 · the map-engine preference — the web's `ENGINE_PREF_KEY`. */
+export const ENGINE_PREF_KEY = "rv-map-engine";
+
+export const STYLE_SEGMENTS: SegmentedOption<StyleMode>[] = [
   { value: "night", label: "Night" },
   { value: "day", label: "Day" },
   { value: "sat", label: "Sat" },
 ];
 
 /**
- * The persisted basemap choice. `null` until AsyncStorage has answered — one
- * render, covered by the loading frame, so no basemap style is fetched twice.
- *
- * EVERY read is narrowed by core's `isStyleMode`: the stored string is
- * untrusted (a value written by a future release, a hand-edited device store),
- * and an un-narrowed read would hand `MAP_PALETTE[mode]` an undefined column.
+ * #198 · whether this build can draw Google. The native renderer lands in #200
+ * (`loadGoogle()` → "no-module" when absent); until then every build reports
+ * "not-built", so a "google" chosen on the web is kept and Mapbox draws.
  */
-export function useStyleMode(): [StyleMode | null, (m: StyleMode) => void] {
-  const [mode, setMode] = useState<StyleMode | null>(null);
+export const PHONE_GOOGLE_AVAILABILITY: GoogleAvailability = { ok: false, reason: "not-built" };
+
+/** The engine pill's options, with the chosen-but-undrawable one struck. */
+export function engineSegments(fallback: GoogleFallbackReason | null): SegmentedOption<MapEngine>[] {
+  return MAP_ENGINES.map(({ value, label }) => ({
+    value,
+    label,
+    struck: value === "google" && fallback !== null,
+  }));
+}
+
+/** One GET /api/prefs shared by every map preference hook mounting together,
+ * so a screen with a map asks once, not once per preference. */
+let remoteRead: Promise<UserPrefs | null> | null = null;
+function readRemotePrefs(): Promise<UserPrefs | null> {
+  remoteRead ??= api.prefs.get().finally(() => {
+    remoteRead = null;
+  });
+  return remoteRead;
+}
+
+/**
+ * #198 · q3 B — a map preference that follows the ACCOUNT on the phone too:
+ * the device's AsyncStorage first (what the first frame reads), then the
+ * `user_prefs` row (`GET /api/prefs`), which wins when it has a value — the
+ * pattern the You tab's home base already uses. A tap writes locally first and
+ * then mirrors ONE field with `PUT /api/prefs`, through core's `toRemotePatch`,
+ * exactly like the web's `lib/pref.ts`.
+ *
+ * `null` until AsyncStorage has answered — one render, covered by the loading
+ * frame, so no basemap style is fetched twice.
+ *
+ * EVERY read is narrowed by `isValid`: the stored string is untrusted (a value
+ * written by a future release, a hand-edited device store), and an un-narrowed
+ * read would hand `MAP_PALETTE[mode]` an undefined column.
+ */
+export function usePhonePref<T extends string>(
+  key: PrefLocalKey,
+  isValid: (v: string) => v is T,
+  fallback: T,
+): [T | null, (v: T) => void] {
+  const [value, setValue] = useState<T | null>(null);
+  // A tap made before the account row answers is the newer word: the row must
+  // not overwrite it.
+  const chosen = useRef(false);
 
   useEffect(() => {
     let live = true;
     const settle = (raw: string | null) => {
-      if (!live) return;
-      setMode(raw !== null && isStyleMode(raw) ? raw : DEFAULT_STYLE_MODE);
+      if (!live || chosen.current) return;
+      setValue(raw !== null && isValid(raw) ? raw : fallback);
     };
-    AsyncStorage.getItem(STYLE_PREF_KEY)
+    AsyncStorage.getItem(key)
       .then(settle)
       // An unreadable store is not a reason to show no map: fall back to the
       // default rather than staying on the loading frame forever.
-      .catch(() => settle(null));
+      .catch(() => settle(null))
+      .then(() => readRemotePrefs())
+      .then((row) => {
+        const remote = row?.[PREF_REMOTE[key]];
+        if (!live || chosen.current || typeof remote !== "string" || !isValid(remote)) return;
+        setValue(remote);
+        void AsyncStorage.setItem(key, remote).catch(() => undefined);
+      })
+      // No network, no API: the device's copy stands.
+      .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, []);
+  }, [key, isValid, fallback]);
 
-  const choose = useCallback((next: StyleMode) => {
-    setMode(next);
-    void AsyncStorage.setItem(STYLE_PREF_KEY, next).catch(() => {
-      // A write that fails costs the reader the preference next launch, nothing
-      // more — never the tap they just made.
-    });
-  }, []);
+  const choose = useCallback(
+    (next: T) => {
+      chosen.current = true;
+      setValue(next);
+      void AsyncStorage.setItem(key, next).catch(() => {
+        // A write that fails costs the reader the preference next launch, nothing
+        // more — never the tap they just made.
+      });
+      void api.prefs.put(toRemotePatch(key, next)).catch(() => {
+        // A dead network costs the sync, not the toggle.
+      });
+    },
+    [key],
+  );
 
-  return [mode, choose];
+  return [value, choose];
+}
+
+/** The persisted basemap choice. */
+export function useStyleMode(): [StyleMode | null, (m: StyleMode) => void] {
+  return usePhonePref(STYLE_PREF_KEY, isStyleMode, DEFAULT_STYLE_MODE);
+}
+
+/** #198 · the persisted map-engine choice (the account's word, not what draws). */
+export function useMapEngine(): [MapEngine | null, (e: MapEngine) => void] {
+  return usePhonePref(ENGINE_PREF_KEY, isMapEngine, DEFAULT_MAP_ENGINE);
+}
+
+/** #198 · the amber two-line note under the engine pill. */
+export function EngineFallbackNote({ reason }: { reason: GoogleFallbackReason }) {
+  const copy = MAP_ENGINE_FALLBACK_COPY[reason];
+  return (
+    <View style={styles.fallbackNote}>
+      <Text style={[styles.fallbackText, styles.fallbackTitle]}>{copy.title}</Text>
+      <Text style={styles.fallbackText}>{copy.body}</Text>
+    </View>
+  );
 }
 
 // ── the three frames where no map renders ───────────────────────────────────
@@ -409,6 +501,10 @@ export function TripMap({
   onPressMap,
 }: TripMapProps) {
   const palette = MAP_PALETTE[mode];
+  // #198 · the account's engine and what this build draws. Until #200 the
+  // resolution is always Mapbox; a "google" choice shows the amber note.
+  const [engine, setEngine] = useMapEngine();
+  const resolved = resolveMapEngine(engine, PHONE_GOOGLE_AVAILABILITY);
   const shape = useMemo(() => arcFeatureCollection(arcs), [arcs]);
   const layers = useMemo(() => arcLayerStyles(palette), [palette]);
   const joinShape = useMemo(
@@ -527,8 +623,16 @@ export function TripMap({
       {onModeChange && (
         // Over the canvas, never in the chrome — the masthead above already
         // spends its rows on the lens control.
+        // #198 · q1 A — the engine pill stacks under the style pill.
         <View style={styles.stylePill}>
           <Segmented mono value={mode} options={STYLE_SEGMENTS} onChange={onModeChange} />
+          <Segmented
+            mono
+            value={engine ?? DEFAULT_MAP_ENGINE}
+            options={engineSegments(resolved.fallback)}
+            onChange={setEngine}
+          />
+          {resolved.fallback && <EngineFallbackNote reason={resolved.fallback} />}
         </View>
       )}
     </View>
@@ -659,7 +763,25 @@ function DestinationDisc({
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   canvas: { position: "relative", overflow: "hidden" },
-  stylePill: { position: "absolute", top: 12, right: 12 },
+  stylePill: { position: "absolute", top: 12, right: 12, alignItems: "flex-end", gap: 6 },
+  // #198 · the wireframe's `.fb`: amber on amber-soft, md radius, shadow-rv-md.
+  fallbackNote: {
+    maxWidth: 220,
+    borderWidth: 1,
+    borderColor: C.warning,
+    backgroundColor: C.warningSoft,
+    borderRadius: R.md,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    // shadow-rv-md: 0 1px 3px rgba(0,0,0,.36) (packages/ui/styles/entry.css)
+    shadowColor: "#000000",
+    shadowOpacity: 0.36,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  fallbackText: { fontSize: 10.5, lineHeight: 14, color: C.warning },
+  fallbackTitle: { fontWeight: "700" },
 
   // The disc's geometry is the web's: 27px, 2px border, mono 12px bold.
   disc: {

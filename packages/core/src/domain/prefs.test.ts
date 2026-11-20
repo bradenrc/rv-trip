@@ -6,6 +6,13 @@ import {
   toRemotePatch,
   toLocalEntries,
   userPrefsPatch,
+  resolveMapEngine,
+  isMapEngine,
+  DEFAULT_MAP_ENGINE,
+  MAP_ENGINES,
+  MAP_ENGINE_FALLBACK_COPY,
+  mapEngineFallbackLine,
+  type GoogleAvailability,
   type UserPrefs,
 } from "./prefs";
 
@@ -37,12 +44,13 @@ const FULL_ROW: UserPrefs = {
 };
 
 describe("PREF_REMOTE — the key map", () => {
-  it("maps each of the four localStorage keys to its column", () => {
+  it("maps each of the five localStorage keys to its column", () => {
     expect(PREF_REMOTE).toEqual({
       "rv-theme": "theme",
       "rv-units": "units",
       "rv-map-style": "mapStyle",
       "rv-track-costs": "trackCosts",
+      "rv-map-engine": "mapEngine",
     });
   });
 
@@ -68,6 +76,11 @@ describe("toRemotePatch — localStorage string → column value", () => {
     expect(toRemotePatch("rv-theme", "light")).toEqual({ theme: "light" });
     expect(toRemotePatch("rv-units", "metric")).toEqual({ units: "metric" });
     expect(toRemotePatch("rv-map-style", "sat")).toEqual({ mapStyle: "sat" });
+  });
+
+  it("#198 · mirrors the map engine to its own column", () => {
+    expect(toRemotePatch("rv-map-engine", "google")).toEqual({ mapEngine: "google" });
+    expect(toRemotePatch("rv-map-engine", "mapbox")).toEqual({ mapEngine: "mapbox" });
   });
 
   it('coerces the "1"/"0" boolean pref to a real boolean', () => {
@@ -145,6 +158,7 @@ describe("the round trip", () => {
       ["rv-map-style", "night"],
       ["rv-track-costs", "1"],
       ["rv-track-costs", "0"],
+      ["rv-map-engine", "google"],
     ];
     for (const [key, stored] of cases) {
       const row = { ...FULL_ROW, ...toRemotePatch(key as never, stored) } as UserPrefs;
@@ -171,6 +185,13 @@ describe("userPrefsPatch — the PUT body", () => {
     expect(userPrefsPatch.safeParse({ theme: null }).success).toBe(true);
   });
 
+  it("#198 · accepts mapEngine (a string or null) and rejects a non-string", () => {
+    expect(userPrefsPatch.safeParse({ mapEngine: "google" }).success).toBe(true);
+    expect(userPrefsPatch.safeParse({ mapEngine: "mapbox" }).success).toBe(true);
+    expect(userPrefsPatch.safeParse({ mapEngine: null }).success).toBe(true);
+    expect(userPrefsPatch.safeParse({ mapEngine: 1 }).success).toBe(false);
+  });
+
   it("rejects unknown fields", () => {
     expect(userPrefsPatch.safeParse({ ownerId: "someone-else" }).success).toBe(false);
     expect(userPrefsPatch.safeParse({ theme: "dark", nope: 1 }).success).toBe(false);
@@ -180,5 +201,82 @@ describe("userPrefsPatch — the PUT body", () => {
   it("rejects a wrongly-typed field", () => {
     expect(userPrefsPatch.safeParse({ trackCosts: "1" }).success).toBe(false);
     expect(userPrefsPatch.safeParse({ theme: 1 }).success).toBe(false);
+  });
+});
+
+describe("#198 · toLocalEntries carries the map engine", () => {
+  it("writes rv-map-engine when the row has one, and skips it when null or absent", () => {
+    expect(toLocalEntries({ ...FULL_ROW, mapEngine: "google" })).toContainEqual([
+      "rv-map-engine",
+      "google",
+    ]);
+    const keys = (row: UserPrefs) => toLocalEntries(row).map(([k]) => k);
+    expect(keys({ ...FULL_ROW, mapEngine: null })).not.toContain("rv-map-engine");
+    expect(keys(FULL_ROW)).not.toContain("rv-map-engine");
+  });
+});
+
+/**
+ * #198 · resolveMapEngine — one case per row of the wireframe's resolution
+ * table (docs/design/202 §3): what the account says vs what gets drawn.
+ */
+describe("#198 · resolveMapEngine — the resolution table", () => {
+  const AVAILABLE: GoogleAvailability = { ok: true };
+  const NO_KEY: GoogleAvailability = { ok: false, reason: "no-key" };
+  const NO_MODULE: GoogleAvailability = { ok: false, reason: "no-module" };
+  const NOT_BUILT: GoogleAvailability = { ok: false, reason: "not-built" };
+  const ANY = [AVAILABLE, NO_KEY, NO_MODULE, NOT_BUILT];
+
+  it("null (never chosen) → mapbox, no fallback line, whatever Google's state", () => {
+    for (const g of ANY) expect(resolveMapEngine(null, g)).toEqual({ engine: "mapbox", fallback: null });
+    expect(resolveMapEngine(undefined, AVAILABLE)).toEqual({ engine: "mapbox", fallback: null });
+  });
+
+  it('"mapbox" → mapbox, no fallback line, whatever Google\'s state', () => {
+    for (const g of ANY) expect(resolveMapEngine("mapbox", g)).toEqual({ engine: "mapbox", fallback: null });
+  });
+
+  it('"google" + available → google', () => {
+    expect(resolveMapEngine("google", AVAILABLE)).toEqual({ engine: "google", fallback: null });
+  });
+
+  it('"google" + web without key or Map ID → mapbox, fallback "no-key"', () => {
+    expect(resolveMapEngine("google", NO_KEY)).toEqual({ engine: "mapbox", fallback: "no-key" });
+  });
+
+  it('"google" + phone without the native module → mapbox, fallback "no-module"', () => {
+    expect(resolveMapEngine("google", NO_MODULE)).toEqual({ engine: "mapbox", fallback: "no-module" });
+  });
+
+  it('"google" + not built yet → mapbox, fallback "not-built"', () => {
+    expect(resolveMapEngine("google", NOT_BUILT)).toEqual({ engine: "mapbox", fallback: "not-built" });
+  });
+
+  it("an unknown stored value (a future release's engine) degrades to the default", () => {
+    expect(resolveMapEngine("apple", AVAILABLE)).toEqual({ engine: DEFAULT_MAP_ENGINE, fallback: null });
+  });
+
+  it("the default is Mapbox, and the pill order is Mapbox · Google", () => {
+    expect(DEFAULT_MAP_ENGINE).toBe("mapbox");
+    expect(MAP_ENGINES.map((e) => e.label)).toEqual(["Mapbox", "Google"]);
+    expect(MAP_ENGINES.every((e) => isMapEngine(e.value))).toBe(true);
+    expect(isMapEngine("apple")).toBe(false);
+  });
+
+  it("each fallback reason carries the wireframe's amber copy verbatim", () => {
+    expect(MAP_ENGINE_FALLBACK_COPY).toEqual({
+      "no-key": { title: "Google isn’t set up here", body: "Showing Mapbox. Your choice is kept." },
+      "no-module": {
+        title: "This version of the app has no Google map",
+        body: "Showing Mapbox until you update.",
+      },
+      "not-built": { title: "Google map is coming", body: "Showing Mapbox for now. Your choice is kept." },
+    });
+  });
+
+  it("the settings-row line joins title and body behind the ⚠", () => {
+    expect(mapEngineFallbackLine("no-module")).toBe(
+      "⚠ This version of the app has no Google map. Showing Mapbox until you update.",
+    );
   });
 });

@@ -1,15 +1,31 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { RigProfile, UserPrefs } from "@rv-trip/core";
-import { formatFeetInches, formatPounds, homeBaseRowValue, householdHomeBasePatch } from "@rv-trip/core";
+import {
+  DEFAULT_MAP_ENGINE,
+  DEFAULT_STYLE_MODE,
+  formatFeetInches,
+  formatPounds,
+  homeBaseRowValue,
+  householdHomeBasePatch,
+  mapEngineFallbackLine,
+  resolveMapEngine,
+} from "@rv-trip/core";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useClerk, useUser } from "@clerk/expo";
 import { api } from "../../src/api";
 import { clerkEnabled } from "../../src/auth";
 import { Label, failed } from "../../src/hops";
 import { PlaceSearchField, type Picked } from "../../src/itinerary";
+import {
+  PHONE_GOOGLE_AVAILABILITY,
+  STYLE_SEGMENTS,
+  engineSegments,
+  useMapEngine,
+  useStyleMode,
+} from "../../src/map";
 import { C, F, R } from "../../src/theme";
-import { Card, Centered, Kicker, Muted } from "../../src/ui";
+import { Card, Centered, Kicker, Muted, Segmented } from "../../src/ui";
 
 /**
  * The You tab (#173 i2 · #171 · Q5 A) — `app/rig.tsx`'s body, promoted to a tab
@@ -50,6 +66,7 @@ function RigBody() {
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <AccountCard />
         <HomeBaseRow />
+        <MapsCard />
         <View style={{ marginTop: 28, alignItems: "center", gap: 6 }}>
           <Text style={{ color: C.ink, fontWeight: "700", fontSize: 17 }}>No rig yet</Text>
           <Muted>Set up your rig on the web app. Until then every drive is a straight-line estimate.</Muted>
@@ -71,6 +88,7 @@ function RigBody() {
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
       <AccountCard />
       <HomeBaseRow />
+      <MapsCard />
       <Kicker color={C.accent}>Routing input</Kicker>
       <Text style={styles.h1}>{rig.name}</Text>
       <Text style={{ color: C.inkMuted, fontSize: 14, lineHeight: 20 }}>
@@ -140,6 +158,43 @@ function HomeBaseRow() {
         </View>
       )}
       <Text style={styles.note}>Where your trips start and end. A trip can override it in Edit ▸ Starts from.</Text>
+    </>
+  );
+}
+
+/**
+ * #198 · q3 B — the Maps card: the phone's front door onto the two map
+ * preferences, the same ones (and the same labels) as web Settings. Both
+ * follow the account through `usePhonePref`; the amber line follows the engine
+ * row wherever the pill appears.
+ */
+function MapsCard() {
+  const [mode, setMode] = useStyleMode();
+  const [engine, setEngine] = useMapEngine();
+  const fallback = resolveMapEngine(engine, PHONE_GOOGLE_AVAILABILITY).fallback;
+  return (
+    <>
+      <Kicker color={C.accent}>Maps</Kicker>
+      <Card style={styles.mapsCard}>
+        <View style={styles.prefRow}>
+          <Text style={styles.prefLabel}>Map style</Text>
+          <View style={styles.prefControl}>
+            <Segmented value={mode ?? DEFAULT_STYLE_MODE} options={STYLE_SEGMENTS} onChange={setMode} />
+          </View>
+        </View>
+        <View style={[styles.prefRow, styles.prefRowLast]}>
+          <Text style={styles.prefLabel}>Map engine</Text>
+          <Text style={styles.prefHelp}>Follows your account to the web.</Text>
+          <View style={styles.prefControl}>
+            <Segmented
+              value={engine ?? DEFAULT_MAP_ENGINE}
+              options={engineSegments(fallback)}
+              onChange={setEngine}
+            />
+            {fallback && <Text style={styles.prefWarn}>{mapEngineFallbackLine(fallback)}</Text>}
+          </View>
+        </View>
+      </Card>
     </>
   );
 }
@@ -257,4 +312,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   ghostText: { color: C.ink, fontSize: 12.5, fontWeight: "700" },
+  // #198 · the Maps card — the web Settings row shape (SettingsForm.tsx Row).
+  mapsCard: { gap: 0, paddingHorizontal: 14, paddingVertical: 4 },
+  prefRow: { paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: C.borderSoft },
+  prefRowLast: { borderBottomWidth: 0 },
+  prefLabel: { color: C.ink, fontSize: 14, fontWeight: "700" },
+  prefHelp: { color: C.inkFaded, fontSize: 12, marginTop: 2 },
+  prefControl: { marginTop: 9, gap: 6, alignItems: "flex-start" },
+  prefWarn: { color: C.warning, fontSize: 11.5 },
 });

@@ -1982,7 +1982,7 @@ export async function upsertRig(owner: string, input: RigProfileInput): Promise<
  */
 export async function upsertPrefs(owner: string, patch: UserPrefsPatch): Promise<UserPrefs> {
   const values: Partial<typeof userPrefs.$inferInsert> = {};
-  for (const key of ["theme", "units", "mapStyle", "trackCosts"] as const) {
+  for (const key of ["theme", "units", "mapStyle", "trackCosts", "mapEngine"] as const) {
     if (patch[key] !== undefined) Object.assign(values, { [key]: patch[key] });
   }
   // #126 · Q5 A — the household home base: one object on the wire, four

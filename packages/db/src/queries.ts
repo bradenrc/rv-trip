@@ -924,6 +924,7 @@ export function mapPrefsRow(row: {
   units: string | null;
   mapStyle: string | null;
   trackCosts: boolean | null;
+  mapEngine?: string | null;
   homeBase?: string | null;
   homeBaseLat?: number | null;
   homeBaseLng?: number | null;
@@ -936,6 +937,7 @@ export function mapPrefsRow(row: {
     units: row.units,
     mapStyle: row.mapStyle,
     trackCosts: row.trackCosts,
+    mapEngine: row.mapEngine ?? null,
     // #126 · the household home base, as the one object the wire carries.
     homeBasePlace:
       row.homeBase == null

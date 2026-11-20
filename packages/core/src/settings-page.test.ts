@@ -108,7 +108,12 @@ describe("the form — three groups, four controls", () => {
     expect(settingsForm).toContain('label="Units"');
     expect(settingsForm).toContain("Rig dimensions and drive distances. Always stored metric.");
     expect(settingsForm).toContain('label="Default map style"');
-    expect(settingsForm).toContain("What every map opens with. Night is the product default.");
+    // #198 · corrected to match DEFAULT_STYLE_MODE = "day".
+    expect(settingsForm).toContain("What every map opens with. Day is the product default.");
+    expect(settingsForm).toContain('label="Map engine"');
+    expect(settingsForm).toContain(
+      "Which map draws every map in the app. Your pins look the same on both.",
+    );
     expect(settingsForm).toContain("Track costs");
     expect(settingsForm).toContain("Show reservation costs and the per-chapter rollup.");
   });
@@ -118,6 +123,7 @@ describe("the form — three groups, four controls", () => {
     expect(code(settingsForm)).toContain("<SegmentedControl<Theme>");
     expect(code(settingsForm)).toContain("<SegmentedControl<Units>");
     expect(code(settingsForm)).toContain("<SegmentedControl<StyleMode>");
+    expect(code(settingsForm)).toContain("<SegmentedControl<MapEngine>");
     expect(code(settingsForm)).toContain("<PrefSwitch");
   });
 

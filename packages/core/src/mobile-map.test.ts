@@ -230,14 +230,19 @@ describe("the basemap and the style preference", () => {
   it("narrows EVERY read with core's isStyleMode", () => {
     expect(isStyleMode("day")).toBe(true);
     expect(isStyleMode("terrain")).toBe(false);
+    // #198 · ONE read site: the generic `usePhonePref`, which both the style
+    // and the engine hooks go through, narrowing every read (local AND remote)
+    // with the vocabulary guard they hand it.
     const reads = mapCode.match(/getItem\(/g) ?? [];
     expect(reads).toHaveLength(1);
-    expect(flat(mapCode)).toContain("raw !== null && isStyleMode(raw) ? raw : DEFAULT_STYLE_MODE");
+    expect(flat(mapCode)).toContain("raw !== null && isValid(raw) ? raw : fallback");
+    expect(flat(mapCode)).toContain('typeof remote !== "string" || !isValid(remote)');
+    expect(flat(mapCode)).toContain("return usePhonePref(STYLE_PREF_KEY, isStyleMode, DEFAULT_STYLE_MODE);");
     expect(DEFAULT_STYLE_MODE).toBe("day");
   });
 
   it("the mode is null until the store answers, and the loading frame covers it", () => {
-    expect(flat(mapCode)).toContain("useState<StyleMode | null>(null)");
+    expect(flat(mapCode)).toContain("useState<T | null>(null)");
     expect(flat(tripScreen)).toContain('mode === null ? ( <View style={styles.mapFrameBox}> <MapFrame state="loading" />');
     expect(flat(destinationScreen)).toContain('mode === null ? ( <MapFrame state="loading"');
   });
@@ -269,11 +274,16 @@ describe("mapAvailable() degrades, and nothing routes to Google Maps instead", (
     expect(flat(mapCode)).toContain('if (!mapbox) return <MapFrame state="unavailable" height={height} />');
   });
 
-  it("offers no Google Maps fallback on any map surface", () => {
-    // Code, not prose: the docstrings explain the rule and so name Google.
+  it("offers no Google Maps hand-off on any map surface", () => {
+    // #198 retires the old "no Google at all" rule: Google is now a second map
+    // ENGINE, chosen by the account and reached only through core's
+    // resolveMapEngine seam. What stays forbidden is a map surface handing the
+    // reader off to Google Maps instead of drawing a map.
     for (const src of [mapCode, destinationCode, tripCode]) {
-      expect(src).not.toMatch(/google/i);
+      expect(src).not.toMatch(/maps\.google|google\.com\/maps|comgooglemaps|Linking/);
     }
+    for (const src of [destinationCode, tripCode]) expect(src).not.toMatch(/google/i);
+    expect(flat(mapCode)).toContain("resolveMapEngine(engine, PHONE_GOOGLE_AVAILABILITY)");
     // The phone's hand-off to the navigation apps is a drive's Navigate pills
     // (#180), which are turn-by-turn, not a map fallback: they live in
     // src/navigate.tsx, reached through `<NavigateLinks`, and no map surface
@@ -442,7 +452,63 @@ describe("Segmented mirrors @rv-trip/ui's SegmentedControl, not some other contr
   });
 
   it("is label-only — the web's variant takes a LucideIcon and this kit has none", () => {
-    expect(flat(uiCode)).toContain("export interface SegmentedOption<T extends string> { value: T; label: string; }");
+    expect(flat(uiCode)).toContain("export interface SegmentedOption<T extends string> { value: T; label: string; struck?: boolean; }");
     expect(dsPlaces).toContain("Icon: LucideIcon");
+  });
+});
+
+describe("#198 · the map engine and the account-synced map prefs on the phone", () => {
+  it("keeps the engine under rv-map-engine, the web's key", () => {
+    expect(mapCode).toContain('export const ENGINE_PREF_KEY = "rv-map-engine"');
+    expect(webMapMount).toContain('export const ENGINE_PREF_KEY = "rv-map-engine"');
+  });
+
+  it('reports Google as "not-built" until the native renderer lands (#200)', () => {
+    expect(flat(mapCode)).toContain(
+      'export const PHONE_GOOGLE_AVAILABILITY: GoogleAvailability = { ok: false, reason: "not-built" };',
+    );
+  });
+
+  it("q3 B · style AND engine both go through usePhonePref: device first, then /api/prefs", () => {
+    const f = flat(mapCode);
+    expect(f).toContain("return usePhonePref(ENGINE_PREF_KEY, isMapEngine, DEFAULT_MAP_ENGINE);");
+    const hook = f.slice(f.indexOf("export function usePhonePref"));
+    const local = hook.indexOf("AsyncStorage.getItem(key)");
+    const remote = hook.indexOf("readRemotePrefs()");
+    expect(local).toBeGreaterThan(-1);
+    expect(remote).toBeGreaterThan(local);
+    expect(hook).toContain("row?.[PREF_REMOTE[key]]");
+    // A tap writes locally and mirrors ONE field through core's toRemotePatch.
+    expect(hook).toContain("void api.prefs.put(toRemotePatch(key, next))");
+    // ...and a tap made before the row answers is never overwritten by it.
+    expect(hook).toContain("chosen.current = true;");
+  });
+
+  it("stacks the engine pill under the style pill, with the amber note, in TripMap", () => {
+    const f = flat(mapCode);
+    const style = f.indexOf("options={STYLE_SEGMENTS} onChange={onModeChange}");
+    const engine = f.indexOf("options={engineSegments(resolved.fallback)}");
+    const note = f.indexOf("<EngineFallbackNote reason={resolved.fallback} />");
+    expect(style).toBeGreaterThan(-1);
+    expect(engine).toBeGreaterThan(style);
+    expect(note).toBeGreaterThan(engine);
+  });
+
+  it("the You tab gains a Maps card with Map style + Map engine rows", () => {
+    const you = flat(code(read("apps/mobile/app/(tabs)/you.tsx")));
+    expect(you).toContain("<Kicker color={C.accent}>Maps</Kicker>");
+    expect(you).toContain("Map style");
+    expect(you).toContain("Map engine");
+    expect(you).toContain("Follows your account to the web.");
+    expect(you).toContain("options={STYLE_SEGMENTS}");
+    expect(you).toContain("options={engineSegments(fallback)}");
+    expect(you).toContain("mapEngineFallbackLine(fallback)");
+    expect((you.match(/<MapsCard \/>/g) ?? []).length).toBe(2);
+  });
+
+  it("the RN Segmented mirrors the DS's struck option", () => {
+    expect(uiCode).toContain("struck?: boolean;");
+    expect(flat(uiCode)).toContain("o.struck && styles.segmentStruck");
+    expect(dsPlaces).toContain("struck?: boolean;");
   });
 });
