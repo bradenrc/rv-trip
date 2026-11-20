@@ -1,10 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 import type { LineLayerStyle } from "@rnmapbox/maps";
+import type { LatLng, MapStyleElement } from "react-native-maps";
 import type {
   Bounds,
+  GoogleAvailability,
+  GoogleFallbackReason,
+  MapEngine,
   OverlayPalette,
+  PrefLocalKey,
+  UserPrefs,
   RvCategory,
   StyleMode,
   TripArc,
@@ -12,13 +19,23 @@ import type {
 } from "@rv-trip/core";
 import {
   ARC_CASING_WIDTH,
+  DEFAULT_MAP_ENGINE,
   DEFAULT_STYLE_MODE,
+  GOOGLE_PHONE_BASEMAP,
+  MAP_ENGINES,
+  MAP_ENGINE_FALLBACK_COPY,
   MAP_PALETTE,
+  PREF_REMOTE,
   arcFeatureCollection,
   arcLabel,
+  isMapEngine,
   isStyleMode,
   mapBounds,
+  phoneGoogleAvailability,
+  resolveMapEngine,
+  toRemotePatch,
 } from "@rv-trip/core";
+import { api } from "./api";
 import { C, F, R } from "./theme";
 import { Segmented, type SegmentedOption } from "./ui";
 
@@ -99,55 +116,196 @@ export function mapAvailable(): boolean {
   return loadMapbox() !== null;
 }
 
-// ── the style preference ────────────────────────────────────────────────────
+// ── #200 · the second engine: Google, through react-native-maps ────────────
+
+type GoogleModule = typeof import("react-native-maps");
+
+/** `undefined` = not tried yet, `null` = this build has no Google map. */
+let googleLoaded: GoogleModule | null | undefined;
+
+/**
+ * Was this binary built with a Google Maps SDK key for this platform?
+ * `app.config.ts` publishes only the yes/no (`extra.googleMaps`), never the
+ * key. On iOS this is load-bearing: the Google pod is linked only when the key
+ * is set, so a keyless iOS build has react-native-maps but no Google renderer.
+ */
+function googleKeyConfigured(): boolean {
+  const extra = Constants.expoConfig?.extra as
+    | { googleMaps?: Partial<Record<string, boolean>> }
+    | undefined;
+  return extra?.googleMaps?.[Platform.OS] === true;
+}
+
+/**
+ * The Google twin of `loadMapbox()`: a lazy require in a try, resolved once.
+ * `react-native-maps` binds its native TurboModule when it is first required,
+ * so a binary without it throws here instead of at import time, and the
+ * account's "google" falls back to Mapbox with the "no-module" note.
+ */
+export function loadGoogle(): GoogleModule | null {
+  if (googleLoaded !== undefined) return googleLoaded;
+  if (!googleKeyConfigured()) {
+    googleLoaded = null;
+    return googleLoaded;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("react-native-maps") as GoogleModule;
+    googleLoaded = mod;
+  } catch {
+    googleLoaded = null;
+  }
+  return googleLoaded;
+}
+
+/** #200 · whether this build can draw Google: the native module, else "no-module". */
+export function googleAvailability(): GoogleAvailability {
+  return phoneGoogleAvailability(loadGoogle() !== null);
+}
+
+/**
+ * Google's zoom scale runs one level ahead of Mapbox's (256px tiles against
+ * 512px), so the same framing is one level higher. The web's Google engine
+ * clamps its fit at 12 for the same reason (GoogleMapView.tsx).
+ */
+const GOOGLE_ZOOM_OFFSET = 1;
+
+/**
+ * Android's night look (iOS takes `userInterfaceStyle="dark"`). A dark
+ * Google basemap painted in the rv-* navy ramp, so it sits beside Mapbox's
+ * stock dark-v11 the way the app does. Tokens only, no raw colour.
+ */
+const ANDROID_NIGHT_STYLE: MapStyleElement[] = [
+  { elementType: "geometry", stylers: [{ color: C.navyDeep }] },
+  { elementType: "labels.text.fill", stylers: [{ color: C.inkFaded }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: C.navy }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: C.surface }] },
+  { featureType: "road.highway", elementType: "geometry", stylers: [{ color: C.borderHi }] },
+  { featureType: "poi.park", elementType: "geometry", stylers: [{ color: C.greenSoft }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: C.navy }] },
+];
+
+// ── the map preferences: style and engine (#198 · q3 B) ─────────────────────
 
 /** Where the preference lives — the SAME key the web writes
- * (apps/web/src/components/map/MapMount.tsx:41), per device rather than per
- * browser because AsyncStorage is the device's. */
+ * (apps/web/src/components/map/MapMount.tsx:41). */
 export const STYLE_PREF_KEY = "rv-map-style";
 
-const STYLE_SEGMENTS: SegmentedOption<StyleMode>[] = [
+/** #198 · the map-engine preference — the web's `ENGINE_PREF_KEY`. */
+export const ENGINE_PREF_KEY = "rv-map-engine";
+
+export const STYLE_SEGMENTS: SegmentedOption<StyleMode>[] = [
   { value: "night", label: "Night" },
   { value: "day", label: "Day" },
   { value: "sat", label: "Sat" },
 ];
 
+/** The engine pill's options, with the chosen-but-undrawable one struck. */
+export function engineSegments(fallback: GoogleFallbackReason | null): SegmentedOption<MapEngine>[] {
+  return MAP_ENGINES.map(({ value, label }) => ({
+    value,
+    label,
+    struck: value === "google" && fallback !== null,
+  }));
+}
+
+/** One GET /api/prefs shared by every map preference hook mounting together,
+ * so a screen with a map asks once, not once per preference. */
+let remoteRead: Promise<UserPrefs | null> | null = null;
+function readRemotePrefs(): Promise<UserPrefs | null> {
+  remoteRead ??= api.prefs.get().finally(() => {
+    remoteRead = null;
+  });
+  return remoteRead;
+}
+
 /**
- * The persisted basemap choice. `null` until AsyncStorage has answered — one
- * render, covered by the loading frame, so no basemap style is fetched twice.
+ * #198 · q3 B — a map preference that follows the ACCOUNT on the phone too:
+ * the device's AsyncStorage first (what the first frame reads), then the
+ * `user_prefs` row (`GET /api/prefs`), which wins when it has a value — the
+ * pattern the You tab's home base already uses. A tap writes locally first and
+ * then mirrors ONE field with `PUT /api/prefs`, through core's `toRemotePatch`,
+ * exactly like the web's `lib/pref.ts`.
  *
- * EVERY read is narrowed by core's `isStyleMode`: the stored string is
- * untrusted (a value written by a future release, a hand-edited device store),
- * and an un-narrowed read would hand `MAP_PALETTE[mode]` an undefined column.
+ * `null` until AsyncStorage has answered — one render, covered by the loading
+ * frame, so no basemap style is fetched twice.
+ *
+ * EVERY read is narrowed by `isValid`: the stored string is untrusted (a value
+ * written by a future release, a hand-edited device store), and an un-narrowed
+ * read would hand `MAP_PALETTE[mode]` an undefined column.
  */
-export function useStyleMode(): [StyleMode | null, (m: StyleMode) => void] {
-  const [mode, setMode] = useState<StyleMode | null>(null);
+export function usePhonePref<T extends string>(
+  key: PrefLocalKey,
+  isValid: (v: string) => v is T,
+  fallback: T,
+): [T | null, (v: T) => void] {
+  const [value, setValue] = useState<T | null>(null);
+  // A tap made before the account row answers is the newer word: the row must
+  // not overwrite it.
+  const chosen = useRef(false);
 
   useEffect(() => {
     let live = true;
     const settle = (raw: string | null) => {
-      if (!live) return;
-      setMode(raw !== null && isStyleMode(raw) ? raw : DEFAULT_STYLE_MODE);
+      if (!live || chosen.current) return;
+      setValue(raw !== null && isValid(raw) ? raw : fallback);
     };
-    AsyncStorage.getItem(STYLE_PREF_KEY)
+    AsyncStorage.getItem(key)
       .then(settle)
       // An unreadable store is not a reason to show no map: fall back to the
       // default rather than staying on the loading frame forever.
-      .catch(() => settle(null));
+      .catch(() => settle(null))
+      .then(() => readRemotePrefs())
+      .then((row) => {
+        const remote = row?.[PREF_REMOTE[key]];
+        if (!live || chosen.current || typeof remote !== "string" || !isValid(remote)) return;
+        setValue(remote);
+        void AsyncStorage.setItem(key, remote).catch(() => undefined);
+      })
+      // No network, no API: the device's copy stands.
+      .catch(() => undefined);
     return () => {
       live = false;
     };
-  }, []);
+  }, [key, isValid, fallback]);
 
-  const choose = useCallback((next: StyleMode) => {
-    setMode(next);
-    void AsyncStorage.setItem(STYLE_PREF_KEY, next).catch(() => {
-      // A write that fails costs the reader the preference next launch, nothing
-      // more — never the tap they just made.
-    });
-  }, []);
+  const choose = useCallback(
+    (next: T) => {
+      chosen.current = true;
+      setValue(next);
+      void AsyncStorage.setItem(key, next).catch(() => {
+        // A write that fails costs the reader the preference next launch, nothing
+        // more — never the tap they just made.
+      });
+      void api.prefs.put(toRemotePatch(key, next)).catch(() => {
+        // A dead network costs the sync, not the toggle.
+      });
+    },
+    [key],
+  );
 
-  return [mode, choose];
+  return [value, choose];
+}
+
+/** The persisted basemap choice. */
+export function useStyleMode(): [StyleMode | null, (m: StyleMode) => void] {
+  return usePhonePref(STYLE_PREF_KEY, isStyleMode, DEFAULT_STYLE_MODE);
+}
+
+/** #198 · the persisted map-engine choice (the account's word, not what draws). */
+export function useMapEngine(): [MapEngine | null, (e: MapEngine) => void] {
+  return usePhonePref(ENGINE_PREF_KEY, isMapEngine, DEFAULT_MAP_ENGINE);
+}
+
+/** #198 · the amber two-line note under the engine pill. */
+export function EngineFallbackNote({ reason }: { reason: GoogleFallbackReason }) {
+  const copy = MAP_ENGINE_FALLBACK_COPY[reason];
+  return (
+    <View style={styles.fallbackNote}>
+      <Text style={[styles.fallbackText, styles.fallbackTitle]}>{copy.title}</Text>
+      <Text style={styles.fallbackText}>{copy.body}</Text>
+    </View>
+  );
 }
 
 // ── the three frames where no map renders ───────────────────────────────────
@@ -386,6 +544,20 @@ export interface TripMapProps {
   /** #186 i6 · a tap on the map itself, off every pin (the Map tab clears its
    * card on it). */
   onPressMap?: () => void;
+  /**
+   * #201 · a business on the Google basemap was tapped (`onPoiClick`): its
+   * Google place id, name and point. Present ⇒ business taps are live on the
+   * Google engine; Mapbox's basemap carries no place id, so it never fires.
+   */
+  onPoi?: (poi: TappedPoi) => void;
+}
+
+/** #201 · what react-native-maps' `onPoiClick` tells us about a tap. */
+export interface TappedPoi {
+  googlePlaceId: string;
+  name: string;
+  lat: number;
+  lng: number;
 }
 
 /**
@@ -407,8 +579,13 @@ export function TripMap({
   selectedId = null,
   onSelect,
   onPressMap,
+  onPoi,
 }: TripMapProps) {
   const palette = MAP_PALETTE[mode];
+  // #198 · the account's engine and what this build draws. #200 · a binary
+  // with the Google renderer draws Google; one without shows the amber note.
+  const [engine, setEngine] = useMapEngine();
+  const resolved = resolveMapEngine(engine, googleAvailability());
   const shape = useMemo(() => arcFeatureCollection(arcs), [arcs]);
   const layers = useMemo(() => arcLayerStyles(palette), [palette]);
   const joinShape = useMemo(
@@ -426,6 +603,49 @@ export function TripMap({
     () => (entries.length > 0 ? mapBounds(arcs, [...pins, ...entries]) : mapBounds(arcs, pins)),
     [arcs, pins, entries],
   );
+
+  const pills = onModeChange ? (
+    // Over the canvas, never in the chrome — the masthead above already
+    // spends its rows on the lens control.
+    // #198 · q1 A — the engine pill stacks under the style pill.
+    <View style={styles.stylePill}>
+      <Segmented mono value={mode} options={STYLE_SEGMENTS} onChange={onModeChange} />
+      <Segmented
+        mono
+        value={engine ?? DEFAULT_MAP_ENGINE}
+        options={engineSegments(resolved.fallback)}
+        onChange={setEngine}
+      />
+      {resolved.fallback && <EngineFallbackNote reason={resolved.fallback} />}
+    </View>
+  ) : null;
+
+  // #200 · Google draws with no Mapbox token: it is checked only on its own path.
+  if (resolved.engine === "google") {
+    const maps = loadGoogle();
+    if (maps) {
+      if (pins.length === 0 && entries.length === 0) return <MapFrame state="empty" height={height} />;
+      return (
+        <View style={[styles.canvas, height != null ? { height } : styles.fill]}>
+          <GoogleTripCanvas
+            maps={maps}
+            mode={mode}
+            arcs={arcs}
+            join={join}
+            pins={pins}
+            entries={entries}
+            bounds={bounds}
+            showLabels={showLabels}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onPressMap={onPressMap}
+            onPoi={onPoi}
+          />
+          {pills}
+        </View>
+      );
+    }
+  }
 
   const mapbox = mapAvailable() ? loadMapbox() : null;
   if (!mapbox) return <MapFrame state="unavailable" height={height} />;
@@ -524,14 +744,247 @@ export function TripMap({
         ))}
       </MapView>
 
-      {onModeChange && (
-        // Over the canvas, never in the chrome — the masthead above already
-        // spends its rows on the lens control.
-        <View style={styles.stylePill}>
-          <Segmented mono value={mode} options={STYLE_SEGMENTS} onChange={onModeChange} />
-        </View>
-      )}
+      {pills}
     </View>
+  );
+}
+
+const CENTER = { x: 0.5, y: 0.5 };
+
+/** `[lng, lat]` (core's GeoJSON order) → react-native-maps' `LatLng`. */
+function toLatLng([lng, lat]: [number, number]): LatLng {
+  return { latitude: lat, longitude: lng };
+}
+
+/** A `#rrggbb` palette colour at an opacity. react-native-maps' Polyline has
+ * no opacity prop, so the estimate's `arcOpacity` rides on the colour. */
+function withOpacity(color: string, opacity: number): string {
+  if (opacity >= 1 || !/^#[0-9a-f]{6}$/i.test(color)) return color;
+  return `${color}${Math.round(opacity * 255).toString(16).padStart(2, "0")}`;
+}
+
+/**
+ * #200 · the same canvas on Google. The same grammar as the Mapbox layers
+ * above, drawn as react-native-maps overlays: a casing under every routed
+ * corridor (and under an estimate only where the mode cases it, sat), the
+ * corridor solid at CORRIDOR_WIDTH, an estimate dashed at the palette's width
+ * and opacity, the Journal join dashed with no casing, and the same discs,
+ * entries and labels as Marker children. Only the basemap and its attribution
+ * change; Google draws its own logo, and nothing hides it.
+ */
+function GoogleTripCanvas({
+  maps,
+  mode,
+  arcs,
+  join,
+  pins,
+  entries,
+  bounds,
+  showLabels,
+  selectedId,
+  onSelect,
+  onPressMap,
+  onPoi,
+}: {
+  maps: GoogleModule;
+  mode: StyleMode;
+  arcs: TripArc[];
+  join: [number, number][];
+  pins: TripMapPin[];
+  entries: TripMapEntry[];
+  bounds: Bounds | null;
+  showLabels: boolean;
+  selectedId: string | null;
+  onSelect?: (id: string) => void;
+  onPressMap?: () => void;
+  onPoi?: (poi: TappedPoi) => void;
+}) {
+  const palette = MAP_PALETTE[mode];
+  const basemap = GOOGLE_PHONE_BASEMAP[mode];
+  const dash = useMemo(() => ESTIMATE_DASH.map((d) => d * palette.arcWidth), [palette]);
+  const ref = useRef<InstanceType<GoogleModule["default"]> | null>(null);
+  const ready = useRef(false);
+
+  // The box as a value, so a re-render with the same trip does not re-fit.
+  const box = bounds ? `${bounds.west},${bounds.south},${bounds.east},${bounds.north}` : "";
+  const corners = useMemo<LatLng[]>(() => {
+    if (!bounds) return [];
+    return [
+      { latitude: bounds.south, longitude: bounds.west },
+      { latitude: bounds.north, longitude: bounds.east },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box]);
+  const fit = useCallback(
+    (animated: boolean) => {
+      if (corners.length === 0) return;
+      ref.current?.fitToCoordinates(corners, {
+        edgePadding: { top: FIT_PADDING, right: FIT_PADDING, bottom: FIT_PADDING, left: FIT_PADDING },
+        animated,
+      });
+    },
+    [corners],
+  );
+  // Frame on ready with no animation, then re-fit when the visible set
+  // changes — the Mapbox Camera's defaultSettings + bounds.
+  useEffect(() => {
+    if (ready.current) fit(true);
+  }, [fit]);
+
+  const GoogleMapView = maps.default;
+  const { Marker, Polyline } = maps;
+  const initialRegion = bounds
+    ? {
+        latitude: (bounds.north + bounds.south) / 2,
+        longitude: (bounds.east + bounds.west) / 2,
+        latitudeDelta: Math.max(bounds.north - bounds.south, 0.02),
+        longitudeDelta: Math.max(bounds.east - bounds.west, 0.02),
+      }
+    : undefined;
+
+  return (
+    <GoogleMapView
+      ref={ref}
+      style={styles.fill}
+      provider={maps.PROVIDER_GOOGLE}
+      mapType={basemap.mapType}
+      userInterfaceStyle={basemap.dark ? "dark" : "light"}
+      customMapStyle={Platform.OS === "android" && basemap.dark ? ANDROID_NIGHT_STYLE : undefined}
+      initialRegion={initialRegion}
+      maxZoomLevel={FIT_MAX_ZOOM + GOOGLE_ZOOM_OFFSET}
+      showsCompass={false}
+      // Android's marker toolbar opens Google Maps: a map hand-off, never offered.
+      toolbarEnabled={false}
+      onMapReady={() => {
+        ready.current = true;
+        fit(false);
+      }}
+      onPress={
+        onPressMap
+          ? (e) => {
+              if (e.nativeEvent.action !== "marker-press") onPressMap();
+            }
+          : undefined
+      }
+      // #201 · a basemap business tap raises the Map tab's card.
+      onPoiClick={
+        onPoi
+          ? (e) => {
+              const { placeId, name, coordinate } = e.nativeEvent;
+              if (placeId) {
+                onPoi({ googlePlaceId: placeId, name, lat: coordinate.latitude, lng: coordinate.longitude });
+              }
+            }
+          : undefined
+      }
+    >
+      {arcs.map((arc) => {
+        const path = arc.path.map(toLatLng);
+        return (
+          <Fragment key={arc.id}>
+            {(arc.source === "here" || palette.arcCasing) && (
+              <Polyline
+                coordinates={path}
+                strokeColor={palette.corridorCasing}
+                strokeWidth={ARC_CASING_WIDTH}
+                lineCap="round"
+                zIndex={1}
+              />
+            )}
+            {arc.source === "here" ? (
+              <Polyline
+                coordinates={path}
+                strokeColor={palette.arcLine}
+                strokeWidth={CORRIDOR_WIDTH}
+                lineCap="round"
+                zIndex={2}
+              />
+            ) : (
+              <Polyline
+                coordinates={path}
+                strokeColor={withOpacity(palette.arcLine, palette.arcOpacity)}
+                strokeWidth={palette.arcWidth}
+                lineCap="round"
+                lineDashPattern={dash}
+                zIndex={2}
+              />
+            )}
+          </Fragment>
+        );
+      })}
+
+      {join.length > 1 && (
+        <Polyline
+          coordinates={join.map(toLatLng)}
+          strokeColor={withOpacity(palette.arcLine, palette.arcOpacity)}
+          strokeWidth={palette.arcWidth}
+          lineCap="round"
+          lineDashPattern={dash}
+          zIndex={2}
+        />
+      )}
+
+      {showLabels &&
+        arcs.map((arc) => (
+          <Marker
+            key={`label-${arc.id}`}
+            coordinate={toLatLng(labelAt(arc))}
+            anchor={CENTER}
+            tappable={false}
+            zIndex={3}
+          >
+            <View
+              style={[
+                styles.arcLabel,
+                { backgroundColor: palette.arcLabelScrim, borderColor: palette.arcLabelBorder },
+              ]}
+            >
+              <Text style={[styles.arcLabelText, { color: palette.arcLabelInk }]}>{arcLabel(arc)}</Text>
+            </View>
+          </Marker>
+        ))}
+
+      {entries.map((e) => (
+        <Marker
+          key={e.id}
+          coordinate={{ latitude: e.lat, longitude: e.lng }}
+          anchor={CENTER}
+          tappable={!!onSelect}
+          onPress={onSelect ? () => onSelect(e.id) : undefined}
+          zIndex={e.id === selectedId ? 6 : 4}
+        >
+          <View
+            style={[
+              styles.entry,
+              e.been === true
+                ? { backgroundColor: palette.hollowGround, borderColor: palette.category[e.category] }
+                : { backgroundColor: palette.category[e.category], borderColor: palette.hollowGround },
+              e.id === selectedId && [styles.entrySel, { borderColor: palette.selStroke }],
+            ]}
+          />
+        </Marker>
+      ))}
+
+      {pins.map((pin) => (
+        <Marker
+          key={pin.id}
+          coordinate={{ latitude: pin.lat, longitude: pin.lng }}
+          anchor={CENTER}
+          tappable={!!onSelect}
+          onPress={onSelect ? () => onSelect(pin.id) : undefined}
+          zIndex={pin.id === selectedId ? 7 : 5}
+        >
+          <View style={styles.pin}>
+            <DestinationDisc pin={pin} palette={palette} selected={pin.id === selectedId} />
+            {showLabels && (
+              <Text style={[styles.pinLabel, { backgroundColor: palette.labelScrim, color: palette.labelInk }]}>
+                {pin.name}
+              </Text>
+            )}
+          </View>
+        </Marker>
+      ))}
+    </GoogleMapView>
   );
 }
 
@@ -563,13 +1016,35 @@ export function PinMap({
   label: string;
   height?: number;
 }) {
-  const mapbox = mapAvailable() ? loadMapbox() : null;
+  // #200 · the account's engine draws here too; PinMap has no pill of its own.
+  const [choice] = useMapEngine();
+  const { engine } = resolveMapEngine(choice, googleAvailability());
+  const maps = engine === "google" ? loadGoogle() : null;
+  const mapbox = !maps && mapAvailable() ? loadMapbox() : null;
+  const basemap = GOOGLE_PHONE_BASEMAP[mode];
   // The first fix frames the map once; after that the user owns the camera.
   const [start] = useState(at);
 
   return (
     <View style={[styles.pinCanvas, { height }]}>
-      {mapbox ? (
+      {maps ? (
+        <maps.default
+          style={styles.fill}
+          provider={maps.PROVIDER_GOOGLE}
+          mapType={basemap.mapType}
+          userInterfaceStyle={basemap.dark ? "dark" : "light"}
+          customMapStyle={Platform.OS === "android" && basemap.dark ? ANDROID_NIGHT_STYLE : undefined}
+          showsCompass={false}
+          toolbarEnabled={false}
+          initialCamera={{
+            center: { latitude: start.lat, longitude: start.lng },
+            zoom: PIN_ZOOM + GOOGLE_ZOOM_OFFSET,
+            heading: 0,
+            pitch: 0,
+          }}
+          onRegionChangeComplete={(region) => onMove({ lat: region.latitude, lng: region.longitude })}
+        />
+      ) : mapbox ? (
         <mapbox.MapView
           style={styles.fill}
           styleURL={MAP_STYLES[mode]}
@@ -659,7 +1134,25 @@ function DestinationDisc({
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   canvas: { position: "relative", overflow: "hidden" },
-  stylePill: { position: "absolute", top: 12, right: 12 },
+  stylePill: { position: "absolute", top: 12, right: 12, alignItems: "flex-end", gap: 6 },
+  // #198 · the wireframe's `.fb`: amber on amber-soft, md radius, shadow-rv-md.
+  fallbackNote: {
+    maxWidth: 220,
+    borderWidth: 1,
+    borderColor: C.warning,
+    backgroundColor: C.warningSoft,
+    borderRadius: R.md,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    // shadow-rv-md: 0 1px 3px rgba(0,0,0,.36) (packages/ui/styles/entry.css)
+    shadowColor: "#000000",
+    shadowOpacity: 0.36,
+    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  fallbackText: { fontSize: 10.5, lineHeight: 14, color: C.warning },
+  fallbackTitle: { fontWeight: "700" },
 
   // The disc's geometry is the web's: 27px, 2px border, mono 12px bold.
   disc: {

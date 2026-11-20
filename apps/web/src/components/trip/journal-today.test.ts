@@ -70,9 +70,10 @@ describe("web JournalLens · mid-trip (#178)", () => {
 
 describe("Nav opens the CaptureSheet on rv:capture (#178)", () => {
   it("adds and removes the window listener", () => {
-    expect(nav).toContain("const onCapture = () => setCapturing(true);");
+    // #201 · the handler now also reads the map's picked place id.
+    expect(nav).toMatch(/const onCapture = \(e: Event\) => \{\s*setPickedId\(googlePlaceIdOf\(e\)\);\s*setCapturing\(true\);/);
     expect(nav).toContain('window.addEventListener("rv:capture", onCapture);');
     expect(nav).toContain('return () => window.removeEventListener("rv:capture", onCapture);');
-    expect(nav).toContain("{capturing ? <CaptureSheet onClose={() => setCapturing(false)} /> : null}");
+    expect(nav).toContain("{capturing ? <CaptureSheet googlePlaceId={pickedId} onClose={close} /> : null}");
   });
 });

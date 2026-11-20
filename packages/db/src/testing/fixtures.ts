@@ -465,6 +465,8 @@ async function insertPrefs(p: {
   units?: string | null;
   mapStyle?: string | null;
   trackCosts?: boolean | null;
+  /** #198 · the map engine. */
+  mapEngine?: string | null;
   /** #126 · the household home base. */
   homeBase?: string | null;
   homeBaseLat?: number | null;
@@ -479,6 +481,7 @@ async function insertPrefs(p: {
       units: p.units ?? null,
       mapStyle: p.mapStyle ?? null,
       trackCosts: p.trackCosts ?? null,
+      mapEngine: p.mapEngine ?? null,
       homeBase: p.homeBase ?? null,
       homeBaseLat: p.homeBaseLat ?? null,
       homeBaseLng: p.homeBaseLng ?? null,

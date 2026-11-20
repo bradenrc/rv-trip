@@ -49,16 +49,38 @@ const TABS: NavItem[] = [
   { href: "/you", label: "You", Icon: CircleUser, match: (p) => ["/you", "/rig", "/settings"].some((r) => p.startsWith(r)) },
 ];
 
+/** #201 · a map's business card asks for the sheet with the tapped place:
+ * `rv:capture` carrying `detail: { googlePlaceId }`. Any other dispatch (the
+ * Journal's Log something) carries none. */
+function googlePlaceIdOf(e: Event): string | null {
+  const detail = (e as CustomEvent<{ googlePlaceId?: unknown } | null>).detail;
+  return typeof detail?.googlePlaceId === "string" && detail.googlePlaceId !== "" ? detail.googlePlaceId : null;
+}
+
 export function Nav() {
   const pathname = usePathname();
   const [theme, setTheme] = useTheme();
   const dark = theme === "dark";
   /** #176 i3 · + Capture and the Capture tab open the sheet; the URL never changes. */
   const [capturing, setCapturing] = useState(false);
+  /** #201 · the place a map's Save picked, opened at the pick; null otherwise. */
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const open = () => {
+    setPickedId(null);
+    setCapturing(true);
+  };
+  const close = () => {
+    setCapturing(false);
+    setPickedId(null);
+  };
   /** #178 · #181 i4 — the trip Journal's Log something asks for the same
-   * sheet through a window event, mirroring the sheet's own `rv:captured`. */
+   * sheet through a window event, mirroring the sheet's own `rv:captured`.
+   * #201 · a map's business card sends the tapped place's id with it. */
   useEffect(() => {
-    const onCapture = () => setCapturing(true);
+    const onCapture = (e: Event) => {
+      setPickedId(googlePlaceIdOf(e));
+      setCapturing(true);
+    };
     window.addEventListener("rv:capture", onCapture);
     return () => window.removeEventListener("rv:capture", onCapture);
   }, []);
@@ -116,7 +138,7 @@ export function Nav() {
             <Moon className="block size-[17px] theme-dark:hidden" />
           </button>
 
-          <button type="button" onClick={() => setCapturing(true)} className="inline-flex cursor-pointer items-center whitespace-nowrap rounded-rv-md border-none bg-rv-green px-[13px] py-[7px] text-[13.5px] font-bold text-rv-navy">
+          <button type="button" onClick={open} className="inline-flex cursor-pointer items-center whitespace-nowrap rounded-rv-md border-none bg-rv-green px-[13px] py-[7px] text-[13.5px] font-bold text-rv-navy">
             + Capture
           </button>
 
@@ -146,7 +168,7 @@ export function Nav() {
             </>
           );
           return href === null ? (
-            <button key={label} type="button" onClick={() => setCapturing(true)} className={`${cls} cursor-pointer border-none bg-transparent`}>
+            <button key={label} type="button" onClick={open} className={`${cls} cursor-pointer border-none bg-transparent`}>
               {face}
             </button>
           ) : (
@@ -160,7 +182,7 @@ export function Nav() {
       {/* #176 i3 · a sibling of both <nav>s, never inside one: each is a
           literal `dark` island in a z-20 stacking context, and the sheet must
           wear the page's theme over everything (vet MED). */}
-      {capturing ? <CaptureSheet onClose={() => setCapturing(false)} /> : null}
+      {capturing ? <CaptureSheet googlePlaceId={pickedId} onClose={close} /> : null}
     </>
   );
 }

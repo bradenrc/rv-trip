@@ -408,7 +408,7 @@ export function PlacesLibrary({
         <div className="md:hidden">
           <div className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-[1fr_360px]">
             <div className="min-h-[420px]">
-              <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} />
+              <MapMount pins={lens.pins} unmappedCount={lens.unmapped.length} saves={places} />
             </div>
             <div className="grid content-start gap-3">
               {leading}
@@ -443,6 +443,7 @@ export function PlacesLibrary({
               selectedId={selectedId}
               onSelect={selectPin}
               height="520px"
+              saves={places}
             />
             {/* #197 · #196: the selected pin's card, with Open → the Place
                 view. It takes the corner the unmapped note sits in, so the

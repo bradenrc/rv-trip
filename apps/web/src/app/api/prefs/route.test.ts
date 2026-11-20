@@ -33,6 +33,7 @@ describeDb("/api/prefs", () => {
       units: null, // never chosen — NOT "null", NOT absent
       mapStyle: null,
       trackCosts: null,
+      mapEngine: null, // #198 · never chosen → Mapbox
       homeBasePlace: null, // #126 · the household home base, never chosen
       updatedAt: expect.any(String),
     });
@@ -52,6 +53,17 @@ describeDb("/api/prefs", () => {
       trackCosts: true,
     });
     expect(await read.countPrefs(DEV_OWNER)).toBe(1); // owner_id is the PK
+  });
+
+  it("#198 · stores the map engine in its own column, leaving map style alone", async () => {
+    await PUT(req({ mapStyle: "night" }, "PUT"));
+
+    const res = await PUT(req({ mapEngine: "google" }, "PUT"));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ mapStyle: "night", mapEngine: "google" });
+    expect((await read.prefsRow(DEV_OWNER))!.mapEngine).toBe("google");
+    expect((await (await GET()).json()).mapEngine).toBe("google");
   });
 
   it("stores trackCosts as a real boolean and reads it back as one", async () => {

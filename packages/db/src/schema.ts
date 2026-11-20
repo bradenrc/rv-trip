@@ -526,6 +526,7 @@ export const userPrefs = pgTable("user_prefs", {
   units: text("units"), // 'imperial' | 'metric'
   mapStyle: text("map_style"), // 'night' | 'day' | 'sat'
   trackCosts: boolean("track_costs"),
+  mapEngine: text("map_engine"), // #198 · 'mapbox' | 'google' — null = never chosen → Mapbox
   // #126 · Q5 A — the HOUSEHOLD home base: where trips start and end unless a
   // trip overrides it (its own `trips.home_base*`, which stay). Same shape as
   // the trip's: the name plus the anchor's three nullable columns.
