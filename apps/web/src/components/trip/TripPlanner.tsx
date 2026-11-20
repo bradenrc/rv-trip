@@ -1772,6 +1772,7 @@ export function TripPlanner({
             drives={drives}
             onRateTrip={rateTrip}
             onNoteTrip={noteTrip}
+            saves={savedPlaces}
           />
         ) : tab === "ideas" ? (
           <IdeasLens

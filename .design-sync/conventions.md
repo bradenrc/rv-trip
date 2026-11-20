@@ -37,6 +37,10 @@ or new class names — the palette below is the whole vocabulary.
   neutral `rv-ink-muted` on `rv-border-hi` with the ↻ glyph (never green); **Once was
   enough** stays amber, `rv-warning` / `rv-warning-soft`. Not said draws no badge. On the
   phone these are `C.inkMuted` / `C.borderHi` and `C.warning` / `C.warningSoft` (core `RV`).
+- Destructive (#197 · q3 B): destructive is the colour of Delete and nothing else. Web:
+  shadcn `destructive` (the ⋯ menu's `variant="destructive"` Delete, `text-destructive`);
+  phone: `C.destructive` (core `RV.destructive`, the hex of globals.css's dark
+  `--destructive`). Never a warning, an error or a decoration.
 - Travel: `rv-travel` / `rv-travel-ink` / `rv-travel-soft` (slate-violet). The
   "Travel" category color, and — as a 3px `border-l` only — the structural accent
   that marks a card as being about a *drive* (the restricted drive card in the

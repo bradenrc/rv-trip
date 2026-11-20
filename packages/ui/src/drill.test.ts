@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { reservationType } from "@rv-trip/core";
+import { categoryMeta } from "./category";
 import { DRILL_MARKS, drillDoors, drillGroupLabel, drillMarkId, type DrillDoor } from "./drill";
 
 /**
@@ -198,5 +200,13 @@ describe("drillGroupLabel", () => {
     expect(drillGroupLabel("category", "activity")).toBe("do");
     expect(drillGroupLabel("google", "campground")).toBe("google");
     expect(drillGroupLabel("social", "campground")).toBe("social");
+  });
+});
+
+describe("drill · moved into core (#197 · #193)", () => {
+  it("names the third group with the same word categoryMeta renders, for every type", () => {
+    for (const type of reservationType.options) {
+      expect(drillGroupLabel("category", type)).toBe(categoryMeta(type).cat.toLowerCase());
+    }
   });
 });

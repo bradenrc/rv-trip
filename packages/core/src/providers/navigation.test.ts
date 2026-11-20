@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNavigationHandoff, navigateLinks } from "./navigation";
+import { buildNavigationHandoff, navigateLinks, navigateLinksForPlace } from "./navigation";
 import { CORRIDOR_TOLERANCE_METERS } from "./frechet";
 import { haversineMeters, type LatLng } from "./index";
 
@@ -153,5 +153,38 @@ describe("navigateLinks (#180)", () => {
     const links = navigateLinks({ lat: 44.6, lng: -124.06451234 });
     expect(links.apple).toBe("https://maps.apple.com/?daddr=44.6000,-124.0645&dirflg=d");
     expect(links.google).not.toMatch(/origin=/);
+  });
+});
+
+describe("navigateLinksForPlace (#197 · #193)", () => {
+  const ASLAN = { name: "Aslan Brewing Co.", lat: 48.751, lng: -122.478, googlePlaceId: "ChIJaslan" };
+  const PULLOUT = { name: "Chuckanut pullout", lat: 48.66, lng: -122.49, googlePlaceId: null };
+
+  it("a Google place: the listing by destination_place_id + name; Apple and Waze get the point and q=", () => {
+    expect(navigateLinksForPlace(ASLAN)).toEqual({
+      google:
+        "https://www.google.com/maps/dir/?api=1&destination=Aslan%20Brewing%20Co.&destination_place_id=ChIJaslan&travelmode=driving",
+      apple: "https://maps.apple.com/?daddr=48.7510,-122.4780&q=Aslan%20Brewing%20Co.&dirflg=d",
+      waze: "https://waze.com/ul?ll=48.7510,-122.4780&q=Aslan%20Brewing%20Co.&navigate=yes",
+    });
+  });
+
+  it("coordinates only: the same point to every app, and the pin's name is never sent", () => {
+    expect(navigateLinksForPlace(PULLOUT)).toEqual({
+      google: "https://www.google.com/maps/dir/?api=1&destination=48.6600,-122.4900&travelmode=driving",
+      apple: "https://maps.apple.com/?daddr=48.6600,-122.4900&dirflg=d",
+      waze: "https://waze.com/ul?ll=48.6600,-122.4900&navigate=yes",
+    });
+  });
+
+  it("coordinates only is byte-identical to navigateLinks", () => {
+    expect(navigateLinksForPlace(PULLOUT)).toEqual(navigateLinks({ lat: 48.66, lng: -122.49 }));
+  });
+
+  it("no lat/lng → null: no Go block", () => {
+    expect(navigateLinksForPlace({ name: "that taco truck", lat: null, lng: null, googlePlaceId: null })).toBeNull();
+    // An id with no point cannot hand Apple or Waze anything, so it is null too.
+    expect(navigateLinksForPlace({ name: "x", lat: null, lng: null, googlePlaceId: "ChIJx" })).toBeNull();
+    expect(navigateLinksForPlace({ name: "x", lat: 48.7, lng: null, googlePlaceId: null })).toBeNull();
   });
 });

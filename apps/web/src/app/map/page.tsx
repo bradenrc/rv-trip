@@ -15,7 +15,13 @@ import { unitsFromPrefs } from "@/lib/units";
 
 export const dynamic = "force-dynamic";
 
-export default async function MapPage() {
+export default async function MapPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ place?: string | string[] }>;
+}) {
+  // #197 · #196 · the Place view's "On the map": preselect that save's pin.
+  const { place } = await searchParams;
   const owner = await getOwner();
   const [trips, places, rig, prefs, jar] = await Promise.all([
     listTripsWithDestinationsForOwner(owner),
@@ -73,6 +79,7 @@ export default async function MapPage() {
         routingHash={routingHash}
         units={units}
         today={today}
+        focus={typeof place === "string" ? place : null}
       />
     </PageShell>
   );

@@ -17,7 +17,8 @@ import SignInScreen from "./sign-in";
  * (#173 i2), whose Trips tab nests the stack that used to live here, so `/` and
  * `/trips/[id]` keep their URLs — plus the one screen that sits ABOVE the tabs:
  * the capture sheet, opened by the center + from any tab as a formSheet. The
- * rig is the You tab now; `app/rig.tsx` only redirects there.
+ * rig is the You tab now; `app/rig.tsx` only redirects there. #197 · #193 adds
+ * a second: the Place screen (`app/place/[id].tsx`), a card push over the tabs.
  */
 function Shell() {
   // The capture queue's flush needs the session token, so it runs in here.
@@ -37,6 +38,9 @@ function Shell() {
             contentStyle: { backgroundColor: C.surface },
           }}
         />
+        {/* #197 · #193: one saved place, pushed over the tabs from Places, Map
+            and a trip's Journal alike — so it lives here, not in a tab. */}
+        <Stack.Screen name="place/[id]" options={{ headerShown: false }} />
       </Stack>
     </>
   );

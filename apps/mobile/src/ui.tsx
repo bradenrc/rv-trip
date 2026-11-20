@@ -279,6 +279,9 @@ export function FilterChip({
  * El Chandelier", "Synced 2 saves". Amber = attention — "Saved on this phone",
  * and the sheet's offline strip. A native-local pattern: `packages/ui` is
  * web-only, and promoting this into the DS is a later decision.
+ *
+ * #197 · #194: an optional `onView` draws "View" before Undo, in the same ink —
+ * the restored toast opens the place it just put back.
  */
 export function Toast({
   title,
@@ -286,12 +289,14 @@ export function Toast({
   tone,
   glyph,
   onUndo,
+  onView,
 }: {
   title: string;
   sub?: string | null;
   tone: "green" | "amber";
   glyph: string;
   onUndo?: () => void;
+  onView?: () => void;
 }) {
   const amber = tone === "amber";
   const color = amber ? C.warning : C.greenInk;
@@ -316,6 +321,11 @@ export function Toast({
           </Text>
         ) : null}
       </View>
+      {onView && (
+        <Pressable onPress={onView} hitSlop={8} accessibilityRole="button">
+          <Text style={[styles.toastUndo, { color }]}>View</Text>
+        </Pressable>
+      )}
       {onUndo && (
         <Pressable onPress={onUndo} hitSlop={8} accessibilityRole="button">
           <Text style={[styles.toastUndo, { color }]}>Undo</Text>

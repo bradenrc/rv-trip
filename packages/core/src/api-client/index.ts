@@ -33,12 +33,14 @@ import {
   savedPlaceListSchema,
   savedPlaceSchema,
   placesEnvelopeSchema,
+  placeDetailsEnvelopeSchema,
   resolvedAreaSchema,
   rigResponseSchema,
   routePairsResponseSchema,
   reservationRowSchema,
   tripSchema,
   destinationSchema,
+  type PlaceDetailsEnvelope,
   type PlacesSearchEnvelope,
   type TripBundle,
 } from "./schemas";
@@ -187,6 +189,11 @@ export interface ApiClient {
     patch(id: string, patch: SavedPlacePatch): Promise<void>;
     /** DELETE /api/places/:id — the capture toast's Undo. */
     remove(id: string): Promise<void>;
+    /** GET /api/places/details/:googlePlaceId (#197 · #193) — the Place
+     * screen's Google line, Call and Website. Keyed by the GOOGLE id, not the
+     * save's. No key answers the degraded envelope with no results (a 200), so
+     * every caller reads "nothing to show" from `results[0]` alone. */
+    details(googlePlaceId: string): Promise<PlaceDetailsEnvelope>;
   };
   areas: {
     /** The locality a point is in, or null (#111). */
@@ -309,6 +316,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       patch: (id, patch) =>
         voidResult(request("PATCH", `/api/places/${encodeURIComponent(id)}`, patch)),
       remove: (id) => voidResult(request("DELETE", `/api/places/${encodeURIComponent(id)}`)),
+      details: (googlePlaceId) =>
+        parsed(
+          placeDetailsEnvelopeSchema,
+          request("GET", `/api/places/details/${encodeURIComponent(googlePlaceId)}`),
+        ),
     },
     areas: {
       resolve: (near) =>

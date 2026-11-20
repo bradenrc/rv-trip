@@ -141,6 +141,42 @@ export function navigateLinks(to: LatLng): NavigateLinks {
 }
 
 /**
+ * The Place screen's Go row (#197 · #193, docs/design/197 §6): the same three
+ * apps, handed one SAVED place rather than a drive's destination.
+ *
+ * - A Google place (an id AND a point) → Google opens the real listing through
+ *   `destination_place_id` with the name as `destination`; Apple and Waze still
+ *   get the 4-decimal point, plus the name as `q=` (whether they show it is a
+ *   walk check — the link navigates either way).
+ * - Coordinates only (a dropped pin) → byte-identical to `navigateLinks`: a
+ *   pin's name is the user's label, not a place, so it is never sent.
+ * - No point → `null`: there is no Go block. An id with no point is null too —
+ *   Apple and Waze have nothing to navigate to, and the row is three equal
+ *   buttons or none.
+ */
+export interface NavigatePlace {
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+}
+
+export function navigateLinksForPlace(place: NavigatePlace): NavigateLinks | null {
+  if (place.lat == null || place.lng == null) return null;
+  const to = { lat: place.lat, lng: place.lng };
+  const id = place.googlePlaceId?.trim();
+  const name = place.name.trim();
+  if (!id || !name) return navigateLinks(to);
+  const at = coord(to);
+  const q = encodeURIComponent(name);
+  return {
+    google: `https://www.google.com/maps/dir/?api=1&destination=${q}&destination_place_id=${encodeURIComponent(id)}&travelmode=driving`,
+    apple: `https://maps.apple.com/?daddr=${at}&q=${q}&dirflg=d`,
+    waze: `https://waze.com/ul?ll=${at}&q=${q}&navigate=yes`,
+  };
+}
+
+/**
  * The deviation, from whichever input carries it. `null` — "the check never
  * ran" — is a different answer from a large number, and only a number can ever
  * produce a "checked" verdict.

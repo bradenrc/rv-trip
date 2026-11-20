@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import Link from "next/link";
 import { CircleMinus, RefreshCw } from "lucide-react";
 import {
   JOURNAL_AROUND_HEADING,
@@ -13,11 +14,13 @@ import {
   didntGetToLabel,
   journalIsEmpty,
   journalTallyParts,
+  saveForJournalEntry,
   travelFoldLabel,
   tripJournal,
   type IsoDate,
   type JournalEntry,
   type RouteDrive,
+  type SavedPlace,
   type Trip,
 } from "@rv-trip/core";
 import { CategoryTile, Stars } from "@rv-trip/ui";
@@ -42,8 +45,12 @@ export function JournalLens({
   drives,
   onRateTrip,
   onNoteTrip,
+  saves = NO_SAVES,
 }: {
   trip: Trip;
+  /** #197 · #196: the owner's library — an entry whose name is in it gets a ›
+   * to its Place view (core's `saveForJournalEntry`, the phone's rule). */
+  saves?: readonly SavedPlace[];
   /** The browser's date (the `tz` cookie); null when the server cannot know it. */
   today: IsoDate | null;
   /** The request's instant (ISO) — Up next's clock until the first tick. */
@@ -71,39 +78,47 @@ export function JournalLens({
   // #179 · q6 A — one layout for both forms: the list on the left, the map
   // always beside it (stacked above it below md). No map for an empty journal.
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(300px,420px)_1fr]">
-      <div className="flex min-w-0 flex-col gap-2">
-        {midTrip && !whole ? (
-          <JournalTodayLens
+    <SavesContext.Provider value={saves}>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(300px,420px)_1fr]">
+        <div className="flex min-w-0 flex-col gap-2">
+          {midTrip && !whole ? (
+            <JournalTodayLens
+              trip={trip}
+              today={today}
+              clock={clock}
+              drives={drives}
+              onWhole={() => setWhole(true)}
+              {...sel}
+            />
+          ) : (
+            <WholeTripLens
+              trip={trip}
+              onRateTrip={onRateTrip}
+              onNoteTrip={onNoteTrip}
+              onToday={midTrip ? () => setWhole(false) : null}
+              {...sel}
+            />
+          )}
+        </div>
+        {!journalIsEmpty(tripJournal(trip)) && (
+          <JournalMap
             trip={trip}
             today={today}
-            clock={clock}
-            drives={drives}
-            onWhole={() => setWhole(true)}
-            {...sel}
-          />
-        ) : (
-          <WholeTripLens
-            trip={trip}
-            onRateTrip={onRateTrip}
-            onNoteTrip={onNoteTrip}
-            onToday={midTrip ? () => setWhole(false) : null}
-            {...sel}
+            label={midTrip ? "The trip so far" : "Everything logged on this trip"}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            saves={saves}
           />
         )}
       </div>
-      {!journalIsEmpty(tripJournal(trip)) && (
-        <JournalMap
-          trip={trip}
-          today={today}
-          label={midTrip ? "The trip so far" : "Everything logged on this trip"}
-          selectedId={selectedId}
-          onSelect={setSelectedId}
-        />
-      )}
-    </div>
+    </SavesContext.Provider>
   );
 }
+
+const NO_SAVES: readonly SavedPlace[] = [];
+/** The library, for every JournalRows under this lens without threading it
+ * through both forms' props. */
+const SavesContext = createContext<readonly SavedPlace[]>(NO_SAVES);
 
 /** The selection both forms share with the map. */
 interface Selection {
@@ -367,6 +382,7 @@ function GroupHead({
 }
 
 function JournalRows({ entries, selectedId, onSelect }: { entries: JournalEntry[] } & Selection) {
+  const saves = useContext(SavesContext);
   return (
     <div className="flex flex-col overflow-hidden rounded-rv-card border border-rv-border bg-rv-surface">
       {entries.map((e) => (
@@ -389,9 +405,31 @@ function JournalRows({ entries, selectedId, onSelect }: { entries: JournalEntry[
             )}
             {e.notes && <div className="mt-0.5 text-[13px] leading-[1.35] text-rv-ink-muted">{e.notes}</div>}
           </div>
+          <EntryOpen entry={e} saves={saves} />
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * #197 · #196 · a Journal entry whose name is in the library gets a › to its
+ * Place view; one that is not gets nothing. The row's own click stays the
+ * shipped one (it selects the pin), so the › is its own link and does not
+ * bubble into it.
+ */
+function EntryOpen({ entry, saves }: { entry: JournalEntry; saves: readonly SavedPlace[] }) {
+  const save = saveForJournalEntry(entry, saves);
+  if (!save) return null;
+  return (
+    <Link
+      href={`/places/${save.id}`}
+      aria-label={`Open ${save.place.name}`}
+      onClick={(ev) => ev.stopPropagation()}
+      className="flex-none self-center rounded-rv-sm px-1.5 text-[14px] leading-none text-rv-ink-faded no-underline hover:bg-rv-navy-soft"
+    >
+      ›
+    </Link>
   );
 }
 

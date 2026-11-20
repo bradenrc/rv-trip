@@ -84,6 +84,14 @@ export function PlacesWorkspace({
   children: ReactNode;
 }) {
   const [places, setPlaces] = useState(initialPlaces);
+  // #197 · #196: a fresh server render (the Place view's writes end in
+  // `router.refresh()`) re-seeds the list — the server's rows are the truth.
+  // Between refreshes the island's own writes stand, as before.
+  const [seed, setSeed] = useState(initialPlaces);
+  if (seed !== initialPlaces) {
+    setSeed(initialPlaces);
+    setPlaces(initialPlaces);
+  }
   const [dismissed, setDismissed] = useState<string[]>([]);
   const [saveSheet, setSaveSheet] = useState<{ id: string | null; form: SavePlaceForm } | null>(
     null,

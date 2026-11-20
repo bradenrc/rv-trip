@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CircleDashed, LocateFixed } from "lucide-react";
 import { toast } from "sonner";
@@ -71,6 +72,7 @@ export function MapOverview({
   routingHash,
   units,
   today,
+  focus = null,
 }: {
   trips: Trip[];
   places: SavedPlace[];
@@ -85,6 +87,9 @@ export function MapOverview({
   /** The reader's date from the tz cookie (map/page.tsx), or null before the
    * cookie exists. It decides which destinations are been (q7 A). */
   today: IsoDate | null;
+  /** #197 · #196 · `/map?place=<id>` — the Place view's "On the map": that
+   * save's pin starts selected, with every filter on All so it is drawn. */
+  focus?: string | null;
 }) {
   const model = useMemo(
     () => buildMapModel(trips, places, routes, routingHash, units, today),
@@ -93,7 +98,18 @@ export function MapOverview({
   const [picked, setFilter] = useState<LibraryFilter>({ kind: "all" });
   const [tripMenuOpen, setTripMenuOpen] = useState(false);
   const [cat, setCat] = useState<CatFilter>("All");
-  const [pickedId, setPickedId] = useState<string | null>(null);
+  const [pickedId, setPickedId] = useState<string | null>(focus);
+  // A new ?place= while this island stays mounted (the Place view was open over
+  // /map) selects that pin too: keyed on the param, not read once on mount.
+  const [focused, setFocused] = useState(focus);
+  if (focus !== focused) {
+    setFocused(focus);
+    if (focus) {
+      setPickedId(focus);
+      setFilter({ kind: "all" });
+      setCat("All");
+    }
+  }
   const [locating, setLocating] = useState(false);
   const router = useRouter();
 
@@ -467,6 +483,13 @@ function SelectedPlace({ pin }: { pin: PlacePin }) {
       <div className="mt-[5px] flex flex-wrap items-center gap-[9px]">
         <span className="text-[15.5px] font-bold tracking-[-0.01em] text-rv-ink">{pin.name}</span>
         {pin.rating != null && <Stars value={pin.rating} />}
+        {/* #197 · #196: two clicks — pin, then Open — to the Place view. */}
+        <Link
+          href={`/places/${pin.id}`}
+          className="ml-auto whitespace-nowrap text-[11.5px] font-bold text-rv-accent no-underline"
+        >
+          Open
+        </Link>
       </div>
       <div className="font-mono text-[11.5px] text-rv-ink-faded">
         {[pin.region, pin.source ? `from ${pin.source}` : null, pin.tripName].filter(Boolean).join(" · ")}

@@ -41,6 +41,7 @@ import {
 } from "@rv-trip/ui";
 import { ChangeBylinePopover } from "@/components/history/ChangeBylinePopover";
 import { GoogleLine } from "@/components/places/GoogleLine";
+import { PinOpenCard } from "@/components/places/PinOpenCard";
 import { MapMount } from "@/components/map/MapMount";
 import { buildMapModel } from "@/components/map/pins";
 import { browserPosition, resolveAreaNear } from "@/lib/area-label";
@@ -219,6 +220,10 @@ export function PlacesLibrary({
   // filters again; the pins ARE the list.
   const lens = useMemo(() => buildMapModel([], list), [list]);
   const hidden = shelf.length - list.length;
+  /** The panel's selected pin, when it is one the panel draws (#197 · #196). */
+  const panelPick = lens.pins.some((p) => p.id === selectedId)
+    ? (list.find((p) => p.id === selectedId) ?? null)
+    : null;
 
   const wantCount = places.filter((p) => p.status === "want").length;
   const beenCount = places.length - wantCount;
@@ -439,10 +444,18 @@ export function PlacesLibrary({
               onSelect={selectPin}
               height="520px"
             />
-            {lens.pins.length > 0 && lens.unmapped.length > 0 && (
-              <span className="pointer-events-none absolute bottom-1.5 right-2 z-[3] font-mono text-[9.5px] text-rv-ink-faded">
-                {lens.unmapped.length} {lens.unmapped.length === 1 ? "has" : "have"} no coordinates
-              </span>
+            {/* #197 · #196: the selected pin's card, with Open → the Place
+                view. It takes the corner the unmapped note sits in, so the
+                note steps aside while a card is up. */}
+            {panelPick ? (
+              <PinOpenCard save={panelPick} className="absolute bottom-2 left-2 right-2 z-[3]" />
+            ) : (
+              lens.pins.length > 0 &&
+              lens.unmapped.length > 0 && (
+                <span className="pointer-events-none absolute bottom-1.5 right-2 z-[3] font-mono text-[9.5px] text-rv-ink-faded">
+                  {lens.unmapped.length} {lens.unmapped.length === 1 ? "has" : "have"} no coordinates
+                </span>
+              )
             )}
           </div>
         </aside>

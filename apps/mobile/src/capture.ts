@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { Alert, AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
+import { router } from "expo-router";
 import type {
   CaptureDraft,
   DidItBody,
@@ -15,6 +16,9 @@ import type {
 } from "@rv-trip/core";
 import {
   CAPTURE_QUEUE_KEY,
+  DELETE_OFFLINE_TOAST,
+  RESTORED_TOAST,
+  removedToast,
   CAPTURE_QUEUE_KEY_V1,
   JOURNAL_QUEUED_TOAST,
   enqueue,
@@ -50,14 +54,30 @@ import { api } from "./api";
  * into one more pass when the current one ends.
  */
 
-export type ToastTone = "saved" | "queued" | "synced" | "journal" | "journal-queued";
+/**
+ * #197 · #194 adds the Place screen's three: `removed` (amber ⌫, Undo),
+ * `restored` (green ↺, View) and `needs-signal` (amber !, Delete with no
+ * signal — nothing is queued).
+ */
+export type ToastTone =
+  | "saved"
+  | "queued"
+  | "synced"
+  | "journal"
+  | "journal-queued"
+  | "removed"
+  | "restored"
+  | "needs-signal";
 
 export interface CaptureToast extends ToastCopy {
   tone: ToastTone;
   /** "saved" only: the row Undo deletes. */
   undoId?: string;
-  /** "journal" only: puts the thing back the way it was. */
+  /** "journal" / "removed": puts the thing back the way it was. */
   onUndo?: () => void;
+  /** "restored": opens the place Undo just put back. "saved" (#195, frame
+   * 12): opens the place just saved — its `undoId`. A queued save has no id. */
+  onView?: () => void;
   key: number;
 }
 
@@ -129,7 +149,11 @@ let toastKey = 0;
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
 const TOAST_MS = 5000;
 
-function showToast(copy: ToastCopy, tone: ToastTone, extra: { undoId?: string; onUndo?: () => void } = {}) {
+function showToast(
+  copy: ToastCopy,
+  tone: ToastTone,
+  extra: { undoId?: string; onUndo?: () => void; onView?: () => void } = {},
+) {
   if (toastTimer) clearTimeout(toastTimer);
   const key = ++toastKey;
   set({ toast: { ...copy, tone, ...extra, key } });
@@ -151,6 +175,34 @@ export async function undoSave(id: string): Promise<void> {
   } catch {
     // Nothing to roll back on the phone; the row is still in the library.
   }
+}
+
+// ── #197 · #194 · the Place screen's Delete ─────────────────────────────────
+
+/** Delete went through: amber "Removed <name>" with Undo (frame 6). Shown by
+ * the toast host on whichever screen is on top — the tab Delete returned to. */
+export function announceRemoved(name: string, undo: () => void): void {
+  showToast(removedToast(name), "removed", {
+    onUndo: () => {
+      dismissToast();
+      undo();
+    },
+  });
+}
+
+/** Undo re-saved it: green "Restored…" with View, which opens the new id (frame 7). */
+export function announceRestored(view: () => void): void {
+  showToast(RESTORED_TOAST, "restored", {
+    onView: () => {
+      dismissToast();
+      view();
+    },
+  });
+}
+
+/** Delete with no signal (frame 8): amber, no action; the Place screen stays. */
+export function announceDeleteNeedsSignal(): void {
+  showToast(DELETE_OFFLINE_TOAST, "needs-signal");
 }
 
 // ── the flush ───────────────────────────────────────────────────────────────
@@ -228,7 +280,14 @@ async function flush(announce: Announce): Promise<void> {
     const waiting = (clientId: string) => out.queue.some((q) => q.clientId === clientId);
     if (announce.kind === "capture") {
       const mine = out.sent.find((s) => s.item.clientId === announce.clientId)?.value as SavedPlace | undefined;
-      if (mine) showToast(savedToast(mine), "saved", { undoId: mine.id });
+      if (mine)
+        showToast(savedToast(mine), "saved", {
+          undoId: mine.id,
+          onView: () => {
+            dismissToast();
+            router.push({ pathname: "/place/[id]", params: { id: mine.id } });
+          },
+        });
       else if (waiting(announce.clientId)) showToast(queuedToast(out.queue.length), "queued");
     } else if (announce.kind === "journal") {
       const mine = out.sent.find((s) => s.item.clientId === announce.clientId);

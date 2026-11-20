@@ -406,6 +406,42 @@ describe("createApiClient — capture (#111)", () => {
     expect(f.calls[0]!.init.method).toBe("DELETE");
   });
 
+  it("GETs a Google place's details (#197 · #193) — keyed by the Google id", async () => {
+    const aslan = {
+      googlePlaceId: "ChIJ aslan",
+      name: "Aslan Brewing Co.",
+      location: { lat: 48.751, lng: -122.478 },
+      rating: 4.6,
+      address: "1330 N Forest St, Bellingham, WA",
+      userRatingCount: 1284,
+      websiteUri: "https://aslanbrewing.com",
+      nationalPhoneNumber: "(360) 778-2088",
+      googleMapsUri: "https://maps.google.com/?cid=1",
+    };
+    const f = fakeFetch(200, { results: [aslan], degraded: false });
+    const api = createApiClient({ baseUrl: "http://x", fetch: f.fn });
+    const env = await api.places.details("ChIJ aslan");
+    expect(f.calls[0]!.url).toBe("http://x/api/places/details/ChIJ%20aslan");
+    expect(f.calls[0]!.init.method).toBe("GET");
+    expect(env.results[0]).toMatchObject({ userRatingCount: 1284, nationalPhoneNumber: "(360) 778-2088" });
+  });
+
+  it("reads the no-key degraded envelope as no results, and a row cached before #91 as googleMapsUri null", async () => {
+    const api = createApiClient({
+      baseUrl: "http://x",
+      fetch: fakeFetch(200, { results: [], degraded: true, reason: "no_provider" }).fn,
+    });
+    expect(await api.places.details("ChIJx")).toEqual({ results: [], degraded: true, reason: "no_provider" });
+    const old = { googlePlaceId: "ChIJx", name: "x", location: null, rating: null, address: null };
+    const api2 = createApiClient({ baseUrl: "http://x", fetch: fakeFetch(200, { results: [old], degraded: false }).fn });
+    expect((await api2.places.details("ChIJx")).results[0]).toMatchObject({
+      userRatingCount: null,
+      websiteUri: null,
+      nationalPhoneNumber: null,
+      googleMapsUri: null,
+    });
+  });
+
   it("resolves a point to its area, or null", async () => {
     const dest = { googlePlaceId: "ChIJsanjose", name: "San José, Costa Rica", region: "Costa Rica", lat: 9.9281, lng: -84.0907 };
     const f = fakeFetch(200, dest);
