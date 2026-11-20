@@ -8,6 +8,7 @@ import {
   MAP_ENGINE_FALLBACK_COPY,
   isMapEngine,
   resolveMapEngine,
+  webGoogleAvailability,
   type GoogleAvailability,
   type GoogleFallbackReason,
   type MapEngine,
@@ -39,12 +40,22 @@ import type { DriveArc, MapPin } from "./pins";
  * Note that nothing is imported from `./MapView` at module scope: this
  * component executes during SSR, and the mode vocabulary therefore lives in the
  * vendor-free `./palette` rather than beside the `mapbox://` urls.
+ *
+ * #199 · it is also where the ENGINE is chosen. `./GoogleMapView` is the second
+ * renderer and is reached the same way, through its own lazy `dynamic()`
+ * import, so a Mapbox reader never downloads Google code and a Google reader
+ * never downloads mapbox-gl.
  */
 
 const LazyMapView = dynamic(() => import("./MapView").then((m) => m.MapView), {
   ssr: false,
   loading: () => <MapFrame state="loading" />,
 });
+
+const LazyGoogleMapView = dynamic(
+  () => import("./GoogleMapView").then((m) => m.GoogleMapView),
+  { ssr: false, loading: () => <MapFrame state="loading" /> },
+);
 
 /** Where the preference lives. Flat and dash-cased, like `rv-track-costs`
  * (TripPlanner.tsx:67). */
@@ -64,11 +75,15 @@ export const STYLE_SEGMENTS: SegmentOption<StyleMode>[] = [
 export const ENGINE_PREF_KEY = "rv-map-engine";
 
 /**
- * #198 · whether THIS client can draw Google. The web renderer lands in #199
- * (which replaces this with the key + Map ID check); until then every web
- * build reports "not-built", so a "google" choice is kept and Mapbox draws.
+ * #199 · whether THIS web build can draw Google: the browser Maps JS key AND
+ * the Map ID, else "no-key" (q4 A, core's `webGoogleAvailability`). Both env
+ * reads are written out literally so Next inlines them at build time. Walks
+ * and CI set neither, so they draw Mapbox with the "no-key" note.
  */
-export const WEB_GOOGLE_AVAILABILITY: GoogleAvailability = { ok: false, reason: "not-built" };
+export const WEB_GOOGLE_AVAILABILITY: GoogleAvailability = webGoogleAvailability(
+  process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY,
+  process.env.NEXT_PUBLIC_GOOGLE_MAP_ID,
+);
 
 /** The engine pill's two options — Mapbox · Google, no glyphs. `struck` marks
  * Google when it is the choice but can't be drawn here (q2 A). Exported for
@@ -130,30 +145,47 @@ export function MapMount({
   const [mode, setMode] = useStringPref(STYLE_PREF_KEY, isStyleMode, DEFAULT_STYLE_MODE);
   // #198 · the account's engine choice, and what this client actually draws.
   // The choice is never written back by the client on its own: only a tap
-  // writes. Until #199 lands, `resolved.engine` is always "mapbox".
+  // writes.
   const [engine, setEngine] = useStringPref(ENGINE_PREF_KEY, isMapEngine, DEFAULT_MAP_ENGINE);
   const resolved = resolveMapEngine(engine, WEB_GOOGLE_AVAILABILITY);
+  // #199 · Google needs no Mapbox token, so a Google reader still gets a map
+  // on a build without one; Mapbox without a token is the "unavailable" frame.
+  const drawable = resolved.engine === "google" || Boolean(token);
 
   return (
     <div className={height ? undefined : "h-full min-h-[150px]"} style={height ? { height } : undefined}>
-      {!token ? (
+      {!drawable ? (
         <MapFrame state="unavailable" />
       ) : pins.length === 0 ? (
         <MapFrame state="empty" count={unmappedCount} />
-      ) : mode === null ? (
+      ) : mode === null || engine === null ? (
+        // Both preferences resolve in the same first client render; waiting on
+        // the engine too means a Google reader never loads mapbox-gl first.
         <MapFrame state="loading" />
       ) : (
         <div className="relative h-full overflow-hidden rounded-rv-card border border-rv-border">
-          <LazyMapView
-            pins={pins}
-            arcs={arcs}
-            join={join}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            showLabels={showLabels}
-            token={token}
-            mode={mode}
-          />
+          {resolved.engine === "google" ? (
+            <LazyGoogleMapView
+              pins={pins}
+              arcs={arcs}
+              join={join}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              showLabels={showLabels}
+              mode={mode}
+            />
+          ) : (
+            <LazyMapView
+              pins={pins}
+              arcs={arcs}
+              join={join}
+              selectedId={selectedId}
+              onSelect={onSelect}
+              showLabels={showLabels}
+              token={token ?? ""}
+              mode={mode}
+            />
+          )}
           {showStyleControl && (
             // Over the canvas, never in the chrome: every surface that mounts a
             // map already spends a row or two on controls, and a third would

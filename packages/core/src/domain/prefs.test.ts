@@ -12,6 +12,8 @@ import {
   MAP_ENGINES,
   MAP_ENGINE_FALLBACK_COPY,
   mapEngineFallbackLine,
+  webGoogleAvailability,
+  GOOGLE_WEB_BASEMAP,
   type GoogleAvailability,
   type UserPrefs,
 } from "./prefs";
@@ -278,5 +280,41 @@ describe("#198 · resolveMapEngine — the resolution table", () => {
     expect(mapEngineFallbackLine("no-module")).toBe(
       "⚠ This version of the app has no Google map. Showing Mapbox until you update.",
     );
+  });
+});
+
+describe("#199 · webGoogleAvailability — key AND Map ID, else no-key (q4 A)", () => {
+  it("is ok only when both the Maps JS key and the Map ID are set", () => {
+    expect(webGoogleAvailability("AIza-key", "map-id-1")).toEqual({ ok: true });
+  });
+
+  it('either one missing (undefined, empty or blank) is "no-key"', () => {
+    const noKey = { ok: false, reason: "no-key" };
+    expect(webGoogleAvailability(undefined, "map-id-1")).toEqual(noKey);
+    expect(webGoogleAvailability("AIza-key", undefined)).toEqual(noKey);
+    expect(webGoogleAvailability(undefined, undefined)).toEqual(noKey);
+    expect(webGoogleAvailability("", "map-id-1")).toEqual(noKey);
+    expect(webGoogleAvailability("AIza-key", "   ")).toEqual(noKey);
+  });
+
+  it("feeds resolveMapEngine: a keyless web build keeps the choice and draws Mapbox", () => {
+    expect(resolveMapEngine("google", webGoogleAvailability("AIza-key", "map-id-1"))).toEqual({
+      engine: "google",
+      fallback: null,
+    });
+    expect(resolveMapEngine("google", webGoogleAvailability("AIza-key", ""))).toEqual({
+      engine: "mapbox",
+      fallback: "no-key",
+    });
+  });
+});
+
+describe("#199 · GOOGLE_WEB_BASEMAP — style mode → Google map type", () => {
+  it("day → roadmap, night → roadmap on the Map ID's DARK scheme, sat → hybrid", () => {
+    expect(GOOGLE_WEB_BASEMAP).toEqual({
+      day: { mapTypeId: "roadmap", colorScheme: "LIGHT" },
+      night: { mapTypeId: "roadmap", colorScheme: "DARK" },
+      sat: { mapTypeId: "hybrid", colorScheme: "LIGHT" },
+    });
   });
 });

@@ -16,7 +16,9 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, "../..");
 const overview = readFileSync(join(HERE, "MapOverview.tsx"), "utf8");
-const view = readFileSync(join(HERE, "MapView.tsx"), "utf8");
+// #199 · the marks moved, unchanged, from MapView.tsx to markers.tsx so both
+// engines draw them.
+const view = readFileSync(join(HERE, "markers.tsx"), "utf8");
 const pins = readFileSync(join(HERE, "pins.ts"), "utf8");
 const page = readFileSync(join(SRC, "app/map/page.tsx"), "utf8");
 

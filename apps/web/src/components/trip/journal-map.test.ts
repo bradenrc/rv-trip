@@ -18,6 +18,8 @@ const lens = flat(code(read("components/trip/JournalLens.tsx")));
 const jmap = flat(code(read("components/trip/JournalMap.tsx")));
 const mapView = flat(code(read("components/map/MapView.tsx")));
 const mapMount = flat(code(read("components/map/MapMount.tsx")));
+// #199 · the marks (IdeaRing among them) moved from MapView.tsx to markers.tsx.
+const markers = flat(code(read("components/map/markers.tsx")));
 const pins = flat(code(read("components/map/pins.ts")));
 
 describe("JournalMap (#179)", () => {
@@ -80,6 +82,6 @@ describe("MapView / MapMount draw the join; IdeaPin carries a category", () => {
 
   it("IdeaPin's optional category paints with palette.category", () => {
     expect(pins).toContain("category?: CategoryLabel;");
-    expect(mapView).toContain("palette.category[category]");
+    expect(markers).toContain("palette.category[category]");
   });
 });

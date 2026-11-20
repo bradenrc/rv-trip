@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { place, type Place } from "./types";
+import type { StyleMode } from "../theme/map-palette";
 
 /**
  * Preferences that follow the account (docs/design/45 §"Q6 · where preferences
@@ -249,3 +250,38 @@ export function mapEngineFallbackLine(reason: GoogleFallbackReason): string {
   const { title, body } = MAP_ENGINE_FALLBACK_COPY[reason];
   return `⚠ ${title}. ${body}`;
 }
+
+// ── #199 · the web Google engine (docs/design/202 §3 "The seam", the mode table) ──
+
+/**
+ * Whether a WEB build can draw Google: only with BOTH the browser Maps JS key
+ * (`NEXT_PUBLIC_GOOGLE_MAPS_KEY`) and a Map ID (`NEXT_PUBLIC_GOOGLE_MAP_ID`).
+ * The Map ID is required, not optional (q4 A): the discs are Advanced Markers,
+ * and night is the Map ID's DARK colour scheme. Either one missing, empty or
+ * blank is the "no-key" case. The caller passes the two `process.env` reads
+ * literally, so Next inlines them into the client bundle.
+ */
+export function webGoogleAvailability(
+  key: string | null | undefined,
+  mapId: string | null | undefined,
+): GoogleAvailability {
+  return key?.trim() && mapId?.trim() ? { ok: true } : { ok: false, reason: "no-key" };
+}
+
+/** A Google Maps JS basemap, as `MapOptions` takes it. String literals, not the
+ * `google.maps` enums, so core stays vendor-free. */
+export interface GoogleWebBasemap {
+  mapTypeId: "roadmap" | "hybrid";
+  colorScheme: "LIGHT" | "DARK";
+}
+
+/**
+ * Style mode → Google basemap on the web (the wireframe's mode table): day is
+ * roadmap, night is roadmap on the Map ID's DARK colour scheme, sat is hybrid.
+ * Our own marks keep `MAP_PALETTE[mode]` on either engine.
+ */
+export const GOOGLE_WEB_BASEMAP: Record<StyleMode, GoogleWebBasemap> = {
+  day: { mapTypeId: "roadmap", colorScheme: "LIGHT" },
+  night: { mapTypeId: "roadmap", colorScheme: "DARK" },
+  sat: { mapTypeId: "hybrid", colorScheme: "LIGHT" },
+};
